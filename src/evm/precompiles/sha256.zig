@@ -45,7 +45,7 @@ const SHA256_OUTPUT_SIZE: usize = crypto.HashAlgorithms.SHA256.OUTPUT_SIZE;
 /// @param input_size Size of input data in bytes
 /// @return Gas cost for processing this input
 pub fn calculate_gas(input_size: usize) u64 {
-    const word_count = (input_size + 31) / 32; // Ceiling division
+    const word_count = gas_utils.wordCount(input_size);
     return SHA256_BASE_COST + SHA256_WORD_COST * word_count;
 }
 
@@ -58,20 +58,10 @@ pub fn calculate_gas(input_size: usize) u64 {
 /// @param input_size Size of input data in bytes
 /// @return Gas cost or error.Overflow if calculation overflows
 pub fn calculate_gas_checked(input_size: usize) !u64 {
-    // Use std.math.add with overflow checking for word count calculation
-    const input_plus_31 = std.math.add(usize, input_size, 31) catch {
-        return error.Overflow;
-    };
-    
-    const word_count = input_plus_31 / 32;
+    const word_count = gas_utils.wordCount(input_size);
 
-    // Convert word_count to u64 with overflow checking
-    const word_count_u64 = std.math.cast(u64, word_count) orelse {
-        return error.Overflow;
-    };
-
-    // Use std.math.mul for gas calculation with overflow checking
-    const gas_from_words = std.math.mul(u64, SHA256_WORD_COST, word_count_u64) catch {
+    // Check for potential overflow in gas calculation
+    const gas_from_words = std.math.mul(u64, SHA256_WORD_COST, word_count) catch {
         return error.Overflow;
     };
 
