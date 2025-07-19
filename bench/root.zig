@@ -14,9 +14,9 @@ pub fn run(allocator: Allocator) !void {
     
     try zbench_runner.run_benchmarks(allocator, zbench);
     
-    // TODO: Fix precompile dispatch benchmarks - currently has module import issues
-    // std.log.info("Running precompile dispatch benchmarks", .{});
-    // try precompile_benchmark.run_precompile_benchmarks(allocator);
+    // Enable precompile benchmarks
+    std.log.info("Running precompile dispatch benchmarks", .{});
+    try precompile_benchmark.run_precompile_benchmarks(allocator);
     
     std.log.info("Benchmark suite completed", .{});
 }
