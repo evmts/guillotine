@@ -318,3 +318,227 @@ pub fn get_name(self: Enum) []const u8 {
 
     return names[@intFromEnum(self)];
 }
+
+/// Checks if an opcode is a PUSH operation (PUSH1-PUSH32).
+///
+/// PUSH operations place N bytes of immediate data onto the stack,
+/// where N is determined by the specific PUSH opcode.
+///
+/// ## Parameters
+/// - `op`: The opcode byte to check
+///
+/// ## Returns
+/// - `true` if the opcode is between PUSH1 (0x60) and PUSH32 (0x7F)
+/// - `false` otherwise
+///
+/// ## Example
+/// ```zig
+/// if (is_push(opcode)) {
+///     const data_size = get_push_size(opcode);
+///     // Read `data_size` bytes following the opcode
+/// }
+/// ```
+pub fn is_push(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_push(op);
+}
+
+/// Returns the number of immediate data bytes for a PUSH opcode.
+///
+/// PUSH1 pushes 1 byte, PUSH2 pushes 2 bytes, etc., up to PUSH32
+/// which pushes 32 bytes of immediate data from the bytecode.
+///
+/// ## Parameters
+/// - `op`: The opcode byte to analyze
+///
+/// ## Returns
+/// - 1-32 for valid PUSH opcodes (PUSH1-PUSH32)
+/// - 0 for non-PUSH opcodes
+///
+/// ## Algorithm
+/// For valid PUSH opcodes: size = opcode - 0x60 + 1
+///
+/// ## Example
+/// ```zig
+/// const size = get_push_size(@intFromEnum(Opcode.Enum.PUSH20)); // Returns 20
+/// const size2 = get_push_size(@intFromEnum(Opcode.Enum.ADD));   // Returns 0
+/// ```
+pub fn get_push_size(op: u8) u8 {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.get_push_size(op);
+}
+
+/// Checks if an opcode is a DUP operation (DUP1-DUP16).
+///
+/// DUP operations duplicate a stack item and push the copy onto the stack.
+/// DUP1 duplicates the top item, DUP2 the second item, etc.
+///
+/// ## Parameters
+/// - `op`: The opcode byte to check
+///
+/// ## Returns
+/// - `true` if the opcode is between DUP1 (0x80) and DUP16 (0x8F)
+/// - `false` otherwise
+///
+/// ## Stack Effect
+/// DUPn: [... vn ... v1] -> [... vn ... v1 vn]
+pub fn is_dup(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_dup(op);
+}
+
+/// Get the stack position for a DUP opcode
+/// Returns 0 for non-DUP opcodes
+pub fn get_dup_position(op: u8) u8 {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.get_dup_position(op);
+}
+
+/// Check if an opcode is a SWAP operation
+pub fn is_swap(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_swap(op);
+}
+
+/// Get the stack position for a SWAP opcode
+/// Returns 0 for non-SWAP opcodes
+pub fn get_swap_position(op: u8) u8 {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.get_swap_position(op);
+}
+
+/// Check if an opcode is a LOG operation
+pub fn is_log(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_log(op);
+}
+
+/// Get the number of topics for a LOG opcode
+/// Returns 0 for non-LOG opcodes
+pub fn get_log_topic_count(op: u8) u8 {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.get_log_topic_count(op);
+}
+
+/// Checks if an opcode terminates execution of the current context.
+///
+/// Terminating operations end the current execution context and cannot
+/// be followed by any other operations in the execution flow.
+///
+/// ## Parameters
+/// - `op`: The opcode byte to check
+///
+/// ## Returns
+/// - `true` for STOP, RETURN, REVERT, SELFDESTRUCT, INVALID
+/// - `false` otherwise
+///
+/// ## Terminating Opcodes
+/// - STOP (0x00): Halts execution successfully
+/// - RETURN (0xF3): Returns data and halts successfully
+/// - REVERT (0xFD): Reverts state changes and returns data
+/// - SELFDESTRUCT (0xFF): Destroys contract and sends balance
+/// - INVALID (0xFE): Invalid operation, always reverts
+///
+/// ## Usage
+/// ```zig
+/// if (is_terminating(opcode)) {
+///     // This is the last operation in this context
+///     return;
+/// }
+/// ```
+pub fn is_terminating(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_terminating(op);
+}
+
+/// Check if an opcode is a call operation
+pub fn is_call(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_call(op);
+}
+
+/// Check if an opcode is a create operation
+pub fn is_create(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.is_create(op);
+}
+
+/// Checks if an opcode can modify blockchain state.
+///
+/// State-modifying operations are restricted in static calls and
+/// require special handling for gas accounting and rollback.
+///
+/// ## Parameters
+/// - `op`: The opcode byte to check
+///
+/// ## Returns
+/// - `true` for operations that modify storage, create contracts, or emit logs
+/// - `false` for read-only operations
+///
+/// ## State-Modifying Opcodes
+/// - SSTORE: Modifies contract storage
+/// - CREATE/CREATE2: Deploys new contracts
+/// - SELFDESTRUCT: Destroys contract and transfers balance
+/// - LOG0-LOG4: Emits events (modifies receipts)
+///
+/// ## Note
+/// CALL can also modify state indirectly if it transfers value,
+/// but this function only checks direct state modifications.
+///
+/// ## Static Call Protection
+/// These operations will fail with an error if executed within
+/// a STATICCALL context.
+pub fn modifies_state(op: u8) bool {
+    const opcode_properties = @import("opcode_properties.zig");
+    return opcode_properties.modifies_state(op);
+}
+
+/// Check if an opcode is valid
+pub fn is_valid(op: u8) bool {
+    return op != @intFromEnum(Enum.INVALID);
+}
+
+// ============================================================================
+// Contract Size and Gas Constants
+// ============================================================================
+
+/// Maximum allowed size for deployed contract bytecode.
+///
+/// ## Value
+/// 24,576 bytes (24 KB)
+///
+/// ## Origin
+/// Defined by EIP-170 (activated in Spurious Dragon hardfork)
+///
+/// ## Rationale
+/// - Prevents excessive blockchain growth from large contracts
+/// - Ensures contracts can be loaded into memory efficiently
+/// - Encourages modular contract design
+///
+/// ## Implications
+/// - Contract creation fails if initcode returns bytecode larger than this
+/// - Does NOT limit initcode size (see EIP-3860 for that)
+/// - Libraries and proxy patterns help work around this limit
+///
+/// Reference: https://eips.ethereum.org/EIPS/eip-170
+pub const MAX_CODE_SIZE: u32 = 24576;
+
+/// Gas cost per byte of deployed contract code.
+///
+/// ## Value
+/// 200 gas per byte
+///
+/// ## Usage
+/// Charged during contract creation (CREATE/CREATE2) based on the
+/// size of the returned bytecode that will be stored on-chain.
+///
+/// ## Calculation
+/// `deployment_gas_cost = len(returned_code) * 200`
+///
+/// ## Example
+/// A 1000-byte contract costs an additional 200,000 gas to deploy
+/// beyond the execution costs.
+///
+/// ## Note
+/// This is separate from the initcode gas cost introduced in EIP-3860.
+pub const DEPLOY_CODE_GAS_PER_BYTE: u64 = 200;
