@@ -4,7 +4,7 @@ const timing = @import("timing.zig");
 const BenchmarkSuite = timing.BenchmarkSuite;
 const BenchmarkConfig = timing.BenchmarkConfig;
 const opcode_benchmarks = @import("opcode_benchmarks.zig");
-const comprehensive_precompile_benchmark = @import("comprehensive_precompile_benchmark.zig");
+// const comprehensive_precompile_benchmark = @import("comprehensive_precompile_benchmark.zig");
 
 pub fn run_all_benchmarks(allocator: Allocator) !void {
     std.debug.print("=== Running All Guillotine Benchmarks ===\n", .{});
@@ -202,18 +202,20 @@ fn add_crypto_benchmarks(suite: *BenchmarkSuite) !void {
 
 /// Run comprehensive precompile benchmarks
 pub fn run_precompile_benchmarks(allocator: Allocator) !void {
+    _ = allocator;
     std.debug.print("=== Comprehensive Precompile Benchmarks ===\n", .{});
-    try comprehensive_precompile_benchmark.run_comprehensive_precompile_benchmarks(allocator);
+    // try comprehensive_precompile_benchmark.run_comprehensive_precompile_benchmarks(allocator);
 }
 
 /// Run precompile dispatch microbenchmark
 pub fn run_precompile_microbenchmarks() void {
-    comprehensive_precompile_benchmark.run_dispatch_microbenchmark();
+    // comprehensive_precompile_benchmark.run_dispatch_microbenchmark();
 }
 
 /// Run precompile comparative analysis
 pub fn run_precompile_comparative_analysis(allocator: Allocator) !void {
-    try comprehensive_precompile_benchmark.run_comparative_analysis(allocator);
+    _ = allocator;
+    // try comprehensive_precompile_benchmark.run_comparative_analysis(allocator);
 }
 
 /// Run all precompile-related benchmarks

@@ -8,12 +8,16 @@ pub const primitives = @import("primitives");
 
 pub const zbench_runner = @import("zbench_runner.zig");
 pub const precompile_benchmark = @import("precompile_benchmark.zig");
-pub const comprehensive_precompile_benchmark = @import("comprehensive_precompile_benchmark.zig");
 pub const opcode_benchmarks = @import("opcode_benchmarks.zig");
 pub const benchmarks = @import("benchmarks.zig");
+pub const jump_table_benchmark = @import("jump_table_benchmark.zig");
 
 pub fn run(allocator: Allocator) !void {
     std.log.info("Starting EVM benchmark suite", .{});
+    
+    // Run the jump table benchmarks (Issue #51)
+    std.log.info("Running jump table benchmarks", .{});
+    try jump_table_benchmark.runComprehensiveJumpTableBenchmarks(allocator);
     
     // Run the comprehensive opcode benchmarks (Issue #62)
     std.log.info("Running comprehensive opcode benchmarks", .{});
