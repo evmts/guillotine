@@ -1028,3 +1028,441 @@ test "block operations push 256-bit values" {
     const basefee_result = try frame.stack.pop();
     try std.testing.expect(basefee_result <= std.math.maxInt(u256));
 }
+
+test "BLOCKHASH consistency: same block number gives same hash" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    vm.context.block_number = 1000;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x40}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+
+    // Get hash for block 900 twice
+    try frame.stack.push(900);
+    _ = try op_blockhash(0, interpreter_ptr, state_ptr);
+    const hash1 = try frame.stack.pop();
+
+    try frame.stack.push(900);
+    _ = try op_blockhash(0, interpreter_ptr, state_ptr);
+    const hash2 = try frame.stack.pop();
+
+    // Should be consistent
+    try std.testing.expectEqual(hash1, hash2);
+    try std.testing.expect(hash1 != 0); // Should be non-zero for valid blocks
+}
+
+test "BASEFEE edge case: zero base fee" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set zero base fee (pre-EIP-1559 or extreme case)
+    vm.context.block_base_fee = 0;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x48}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_basefee(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "BASEFEE edge case: maximum base fee" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set maximum possible base fee
+    vm.context.block_base_fee = std.math.maxInt(u256);
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x48}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_basefee(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(std.math.maxInt(u256), result);
+}
+
+test "BLOBHASH empty blob hashes array" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set empty blob hashes array
+    const empty_blob_hashes: []const u256 = &.{};
+    vm.context.blob_hashes = empty_blob_hashes;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x49}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Test index 0 (should return 0 for empty array)
+    try frame.stack.push(0);
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_blobhash(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "BLOBBASEFEE edge case: zero blob base fee" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set zero blob base fee
+    vm.context.blob_base_fee = 0;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x4A}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_blobbasefee(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "BLOBBASEFEE edge case: maximum blob base fee" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set maximum possible blob base fee
+    vm.context.blob_base_fee = std.math.maxInt(u256);
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x4A}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_blobbasefee(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(std.math.maxInt(u256), result);
+}
+
+test "GASLIMIT edge case: zero gas limit" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set zero gas limit (extreme edge case)
+    vm.context.block_gas_limit = 0;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x45}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_gaslimit(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "GASLIMIT edge case: maximum gas limit" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set maximum possible gas limit
+    vm.context.block_gas_limit = std.math.maxInt(u64);
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x45}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_gaslimit(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, std.math.maxInt(u64)), result);
+}
+
+test "DIFFICULTY zero difficulty" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set zero difficulty (post-merge scenario)
+    vm.context.block_difficulty = 0;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x44}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_difficulty(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "PREVRANDAO and DIFFICULTY are equivalent" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set post-merge prevrandao value
+    const test_value: u256 = 0xABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890;
+    vm.context.block_difficulty = test_value;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x44}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    
+    // Test DIFFICULTY
+    _ = try op_difficulty(0, interpreter_ptr, state_ptr);
+    const difficulty_result = try frame.stack.pop();
+    
+    // Test PREVRANDAO
+    _ = try op_prevrandao(0, interpreter_ptr, state_ptr);
+    const prevrandao_result = try frame.stack.pop();
+    
+    // Should return the same value
+    try std.testing.expectEqual(difficulty_result, prevrandao_result);
+    try std.testing.expectEqual(test_value, difficulty_result);
+}
+
+test "COINBASE edge case: zero address" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set zero coinbase address
+    vm.context.block_coinbase = primitives.Address.ZERO;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x41}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_coinbase(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "COINBASE edge case: maximum address" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set maximum coinbase address
+    const max_address = primitives.Address.from_u256(std.math.maxInt(u160));
+    vm.context.block_coinbase = max_address;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x41}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_coinbase(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(primitives.Address.to_u256(max_address), result);
+}
+
+test "TIMESTAMP edge case: zero timestamp" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set zero timestamp (genesis block or extreme case)
+    vm.context.block_timestamp = 0;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x42}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_timestamp(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0), result);
+}
+
+test "NUMBER edge case: maximum block number" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set maximum block number
+    vm.context.block_number = std.math.maxInt(u64);
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x43}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_number(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, std.math.maxInt(u64)), result);
+}
+
+test "BLOBHASH edge case: maximum valid index" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Set maximum number of blob hashes (6 per EIP-4844)
+    const max_blob_hashes = [_]u256{
+        0x1111111111111111111111111111111111111111111111111111111111111111,
+        0x2222222222222222222222222222222222222222222222222222222222222222,
+        0x3333333333333333333333333333333333333333333333333333333333333333,
+        0x4444444444444444444444444444444444444444444444444444444444444444,
+        0x5555555555555555555555555555555555555555555555555555555555555555,
+        0x6666666666666666666666666666666666666666666666666666666666666666,
+    };
+    vm.context.blob_hashes = &max_blob_hashes;
+
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x49}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Test last valid index (5)
+    try frame.stack.push(5);
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try op_blobhash(0, interpreter_ptr, state_ptr);
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(max_blob_hashes[5], result);
+}
