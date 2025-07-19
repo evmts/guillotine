@@ -128,6 +128,18 @@ pub fn build(b: *std.Build) void {
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
+    
+    // Helper function to apply macOS fuzzing workaround
+    const applyMacOSFuzzWorkaround = struct {
+        fn apply(test_step: *std.Build.Step.Compile, target_info: std.Build.ResolvedTarget) void {
+            // macOS workaround for fuzzing coverage instrumentation issue
+            // LLVM ERROR: Global variable '__sancov_gen_.0' has an invalid section specifier '__sancov_cntrs'
+            // Disable fuzzing coverage on macOS due to Mach-O incompatibility
+            if (target_info.result.os.tag == .macos) {
+                test_step.root_module.fuzz = false;
+            }
+        }
+    }.apply;
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
@@ -616,12 +628,14 @@ pub fn build(b: *std.Build) void {
     const lib_unit_tests = b.addTest(.{
         .root_module = lib_mod,
     });
+    applyMacOSFuzzWorkaround(lib_unit_tests, target);
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
         .root_module = exe_mod,
     });
+    applyMacOSFuzzWorkaround(exe_unit_tests, target);
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
@@ -635,6 +649,7 @@ pub fn build(b: *std.Build) void {
     });
     memory_test.root_module.addImport("evm", evm_mod);
     memory_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(memory_test, target);
 
     const run_memory_test = b.addRunArtifact(memory_test);
     const memory_test_step = b.step("test-memory", "Run Memory tests");
@@ -648,6 +663,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     stack_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(stack_test, target);
 
     const run_stack_test = b.addRunArtifact(stack_test);
     const stack_test_step = b.step("test-stack", "Run Stack tests");
@@ -663,6 +679,7 @@ pub fn build(b: *std.Build) void {
     });
     stack_validation_test.root_module.stack_check = false;
     stack_validation_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(stack_validation_test, target);
 
     const run_stack_validation_test = b.addRunArtifact(stack_validation_test);
     const stack_validation_test_step = b.step("test-stack-validation", "Run Stack validation tests");
@@ -679,6 +696,7 @@ pub fn build(b: *std.Build) void {
     jump_table_test.root_module.stack_check = false;
     jump_table_test.root_module.addImport("primitives", primitives_mod);
     jump_table_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(jump_table_test, target);
 
     const run_jump_table_test = b.addRunArtifact(jump_table_test);
     const jump_table_test_step = b.step("test-jump-table", "Run Jump table tests");
@@ -695,6 +713,7 @@ pub fn build(b: *std.Build) void {
     opcodes_test.root_module.stack_check = false;
     opcodes_test.root_module.addImport("primitives", primitives_mod);
     opcodes_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(opcodes_test, target);
 
     const run_opcodes_test = b.addRunArtifact(opcodes_test);
     const opcodes_test_step = b.step("test-opcodes", "Run Opcodes tests");
@@ -711,6 +730,7 @@ pub fn build(b: *std.Build) void {
     vm_opcode_test.root_module.stack_check = false;
     vm_opcode_test.root_module.addImport("primitives", primitives_mod);
     vm_opcode_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(vm_opcode_test, target);
 
     const run_vm_opcode_test = b.addRunArtifact(vm_opcode_test);
     const vm_opcode_test_step = b.step("test-vm-opcodes", "Run VM opcode tests");
@@ -727,6 +747,7 @@ pub fn build(b: *std.Build) void {
     integration_test.root_module.stack_check = false;
     integration_test.root_module.addImport("primitives", primitives_mod);
     integration_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(integration_test, target);
 
     const run_integration_test = b.addRunArtifact(integration_test);
     const integration_test_step = b.step("test-integration", "Run Integration tests");
@@ -743,6 +764,7 @@ pub fn build(b: *std.Build) void {
     gas_test.root_module.stack_check = false;
     gas_test.root_module.addImport("primitives", primitives_mod);
     gas_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(gas_test, target);
 
     const run_gas_test = b.addRunArtifact(gas_test);
     const gas_test_step = b.step("test-gas", "Run Gas Accounting tests");
@@ -759,6 +781,7 @@ pub fn build(b: *std.Build) void {
     static_protection_test.root_module.stack_check = false;
     static_protection_test.root_module.addImport("primitives", primitives_mod);
     static_protection_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(static_protection_test, target);
 
     const run_static_protection_test = b.addRunArtifact(static_protection_test);
     const static_protection_test_step = b.step("test-static-protection", "Run Static Call Protection tests");
@@ -774,6 +797,7 @@ pub fn build(b: *std.Build) void {
     sha256_test.root_module.stack_check = false;
     sha256_test.root_module.addImport("primitives", primitives_mod);
     sha256_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(sha256_test, target);
 
     const run_sha256_test = b.addRunArtifact(sha256_test);
     const sha256_test_step = b.step("test-sha256", "Run SHA256 precompile tests");
@@ -789,6 +813,7 @@ pub fn build(b: *std.Build) void {
     ripemd160_test.root_module.stack_check = false;
     ripemd160_test.root_module.addImport("primitives", primitives_mod);
     ripemd160_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(ripemd160_test, target);
 
     const run_ripemd160_test = b.addRunArtifact(ripemd160_test);
     const ripemd160_test_step = b.step("test-ripemd160", "Run RIPEMD160 precompile tests");
@@ -804,6 +829,7 @@ pub fn build(b: *std.Build) void {
     blake2f_test.root_module.stack_check = false;
     blake2f_test.root_module.addImport("primitives", primitives_mod);
     blake2f_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(blake2f_test, target);
     const run_blake2f_test = b.addRunArtifact(blake2f_test);
     const blake2f_test_step = b.step("test-blake2f", "Run BLAKE2f precompile tests");
     blake2f_test_step.dependOn(&run_blake2f_test.step);
@@ -821,6 +847,7 @@ pub fn build(b: *std.Build) void {
     // Link BN254 Rust library to tests
     bn254_rust_test.linkLibrary(bn254_lib);
     bn254_rust_test.addIncludePath(b.path("src/bn254_wrapper"));
+    applyMacOSFuzzWorkaround(bn254_rust_test, target);
 
     const run_bn254_rust_test = b.addRunArtifact(bn254_rust_test);
     const bn254_rust_test_step = b.step("test-bn254-rust", "Run BN254 Rust wrapper precompile tests");
@@ -837,6 +864,7 @@ pub fn build(b: *std.Build) void {
     e2e_simple_test.root_module.stack_check = false;
     e2e_simple_test.root_module.addImport("primitives", primitives_mod);
     e2e_simple_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(e2e_simple_test, target);
 
     const run_e2e_simple_test = b.addRunArtifact(e2e_simple_test);
     const e2e_simple_test_step = b.step("test-e2e-simple", "Run E2E simple tests");
@@ -853,6 +881,7 @@ pub fn build(b: *std.Build) void {
     e2e_error_test.root_module.stack_check = false;
     e2e_error_test.root_module.addImport("primitives", primitives_mod);
     e2e_error_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(e2e_error_test, target);
 
     const run_e2e_error_test = b.addRunArtifact(e2e_error_test);
     const e2e_error_test_step = b.step("test-e2e-error", "Run E2E error handling tests");
@@ -869,6 +898,7 @@ pub fn build(b: *std.Build) void {
     e2e_data_test.root_module.stack_check = false;
     e2e_data_test.root_module.addImport("primitives", primitives_mod);
     e2e_data_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(e2e_data_test, target);
 
     const run_e2e_data_test = b.addRunArtifact(e2e_data_test);
     const e2e_data_test_step = b.step("test-e2e-data", "Run E2E data structures tests");
@@ -885,6 +915,7 @@ pub fn build(b: *std.Build) void {
     e2e_inheritance_test.root_module.stack_check = false;
     e2e_inheritance_test.root_module.addImport("primitives", primitives_mod);
     e2e_inheritance_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(e2e_inheritance_test, target);
 
     const run_e2e_inheritance_test = b.addRunArtifact(e2e_inheritance_test);
     const e2e_inheritance_test_step = b.step("test-e2e-inheritance", "Run E2E inheritance tests");
@@ -899,6 +930,7 @@ pub fn build(b: *std.Build) void {
     });
     compiler_test.root_module.addImport("primitives", primitives_mod);
     compiler_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(compiler_test, target);
 
     // TODO: Re-enable when Rust integration is fixed
     // // Make the compiler test depend on the Rust build
@@ -930,6 +962,7 @@ pub fn build(b: *std.Build) void {
     });
     snail_shell_benchmark_test.root_module.addImport("primitives", primitives_mod);
     snail_shell_benchmark_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(snail_shell_benchmark_test, target);
 
     const run_snail_shell_benchmark_test = b.addRunArtifact(snail_shell_benchmark_test);
     const snail_shell_benchmark_test_step = b.step("test-benchmark", "Run SnailShellBenchmark tests");
@@ -946,6 +979,7 @@ pub fn build(b: *std.Build) void {
     });
     constructor_bug_test.root_module.addImport("primitives", primitives_mod);
     constructor_bug_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(constructor_bug_test, target);
     const run_constructor_bug_test = b.addRunArtifact(constructor_bug_test);
     const constructor_bug_test_step = b.step("test-constructor-bug", "Run Constructor Bug test");
     constructor_bug_test_step.dependOn(&run_constructor_bug_test.step);
@@ -960,6 +994,7 @@ pub fn build(b: *std.Build) void {
     });
     solidity_constructor_test.root_module.addImport("primitives", primitives_mod);
     solidity_constructor_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(solidity_constructor_test, target);
     const run_solidity_constructor_test = b.addRunArtifact(solidity_constructor_test);
     const solidity_constructor_test_step = b.step("test-solidity-constructor", "Run Solidity Constructor test");
     solidity_constructor_test_step.dependOn(&run_solidity_constructor_test.step);
@@ -973,6 +1008,7 @@ pub fn build(b: *std.Build) void {
     });
     contract_call_test.root_module.addImport("primitives", primitives_mod);
     contract_call_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(contract_call_test, target);
     const run_contract_call_test = b.addRunArtifact(contract_call_test);
     const contract_call_test_step = b.step("test-contract-call", "Run Contract Call tests");
     contract_call_test_step.dependOn(&run_contract_call_test.step);
@@ -988,6 +1024,7 @@ pub fn build(b: *std.Build) void {
     });
     delegatecall_test.root_module.addImport("primitives", primitives_mod);
     delegatecall_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(delegatecall_test, target);
     const run_delegatecall_test = b.addRunArtifact(delegatecall_test);
     const delegatecall_test_step = b.step("test-delegatecall", "Run DELEGATECALL tests");
     delegatecall_test_step.dependOn(&run_delegatecall_test.step);
@@ -1040,6 +1077,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     fuzz_stack_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(fuzz_stack_test, target);
 
     const run_fuzz_stack_test = b.addRunArtifact(fuzz_stack_test);
     const fuzz_stack_test_step = b.step("fuzz-stack", "Run stack fuzz tests");
@@ -1052,6 +1090,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     fuzz_memory_test.root_module.addImport("evm", evm_mod);
+    applyMacOSFuzzWorkaround(fuzz_memory_test, target);
 
     const run_fuzz_memory_test = b.addRunArtifact(fuzz_memory_test);
     const fuzz_memory_test_step = b.step("fuzz-memory", "Run memory fuzz tests");
@@ -1065,6 +1104,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_arithmetic_test.root_module.addImport("evm", evm_mod);
     fuzz_arithmetic_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_arithmetic_test, target);
 
     const run_fuzz_arithmetic_test = b.addRunArtifact(fuzz_arithmetic_test);
     const fuzz_arithmetic_test_step = b.step("fuzz-arithmetic", "Run arithmetic fuzz tests");
@@ -1078,6 +1118,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_bitwise_test.root_module.addImport("evm", evm_mod);
     fuzz_bitwise_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_bitwise_test, target);
 
     const run_fuzz_bitwise_test = b.addRunArtifact(fuzz_bitwise_test);
     const fuzz_bitwise_test_step = b.step("fuzz-bitwise", "Run bitwise fuzz tests");
@@ -1091,6 +1132,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_comparison_test.root_module.addImport("evm", evm_mod);
     fuzz_comparison_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_comparison_test, target);
 
     const run_fuzz_comparison_test = b.addRunArtifact(fuzz_comparison_test);
     const fuzz_comparison_test_step = b.step("fuzz-comparison", "Run comparison fuzz tests");
@@ -1104,6 +1146,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_control_test.root_module.addImport("evm", evm_mod);
     fuzz_control_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_control_test, target);
 
     const run_fuzz_control_test = b.addRunArtifact(fuzz_control_test);
     const fuzz_control_test_step = b.step("fuzz-control", "Run control fuzz tests");
@@ -1117,6 +1160,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_crypto_test.root_module.addImport("evm", evm_mod);
     fuzz_crypto_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_crypto_test, target);
 
     const run_fuzz_crypto_test = b.addRunArtifact(fuzz_crypto_test);
     const fuzz_crypto_test_step = b.step("fuzz-crypto", "Run crypto fuzz tests");
@@ -1130,6 +1174,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_environment_test.root_module.addImport("evm", evm_mod);
     fuzz_environment_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_environment_test, target);
 
     const run_fuzz_environment_test = b.addRunArtifact(fuzz_environment_test);
     const fuzz_environment_test_step = b.step("fuzz-environment", "Run environment fuzz tests");
@@ -1143,6 +1188,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_storage_test.root_module.addImport("evm", evm_mod);
     fuzz_storage_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_storage_test, target);
 
     const run_fuzz_storage_test = b.addRunArtifact(fuzz_storage_test);
     const fuzz_storage_test_step = b.step("fuzz-storage", "Run storage fuzz tests");
@@ -1157,6 +1203,7 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_state_test.root_module.addImport("evm", evm_mod);
     fuzz_state_test.root_module.addImport("primitives", primitives_mod);
+    applyMacOSFuzzWorkaround(fuzz_state_test, target);
     const run_fuzz_state_test = b.addRunArtifact(fuzz_state_test);
     const fuzz_state_test_step = b.step("fuzz-state", "Run state fuzz tests");
     fuzz_state_test_step.dependOn(&run_fuzz_state_test.step);
