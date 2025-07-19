@@ -96,6 +96,10 @@ pub const DatabaseInterface = struct {
     ptr: *anyopaque,
     /// Function pointer table for the implementation
     vtable: *const VTable,
+    /// Optional cleanup function for RAII pattern
+    cleanup: ?*const fn(allocator: std.mem.Allocator, ptr: *anyopaque) void,
+    /// Allocator used for creation (for cleanup)
+    allocator: ?std.mem.Allocator,
 
     /// Virtual function table defining all database operations
     pub const VTable = struct {
@@ -145,6 +149,19 @@ pub const DatabaseInterface = struct {
     /// ## Type Requirements
     /// The implementation must provide all required methods with correct signatures
     pub fn init(implementation: anytype) DatabaseInterface {
+        return init_with_cleanup(implementation, null, null);
+    }
+
+    /// Initialize a database interface with cleanup information
+    ///
+    /// ## Parameters
+    /// - `implementation`: Pointer to the database implementation
+    /// - `allocator`: Allocator used to create the implementation (optional)
+    /// - `cleanup_fn`: Cleanup function (optional)
+    ///
+    /// ## Returns
+    /// DatabaseInterface wrapping the implementation with cleanup support
+    pub fn init_with_cleanup(implementation: anytype, allocator: ?std.mem.Allocator, cleanup_fn: ?*const fn(allocator: std.mem.Allocator, ptr: *anyopaque) void) DatabaseInterface {
         const Impl = @TypeOf(implementation);
         const impl_info = @typeInfo(Impl);
 
@@ -262,6 +279,8 @@ pub const DatabaseInterface = struct {
         return DatabaseInterface{
             .ptr = implementation,
             .vtable = &gen.vtable,
+            .cleanup = cleanup_fn,
+            .allocator = allocator,
         };
     }
 
@@ -362,6 +381,20 @@ pub const DatabaseInterface = struct {
     /// Clean up database resources
     pub fn deinit(self: DatabaseInterface) void {
         return self.vtable.deinit(self.ptr);
+    }
+
+    /// Destroy database including factory cleanup
+    /// Use this instead of deinit when the database was created through a factory
+    pub fn destroy(self: DatabaseInterface) void {
+        // Call database's deinit first
+        self.deinit();
+
+        // Then call factory cleanup if available
+        if (self.cleanup) |cleanup_fn| {
+            if (self.allocator) |allocator| {
+                cleanup_fn(allocator, self.ptr);
+            }
+        }
     }
 };
 

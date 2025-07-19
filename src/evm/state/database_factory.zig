@@ -14,7 +14,7 @@
 //! ```zig
 //! const config = DatabaseConfig{ .Memory = {} };
 //! const db_interface = try create_database(allocator, config);
-//! defer destroy_database(allocator, db_interface);
+//! defer db_interface.destroy(); // Uses embedded cleanup, no need to pass allocator
 //! ```
 //!
 //! ## Extensibility
@@ -67,23 +67,10 @@ pub const DatabaseConfig = union(DatabaseType) {
     // },
 };
 
-/// Metadata about a created database for proper cleanup
-const DatabaseMetadata = struct {
-    database_type: DatabaseType,
-    allocation_ptr: *anyopaque,
-
-    /// Size of the allocated database struct for proper deallocation
-    allocation_size: usize,
-};
-
-/// Storage for database metadata to enable proper cleanup
-var database_metadata_map: ?std.AutoHashMap(*anyopaque, DatabaseMetadata) = null;
-
-/// Initialize the metadata map (called automatically when needed)
-fn ensure_metadata_map_initialized(allocator: std.mem.Allocator) !void {
-    if (database_metadata_map == null) {
-        database_metadata_map = std.AutoHashMap(*anyopaque, DatabaseMetadata).init(allocator);
-    }
+/// Cleanup function for memory database
+fn cleanup_memory_database(allocator: std.mem.Allocator, ptr: *anyopaque) void {
+    const memory_db: *MemoryDatabase = @ptrCast(@alignCast(ptr));
+    allocator.destroy(memory_db);
 }
 
 /// Create a database implementation based on configuration
@@ -93,41 +80,30 @@ fn ensure_metadata_map_initialized(allocator: std.mem.Allocator) !void {
 /// - `config`: Configuration specifying database type and parameters
 ///
 /// ## Returns
-/// DatabaseInterface wrapping the created database implementation
+/// DatabaseInterface wrapping the created database implementation with embedded cleanup
 ///
 /// ## Memory Management
 /// The returned database interface owns the underlying implementation.
-/// Call `destroy_database` to properly clean up resources.
+/// Call `.destroy()` to properly clean up resources using embedded cleanup information.
 ///
 /// ## Example
 /// ```zig
 /// const config = DatabaseConfig{ .Memory = {} };
 /// const db = try create_database(allocator, config);
-/// defer destroy_database(allocator, db);
+/// defer db.destroy(); // No need to pass allocator, it's embedded
 ///
 /// // Use database through interface
 /// try db.set_account(address, account);
 /// ```
 pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !DatabaseInterface {
-    try ensure_metadata_map_initialized(allocator);
-
     switch (config) {
         .Memory => {
             // Allocate memory database on heap
             const memory_db = try allocator.create(MemoryDatabase);
             memory_db.* = MemoryDatabase.init(allocator);
 
-            // Store metadata for cleanup
-            const metadata = DatabaseMetadata{
-                .database_type = .Memory,
-                .allocation_ptr = memory_db,
-                .allocation_size = @sizeOf(MemoryDatabase),
-            };
-            if (database_metadata_map) |*map| {
-                try map.put(memory_db, metadata);
-            }
-
-            return memory_db.to_database_interface();
+            // Return interface with embedded cleanup function and allocator
+            return DatabaseInterface.init_with_cleanup(memory_db, allocator, cleanup_memory_database);
         },
 
         // Future database types can be implemented here:
@@ -135,125 +111,32 @@ pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !Da
         // .Fork => |fork_config| {
         //     const fork_db = try allocator.create(ForkDatabase);
         //     fork_db.* = try ForkDatabase.init(allocator, fork_config.remote_url, fork_config.block_number);
-        //
-        //     const metadata = DatabaseMetadata{
-        //         .database_type = .Fork,
-        //         .allocation_ptr = fork_db,
-        //         .allocation_size = @sizeOf(ForkDatabase),
-        //     };
-        //     try database_metadata_map.put(fork_db, metadata);
-        //
-        //     return fork_db.to_database_interface();
+        //     return DatabaseInterface.init_with_cleanup(fork_db, allocator, cleanup_fork_database);
         // },
         //
         // .File => |file_config| {
         //     const file_db = try allocator.create(FileDatabase);
         //     file_db.* = try FileDatabase.init(allocator, file_config.file_path, file_config.create_if_missing);
-        //
-        //     const metadata = DatabaseMetadata{
-        //         .database_type = .File,
-        //         .allocation_ptr = file_db,
-        //         .allocation_size = @sizeOf(FileDatabase),
-        //     };
-        //     try database_metadata_map.put(file_db, metadata);
-        //
-        //     return file_db.to_database_interface();
+        //     return DatabaseInterface.init_with_cleanup(file_db, allocator, cleanup_file_database);
         // },
         //
         // .Cached => |cached_config| {
         //     const backend_db = try create_database(allocator, cached_config.backend_config.*);
-        //
         //     const cached_db = try allocator.create(CachedDatabase);
         //     cached_db.* = try CachedDatabase.init(allocator, backend_db, cached_config.cache_size);
-        //
-        //     const metadata = DatabaseMetadata{
-        //         .database_type = .Cached,
-        //         .allocation_ptr = cached_db,
-        //         .allocation_size = @sizeOf(CachedDatabase),
-        //     };
-        //     try database_metadata_map.put(cached_db, metadata);
-        //
-        //     return cached_db.to_database_interface();
+        //     return DatabaseInterface.init_with_cleanup(cached_db, allocator, cleanup_cached_database);
         // },
     }
 }
 
-/// Destroy a database created by create_database
-///
-/// ## Parameters
-/// - `allocator`: The same allocator used to create the database
-/// - `database`: Database interface to destroy
-///
-/// ## Important
-/// This function must be called to properly clean up database resources.
-/// The database interface becomes invalid after this call.
-///
-/// ## Example
-/// ```zig
-/// const db = try create_database(allocator, config);
-/// defer destroy_database(allocator, db);
-/// ```
-pub fn destroy_database(allocator: std.mem.Allocator, database: DatabaseInterface) void {
-    // Call the database's deinit method
-    database.deinit();
+// destroy_database function is no longer needed
+// Use database.destroy() method instead, which uses embedded cleanup information
 
-    // Look up metadata for proper deallocation
-    if (database_metadata_map) |*map| {
-        if (map.get(database.ptr)) |metadata| {
-            // Remove from metadata map
-            _ = map.remove(database.ptr);
+// get_database_type function is no longer available
+// Database type information is not tracked with the new embedded cleanup approach
 
-            // Deallocate based on original type
-            switch (metadata.database_type) {
-                .Memory => {
-                    const memory_db: *MemoryDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-                    allocator.destroy(memory_db);
-                },
-
-            // Future database type cleanup:
-            // .Fork => {
-            //     const fork_db: *ForkDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(fork_db);
-            // },
-            // .File => {
-            //     const file_db: *FileDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(file_db);
-            // },
-            // .Cached => {
-            //     const cached_db: *CachedDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(cached_db);
-            // },
-            }
-        }
-    }
-}
-
-/// Get the type of a database interface
-///
-/// ## Parameters
-/// - `database`: Database interface to inspect
-///
-/// ## Returns
-/// DatabaseType if the database was created through this factory, null otherwise
-pub fn get_database_type(database: DatabaseInterface) ?DatabaseType {
-    if (database_metadata_map) |*map| {
-        if (map.get(database.ptr)) |metadata| {
-            return metadata.database_type;
-        }
-    }
-    return null;
-}
-
-/// Clean up factory resources
-///
-/// Call this when shutting down to clean up internal factory state.
-/// Only needed if you've created databases through this factory.
-pub fn deinit_factory() void {
-    if (database_metadata_map) |*map| {
-        map.deinit();
-        database_metadata_map = null;
-    }
-}
+// deinit_factory function is no longer needed
+// No global factory state to clean up with the embedded cleanup approach
 
 /// Convenience function to create a memory database
 ///
@@ -289,7 +172,7 @@ const testing = std.testing;
 test "factory memory database creation" {
     const config = DatabaseConfig{ .Memory = {} };
     const db = try create_database(testing.allocator, config);
-    defer destroy_database(testing.allocator, db);
+    defer db.destroy(); // Use embedded cleanup
 
     // Test that we can use the database
     const address = [_]u8{1} ** 20;
@@ -302,19 +185,22 @@ test "factory memory database creation" {
 
 test "factory convenience function" {
     const db = try create_memory_database(testing.allocator);
-    defer destroy_database(testing.allocator, db);
+    defer db.destroy(); // Use embedded cleanup
 
-    // Test database type detection
-    const db_type = get_database_type(db);
-    try testing.expect(db_type == .Memory);
+    // Test that database works (database type detection is no longer available)
+    const address = [_]u8{1} ** 20;
+    const account = @import("database_interface.zig").Account.zero();
+    try db.set_account(address, account);
+    const retrieved_account = try db.get_account(address);
+    try testing.expect(retrieved_account != null);
 }
 
 test "factory cleanup" {
-    defer deinit_factory();
-
+    // No factory state to clean up with embedded cleanup approach
+    
     // Create and destroy a database
     const db = try create_memory_database(testing.allocator);
-    destroy_database(testing.allocator, db);
+    db.destroy(); // Use embedded cleanup
 
-    // Factory should clean up properly
+    // No global factory state to verify
 }
