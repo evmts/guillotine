@@ -363,7 +363,7 @@ pub const MemoryDatabase = struct {
             }
         }
 
-        const index = snapshot_index orelse return DatabaseError.SnapshotNotFound;
+        const index = snapshot_index orelse return DatabaseError.NotFound;
         const snapshot = &self.snapshots.items[index];
 
         // Clear current state
@@ -413,7 +413,7 @@ pub const MemoryDatabase = struct {
             }
         }
 
-        return DatabaseError.SnapshotNotFound;
+        return DatabaseError.NotFound;
     }
 
     // Batch operations
@@ -421,7 +421,7 @@ pub const MemoryDatabase = struct {
     /// Begin a batch operation for efficient bulk updates
     pub fn begin_batch(self: *MemoryDatabase) DatabaseError!void {
         if (self.batch_in_progress) {
-            return DatabaseError.NoBatchInProgress; // Already in batch
+            return DatabaseError.ResourceError; // Already in batch
         }
 
         self.batch_operations = std.ArrayList(BatchOperation).init(self.allocator);
@@ -431,10 +431,10 @@ pub const MemoryDatabase = struct {
     /// Commit all changes in the current batch
     pub fn commit_batch(self: *MemoryDatabase) DatabaseError!void {
         if (!self.batch_in_progress) {
-            return DatabaseError.NoBatchInProgress;
+            return DatabaseError.ResourceError;
         }
 
-        const batch_ops = &(self.batch_operations orelse return DatabaseError.NoBatchInProgress);
+        const batch_ops = &(self.batch_operations orelse return DatabaseError.ResourceError);
 
         // Execute all batch operations
         for (batch_ops.items) |op| {
@@ -485,7 +485,7 @@ pub const MemoryDatabase = struct {
     /// Rollback all changes in the current batch
     pub fn rollback_batch(self: *MemoryDatabase) DatabaseError!void {
         if (!self.batch_in_progress) {
-            return DatabaseError.NoBatchInProgress;
+            return DatabaseError.ResourceError;
         }
 
         // Simply discard all pending operations
@@ -499,7 +499,7 @@ pub const MemoryDatabase = struct {
     // Helper methods
 
     fn add_batch_operation(self: *MemoryDatabase, operation: BatchOperation) DatabaseError!void {
-        const batch_ops = &(self.batch_operations orelse return DatabaseError.NoBatchInProgress);
+        const batch_ops = &(self.batch_operations orelse return DatabaseError.ResourceError);
         try batch_ops.append(operation);
     }
 

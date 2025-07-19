@@ -150,11 +150,11 @@ fn test_batch_operations(db: DatabaseInterface) !void {
 fn test_error_conditions(db: DatabaseInterface) !void {
     // Test invalid snapshot revert
     const result = db.revert_to_snapshot(999);
-    try testing.expectError(DatabaseError.SnapshotNotFound, result);
+    try testing.expectError(DatabaseError.NotFound, result);
 
     // Test batch operations without begin
     const batch_result = db.commit_batch();
-    try testing.expectError(DatabaseError.NoBatchInProgress, batch_result);
+    try testing.expectError(DatabaseError.ResourceError, batch_result);
 }
 
 // Test memory database specifically

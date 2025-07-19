@@ -35,30 +35,14 @@ const std = @import("std");
 // Address type is [20]u8
 const StorageKey = @import("primitives").StorageKey;
 
-/// Database operation errors
+/// Database operation errors - simplified for reduced binary size
 pub const DatabaseError = error{
-    /// Account not found in the database
-    AccountNotFound,
-    /// Storage slot not found for the given address
-    StorageNotFound,
-    /// Contract code not found for the given hash
-    CodeNotFound,
-    /// Invalid address format
-    InvalidAddress,
-    /// Database corruption detected
-    DatabaseCorrupted,
-    /// Network error when accessing remote database
-    NetworkError,
-    /// Permission denied accessing database
-    PermissionDenied,
-    /// Out of memory during database operation
-    OutOfMemory,
-    /// Invalid snapshot identifier
-    InvalidSnapshot,
-    /// Batch operation not in progress
-    NoBatchInProgress,
-    /// Snapshot not found
-    SnapshotNotFound,
+    /// Item not found in database (accounts, storage, code, snapshots)
+    NotFound,
+    /// Access error (permissions, network, corruption)
+    AccessError,
+    /// Resource error (out of memory, invalid operations)
+    ResourceError,
 };
 
 /// Account state data structure
@@ -131,10 +115,118 @@ pub const DatabaseInterface = struct {
         deinit: *const fn (ptr: *anyopaque) void,
     };
 
+    /// Generate complete vtable using comptime for the given implementation
+    fn generateVTable(comptime Impl: type) VTable {
+        return VTable{
+            .get_account = struct {
+                fn wrapper(ptr: *anyopaque, address: [20]u8) DatabaseError!?Account {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.get_account(address);
+                }
+            }.wrapper,
+            .set_account = struct {
+                fn wrapper(ptr: *anyopaque, address: [20]u8, account: Account) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.set_account(address, account);
+                }
+            }.wrapper,
+            .delete_account = struct {
+                fn wrapper(ptr: *anyopaque, address: [20]u8) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.delete_account(address);
+                }
+            }.wrapper,
+            .account_exists = struct {
+                fn wrapper(ptr: *anyopaque, address: [20]u8) bool {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.account_exists(address);
+                }
+            }.wrapper,
+            .get_storage = struct {
+                fn wrapper(ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256 {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.get_storage(address, key);
+                }
+            }.wrapper,
+            .set_storage = struct {
+                fn wrapper(ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.set_storage(address, key, value);
+                }
+            }.wrapper,
+            .get_code = struct {
+                fn wrapper(ptr: *anyopaque, code_hash: [32]u8) DatabaseError![]const u8 {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.get_code(code_hash);
+                }
+            }.wrapper,
+            .set_code = struct {
+                fn wrapper(ptr: *anyopaque, code: []const u8) DatabaseError![32]u8 {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.set_code(code);
+                }
+            }.wrapper,
+            .get_state_root = struct {
+                fn wrapper(ptr: *anyopaque) DatabaseError![32]u8 {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.get_state_root();
+                }
+            }.wrapper,
+            .commit_changes = struct {
+                fn wrapper(ptr: *anyopaque) DatabaseError![32]u8 {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.commit_changes();
+                }
+            }.wrapper,
+            .create_snapshot = struct {
+                fn wrapper(ptr: *anyopaque) DatabaseError!u64 {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.create_snapshot();
+                }
+            }.wrapper,
+            .revert_to_snapshot = struct {
+                fn wrapper(ptr: *anyopaque, snapshot_id: u64) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.revert_to_snapshot(snapshot_id);
+                }
+            }.wrapper,
+            .commit_snapshot = struct {
+                fn wrapper(ptr: *anyopaque, snapshot_id: u64) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.commit_snapshot(snapshot_id);
+                }
+            }.wrapper,
+            .begin_batch = struct {
+                fn wrapper(ptr: *anyopaque) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.begin_batch();
+                }
+            }.wrapper,
+            .commit_batch = struct {
+                fn wrapper(ptr: *anyopaque) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.commit_batch();
+                }
+            }.wrapper,
+            .rollback_batch = struct {
+                fn wrapper(ptr: *anyopaque) DatabaseError!void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.rollback_batch();
+                }
+            }.wrapper,
+            .deinit = struct {
+                fn wrapper(ptr: *anyopaque) void {
+                    const self: Impl = @ptrCast(@alignCast(ptr));
+                    return self.deinit();
+                }
+            }.wrapper,
+        };
+    }
+
     /// Initialize a database interface from any implementation
     ///
-    /// This function uses Zig's compile-time type introspection to generate
-    /// the appropriate vtable for the given implementation type.
+    /// This function uses compile-time vtable generation to eliminate 
+    /// all manual wrapper functions.
     ///
     /// ## Parameters
     /// - `implementation`: Pointer to the database implementation
@@ -153,110 +245,7 @@ pub const DatabaseInterface = struct {
         }
 
         const gen = struct {
-            fn vtable_get_account(ptr: *anyopaque, address: [20]u8) DatabaseError!?Account {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_account(address);
-            }
-
-            fn vtable_set_account(ptr: *anyopaque, address: [20]u8, account: Account) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.set_account(address, account);
-            }
-
-            fn vtable_delete_account(ptr: *anyopaque, address: [20]u8) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.delete_account(address);
-            }
-
-            fn vtable_account_exists(ptr: *anyopaque, address: [20]u8) bool {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.account_exists(address);
-            }
-
-            fn vtable_get_storage(ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_storage(address, key);
-            }
-
-            fn vtable_set_storage(ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.set_storage(address, key, value);
-            }
-
-            fn vtable_get_code(ptr: *anyopaque, code_hash: [32]u8) DatabaseError![]const u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_code(code_hash);
-            }
-
-            fn vtable_set_code(ptr: *anyopaque, code: []const u8) DatabaseError![32]u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.set_code(code);
-            }
-
-            fn vtable_get_state_root(ptr: *anyopaque) DatabaseError![32]u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_state_root();
-            }
-
-            fn vtable_commit_changes(ptr: *anyopaque) DatabaseError![32]u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.commit_changes();
-            }
-
-            fn vtable_create_snapshot(ptr: *anyopaque) DatabaseError!u64 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.create_snapshot();
-            }
-
-            fn vtable_revert_to_snapshot(ptr: *anyopaque, snapshot_id: u64) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.revert_to_snapshot(snapshot_id);
-            }
-
-            fn vtable_commit_snapshot(ptr: *anyopaque, snapshot_id: u64) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.commit_snapshot(snapshot_id);
-            }
-
-            fn vtable_begin_batch(ptr: *anyopaque) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.begin_batch();
-            }
-
-            fn vtable_commit_batch(ptr: *anyopaque) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.commit_batch();
-            }
-
-            fn vtable_rollback_batch(ptr: *anyopaque) DatabaseError!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.rollback_batch();
-            }
-
-            fn vtable_deinit(ptr: *anyopaque) void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.deinit();
-            }
-
-            const vtable = VTable{
-                .get_account = vtable_get_account,
-                .set_account = vtable_set_account,
-                .delete_account = vtable_delete_account,
-                .account_exists = vtable_account_exists,
-                .get_storage = vtable_get_storage,
-                .set_storage = vtable_set_storage,
-                .get_code = vtable_get_code,
-                .set_code = vtable_set_code,
-                .get_state_root = vtable_get_state_root,
-                .commit_changes = vtable_commit_changes,
-                .create_snapshot = vtable_create_snapshot,
-                .revert_to_snapshot = vtable_revert_to_snapshot,
-                .commit_snapshot = vtable_commit_snapshot,
-                .begin_batch = vtable_begin_batch,
-                .commit_batch = vtable_commit_batch,
-                .rollback_batch = vtable_rollback_batch,
-                .deinit = vtable_deinit,
-            };
+            const vtable = generateVTable(Impl);
         };
 
         return DatabaseInterface{
