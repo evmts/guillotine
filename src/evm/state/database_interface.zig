@@ -96,6 +96,10 @@ pub const DatabaseInterface = struct {
     ptr: *anyopaque,
     /// Function pointer table for the implementation
     vtable: *const VTable,
+    /// Optional cleanup function for proper resource deallocation  
+    cleanup: ?*const fn(*anyopaque, std.mem.Allocator) void = null,
+    /// Allocator for cleanup if needed
+    cleanup_allocator: ?std.mem.Allocator = null,
 
     /// Virtual function table defining all database operations
     pub const VTable = struct {
@@ -262,7 +266,44 @@ pub const DatabaseInterface = struct {
         return DatabaseInterface{
             .ptr = implementation,
             .vtable = &gen.vtable,
+            .cleanup = null,
+            .cleanup_allocator = null,
         };
+    }
+
+    /// Initialize a database interface with cleanup function
+    ///
+    /// This variant allows embedding cleanup information directly in the interface
+    /// instance, following RAII patterns for proper resource management.
+    ///
+    /// ## Parameters
+    /// - `implementation`: Pointer to the database implementation
+    /// - `cleanup_fn`: Function to call for cleanup when interface is destroyed
+    /// - `allocator`: Allocator to use for cleanup
+    ///
+    /// ## Returns
+    /// DatabaseInterface wrapping the implementation with embedded cleanup
+    pub fn initWithCleanup(implementation: anytype, cleanup_fn: *const fn(*anyopaque, std.mem.Allocator) void, allocator: std.mem.Allocator) DatabaseInterface {
+        var interface = init(implementation);
+        interface.cleanup = cleanup_fn;
+        interface.cleanup_allocator = allocator;
+        return interface;
+    }
+
+    /// Clean up database resources using embedded cleanup function
+    /// 
+    /// Call this to properly deallocate database resources when done.
+    /// Uses the embedded cleanup function if available.
+    pub fn destroy(self: DatabaseInterface) void {
+        // Call database's deinit first
+        self.vtable.deinit(self.ptr);
+        
+        // Then call cleanup if available
+        if (self.cleanup) |cleanup_fn| {
+            if (self.cleanup_allocator) |allocator| {
+                cleanup_fn(self.ptr, allocator);
+            }
+        }
     }
 
     // Account operations

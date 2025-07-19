@@ -192,37 +192,27 @@ test "memory database error conditions" {
 
 // Test database factory
 test "database factory memory creation" {
-    defer database_factory.deinitFactory();
-
-    const db = try database_factory.createMemoryDatabase(testing.allocator);
-    defer database_factory.destroyDatabase(testing.allocator, db);
+    const db = try database_factory.create_memory_database(testing.allocator);
+    defer database_factory.destroy_database(db);
 
     try test_database_interface_compliance(db);
-
-    // Test factory type detection
-    const db_type = database_factory.getDatabaseType(db);
-    try testing.expectEqual(database_factory.DatabaseType.Memory, db_type.?);
 }
 
 test "database factory configuration" {
-    defer database_factory.deinitFactory();
-
     const config = database_factory.DatabaseConfig{ .Memory = {} };
-    const db = try database_factory.createDatabase(testing.allocator, config);
-    defer database_factory.destroyDatabase(testing.allocator, db);
+    const db = try database_factory.create_database(testing.allocator, config);
+    defer database_factory.destroy_database(db);
 
     try test_database_interface_compliance(db);
 }
 
 // Test multiple databases simultaneously
 test "multiple database instances" {
-    defer database_factory.deinitFactory();
+    const db1 = try database_factory.create_memory_database(testing.allocator);
+    defer database_factory.destroy_database(db1);
 
-    const db1 = try database_factory.createMemoryDatabase(testing.allocator);
-    defer database_factory.destroyDatabase(testing.allocator, db1);
-
-    const db2 = try database_factory.createMemoryDatabase(testing.allocator);
-    defer database_factory.destroyDatabase(testing.allocator, db2);
+    const db2 = try database_factory.create_memory_database(testing.allocator);
+    defer database_factory.destroy_database(db2);
 
     const addr = create_test_address(1);
     const account1 = create_test_account(1000, 1);

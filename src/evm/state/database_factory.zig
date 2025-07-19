@@ -67,24 +67,6 @@ pub const DatabaseConfig = union(DatabaseType) {
     // },
 };
 
-/// Metadata about a created database for proper cleanup
-const DatabaseMetadata = struct {
-    database_type: DatabaseType,
-    allocation_ptr: *anyopaque,
-
-    /// Size of the allocated database struct for proper deallocation
-    allocation_size: usize,
-};
-
-/// Storage for database metadata to enable proper cleanup
-var database_metadata_map: ?std.AutoHashMap(*anyopaque, DatabaseMetadata) = null;
-
-/// Initialize the metadata map (called automatically when needed)
-fn ensure_metadata_map_initialized(allocator: std.mem.Allocator) !void {
-    if (database_metadata_map == null) {
-        database_metadata_map = std.AutoHashMap(*anyopaque, DatabaseMetadata).init(allocator);
-    }
-}
 
 /// Create a database implementation based on configuration
 ///
@@ -109,25 +91,14 @@ fn ensure_metadata_map_initialized(allocator: std.mem.Allocator) !void {
 /// try db.set_account(address, account);
 /// ```
 pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !DatabaseInterface {
-    try ensure_metadata_map_initialized(allocator);
-
     switch (config) {
         .Memory => {
             // Allocate memory database on heap
             const memory_db = try allocator.create(MemoryDatabase);
             memory_db.* = MemoryDatabase.init(allocator);
 
-            // Store metadata for cleanup
-            const metadata = DatabaseMetadata{
-                .database_type = .Memory,
-                .allocation_ptr = memory_db,
-                .allocation_size = @sizeOf(MemoryDatabase),
-            };
-            if (database_metadata_map) |*map| {
-                try map.put(memory_db, metadata);
-            }
-
-            return memory_db.to_database_interface();
+            // Return interface with embedded cleanup
+            return memory_db.to_database_interface_with_cleanup(allocator);
         },
 
         // Future database types can be implemented here:
@@ -181,79 +152,23 @@ pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !Da
 /// Destroy a database created by create_database
 ///
 /// ## Parameters
-/// - `allocator`: The same allocator used to create the database
 /// - `database`: Database interface to destroy
 ///
 /// ## Important
 /// This function must be called to properly clean up database resources.
 /// The database interface becomes invalid after this call.
+/// Uses the embedded cleanup pattern, so no allocator parameter is needed.
 ///
 /// ## Example
 /// ```zig
 /// const db = try create_database(allocator, config);
-/// defer destroy_database(allocator, db);
+/// defer destroy_database(db);
 /// ```
-pub fn destroy_database(allocator: std.mem.Allocator, database: DatabaseInterface) void {
-    // Call the database's deinit method
-    database.deinit();
-
-    // Look up metadata for proper deallocation
-    if (database_metadata_map) |*map| {
-        if (map.get(database.ptr)) |metadata| {
-            // Remove from metadata map
-            _ = map.remove(database.ptr);
-
-            // Deallocate based on original type
-            switch (metadata.database_type) {
-                .Memory => {
-                    const memory_db: *MemoryDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-                    allocator.destroy(memory_db);
-                },
-
-            // Future database type cleanup:
-            // .Fork => {
-            //     const fork_db: *ForkDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(fork_db);
-            // },
-            // .File => {
-            //     const file_db: *FileDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(file_db);
-            // },
-            // .Cached => {
-            //     const cached_db: *CachedDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(cached_db);
-            // },
-            }
-        }
-    }
+pub fn destroy_database(database: DatabaseInterface) void {
+    // Use the embedded cleanup function which handles both deinit and deallocation
+    database.destroy();
 }
 
-/// Get the type of a database interface
-///
-/// ## Parameters
-/// - `database`: Database interface to inspect
-///
-/// ## Returns
-/// DatabaseType if the database was created through this factory, null otherwise
-pub fn get_database_type(database: DatabaseInterface) ?DatabaseType {
-    if (database_metadata_map) |*map| {
-        if (map.get(database.ptr)) |metadata| {
-            return metadata.database_type;
-        }
-    }
-    return null;
-}
-
-/// Clean up factory resources
-///
-/// Call this when shutting down to clean up internal factory state.
-/// Only needed if you've created databases through this factory.
-pub fn deinit_factory() void {
-    if (database_metadata_map) |*map| {
-        map.deinit();
-        database_metadata_map = null;
-    }
-}
 
 /// Convenience function to create a memory database
 ///

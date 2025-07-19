@@ -519,9 +519,20 @@ pub const MemoryDatabase = struct {
         try batch_ops.append(operation);
     }
 
+    /// Cleanup function for factory pattern
+    fn cleanup_memory_database(ptr: *anyopaque, allocator: std.mem.Allocator) void {
+        const memory_db: *MemoryDatabase = @ptrCast(@alignCast(ptr));
+        allocator.destroy(memory_db);
+    }
+
     /// Convert this memory database to a database interface
     pub fn to_database_interface(self: *MemoryDatabase) DatabaseInterface {
         return DatabaseInterface.init(self);
+    }
+
+    /// Convert this memory database to a database interface with cleanup
+    pub fn to_database_interface_with_cleanup(self: *MemoryDatabase, allocator: std.mem.Allocator) DatabaseInterface {
+        return DatabaseInterface.initWithCleanup(self, cleanup_memory_database, allocator);
     }
 };
 
