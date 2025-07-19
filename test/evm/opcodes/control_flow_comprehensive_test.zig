@@ -73,7 +73,6 @@ test "JUMP (0x56): Basic unconditional jump" {
 
 test "JUMP: Simple JUMPDEST validation" {
     const allocator = testing.allocator;
-    defer Contract.clear_analysis_cache(allocator);
 
     // Simple test: just verify that JUMPDEST validation works
     const code = [_]u8{
@@ -110,7 +109,6 @@ test "JUMP: Simple JUMPDEST validation" {
 
 test "JUMP: Jump to various valid destinations" {
     const allocator = testing.allocator;
-    defer Contract.clear_analysis_cache(allocator);
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -1243,7 +1241,6 @@ test "Control Flow: Complex jump sequences" {
 
 test "Control Flow: Simple JUMPDEST validation" {
     const allocator = testing.allocator;
-    defer Contract.clear_analysis_cache(allocator); // Clean up cache after test
 
     // Simple test: just validate that a JUMPDEST at position 0 is recognized
     const code = [_]u8{0x5B}; // Just a JUMPDEST
@@ -1276,7 +1273,6 @@ test "Control Flow: Simple JUMPDEST validation" {
 
 test "Control Flow: Stack operations validation" {
     const allocator = testing.allocator;
-    defer Contract.clear_analysis_cache(allocator);
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -1352,7 +1348,6 @@ test "Control Flow: Stack operations validation" {
 
 test "Control Flow: Program counter tracking" {
     const allocator = testing.allocator;
-    defer Contract.clear_analysis_cache(allocator); // Clean up cache after test
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();

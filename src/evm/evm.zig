@@ -111,7 +111,6 @@ pub fn init_with_hardfork(allocator: std.mem.Allocator, database: @import("state
 pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
-    Contract.clear_analysis_cache(self.allocator);
 }
 
 pub usingnamespace @import("evm/set_context.zig");
