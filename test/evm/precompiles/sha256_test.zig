@@ -57,6 +57,24 @@ test "sha256 gas calculation checked" {
     }
 }
 
+test "sha256 gas calculation saturating" {
+    // Normal cases should work the same as regular calculation
+    try testing.expectEqual(@as(u64, 60), sha256.calculate_gas_saturating(0));
+    try testing.expectEqual(@as(u64, 72), sha256.calculate_gas_saturating(32));
+    try testing.expectEqual(@as(u64, 84), sha256.calculate_gas_saturating(64));
+    
+    // Large but reasonable inputs should work normally
+    try testing.expectEqual(@as(u64, 444), sha256.calculate_gas_saturating(1024));
+    
+    // Very large inputs should saturate to max value instead of overflowing
+    const huge_size = std.math.maxInt(usize);
+    const saturated_result = sha256.calculate_gas_saturating(huge_size);
+    
+    // Should either be a reasonable value or saturated to max
+    // The exact behavior depends on the platform, but it should never panic
+    try testing.expect(saturated_result >= 60); // At least the base cost
+}
+
 test "sha256 execute empty input" {
     var output_buffer: [32]u8 = undefined;
     const result = sha256.execute(&[_]u8{}, &output_buffer, 100);

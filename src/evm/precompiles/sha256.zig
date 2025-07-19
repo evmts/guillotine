@@ -58,29 +58,35 @@ pub fn calculate_gas(input_size: usize) u64 {
 /// @param input_size Size of input data in bytes
 /// @return Gas cost or error.Overflow if calculation overflows
 pub fn calculate_gas_checked(input_size: usize) !u64 {
-    // Use std.math.add with overflow checking for word count calculation
+    // Check for overflow in word count calculation  
     const input_plus_31 = std.math.add(usize, input_size, 31) catch {
         return error.Overflow;
     };
-    
     const word_count = input_plus_31 / 32;
-
-    // Convert word_count to u64 with overflow checking
-    const word_count_u64 = std.math.cast(u64, word_count) orelse {
+    
+    const gas_from_words = std.math.mul(u64, SHA256_WORD_COST, word_count) catch {
         return error.Overflow;
     };
 
-    // Use std.math.mul for gas calculation with overflow checking
-    const gas_from_words = std.math.mul(u64, SHA256_WORD_COST, word_count_u64) catch {
-        return error.Overflow;
-    };
-
-    // Use std.math.add for total gas calculation with overflow checking
     const total_gas = std.math.add(u64, SHA256_BASE_COST, gas_from_words) catch {
         return error.Overflow;
     };
 
     return total_gas;
+}
+
+/// Calculate gas cost with saturating arithmetic
+///
+/// Same as calculate_gas but uses saturating arithmetic to prevent overflow.
+/// If overflow would occur, returns the maximum possible value instead of erroring.
+///
+/// @param input_size Size of input data in bytes
+/// @return Gas cost (saturated to max value on overflow)
+pub fn calculate_gas_saturating(input_size: usize) u64 {
+    const input_plus_31 = input_size +| 31; // Saturating addition
+    const word_count = input_plus_31 / 32; // Ceiling division
+    const gas_from_words = SHA256_WORD_COST *| @as(u64, word_count);
+    return SHA256_BASE_COST +| gas_from_words;
 }
 
 /// Execute SHA256 precompile
