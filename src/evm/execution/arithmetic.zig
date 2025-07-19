@@ -1,56 +1,5 @@
 /// Arithmetic operations for the Ethereum Virtual Machine
-///
-/// This module implements all arithmetic opcodes for the EVM, including basic
-/// arithmetic (ADD, SUB, MUL, DIV), signed operations (SDIV, SMOD), modular
-/// arithmetic (MOD, ADDMOD, MULMOD), exponentiation (EXP), and sign extension
-/// (SIGNEXTEND).
-///
-/// ## Design Philosophy
-///
-/// All operations follow a consistent pattern:
-/// 1. Pop operands from the stack (validated by jump table)
-/// 2. Perform the arithmetic operation
-/// 3. Push the result back onto the stack
-///
-/// ## Performance Optimizations
-///
-/// - **Unsafe Operations**: Stack bounds checking is done by the jump table,
-///   allowing opcodes to use unsafe stack operations for maximum performance
-/// - **In-Place Updates**: Results are written directly to stack slots to
-///   minimize memory operations
-/// - **Wrapping Arithmetic**: Uses Zig's wrapping operators (`+%`, `*%`, `-%`)
-///   for correct 256-bit overflow behavior
-///
-/// ## EVM Arithmetic Rules
-///
-/// - All values are 256-bit unsigned integers (u256)
-/// - Overflow wraps around (e.g., MAX_U256 + 1 = 0)
-/// - Division by zero returns 0 (not an error)
-/// - Modulo by zero returns 0 (not an error)
-/// - Signed operations interpret u256 as two's complement i256
-///
-/// ## Gas Costs
-///
-/// - ADD, SUB, NOT: 3 gas (GasFastestStep)
-/// - MUL, DIV, SDIV, MOD, SMOD: 5 gas (GasFastStep)
-/// - ADDMOD, MULMOD, SIGNEXTEND: 8 gas (GasMidStep)
-/// - EXP: 10 gas + 50 per byte of exponent
-///
-/// ## Stack Requirements
-///
-/// Operation    | Stack Input | Stack Output | Description
-/// -------------|-------------|--------------|-------------
-/// ADD          | [a, b]      | [a + b]      | Addition with overflow
-/// MUL          | [a, b]      | [a * b]      | Multiplication with overflow
-/// SUB          | [a, b]      | [a - b]      | Subtraction with underflow
-/// DIV          | [a, b]      | [a / b]      | Division (b=0 returns 0)
-/// SDIV         | [a, b]      | [a / b]      | Signed division
-/// MOD          | [a, b]      | [a % b]      | Modulo (b=0 returns 0)
-/// SMOD         | [a, b]      | [a % b]      | Signed modulo
-/// ADDMOD       | [a, b, n]   | [(a+b)%n]    | Addition modulo n
-/// MULMOD       | [a, b, n]   | [(a*b)%n]    | Multiplication modulo n
-/// EXP          | [a, b]      | [a^b]        | Exponentiation
-/// SIGNEXTEND   | [b, x]      | [y]          | Sign extend x from byte b
+/// Division/modulo by zero returns 0 (not error)
 const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
@@ -58,30 +7,7 @@ const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
 const Vm = @import("../evm.zig");
 
-/// ADD opcode (0x01) - Addition operation
-///
-/// Pops two values from the stack, adds them with wrapping overflow,
-/// and pushes the result.
-///
-/// ## Stack Input
-/// - `a`: First operand (second from top)
-/// - `b`: Second operand (top)
-///
-/// ## Stack Output
-/// - `a + b`: Sum with 256-bit wrapping overflow
-///
-/// ## Gas Cost
-/// 3 gas (GasFastestStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. Calculate sum = (a + b) mod 2^256
-/// 4. Push sum to stack
-///
-/// ## Example
-/// Stack: [10, 20] => [30]
-/// Stack: [MAX_U256, 1] => [0] (overflow wraps)
+/// ADD opcode (0x01)
 pub fn op_add(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -102,30 +28,7 @@ pub fn op_add(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     return Operation.ExecutionResult{};
 }
 
-/// MUL opcode (0x02) - Multiplication operation
-///
-/// Pops two values from the stack, multiplies them with wrapping overflow,
-/// and pushes the result.
-///
-/// ## Stack Input
-/// - `a`: First operand (second from top)
-/// - `b`: Second operand (top)
-///
-/// ## Stack Output
-/// - `a * b`: Product with 256-bit wrapping overflow
-///
-/// ## Gas Cost
-/// 5 gas (GasFastStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. Calculate product = (a * b) mod 2^256
-/// 4. Push product to stack
-///
-/// ## Example
-/// Stack: [10, 20] => [200]
-/// Stack: [2^128, 2^128] => [0] (overflow wraps)
+/// MUL opcode (0x02)
 pub fn op_mul(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -145,30 +48,7 @@ pub fn op_mul(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     return Operation.ExecutionResult{};
 }
 
-/// SUB opcode (0x03) - Subtraction operation
-///
-/// Pops two values from the stack, subtracts the top from the second,
-/// with wrapping underflow, and pushes the result.
-///
-/// ## Stack Input
-/// - `a`: Minuend (second from top)
-/// - `b`: Subtrahend (top)
-///
-/// ## Stack Output
-/// - `a - b`: Difference with 256-bit wrapping underflow
-///
-/// ## Gas Cost
-/// 3 gas (GasFastestStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. Calculate result = (a - b) mod 2^256
-/// 4. Push result to stack
-///
-/// ## Example
-/// Stack: [30, 10] => [20]
-/// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
+/// SUB opcode (0x03)
 pub fn op_sub(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -189,37 +69,7 @@ pub fn op_sub(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     return Operation.ExecutionResult{};
 }
 
-/// DIV opcode (0x04) - Unsigned integer division
-///
-/// Pops two values from the stack, divides the second by the top,
-/// and pushes the integer quotient. Division by zero returns 0.
-///
-/// ## Stack Input
-/// - `a`: Dividend (second from top)
-/// - `b`: Divisor (top)
-///
-/// ## Stack Output
-/// - `a / b`: Integer quotient, or 0 if b = 0
-///
-/// ## Gas Cost
-/// 5 gas (GasFastStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. If b = 0, result = 0 (no error)
-/// 4. Else result = floor(a / b)
-/// 5. Push result to stack
-///
-/// ## Example
-/// Stack: [20, 5] => [4]
-/// Stack: [7, 3] => [2] (integer division)
-/// Stack: [100, 0] => [0] (division by zero)
-///
-/// ## Note
-/// Unlike most programming languages, EVM division by zero does not
-/// throw an error but returns 0. This is a deliberate design choice
-/// to avoid exceptional halting conditions.
+/// DIV opcode (0x04) - Division by zero returns 0
 pub fn op_div(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -243,40 +93,7 @@ pub fn op_div(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     return Operation.ExecutionResult{};
 }
 
-/// SDIV opcode (0x05) - Signed integer division
-///
-/// Pops two values from the stack, interprets them as signed integers,
-/// divides the second by the top, and pushes the signed quotient.
-/// Division by zero returns 0.
-///
-/// ## Stack Input
-/// - `a`: Dividend as signed i256 (second from top)
-/// - `b`: Divisor as signed i256 (top)
-///
-/// ## Stack Output
-/// - `a / b`: Signed integer quotient, or 0 if b = 0
-///
-/// ## Gas Cost
-/// 5 gas (GasFastStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. Interpret both as two's complement signed integers
-/// 4. If b = 0, result = 0
-/// 5. Else if a = -2^255 and b = -1, result = -2^255 (overflow case)
-/// 6. Else result = truncated division a / b
-/// 7. Push result to stack
-///
-/// ## Example
-/// Stack: [20, 5] => [4]
-/// Stack: [-20, 5] => [-4] (0xfff...fec / 5)
-/// Stack: [-20, -5] => [4]
-/// Stack: [MIN_I256, -1] => [MIN_I256] (overflow protection)
-///
-/// ## Note
-/// The special case for MIN_I256 / -1 prevents integer overflow,
-/// as the mathematical result (2^255) cannot be represented in i256.
+/// SDIV opcode (0x05) - Signed division, handles MIN_I256/-1 overflow
 pub fn op_sdiv(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -312,36 +129,7 @@ pub fn op_sdiv(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     return Operation.ExecutionResult{};
 }
 
-/// MOD opcode (0x06) - Modulo remainder operation
-///
-/// Pops two values from the stack, calculates the remainder of dividing
-/// the second by the top, and pushes the result. Modulo by zero returns 0.
-///
-/// ## Stack Input
-/// - `a`: Dividend (second from top)
-/// - `b`: Divisor (top)
-///
-/// ## Stack Output
-/// - `a % b`: Remainder of a / b, or 0 if b = 0
-///
-/// ## Gas Cost
-/// 5 gas (GasFastStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. If b = 0, result = 0 (no error)
-/// 4. Else result = a modulo b
-/// 5. Push result to stack
-///
-/// ## Example
-/// Stack: [17, 5] => [2]
-/// Stack: [100, 10] => [0]
-/// Stack: [7, 0] => [0] (modulo by zero)
-///
-/// ## Note
-/// The result is always in range [0, b-1] for b > 0.
-/// Like DIV, modulo by zero returns 0 rather than throwing an error.
+/// MOD opcode (0x06) - Modulo by zero returns 0
 pub fn op_mod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -365,40 +153,7 @@ pub fn op_mod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     return Operation.ExecutionResult{};
 }
 
-/// SMOD opcode (0x07) - Signed modulo remainder operation
-///
-/// Pops two values from the stack, interprets them as signed integers,
-/// calculates the signed remainder, and pushes the result.
-/// Modulo by zero returns 0.
-///
-/// ## Stack Input
-/// - `a`: Dividend as signed i256 (second from top)
-/// - `b`: Divisor as signed i256 (top)
-///
-/// ## Stack Output
-/// - `a % b`: Signed remainder, or 0 if b = 0
-///
-/// ## Gas Cost
-/// 5 gas (GasFastStep)
-///
-/// ## Execution
-/// 1. Pop b from stack
-/// 2. Pop a from stack
-/// 3. Interpret both as two's complement signed integers
-/// 4. If b = 0, result = 0
-/// 5. Else result = signed remainder of a / b
-/// 6. Push result to stack
-///
-/// ## Example
-/// Stack: [17, 5] => [2]
-/// Stack: [-17, 5] => [-2] (sign follows dividend)
-/// Stack: [17, -5] => [2]
-/// Stack: [-17, -5] => [-2]
-///
-/// ## Note
-/// In signed modulo, the result has the same sign as the dividend (a).
-/// This follows the Euclidean division convention where:
-/// a = b * q + r, where |r| < |b| and sign(r) = sign(a)
+/// SMOD opcode (0x07) - Signed modulo, result sign follows dividend
 pub fn op_smod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -428,40 +183,7 @@ pub fn op_smod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     return Operation.ExecutionResult{};
 }
 
-/// ADDMOD opcode (0x08) - Addition modulo n
-///
-/// Pops three values from the stack, adds the first two, then takes
-/// the modulo with the third value. Handles overflow correctly by
-/// computing (a + b) mod n, not ((a + b) mod 2^256) mod n.
-///
-/// ## Stack Input
-/// - `a`: First addend (third from top)
-/// - `b`: Second addend (second from top)
-/// - `n`: Modulus (top)
-///
-/// ## Stack Output
-/// - `(a + b) % n`: Sum modulo n, or 0 if n = 0
-///
-/// ## Gas Cost
-/// 8 gas (GasMidStep)
-///
-/// ## Execution
-/// 1. Pop n from stack (modulus)
-/// 2. Pop b from stack (second addend)
-/// 3. Pop a from stack (first addend)
-/// 4. If n = 0, result = 0
-/// 5. Else result = (a + b) mod n
-/// 6. Push result to stack
-///
-/// ## Example
-/// Stack: [10, 20, 7] => [2] ((10 + 20) % 7)
-/// Stack: [MAX_U256, 5, 10] => [4] (overflow handled)
-/// Stack: [50, 50, 0] => [0] (modulo by zero)
-///
-/// ## Note
-/// This operation is atomic - the addition and modulo are
-/// performed as one operation to handle cases where a + b
-/// exceeds 2^256.
+/// ADDMOD opcode (0x08) - Atomic (a+b)%n operation
 pub fn op_addmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -480,9 +202,15 @@ pub fn op_addmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     if (n == 0) {
         result = 0;
     } else {
+<<<<<<< HEAD
         // Use @addWithOverflow for more idiomatic overflow handling
         const overflow = @addWithOverflow(a, b);
         result = overflow[0] % n;
+=======
+        // Compute (a + b) % n with overflow handling
+        const sum = a +% b; // Wrapping addition
+        result = sum % n;
+>>>>>>> 6e3c0dc (feat: Reduce verbose documentation in arithmetic.zig for size optimization)
     }
 
     frame.stack.set_top_unsafe(result);
@@ -490,45 +218,7 @@ pub fn op_addmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     return Operation.ExecutionResult{};
 }
 
-/// MULMOD opcode (0x09) - Multiplication modulo n
-///
-/// Pops three values from the stack, multiplies the first two, then
-/// takes the modulo with the third value. Correctly handles cases where
-/// the product exceeds 2^256.
-///
-/// ## Stack Input
-/// - `a`: First multiplicand (third from top)
-/// - `b`: Second multiplicand (second from top)
-/// - `n`: Modulus (top)
-///
-/// ## Stack Output
-/// - `(a * b) % n`: Product modulo n, or 0 if n = 0
-///
-/// ## Gas Cost
-/// 8 gas (GasMidStep)
-///
-/// ## Execution
-/// 1. Pop n from stack (modulus)
-/// 2. Pop b from stack (second multiplicand)
-/// 3. Pop a from stack (first multiplicand)
-/// 4. If n = 0, result = 0
-/// 5. Else compute (a * b) mod n using Russian peasant algorithm
-/// 6. Push result to stack
-///
-/// ## Algorithm
-/// Uses Russian peasant multiplication with modular reduction:
-/// - Reduces inputs modulo n first
-/// - Builds product bit by bit, reducing modulo n at each step
-/// - Avoids need for 512-bit intermediate values
-///
-/// ## Example
-/// Stack: [10, 20, 7] => [4] ((10 * 20) % 7)
-/// Stack: [2^128, 2^128, 100] => [0] (handles overflow)
-/// Stack: [50, 50, 0] => [0] (modulo by zero)
-///
-/// ## Note
-/// This operation correctly computes (a * b) mod n even when
-/// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
+/// MULMOD opcode (0x09) - Uses Russian peasant algorithm for (a*b)%n
 pub fn op_mulmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -547,18 +237,12 @@ pub fn op_mulmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     if (n == 0) {
         result = 0;
     } else {
-        // For MULMOD, we need to compute (a * b) % n where a * b might overflow
-        // We can't just do (a *% b) % n because that would give us ((a * b) % 2^256) % n
-        // which is not the same as (a * b) % n when a * b >= 2^256
-
-        // We'll use the Russian peasant multiplication algorithm with modular reduction
-        // This allows us to compute (a * b) % n without needing the full 512-bit product
+        // Russian peasant multiplication to avoid 512-bit overflow
         result = 0;
         var x = a % n;
         var y = b % n;
 
         while (y > 0) {
-            // If y is odd, add x to result (mod n)
             if ((y & 1) == 1) {
                 const sum = result +% x;
                 result = sum % n;
@@ -575,6 +259,7 @@ pub fn op_mulmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     return Operation.ExecutionResult{};
 }
 
+<<<<<<< HEAD
 /// EXP opcode (0x0A) - Exponentiation
 ///
 /// Pops two values from the stack and raises the second to the power
@@ -617,6 +302,9 @@ pub fn op_mulmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
 /// - 2^10: 10 + 50*1 = 60 gas (exponent fits in 1 byte)
 /// - 2^256: 10 + 50*2 = 110 gas (exponent needs 2 bytes)
 /// - 2^(2^255): 10 + 50*32 = 1610 gas (huge exponent)
+=======
+/// EXP opcode (0x0A) - Dynamic gas: 10 + 50*exponent_bytes
+>>>>>>> 6e3c0dc (feat: Reduce verbose documentation in arithmetic.zig for size optimization)
 pub fn op_exp(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
 
@@ -684,46 +372,7 @@ pub fn op_exp(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     return Operation.ExecutionResult{};
 }
 
-/// SIGNEXTEND opcode (0x0B) - Sign extension
-///
-/// Extends the sign bit of a value from a given byte position to fill
-/// all higher-order bits. Used to convert smaller signed integers to
-/// full 256-bit representation.
-///
-/// ## Stack Input
-/// - `b`: Byte position of sign bit (0-indexed from right)
-/// - `x`: Value to sign-extend
-///
-/// ## Stack Output
-/// - Sign-extended value
-///
-/// ## Gas Cost
-/// 5 gas (GasFastStep)
-///
-/// ## Execution
-/// 1. Pop b from stack (byte position)
-/// 2. Pop x from stack (value to extend)
-/// 3. If b >= 31, return x unchanged (already full width)
-/// 4. Find sign bit at position (b * 8 + 7)
-/// 5. If sign bit = 1, fill higher bits with 1s
-/// 6. If sign bit = 0, fill higher bits with 0s
-/// 7. Push result to stack
-///
-/// ## Byte Position
-/// - b = 0: Extend from byte 0 (bits 0-7, rightmost byte)
-/// - b = 1: Extend from byte 1 (bits 8-15)
-/// - b = 31: Extend from byte 31 (bits 248-255, leftmost byte)
-///
-/// ## Example
-/// Stack: [0, 0x7F] => [0x7F] (positive sign, no change)
-/// Stack: [0, 0x80] => [0xFFFF...FF80] (negative sign extended)
-/// Stack: [1, 0x80FF] => [0xFFFF...80FF] (extend from byte 1)
-/// Stack: [31, x] => [x] (already full width)
-///
-/// ## Use Cases
-/// - Converting int8/int16/etc to int256
-/// - Arithmetic on mixed-width signed integers
-/// - Implementing higher-level language semantics
+/// SIGNEXTEND opcode (0x0B) - Extends sign bit from byte position
 pub fn op_signextend(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -752,7 +401,7 @@ pub fn op_signextend(pc: usize, interpreter: *Operation.Interpreter, state: *Ope
         const keep_bits = sign_bit_pos + 1;
 
         if (sign_bit == 1) {
-            // First, create a mask of all 1s for the upper bits
+            // Sign bit is 1, extend with 1s
             if (keep_bits >= 256) {
                 result = x;
             } else {
@@ -761,7 +410,7 @@ pub fn op_signextend(pc: usize, interpreter: *Operation.Interpreter, state: *Ope
                 result = x | ones_mask;
             }
         } else {
-            // Sign bit is 0, extend with 0s (just mask out upper bits)
+            // Sign bit is 0, extend with 0s
             if (keep_bits >= 256) {
                 result = x;
             } else {
