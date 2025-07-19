@@ -35,30 +35,14 @@ const std = @import("std");
 // Address type is [20]u8
 const StorageKey = @import("primitives").StorageKey;
 
-/// Database operation errors
+/// Database operation errors - simplified for size optimization
 pub const DatabaseError = error{
-    /// Account not found in the database
-    AccountNotFound,
-    /// Storage slot not found for the given address
-    StorageNotFound,
-    /// Contract code not found for the given hash
-    CodeNotFound,
-    /// Invalid address format
-    InvalidAddress,
-    /// Database corruption detected
-    DatabaseCorrupted,
-    /// Network error when accessing remote database
-    NetworkError,
-    /// Permission denied accessing database
-    PermissionDenied,
-    /// Out of memory during database operation
-    OutOfMemory,
-    /// Invalid snapshot identifier
-    InvalidSnapshot,
-    /// Batch operation not in progress
-    NoBatchInProgress,
-    /// Snapshot not found
-    SnapshotNotFound,
+    /// Data not found (consolidates AccountNotFound, StorageNotFound, CodeNotFound, SnapshotNotFound)
+    NotFound,
+    /// Access denied or invalid operation (consolidates PermissionDenied, InvalidAddress, InvalidSnapshot, NoBatchInProgress)
+    AccessDenied,
+    /// System or internal error (consolidates DatabaseCorrupted, NetworkError, OutOfMemory)
+    InternalError,
 };
 
 /// Account state data structure

@@ -11,17 +11,10 @@ size: usize,
 /// Whether this bitvec owns its memory (and should free it)
 owned: bool,
 
-/// Error types for BitVec operations
-pub const BitVecError = error{
-    /// Position is out of bounds for the bit vector
-    PositionOutOfBounds,
-};
-
-/// Error type for BitVec initialization
+/// Consolidated error types for BitVec operations
+pub const BitVecError = error{OutOfBounds};
 pub const BitVecInitError = std.mem.Allocator.Error;
-
-/// Error type for code bitmap creation
-pub const CodeBitmapError = BitVecInitError;
+pub const CodeBitmapError = std.mem.Allocator.Error;
 
 /// Create a new BitVec with the given size
 pub fn init(allocator: std.mem.Allocator, size: usize) BitVecInitError!BitVec {
@@ -56,7 +49,7 @@ pub fn deinit(self: *BitVec, allocator: std.mem.Allocator) void {
 
 /// Set a bit at the given position
 pub fn set(self: *BitVec, pos: usize) BitVecError!void {
-    if (pos >= self.size) return BitVecError.PositionOutOfBounds;
+    if (pos >= self.size) return BitVecError.OutOfBounds;
     const idx = pos / 64;
     const bit = @as(u64, 1) << @intCast(pos % 64);
     self.bits[idx] |= bit;
@@ -71,7 +64,7 @@ pub fn set_unchecked(self: *BitVec, pos: usize) void {
 
 /// Clear a bit at the given position
 pub fn clear(self: *BitVec, pos: usize) BitVecError!void {
-    if (pos >= self.size) return BitVecError.PositionOutOfBounds;
+    if (pos >= self.size) return BitVecError.OutOfBounds;
     const idx = pos / 64;
     const bit = @as(u64, 1) << @intCast(pos % 64);
     self.bits[idx] &= ~bit;
@@ -86,7 +79,7 @@ pub fn clear_unchecked(self: *BitVec, pos: usize) void {
 
 /// Check if a bit is set at the given position
 pub fn is_set(self: *const BitVec, pos: usize) BitVecError!bool {
-    if (pos >= self.size) return BitVecError.PositionOutOfBounds;
+    if (pos >= self.size) return BitVecError.OutOfBounds;
     const idx = pos / 64;
     const bit = @as(u64, 1) << @intCast(pos % 64);
     return (self.bits[idx] & bit) != 0;

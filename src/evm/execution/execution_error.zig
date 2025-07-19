@@ -126,27 +126,13 @@ pub const Error = error{
     /// Placeholder for future EOF-related opcodes
     EOFNotSupported,
 
-    // Database errors from the database interface
-    /// Account not found in the database
-    AccountNotFound,
-    /// Storage slot not found for the given address
-    StorageNotFound,
-    /// Contract code not found for the given hash
-    CodeNotFound,
-    /// Invalid address format
-    InvalidAddress,
-    /// Database corruption detected
-    DatabaseCorrupted,
-    /// Network error when accessing remote database
-    NetworkError,
-    /// Permission denied accessing database
-    PermissionDenied,
-    /// Invalid snapshot identifier
-    InvalidSnapshot,
-    /// Batch operation not in progress
-    NoBatchInProgress,
-    /// Snapshot not found
-    SnapshotNotFound,
+    // Database errors from the database interface - consolidated
+    /// Data not found in database
+    NotFound,
+    /// Access denied or invalid database operation  
+    AccessDenied,
+    /// System or internal database error
+    InternalError,
 };
 
 /// Get a human-readable description for an execution error
@@ -193,15 +179,8 @@ pub fn get_description(err: Error) []const u8 {
         Error.ChildContextActive => "Child context is active",
         Error.NoChildContextToRevertOrCommit => "No child context to revert or commit",
         Error.EOFNotSupported => "EOF (EVM Object Format) opcode not supported",
-        Error.AccountNotFound => "Account not found in database",
-        Error.StorageNotFound => "Storage slot not found in database",
-        Error.CodeNotFound => "Contract code not found in database",
-        Error.InvalidAddress => "Invalid address format",
-        Error.DatabaseCorrupted => "Database corruption detected",
-        Error.NetworkError => "Network error accessing database",
-        Error.PermissionDenied => "Permission denied accessing database",
-        Error.InvalidSnapshot => "Invalid snapshot identifier",
-        Error.NoBatchInProgress => "No batch operation in progress",
-        Error.SnapshotNotFound => "Snapshot not found in database",
+        Error.NotFound => "Data not found in database",
+        Error.AccessDenied => "Access denied or invalid database operation",
+        Error.InternalError => "System or internal database error",
     };
 }

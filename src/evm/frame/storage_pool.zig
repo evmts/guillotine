@@ -79,11 +79,8 @@ pub fn deinit(self: *StoragePool) void {
     self.storage_maps.deinit();
 }
 
-/// Error type for access map borrowing operations
-pub const BorrowAccessMapError = error{
-    /// Allocator failed to allocate memory for a new map
-    OutOfAllocatorMemory,
-};
+/// Consolidated error type for access map borrowing operations  
+pub const BorrowAccessMapError = std.mem.Allocator.Error;
 
 /// Borrow an access tracking map from the pool.
 ///
@@ -94,7 +91,7 @@ pub const BorrowAccessMapError = error{
 /// Otherwise, a new map is allocated.
 ///
 /// @return A cleared hash map ready for use
-/// @throws OutOfAllocatorMemory if allocation fails
+/// @throws OutOfMemory if allocation fails
 ///
 /// Example:
 /// ```zig
@@ -108,7 +105,7 @@ pub const BorrowAccessMapError = error{
 pub fn borrow_access_map(self: *StoragePool) BorrowAccessMapError!*std.AutoHashMap(u256, bool) {
     if (self.access_maps.items.len > 0) return self.access_maps.pop() orelse unreachable;
     const map = self.allocator.create(std.AutoHashMap(u256, bool)) catch {
-        return BorrowAccessMapError.OutOfAllocatorMemory;
+        return std.mem.Allocator.Error.OutOfMemory;
     };
     errdefer self.allocator.destroy(map);
     map.* = std.AutoHashMap(u256, bool).init(self.allocator);
@@ -129,11 +126,8 @@ pub fn return_access_map(self: *StoragePool, map: *std.AutoHashMap(u256, bool)) 
     self.access_maps.append(map) catch {};
 }
 
-/// Error type for storage map borrowing operations
-pub const BorrowStorageMapError = error{
-    /// Allocator failed to allocate memory for a new map
-    OutOfAllocatorMemory,
-};
+/// Consolidated error type for storage map borrowing operations
+pub const BorrowStorageMapError = std.mem.Allocator.Error;
 
 /// Borrow a storage value map from the pool.
 ///
@@ -144,7 +138,7 @@ pub const BorrowStorageMapError = error{
 /// Otherwise, a new map is allocated.
 ///
 /// @return A cleared hash map ready for use
-/// @throws OutOfAllocatorMemory if allocation fails
+/// @throws OutOfMemory if allocation fails
 ///
 /// Example:
 /// ```zig
@@ -159,7 +153,7 @@ pub fn borrow_storage_map(self: *StoragePool) BorrowStorageMapError!*std.AutoHas
         return map;
     }
     const map = self.allocator.create(std.AutoHashMap(u256, u256)) catch {
-        return BorrowStorageMapError.OutOfAllocatorMemory;
+        return std.mem.Allocator.Error.OutOfMemory;
     };
     errdefer self.allocator.destroy(map);
     map.* = std.AutoHashMap(u256, u256).init(self.allocator);

@@ -50,12 +50,9 @@ const Log = @import("../log.zig");
 /// Maximum gas refund allowed (EIP-3529)
 const MAX_REFUND_QUOTIENT = 5;
 
-/// Error types for Contract operations
-pub const ContractError = std.mem.Allocator.Error || StorageOperationError;
-pub const StorageOperationError = error{
-    OutOfAllocatorMemory,
-    InvalidStorageOperation,
-};
+/// Consolidated error types for Contract operations 
+pub const ContractError = std.mem.Allocator.Error || error{InvalidOperation};
+pub const StorageOperationError = error{InvalidOperation};
 pub const CodeAnalysisError = std.mem.Allocator.Error;
 
 /// Global analysis cache
@@ -549,9 +546,7 @@ pub fn sub_gas_refund(self: *Contract, amount: u64) void {
     self.gas_refund = if (self.gas_refund > amount) self.gas_refund - amount else 0;
 }
 
-pub const MarkStorageSlotWarmError = error{
-    OutOfAllocatorMemory,
-};
+pub const MarkStorageSlotWarmError = std.mem.Allocator.Error;
 
 /// Mark storage slot as warm with pool support
 pub fn mark_storage_slot_warm(self: *Contract, allocator: std.mem.Allocator, slot: u256, pool: ?*StoragePool) MarkStorageSlotWarmError!bool {
@@ -560,13 +555,13 @@ pub fn mark_storage_slot_warm(self: *Contract, allocator: std.mem.Allocator, slo
             self.storage_access = p.borrow_access_map() catch |err| switch (err) {
                 StoragePool.BorrowAccessMapError.OutOfAllocatorMemory => {
                     Log.debug("Contract.mark_storage_slot_warm: failed to borrow access map: {any}", .{err});
-                    return MarkStorageSlotWarmError.OutOfAllocatorMemory;
+                    return std.mem.Allocator.Error.OutOfMemory;
                 },
             };
         } else {
             self.storage_access = allocator.create(std.AutoHashMap(u256, bool)) catch |err| {
                 Log.debug("Contract.mark_storage_slot_warm: allocation failed: {any}", .{err});
-                return MarkStorageSlotWarmError.OutOfAllocatorMemory;
+                return std.mem.Allocator.Error.OutOfMemory;
             };
             self.storage_access.?.* = std.AutoHashMap(u256, bool).init(allocator);
         }
@@ -577,7 +572,7 @@ pub fn mark_storage_slot_warm(self: *Contract, allocator: std.mem.Allocator, slo
     if (was_cold) {
         map.put(slot, true) catch |err| {
             Log.debug("Contract.mark_storage_slot_warm: map.put failed: {any}", .{err});
-            return MarkStorageSlotWarmError.OutOfAllocatorMemory;
+            return std.mem.Allocator.Error.OutOfMemory;
         };
     }
     return was_cold;
