@@ -1,0 +1,169 @@
+const std = @import("std");
+const Operation = @import("../opcodes/operation.zig");
+const Stack = @import("../stack/stack.zig");
+const Frame = @import("../frame/frame.zig");
+const comparison = @import("comparison.zig");
+const Vm = @import("../evm.zig");
+const address = @import("Address");
+
+// Fuzz testing functions for comparison operations
+pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []const FuzzComparisonOperation) !void {
+    
+    for (operations) |op| {
+        var memory = try @import("../memory/memory.zig").init_default(allocator);
+        defer memory.deinit();
+        
+        var db = @import("../state/memory_database.zig").init(allocator);
+        defer db.deinit();
+        
+        var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+        defer vm.deinit();
+        
+        var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x01}, .{});
+        defer contract.deinit(allocator, null);
+        
+        var frame = try Frame.init(allocator, &vm, 1000000, contract, address.Address.ZERO, &.{});
+        defer frame.deinit();
+        
+        // Setup stack with test values
+        switch (op.op_type) {
+            .lt, .gt, .slt, .sgt, .eq => {
+                try frame.stack.append(op.a);
+                try frame.stack.append(op.b);
+            },
+            .iszero => {
+                try frame.stack.append(op.a);
+            },
+        }
+        
+        // Execute the operation
+        var result: Operation.ExecutionResult = undefined;
+        switch (op.op_type) {
+            .lt => result = try comparison.op_lt(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .gt => result = try comparison.op_gt(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .slt => result = try comparison.op_slt(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .sgt => result = try comparison.op_sgt(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .eq => result = try comparison.op_eq(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .iszero => result = try comparison.op_iszero(0, @ptrCast(&vm), @ptrCast(&frame)),
+        }
+        
+        // Verify the result makes sense
+        try validate_comparison_result(&frame.stack, op);
+    }
+}
+
+const FuzzComparisonOperation = struct {
+    op_type: ComparisonOpType,
+    a: u256,
+    b: u256 = 0,
+};
+
+const ComparisonOpType = enum {
+    lt,
+    gt,
+    slt,
+    sgt,
+    eq,
+    iszero,
+};
+
+fn validate_comparison_result(stack: *const Stack, op: FuzzComparisonOperation) !void {
+    const testing = std.testing;
+    
+    // Stack should have exactly one result
+    try testing.expectEqual(@as(usize, 1), stack.size);
+    
+    const result = stack.data[0];
+    
+    // All comparison operations return 0 or 1
+    try testing.expect(result == 0 or result == 1);
+    
+    // Verify specific comparison properties
+    switch (op.op_type) {
+        .lt => {
+            const expected: u256 = if (op.a < op.b) 1 else 0;
+            try testing.expectEqual(expected, result);
+        },
+        .gt => {
+            const expected: u256 = if (op.a > op.b) 1 else 0;
+            try testing.expectEqual(expected, result);
+        },
+        .slt => {
+            const a_i256 = @as(i256, @bitCast(op.a));
+            const b_i256 = @as(i256, @bitCast(op.b));
+            const expected: u256 = if (a_i256 < b_i256) 1 else 0;
+            try testing.expectEqual(expected, result);
+        },
+        .sgt => {
+            const a_i256 = @as(i256, @bitCast(op.a));
+            const b_i256 = @as(i256, @bitCast(op.b));
+            const expected: u256 = if (a_i256 > b_i256) 1 else 0;
+            try testing.expectEqual(expected, result);
+        },
+        .eq => {
+            const expected: u256 = if (op.a == op.b) 1 else 0;
+            try testing.expectEqual(expected, result);
+        },
+        .iszero => {
+            const expected: u256 = if (op.a == 0) 1 else 0;
+            try testing.expectEqual(expected, result);
+        },
+    }
+}
+
+test "fuzz_comparison_basic_operations" {
+    const allocator = std.testing.allocator;
+    
+    const operations = [_]FuzzComparisonOperation{
+        .{ .op_type = .lt, .a = 5, .b = 10 },
+        .{ .op_type = .gt, .a = 10, .b = 5 },
+        .{ .op_type = .slt, .a = 5, .b = 10 },
+        .{ .op_type = .sgt, .a = 10, .b = 5 },
+        .{ .op_type = .eq, .a = 5, .b = 5 },
+        .{ .op_type = .iszero, .a = 0 },
+    };
+    
+    try fuzz_comparison_operations(allocator, &operations);
+}
+
+test "fuzz_comparison_edge_cases" {
+    const allocator = std.testing.allocator;
+    
+    const operations = [_]FuzzComparisonOperation{
+        .{ .op_type = .lt, .a = 0, .b = 0 },
+        .{ .op_type = .gt, .a = 0, .b = 0 },
+        .{ .op_type = .lt, .a = std.math.maxInt(u256), .b = 0 },
+        .{ .op_type = .gt, .a = 0, .b = std.math.maxInt(u256) },
+        .{ .op_type = .slt, .a = 1 << 255, .b = 0 }, // Negative vs positive
+        .{ .op_type = .sgt, .a = 0, .b = 1 << 255 }, // Positive vs negative
+        .{ .op_type = .slt, .a = 1 << 255, .b = (1 << 255) + 1 }, // Two negatives
+        .{ .op_type = .sgt, .a = (1 << 255) + 1, .b = 1 << 255 }, // Two negatives
+        .{ .op_type = .eq, .a = std.math.maxInt(u256), .b = std.math.maxInt(u256) },
+        .{ .op_type = .iszero, .a = std.math.maxInt(u256) },
+    };
+    
+    try fuzz_comparison_operations(allocator, &operations);
+}
+
+test "fuzz_comparison_random_operations" {
+    const allocator = std.testing.allocator;
+    var prng = std.Random.DefaultPrng.init(42);
+    const random = prng.random();
+    
+    var operations = std.ArrayList(FuzzComparisonOperation).init(allocator);
+    defer operations.deinit();
+    
+    var i: usize = 0;
+    while (i < 100) : (i += 1) {
+        const op_type_idx = random.intRangeAtMost(usize, 0, 5);
+        const op_types = [_]ComparisonOpType{ .lt, .gt, .slt, .sgt, .eq, .iszero };
+        const op_type = op_types[op_type_idx];
+        
+        const a = random.int(u256);
+        const b = random.int(u256);
+        
+        try operations.append(.{ .op_type = op_type, .a = a, .b = b });
+    }
+    
+    try fuzz_comparison_operations(allocator, operations.items);
+}

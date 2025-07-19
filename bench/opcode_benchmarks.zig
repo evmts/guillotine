@@ -24,7 +24,7 @@ fn benchmark_bytecode(allocator: Allocator, bytecode: []const u8) !void {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    const db_interface = memory_db.toDatabaseInterface();
+    const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     

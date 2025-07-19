@@ -8,7 +8,7 @@ pub const primitives = @import("primitives");
 
 pub const zbench_runner = @import("zbench_runner.zig");
 pub const precompile_benchmark = @import("precompile_benchmark.zig");
-pub const comprehensive_precompile_benchmark = @import("comprehensive_precompile_benchmark.zig");
+// pub const comprehensive_precompile_benchmark = @import("comprehensive_precompile_benchmark.zig");
 pub const opcode_benchmarks = @import("opcode_benchmarks.zig");
 pub const benchmarks = @import("benchmarks.zig");
 
