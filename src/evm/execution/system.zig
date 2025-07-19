@@ -245,7 +245,6 @@ pub fn gas_op(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 // Helper to check if u256 fits in usize
 fn check_offset_bounds(value: u256) ExecutionError.Error!void {
     if (value > std.math.maxInt(usize)) {
-        @branchHint(.cold);
         return ExecutionError.Error.InvalidOffset;
     }
 }
@@ -306,7 +305,6 @@ pub fn op_create(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
 
     // Check if we're in a static call
     if (frame.is_static) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -318,7 +316,6 @@ pub fn op_create(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
 
     // Check depth
     if (frame.depth >= 1024) {
-        @branchHint(.cold);
         try frame.stack.append(0);
         return Operation.ExecutionResult{};
     }
@@ -327,7 +324,6 @@ pub fn op_create(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     try check_offset_bounds(size);
     const size_usize = @as(usize, @intCast(size));
     if (vm.chain_rules.is_eip3860 and size_usize > gas_constants.MaxInitcodeSize) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.MaxCodeSizeExceeded;
     }
 
@@ -369,7 +365,6 @@ pub fn op_create(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     frame.gas_remaining = frame.gas_remaining - gas_for_call + result.gas_left;
 
     if (!result.success) {
-        @branchHint(.unlikely);
         try frame.stack.append(0);
         try frame.return_data.set(result.output orelse &[_]u8{});
         return Operation.ExecutionResult{};
@@ -393,7 +388,6 @@ pub fn op_create2(pc: usize, interpreter: *Operation.Interpreter, state: *Operat
     const vm = @as(*Vm, @ptrCast(@alignCast(interpreter)));
 
     if (frame.is_static) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -411,7 +405,6 @@ pub fn op_create2(pc: usize, interpreter: *Operation.Interpreter, state: *Operat
     try check_offset_bounds(size);
     const size_usize = @as(usize, @intCast(size));
     if (vm.chain_rules.is_eip3860 and size_usize > gas_constants.MaxInitcodeSize) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.MaxCodeSizeExceeded;
     }
 
@@ -453,7 +446,6 @@ pub fn op_create2(pc: usize, interpreter: *Operation.Interpreter, state: *Operat
     frame.gas_remaining = frame.gas_remaining - gas_for_call + result.gas_left;
 
     if (!result.success) {
-        @branchHint(.unlikely);
         try frame.stack.append(0);
         try frame.return_data.set(result.output orelse &[_]u8{});
         return Operation.ExecutionResult{};
@@ -485,13 +477,11 @@ pub fn op_call(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 
     // Check static call restrictions
     if (frame.is_static and value != 0) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
     // Check depth
     if (frame.depth >= 1024) {
-        @branchHint(.cold);
         try frame.stack.append(0);
         return Operation.ExecutionResult{};
     }
@@ -527,7 +517,6 @@ pub fn op_call(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     const access_cost = try vm.access_list.access_address(to_address);
     const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
     if (is_cold) {
-        @branchHint(.unlikely);
         // Cold address access costs more (2600 gas)
         try frame.consume_gas(gas_constants.ColdAccountAccessCost);
     }
@@ -559,7 +548,6 @@ pub fn op_call(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 
         // Zero out remaining bytes if output was smaller than requested
         if (copy_size < ret_size_usize) {
-            @branchHint(.unlikely);
             @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
         }
     }
@@ -589,7 +577,6 @@ pub fn op_callcode(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
 
     // Check depth
     if (frame.depth >= 1024) {
-        @branchHint(.cold);
         try frame.stack.append(0);
         return Operation.ExecutionResult{};
     }
@@ -625,7 +612,6 @@ pub fn op_callcode(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
     const access_cost = try vm.access_list.access_address(to_address);
     const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
     if (is_cold) {
-        @branchHint(.unlikely);
         // Cold address access costs more (2600 gas)
         try frame.consume_gas(gas_constants.ColdAccountAccessCost);
     }
@@ -658,7 +644,6 @@ pub fn op_callcode(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
 
         // Zero out remaining bytes if output was smaller than requested
         if (copy_size < ret_size_usize) {
-            @branchHint(.unlikely);
             @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
         }
     }
@@ -688,7 +673,6 @@ pub fn op_delegatecall(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
     // Check call depth limit
     if (frame.depth >= 1024) {
-        @branchHint(.cold);
         try frame.stack.append(0);
         return Operation.ExecutionResult{};
     }
@@ -724,7 +708,6 @@ pub fn op_delegatecall(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const access_cost = try vm.access_list.access_address(to_address);
     const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
     if (is_cold) {
-        @branchHint(.unlikely);
         // Cold address access costs more (2600 gas)
         try frame.consume_gas(gas_constants.ColdAccountAccessCost);
     }
@@ -765,7 +748,6 @@ pub fn op_delegatecall(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
         // Zero out remaining bytes if output was smaller than requested
         if (copy_size < ret_size_usize) {
-            @branchHint(.unlikely);
             @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
         }
     }
@@ -795,7 +777,6 @@ pub fn op_staticcall(pc: usize, interpreter: *Operation.Interpreter, state: *Ope
 
     // Check call depth limit
     if (frame.depth >= 1024) {
-        @branchHint(.cold);
         try frame.stack.append(0);
         return Operation.ExecutionResult{};
     }
@@ -831,7 +812,6 @@ pub fn op_staticcall(pc: usize, interpreter: *Operation.Interpreter, state: *Ope
     const access_cost = try vm.access_list.access_address(to_address);
     const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
     if (is_cold) {
-        @branchHint(.unlikely);
         // Cold address access costs more (2600 gas)
         try frame.consume_gas(gas_constants.ColdAccountAccessCost);
     }
@@ -865,7 +845,6 @@ pub fn op_staticcall(pc: usize, interpreter: *Operation.Interpreter, state: *Ope
 
         // Zero out remaining bytes if output was smaller than requested
         if (copy_size < ret_size_usize) {
-            @branchHint(.unlikely);
             @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
         }
     }
@@ -903,7 +882,6 @@ pub fn op_selfdestruct(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
     // Static call protection - SELFDESTRUCT forbidden in static context
     if (frame.is_static) {
-        @branchHint(.cold);
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -923,19 +901,16 @@ pub fn op_selfdestruct(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
     // EIP-161: Account creation cost if transferring to a non-existent account
     if (chain_rules.is_eip158) {
-        @branchHint(.likely);
 
         // Check if the recipient account exists and is empty
         const recipient_exists = vm.state.account_exists(recipient_address);
         if (!recipient_exists) {
-            @branchHint(.cold);
             gas_cost += gas_constants.CallNewAccountGas; // 25000 gas
         }
     }
 
     // Account for access list gas costs (EIP-2929)
     if (chain_rules.is_berlin) {
-        @branchHint(.likely);
 
         // Warm up recipient address access
         const access_cost = vm.state.warm_account_access(recipient_address);
@@ -944,7 +919,6 @@ pub fn op_selfdestruct(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
     // Check if we have enough gas
     if (gas_cost > frame.gas_remaining) {
-        @branchHint(.cold);
         return ExecutionError.Error.OutOfGas;
     }
 

@@ -68,7 +68,6 @@ pub fn clear(self: *AccessList) void {
 pub fn access_address(self: *AccessList, address: primitives.Address.Address) std.mem.Allocator.Error!u64 {
     const result = try self.addresses.getOrPut(address);
     if (result.found_existing) {
-        @branchHint(.likely);
         return WARM_ACCOUNT_ACCESS_COST;
     }
     return COLD_ACCOUNT_ACCESS_COST;
@@ -80,7 +79,6 @@ pub fn access_storage_slot(self: *AccessList, address: primitives.Address.Addres
     const key = AccessListStorageKey{ .address = address, .slot = slot };
     const result = try self.storage_slots.getOrPut(key);
     if (result.found_existing) {
-        @branchHint(.likely);
         return WARM_SLOAD_COST;
     }
     return COLD_SLOAD_COST;
@@ -131,7 +129,6 @@ pub fn init_transaction(self: *AccessList, to: ?primitives.Address.Address) std.
 pub fn get_call_cost(self: *AccessList, address: primitives.Address.Address) std.mem.Allocator.Error!u64 {
     const result = try self.addresses.getOrPut(address);
     if (result.found_existing) {
-        @branchHint(.likely);
         return 0;
     }
     return COLD_CALL_EXTRA_COST;

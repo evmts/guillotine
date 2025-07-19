@@ -42,10 +42,8 @@ const ChainRules = @import("../hardforks/chain_rules.zig");
 /// @return Gas cost for ECADD operation
 pub fn calculate_gas(chain_rules: ChainRules) u64 {
     if (chain_rules.is_istanbul) {
-        @branchHint(.likely);
         return gas_constants.ECADD_GAS_COST;
     } else {
-        @branchHint(.cold);
         return gas_constants.ECADD_GAS_COST_BYZANTIUM;
     }
 }
@@ -83,13 +81,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
     // Calculate and validate gas cost
     const gas_cost = calculate_gas(chain_rules);
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // Validate output buffer size
     if (output.len < 64) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -100,7 +96,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
 
     // Parse first point (bytes 0-63)
     const point1 = bn254.G1Point.from_bytes(padded_input[0..64]) catch {
-        @branchHint(.cold);
         // Invalid points result in point at infinity (0, 0)
         @memset(output[0..64], 0);
         return PrecompileOutput.success_result(gas_cost, 64);
@@ -108,7 +103,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
 
     // Parse second point (bytes 64-127)
     const point2 = bn254.G1Point.from_bytes(padded_input[64..128]) catch {
-        @branchHint(.cold);
         // Invalid points result in point at infinity (0, 0)
         @memset(output[0..64], 0);
         return PrecompileOutput.success_result(gas_cost, 64);

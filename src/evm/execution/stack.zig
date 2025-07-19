@@ -35,7 +35,6 @@ pub fn make_push(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.S
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
             if (frame.stack.size >= Stack.CAPACITY) {
-                @branchHint(.cold);
                 unreachable;
             }
 
@@ -44,7 +43,6 @@ pub fn make_push(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.S
 
             for (0..n) |i| {
                 if (pc + 1 + i < code.len) {
-                    @branchHint(.likely);
                     value = (value << 8) | code[pc + 1 + i];
                 } else {
                     value = value << 8;
@@ -69,7 +67,6 @@ pub fn push_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const n = opcode - 0x5f; // PUSH1 is 0x60, so n = opcode - 0x5f
 
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -78,7 +75,6 @@ pub fn push_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 
     for (0..n) |i| {
         if (pc + 1 + i < code.len) {
-            @branchHint(.likely);
             value = (value << 8) | code[pc + 1 + i];
         } else {
             value = value << 8;
@@ -102,11 +98,9 @@ pub fn make_dup(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.St
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
             if (frame.stack.size < n) {
-                @branchHint(.cold);
                 unreachable;
             }
             if (frame.stack.size >= Stack.CAPACITY) {
-                @branchHint(.cold);
                 unreachable;
             }
 
@@ -126,11 +120,9 @@ pub fn dup_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
     const n = opcode - 0x7f; // DUP1 is 0x80, so n = opcode - 0x7f
 
     if (frame.stack.size < n) {
-        @branchHint(.cold);
         unreachable;
     }
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -151,7 +143,6 @@ pub fn make_swap(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.S
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
             if (frame.stack.size < n + 1) {
-                @branchHint(.cold);
                 unreachable;
             }
 
@@ -171,7 +162,6 @@ pub fn swap_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const n = opcode - 0x8f; // SWAP1 is 0x90, so n = opcode - 0x8f
 
     if (frame.stack.size < n + 1) {
-        @branchHint(.cold);
         unreachable;
     }
 

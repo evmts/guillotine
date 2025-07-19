@@ -118,12 +118,10 @@ pub fn validate_dup(stack: *const Stack, n: u32) ExecutionError.Error!void {
     Log.debug("ValidationPatterns.validate_dup: Validating DUP{}, stack_size={}", .{ n, stack.size });
     // DUP pops 0 and pushes 1
     if (stack.size < n) {
-        @branchHint(.cold);
         Log.debug("ValidationPatterns.validate_dup: Stack underflow, size={} < n={}", .{ stack.size, n });
         return ExecutionError.Error.StackUnderflow;
     }
     if (stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         Log.debug("ValidationPatterns.validate_dup: Stack overflow, size={} >= capacity={}", .{ stack.size, Stack.CAPACITY });
         return ExecutionError.Error.StackOverflow;
     }
@@ -149,7 +147,6 @@ pub fn validate_swap(stack: *const Stack, n: u32) ExecutionError.Error!void {
     Log.debug("ValidationPatterns.validate_swap: Validating SWAP{}, stack_size={}", .{ n, stack.size });
     // SWAP needs at least n+1 items on stack
     if (stack.size <= n) {
-        @branchHint(.cold);
         Log.debug("ValidationPatterns.validate_swap: Stack underflow, size={} <= n={}", .{ stack.size, n });
         return ExecutionError.Error.StackUnderflow;
     }
@@ -174,7 +171,6 @@ pub fn validate_swap(stack: *const Stack, n: u32) ExecutionError.Error!void {
 pub fn validate_push(stack: *const Stack) ExecutionError.Error!void {
     Log.debug("ValidationPatterns.validate_push: Validating PUSH, stack_size={}", .{stack.size});
     if (stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         Log.debug("ValidationPatterns.validate_push: Stack overflow, size={} >= capacity={}", .{ stack.size, Stack.CAPACITY });
         return ExecutionError.Error.StackOverflow;
     }

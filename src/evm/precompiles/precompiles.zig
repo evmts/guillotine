@@ -48,7 +48,6 @@ pub fn is_precompile(address: primitives.Address.Address) bool {
 /// @return true if the precompile is available with these chain rules
 pub fn is_available(address: primitives.Address.Address, chain_rules: ChainRules) bool {
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return false;
     }
 
@@ -86,13 +85,11 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
     } else {
         // Check if this is a valid precompile address
         if (!is_precompile(address)) {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         }
 
         // Check if this precompile is available with the current chain rules
         if (!is_available(address, chain_rules)) {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         }
 
@@ -101,60 +98,49 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
         // Route to specific precompile implementation
         return switch (precompile_id) {
             4 => {
-                @branchHint(.likely);
                 const identity = @import("identity.zig");
                 return identity.execute(input, output, gas_limit);
             }, // IDENTITY
 
             // Placeholder implementations for future precompiles
             1 => {
-                @branchHint(.likely);
                 const ecrecover = @import("ecrecover.zig");
                 return ecrecover.execute(input, output, gas_limit);
             }, // ECRECOVER
             2 => {
-                @branchHint(.likely);
                 const sha256 = @import("sha256.zig");
                 return sha256.execute(input, output, gas_limit);
             }, // SHA256
             3 => {
-                @branchHint(.likely);
                 const ripemd160 = @import("ripemd160.zig");
                 return ripemd160.execute(input, output, gas_limit);
             }, // RIPEMD160
             5 => {
-                @branchHint(.likely);
                 const modexp = @import("modexp.zig");
                 return modexp.execute(input, output, gas_limit);
             }, // MODEXP
             6 => {
-                @branchHint(.likely);
                 const ecadd = @import("ecadd.zig");
                 return ecadd.execute(input, output, gas_limit, chain_rules);
             }, // ECADD
             7 => {
-                @branchHint(.likely);
                 const ecmul = @import("ecmul.zig");
                 return ecmul.execute(input, output, gas_limit, chain_rules);
             }, // ECMUL
             8 => {
-                @branchHint(.likely);
                 const ecpairing = @import("ecpairing.zig");
                 return ecpairing.execute(input, output, gas_limit, chain_rules);
             }, // ECPAIRING
             9 => {
-                @branchHint(.unlikely);
                 const blake2f = @import("blake2f.zig");
                 return blake2f.execute(input, output, gas_limit);
             }, // BLAKE2F
             10 => {
-                @branchHint(.unlikely);
                 const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
                 return kzg_point_evaluation.execute(input, output, gas_limit);
             }, // POINT_EVALUATION
 
             else => {
-                @branchHint(.cold);
                 return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
             },
         };
@@ -177,12 +163,10 @@ pub fn estimate_gas(address: primitives.Address.Address, input_size: usize, chai
     }
 
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return error.InvalidPrecompile;
     }
 
     if (!is_available(address, chain_rules)) {
-        @branchHint(.cold);
         return error.PrecompileNotAvailable;
     }
 
@@ -254,12 +238,10 @@ pub fn get_output_size(address: primitives.Address.Address, input_size: usize, c
     }
 
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return error.InvalidPrecompile;
     }
 
     if (!is_available(address, chain_rules)) {
-        @branchHint(.cold);
         return error.PrecompileNotAvailable;
     }
 
@@ -317,16 +299,13 @@ pub fn get_output_size(address: primitives.Address.Address, input_size: usize, c
 /// @return true if the call would succeed
 pub fn validate_call(address: primitives.Address.Address, input_size: usize, gas_limit: u64, chain_rules: ChainRules) bool {
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return false;
     }
     if (!is_available(address, chain_rules)) {
-        @branchHint(.cold);
         return false;
     }
 
     const gas_cost = estimate_gas(address, input_size, chain_rules) catch {
-        @branchHint(.cold);
         return false;
     };
     return gas_cost <= gas_limit;

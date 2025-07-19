@@ -64,7 +64,6 @@ size: usize = 0,
 /// ```
 pub fn append(self: *Stack, value: u256) Error!void {
     if (self.size >= CAPACITY) {
-        @branchHint(.cold);
         // Debug logging removed for fuzz testing compatibility
         return Error.StackOverflow;
     }
@@ -81,7 +80,6 @@ pub fn append(self: *Stack, value: u256) Error!void {
 /// @param self The stack to push onto
 /// @param value The 256-bit value to push
 pub fn append_unsafe(self: *Stack, value: u256) void {
-    @branchHint(.likely);
     self.data[self.size] = value;
     self.size += 1;
 }
@@ -101,7 +99,6 @@ pub fn append_unsafe(self: *Stack, value: u256) void {
 /// ```
 pub fn pop(self: *Stack) Error!u256 {
     if (self.size == 0) {
-        @branchHint(.cold);
         // Debug logging removed for fuzz testing compatibility
         return Error.StackUnderflow;
     }
@@ -120,7 +117,6 @@ pub fn pop(self: *Stack) Error!u256 {
 /// @param self The stack to pop from
 /// @return The popped value
 pub fn pop_unsafe(self: *Stack) u256 {
-    @branchHint(.likely);
     self.size -= 1;
     const value = self.data[self.size];
     self.data[self.size] = 0;
@@ -134,7 +130,6 @@ pub fn pop_unsafe(self: *Stack) u256 {
 /// @param self The stack to peek at
 /// @return Pointer to the top value
 pub fn peek_unsafe(self: *const Stack) *const u256 {
-    @branchHint(.likely);
     return &self.data[self.size - 1];
 }
 
@@ -145,14 +140,13 @@ pub fn peek_unsafe(self: *const Stack) *const u256 {
 /// @param self The stack to operate on
 /// @param n Position to duplicate from (1-16)
 pub fn dup_unsafe(self: *Stack, n: usize) void {
-    @branchHint(.likely);
     @setRuntimeSafety(false);
     self.append_unsafe(self.data[self.size - n]);
 }
 
 /// Pop 2 values without pushing (unsafe version)
 pub fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
-    @branchHint(.likely); @setRuntimeSafety(false);
+    @setRuntimeSafety(false);
     const a = self.data[self.size - 2];
     const b = self.data[self.size - 1];
     self.size -= 2;
@@ -161,7 +155,6 @@ pub fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
 
 /// Pop 3 values without pushing (unsafe version)
 pub fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
-    @branchHint(.likely);
     @setRuntimeSafety(false);
     self.size -= 3;
     return .{
@@ -172,7 +165,6 @@ pub fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
 }
 
 pub fn set_top_unsafe(self: *Stack, value: u256) void {
-    @branchHint(.likely);
     // Assumes stack is not empty; this should be guaranteed by jump_table validation
     // for opcodes that use this pattern (e.g., after a pop and peek on a stack with >= 2 items).
     self.data[self.size - 1] = value;
@@ -180,14 +172,12 @@ pub fn set_top_unsafe(self: *Stack, value: u256) void {
 
 /// Swap unsafe function following snake_case convention
 pub fn swap_unsafe(self: *Stack, n: usize) void {
-    @branchHint(.likely);
     std.mem.swap(u256, &self.data[self.size - 1], &self.data[self.size - n - 1]);
 }
 
 /// Peek at the nth element from the top (for test compatibility)
 pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
     if (n >= self.size) {
-        @branchHint(.cold);
         return Error.StackUnderflow;
     }
     return self.data[self.size - 1 - n];
@@ -203,7 +193,6 @@ pub fn clear(self: *Stack) void {
 /// Peek at the top value (for test compatibility)
 pub fn peek(self: *const Stack) Error!u256 {
     if (self.size == 0) {
-        @branchHint(.cold);
         return Error.StackUnderflow;
     }
     return self.data[self.size - 1];

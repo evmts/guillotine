@@ -103,13 +103,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Check if we have enough gas
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // Validate output buffer size
     if (output.len < RIPEMD160_OUTPUT_SIZE) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 

@@ -125,12 +125,10 @@ pub fn op_extcodecopy(pc: usize, interpreter: *Operation.Interpreter, state: *Op
     const size = try frame.stack.pop();
 
     if (size == 0) {
-        @branchHint(.unlikely);
         return Operation.ExecutionResult{};
     }
 
     if (mem_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize) or code_offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -179,7 +177,6 @@ pub fn op_extcodehash(pc: usize, interpreter: *Operation.Interpreter, state: *Op
     // Get code from VM state and compute hash
     const code = vm.state.get_code(address);
     if (code.len == 0) {
-        @branchHint(.unlikely);
         // Empty account - return zero
         try frame.stack.append(0);
     } else {
@@ -256,7 +253,6 @@ pub fn op_calldataload(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const offset = try frame.stack.pop();
 
     if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         // Offset too large, push zero
         try frame.stack.append(0);
         return Operation.ExecutionResult{};
@@ -270,7 +266,6 @@ pub fn op_calldataload(pc: usize, interpreter: *Operation.Interpreter, state: *O
     var i: usize = 0;
     while (i < 32) : (i += 1) {
         if (offset_usize + i < calldata.len) {
-            @branchHint(.likely);
             value = (value << 8) | calldata[offset_usize + i];
         } else {
             value = value << 8; // Pad with zero
@@ -294,7 +289,6 @@ pub fn op_calldatacopy(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const size = try frame.stack.pop();
 
     if (size == 0) {
-        @branchHint(.unlikely);
         return Operation.ExecutionResult{};
     }
 
@@ -338,12 +332,10 @@ pub fn op_codecopy(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
     // Debug logging removed for fuzz testing compatibility
 
     if (size == 0) {
-        @branchHint(.unlikely);
         return Operation.ExecutionResult{};
     }
 
     if (mem_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize) or code_offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -385,7 +377,6 @@ pub fn op_returndataload(pc: usize, interpreter: *Operation.Interpreter, state: 
 
     // Check if offset is within bounds
     if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -394,7 +385,6 @@ pub fn op_returndataload(pc: usize, interpreter: *Operation.Interpreter, state: 
 
     // If offset + 32 > return_data.len, this is an error (unlike CALLDATALOAD which pads with zeros)
     if (offset_usize + 32 > return_data.len) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 

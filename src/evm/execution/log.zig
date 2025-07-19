@@ -27,7 +27,6 @@ pub fn make_log(comptime num_topics: u8) fn (usize, *Operation.Interpreter, *Ope
 
             // Check if we're in a static call
             if (frame.is_static) {
-                @branchHint(.unlikely);
                 return ExecutionError.Error.WriteProtection;
             }
 
@@ -45,7 +44,6 @@ pub fn make_log(comptime num_topics: u8) fn (usize, *Operation.Interpreter, *Ope
             }
 
             if (size == 0) {
-                @branchHint(.unlikely);
                 // Empty data - emit empty log
                 try vm.emit_log(frame.contract.address, topics[0..num_topics], &[_]u8{});
                 return Operation.ExecutionResult{};
@@ -54,7 +52,6 @@ pub fn make_log(comptime num_topics: u8) fn (usize, *Operation.Interpreter, *Ope
             // Process non-empty log data
 
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                @branchHint(.unlikely);
                 return ExecutionError.Error.OutOfOffset;
             }
 
@@ -109,7 +106,6 @@ pub fn log_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
 
     // Check if we're in a static call
     if (frame.is_static) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -124,7 +120,6 @@ pub fn log_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
     }
 
     if (size == 0) {
-        @branchHint(.unlikely);
         // Empty data - emit empty log
         try vm.emit_log(frame.contract.address, topics[0..num_topics], &[_]u8{});
         return Operation.ExecutionResult{};

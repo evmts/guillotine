@@ -53,11 +53,9 @@ else
 /// @return Gas cost for ECPAIRING operation
 pub fn calculate_gas(num_pairs: usize, chain_rules: ChainRules) u64 {
     if (chain_rules.is_istanbul) {
-        @branchHint(.likely);
         return gas_constants.ECPAIRING_BASE_GAS_COST +
             gas_constants.ECPAIRING_PER_PAIR_GAS_COST * @as(u64, @intCast(num_pairs));
     } else {
-        @branchHint(.cold);
         return gas_constants.ECPAIRING_BASE_GAS_COST_BYZANTIUM +
             gas_constants.ECPAIRING_PER_PAIR_GAS_COST_BYZANTIUM * @as(u64, @intCast(num_pairs));
     }
@@ -105,13 +103,11 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
     // Validate output buffer size
     if (output.len < 32) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
     // Validate input length (must be multiple of 192 bytes)
     if (input.len % 192 != 0) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -120,7 +116,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
     // Calculate and validate gas cost
     const gas_cost = calculate_gas(num_pairs, chain_rules);
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
@@ -141,13 +136,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
         // Use Rust implementation for native targets
         // Ensure BN254 Rust library is initialized
         bn254_backend.init() catch {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         };
 
         // Perform elliptic curve pairing check using Rust BN254 library
         bn254_backend.ecpairing(input, output[0..32]) catch {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         };
     }

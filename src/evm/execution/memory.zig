@@ -10,7 +10,6 @@ const gas_constants = @import("../constants/gas_constants.zig");
 // Helper to check if u256 fits in usize
 fn check_offset_bounds(value: u256) ExecutionError.Error!void {
     if (value > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.InvalidOffset;
     }
 }
@@ -22,7 +21,6 @@ pub fn op_mload(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 1) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -30,7 +28,6 @@ pub fn op_mload(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const offset = frame.stack.peek_unsafe().*;
 
     if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -63,7 +60,6 @@ pub fn op_mstore(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -74,7 +70,6 @@ pub fn op_mstore(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     const offset = popped.b; // Second popped (was top)
 
     if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -112,7 +107,6 @@ pub fn op_mstore8(pc: usize, interpreter: *Operation.Interpreter, state: *Operat
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -123,7 +117,6 @@ pub fn op_mstore8(pc: usize, interpreter: *Operation.Interpreter, state: *Operat
     const offset = popped.b; // Second popped (was top)
 
     if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -154,7 +147,6 @@ pub fn op_msize(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -176,7 +168,6 @@ pub fn op_mcopy(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 3) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -187,12 +178,10 @@ pub fn op_mcopy(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const dest = frame.stack.pop_unsafe();
 
     if (size == 0) {
-        @branchHint(.unlikely);
         return Operation.ExecutionResult{};
     }
 
     if (dest > std.math.maxInt(usize) or src > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -217,14 +206,11 @@ pub fn op_mcopy(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     // Get memory slice and handle overlapping copy
     const mem_slice = frame.memory.slice();
     if (mem_slice.len >= max_addr) {
-        @branchHint(.likely);
         // Handle overlapping memory copy correctly
         if (dest_usize > src_usize and dest_usize < src_usize + size_usize) {
-            @branchHint(.unlikely);
             // Forward overlap: dest is within source range, copy backwards
             std.mem.copyBackwards(u8, mem_slice[dest_usize .. dest_usize + size_usize], mem_slice[src_usize .. src_usize + size_usize]);
         } else if (src_usize > dest_usize and src_usize < dest_usize + size_usize) {
-            @branchHint(.unlikely);
             // Backward overlap: src is within dest range, copy forwards
             std.mem.copyForwards(u8, mem_slice[dest_usize .. dest_usize + size_usize], mem_slice[src_usize .. src_usize + size_usize]);
         } else {
@@ -245,7 +231,6 @@ pub fn op_calldataload(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 1) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -253,7 +238,6 @@ pub fn op_calldataload(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const offset = frame.stack.peek_unsafe().*;
 
     if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         // Replace top of stack with 0
         frame.stack.set_top_unsafe(0);
         return Operation.ExecutionResult{};
@@ -266,7 +250,6 @@ pub fn op_calldataload(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
     for (0..32) |i| {
         if (offset_usize + i < frame.input.len) {
-            @branchHint(.likely);
             result = (result << 8) | frame.input[offset_usize + i];
         } else {
             result = result << 8;
@@ -286,7 +269,6 @@ pub fn op_calldatasize(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -303,7 +285,6 @@ pub fn op_calldatacopy(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 3) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -314,12 +295,10 @@ pub fn op_calldatacopy(pc: usize, interpreter: *Operation.Interpreter, state: *O
     const size = frame.stack.pop_unsafe();
 
     if (size == 0) {
-        @branchHint(.unlikely);
         return Operation.ExecutionResult{};
     }
 
     if (mem_offset > std.math.maxInt(usize) or data_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -353,7 +332,6 @@ pub fn op_codesize(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -370,7 +348,6 @@ pub fn op_codecopy(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 3) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -383,7 +360,6 @@ pub fn op_codecopy(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
     Log.debug("CODECOPY: mem_offset={}, code_offset={}, size={}, code_len={}", .{ mem_offset, code_offset, size, frame.contract.code.len });
 
     if (size == 0) {
-        @branchHint(.unlikely);
         Log.debug("CODECOPY: size is 0, returning early", .{});
         return Operation.ExecutionResult{};
     }
@@ -422,7 +398,6 @@ pub fn op_returndatasize(pc: usize, interpreter: *Operation.Interpreter, state: 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -439,7 +414,6 @@ pub fn op_returndatacopy(pc: usize, interpreter: *Operation.Interpreter, state: 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 3) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -450,12 +424,10 @@ pub fn op_returndatacopy(pc: usize, interpreter: *Operation.Interpreter, state: 
     const size = frame.stack.pop_unsafe();
 
     if (size == 0) {
-        @branchHint(.unlikely);
         return Operation.ExecutionResult{};
     }
 
     if (mem_offset > std.math.maxInt(usize) or data_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
@@ -465,7 +437,6 @@ pub fn op_returndatacopy(pc: usize, interpreter: *Operation.Interpreter, state: 
 
     // Check bounds
     if (data_offset_usize + size_usize > frame.return_data.size()) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.ReturnDataOutOfBounds;
     }
 

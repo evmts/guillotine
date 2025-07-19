@@ -87,62 +87,51 @@ const KZG_POINT_EVALUATION_SUCCESS: [64]u8 = blk: {
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
     // Check gas limit
     if (gas_limit < KZG_POINT_EVALUATION_GAS_COST) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // Validate input length
     if (input.len != KZG_POINT_EVALUATION_INPUT_LENGTH) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     }
 
     // Validate output buffer size
     if (output.len < KZG_POINT_EVALUATION_OUTPUT_LENGTH) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     }
 
     // Parse input parameters
     const versioned_hash = parse_versioned_hash(input[0..32]) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     };
 
     const z = parse_field_element(input[32..64]) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     };
 
     const y = parse_field_element(input[64..96]) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     };
 
     const commitment = parse_commitment(input[96..144]) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     };
 
     const proof = parse_proof(input[144..192]) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     };
 
     // Validate that the versioned hash matches the commitment
     if (!blob_types.validate_commitment_hash(&commitment, &versioned_hash)) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
     // Perform KZG point evaluation verification
     const verification_result = perform_kzg_verification(&commitment, &z, &y, &proof) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     };
 
     if (!verification_result) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -227,7 +216,6 @@ fn perform_kzg_verification(
 ) !bool {
     // Get the global KZG verifier
     const verifier = kzg_verification.get_global_verifier() orelse {
-        @branchHint(.cold);
         return error.KZGVerifierNotAvailable;
     };
 

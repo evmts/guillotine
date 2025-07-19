@@ -129,7 +129,6 @@ pub fn execute(self: *const JumpTable, pc: usize, interpreter: *operation_module
 
     // Handle undefined opcodes (cold path)
     if (operation.undefined) {
-        @branchHint(.cold);
         Log.debug("JumpTable.execute: Invalid opcode 0x{x:0>2}", .{opcode});
         frame.gas_remaining = 0;
         return ExecutionError.Error.InvalidOpcode;
@@ -140,7 +139,6 @@ pub fn execute(self: *const JumpTable, pc: usize, interpreter: *operation_module
 
     // Gas consumption (likely path)
     if (operation.constant_gas > 0) {
-        @branchHint(.likely);
         Log.debug("JumpTable.execute: Consuming {} gas for opcode 0x{x:0>2}", .{ operation.constant_gas, opcode });
         try frame.consume_gas(operation.constant_gas);
     }
@@ -165,7 +163,6 @@ pub fn validate(self: *JumpTable) void {
     for (0..256) |i| {
         // Handle null entries (less common)
         if (self.table[i] == null) {
-            @branchHint(.cold);
             self.table[i] = &operation_module.NULL_OPERATION;
             continue;
         }
@@ -173,7 +170,6 @@ pub fn validate(self: *JumpTable) void {
         // Check for invalid operation configuration (error path)
         const operation = self.table[i].?;
         if (operation.memory_size != null and operation.dynamic_gas == null) {
-            @branchHint(.cold);
             // Log error instead of panicking
             Log.debug("Warning: Operation 0x{x} has memory size but no dynamic gas calculation", .{i});
             // Set to NULL to prevent issues

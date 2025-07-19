@@ -48,10 +48,8 @@ else
 /// @return Gas cost for ECMUL operation
 pub fn calculate_gas(chain_rules: ChainRules) u64 {
     if (chain_rules.is_istanbul) {
-        @branchHint(.likely);
         return gas_constants.ECMUL_GAS_COST;
     } else {
-        @branchHint(.cold);
         return gas_constants.ECMUL_GAS_COST_BYZANTIUM;
     }
 }
@@ -89,13 +87,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
     // Calculate and validate gas cost
     const gas_cost = calculate_gas(chain_rules);
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // Validate output buffer size
     if (output.len < 64) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -116,13 +112,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
         // Use Rust implementation for native targets
         // Ensure BN254 Rust library is initialized
         bn254_backend.init() catch {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         };
 
         // Perform elliptic curve scalar multiplication using Rust BN254 library
         bn254_backend.ecmul(&padded_input, output[0..64]) catch {
-            @branchHint(.cold);
             // Invalid input results in point at infinity (0, 0)
             @memset(output[0..64], 0);
             return PrecompileOutput.success_result(gas_cost, 64);
