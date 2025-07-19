@@ -58,6 +58,144 @@ const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
 const Vm = @import("../evm.zig");
 
+/// Common patterns extracted from arithmetic operations for size optimization
+/// These helper functions reduce code duplication across arithmetic opcodes
+
+/// Helper function for binary arithmetic operations that follow the standard pattern:
+/// 1. Pop two operands from stack
+/// 2. Apply the operation function  
+/// 3. Set the result on the stack top
+fn binaryArithmeticOp(
+    pc: usize, 
+    interpreter: *Operation.Interpreter, 
+    state: *Operation.State, 
+    comptime operation_fn: fn(a: u256, b: u256) u256
+) ExecutionError.Error!Operation.ExecutionResult {
+    _ = pc;
+    _ = interpreter;
+    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
+    
+    if (frame.stack.size < 2) {
+        @branchHint(.cold);
+        unreachable;
+    }
+    
+    const b = frame.stack.pop_unsafe();
+    const a = frame.stack.peek_unsafe().*;
+    const result = operation_fn(a, b);
+    frame.stack.set_top_unsafe(result);
+    
+    return Operation.ExecutionResult{};
+}
+
+/// Helper function for binary operations with division by zero handling
+fn binaryDivisionOp(
+    pc: usize,
+    interpreter: *Operation.Interpreter,
+    state: *Operation.State,
+    comptime division_fn: fn(a: u256, b: u256) u256
+) ExecutionError.Error!Operation.ExecutionResult {
+    _ = pc;
+    _ = interpreter;
+    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
+    
+    if (frame.stack.size < 2) {
+        @branchHint(.cold);
+        unreachable;
+    }
+    
+    const b = frame.stack.pop_unsafe();
+    const a = frame.stack.peek_unsafe().*;
+    
+    const result = if (b == 0) blk: {
+        @branchHint(.unlikely);
+        break :blk 0;
+    } else division_fn(a, b);
+    
+    frame.stack.set_top_unsafe(result);
+    
+    return Operation.ExecutionResult{};
+}
+
+/// Helper function for ternary operations like ADDMOD and MULMOD
+fn ternaryModOp(
+    pc: usize,
+    interpreter: *Operation.Interpreter,
+    state: *Operation.State,
+    comptime operation_fn: fn(a: u256, b: u256, n: u256) u256
+) ExecutionError.Error!Operation.ExecutionResult {
+    _ = pc;
+    _ = interpreter;
+    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
+    
+    if (frame.stack.size < 3) {
+        @branchHint(.cold);
+        unreachable;
+    }
+    
+    const n = frame.stack.pop_unsafe();
+    const b = frame.stack.pop_unsafe();
+    const a = frame.stack.peek_unsafe().*;
+    
+    const result = if (n == 0) blk: {
+        @branchHint(.unlikely);
+        break :blk 0;
+    } else operation_fn(a, b, n);
+    
+    frame.stack.set_top_unsafe(result);
+    
+    return Operation.ExecutionResult{};
+}
+
+/// Operation functions for use with helper patterns
+/// These are pure functions that contain only the arithmetic logic
+
+fn addOperation(a: u256, b: u256) u256 {
+    return a +% b;
+}
+
+fn mulOperation(a: u256, b: u256) u256 {
+    return a *% b;
+}
+
+fn subOperation(a: u256, b: u256) u256 {
+    return a -% b;
+}
+
+fn divOperation(a: u256, b: u256) u256 {
+    return a / b;
+}
+
+fn modOperation(a: u256, b: u256) u256 {
+    return a % b;
+}
+
+fn addmodOperation(a: u256, b: u256, n: u256) u256 {
+    // Use @addWithOverflow for more idiomatic overflow handling
+    const overflow = @addWithOverflow(a, b);
+    return overflow[0] % n;
+}
+
+fn mulmodOperation(a: u256, b: u256, n: u256) u256 {
+    // Russian peasant multiplication with modular reduction
+    // This allows us to compute (a * b) % n without needing the full 512-bit product
+    var result: u256 = 0;
+    var x = a % n;
+    var y = b % n;
+
+    while (y > 0) {
+        // If y is odd, add x to result (mod n)
+        if ((y & 1) == 1) {
+            const sum = result +% x;
+            result = sum % n;
+        }
+
+        x = (x +% x) % n;
+        y >>= 1;
+    }
+    return result;
+}
+
 /// ADD opcode (0x01) - Addition operation
 ///
 /// Pops two values from the stack, adds them with wrapping overflow,
@@ -83,23 +221,7 @@ const Vm = @import("../evm.zig");
 /// Stack: [10, 20] => [30]
 /// Stack: [MAX_U256, 1] => [0] (overflow wraps)
 pub fn op_add(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const sum = a +% b;
-
-    frame.stack.set_top_unsafe(sum);
-
-    return Operation.ExecutionResult{};
+    return binaryArithmeticOp(pc, interpreter, state, addOperation);
 }
 
 /// MUL opcode (0x02) - Multiplication operation
@@ -127,22 +249,7 @@ pub fn op_add(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 /// Stack: [10, 20] => [200]
 /// Stack: [2^128, 2^128] => [0] (overflow wraps)
 pub fn op_mul(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-    const product = a *% b;
-
-    frame.stack.set_top_unsafe(product);
-
-    return Operation.ExecutionResult{};
+    return binaryArithmeticOp(pc, interpreter, state, mulOperation);
 }
 
 /// SUB opcode (0x03) - Subtraction operation
@@ -170,23 +277,7 @@ pub fn op_mul(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 /// Stack: [30, 10] => [20]
 /// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
 pub fn op_sub(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const result = a -% b;
-
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    return binaryArithmeticOp(pc, interpreter, state, subOperation);
 }
 
 /// DIV opcode (0x04) - Unsigned integer division
@@ -221,26 +312,7 @@ pub fn op_sub(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 /// throw an error but returns 0. This is a deliberate design choice
 /// to avoid exceptional halting conditions.
 pub fn op_div(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const result = if (b == 0) blk: {
-        @branchHint(.unlikely);
-        break :blk 0;
-    } else a / b;
-
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    return binaryDivisionOp(pc, interpreter, state, divOperation);
 }
 
 /// SDIV opcode (0x05) - Signed integer division
@@ -343,26 +415,7 @@ pub fn op_sdiv(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 /// The result is always in range [0, b-1] for b > 0.
 /// Like DIV, modulo by zero returns 0 rather than throwing an error.
 pub fn op_mod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const result = if (b == 0) blk: {
-        @branchHint(.unlikely);
-        break :blk 0;
-    } else a % b;
-
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    return binaryDivisionOp(pc, interpreter, state, modOperation);
 }
 
 /// SMOD opcode (0x07) - Signed modulo remainder operation
@@ -463,31 +516,7 @@ pub fn op_smod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 /// performed as one operation to handle cases where a + b
 /// exceeds 2^256.
 pub fn op_addmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 3) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const n = frame.stack.pop_unsafe();
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    var result: u256 = undefined;
-    if (n == 0) {
-        result = 0;
-    } else {
-        // Use @addWithOverflow for more idiomatic overflow handling
-        const overflow = @addWithOverflow(a, b);
-        result = overflow[0] % n;
-    }
-
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    return ternaryModOp(pc, interpreter, state, addmodOperation);
 }
 
 /// MULMOD opcode (0x09) - Multiplication modulo n
@@ -530,49 +559,7 @@ pub fn op_addmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
 /// This operation correctly computes (a * b) mod n even when
 /// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
 pub fn op_mulmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 3) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const n = frame.stack.pop_unsafe();
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    var result: u256 = undefined;
-    if (n == 0) {
-        result = 0;
-    } else {
-        // For MULMOD, we need to compute (a * b) % n where a * b might overflow
-        // We can't just do (a *% b) % n because that would give us ((a * b) % 2^256) % n
-        // which is not the same as (a * b) % n when a * b >= 2^256
-
-        // We'll use the Russian peasant multiplication algorithm with modular reduction
-        // This allows us to compute (a * b) % n without needing the full 512-bit product
-        result = 0;
-        var x = a % n;
-        var y = b % n;
-
-        while (y > 0) {
-            // If y is odd, add x to result (mod n)
-            if ((y & 1) == 1) {
-                const sum = result +% x;
-                result = sum % n;
-            }
-
-            x = (x +% x) % n;
-
-            y >>= 1;
-        }
-    }
-
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    return ternaryModOp(pc, interpreter, state, mulmodOperation);
 }
 
 /// EXP opcode (0x0A) - Exponentiation
