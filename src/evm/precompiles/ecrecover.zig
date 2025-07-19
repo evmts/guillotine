@@ -47,6 +47,28 @@ const ECRECOVER_INPUT_SIZE: usize = 128;
 /// Expected output size for ECRECOVER (32 bytes)
 const ECRECOVER_OUTPUT_SIZE: usize = 32;
 
+/// Size of each input parameter (32 bytes each for hash, v, r, s)
+const PARAM_SIZE: usize = 32;
+
+/// Input structure offsets
+const HASH_OFFSET: usize = 0;
+const V_OFFSET: usize = 32;
+const R_OFFSET: usize = 64;
+const S_OFFSET: usize = 96;
+
+/// Legacy signature v values
+const LEGACY_V_EVEN: u256 = 27;
+const LEGACY_V_ODD: u256 = 28;
+
+/// EIP-155 signature v offset
+const EIP155_V_OFFSET: u256 = 35;
+
+/// Invalid recovery ID sentinel value
+const INVALID_RECOVERY_ID: u8 = 255;
+
+/// Address padding offset in output (addresses are 20 bytes, left-padded to 32)
+const ADDRESS_PADDING_OFFSET: usize = 12;
+
 /// Calculates the gas cost for ECRECOVER precompile execution
 ///
 /// ECRECOVER has a fixed gas cost regardless of input size or execution outcome.
@@ -106,10 +128,10 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
     }
 
     // Parse input components (each 32 bytes)
-    const hash = input[0..32];
-    const v_bytes = input[32..64];
-    const r_bytes = input[64..96];
-    const s_bytes = input[96..128];
+    const hash = input[HASH_OFFSET..HASH_OFFSET + PARAM_SIZE];
+    const v_bytes = input[V_OFFSET..V_OFFSET + PARAM_SIZE];
+    const r_bytes = input[R_OFFSET..R_OFFSET + PARAM_SIZE];
+    const s_bytes = input[S_OFFSET..S_OFFSET + PARAM_SIZE];
 
     // Convert byte arrays to u256 values
     const v = bytes_to_u256(v_bytes);
@@ -137,7 +159,7 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Clear output buffer and write the recovered address (left-padded to 32 bytes)
     @memset(output[0..ECRECOVER_OUTPUT_SIZE], 0);
-    @memcpy(output[12..32], &recovered_address);
+    @memcpy(output[ADDRESS_PADDING_OFFSET..ECRECOVER_OUTPUT_SIZE], &recovered_address);
 
     return PrecompileOutput.success_result(gas_cost, ECRECOVER_OUTPUT_SIZE);
 }
@@ -151,18 +173,18 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 /// @return Recovery ID (0 or 1) or 255 if invalid
 fn extract_recovery_id(v: u256) u8 {
     // Handle legacy format (27, 28)
-    if (v == 27) return 0;
-    if (v == 28) return 1;
+    if (v == LEGACY_V_EVEN) return 0;
+    if (v == LEGACY_V_ODD) return 1;
 
     // Handle EIP-155 format (chain_id * 2 + 35/36)
-    if (v >= 35) {
-        const adjusted = v - 35;
+    if (v >= EIP155_V_OFFSET) {
+        const adjusted = v - EIP155_V_OFFSET;
         const recovery_id = @as(u8, @intCast(adjusted % 2));
         return recovery_id;
     }
 
     // Invalid v value
-    return 255;
+    return INVALID_RECOVERY_ID;
 }
 
 /// Converts a 32-byte big-endian byte array to u256
@@ -172,8 +194,8 @@ fn extract_recovery_id(v: u256) u8 {
 /// @param bytes 32-byte array in big-endian format
 /// @return Corresponding u256 value
 fn bytes_to_u256(bytes: []const u8) u256 {
-    std.debug.assert(bytes.len == 32);
-    return std.mem.readInt(u256, bytes[0..32], .big);
+    std.debug.assert(bytes.len == PARAM_SIZE);
+    return std.mem.readInt(u256, bytes[0..PARAM_SIZE], .big);
 }
 
 /// Recovers the Ethereum address from ECDSA signature components
