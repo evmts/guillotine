@@ -1148,6 +1148,19 @@ pub fn build(b: *std.Build) void {
     const fuzz_storage_test_step = b.step("fuzz-storage", "Run storage fuzz tests");
     fuzz_storage_test_step.dependOn(&run_fuzz_storage_test.step);
 
+    // Add State Fuzz Testing
+    const fuzz_state_test = b.addTest(.{
+        .name = "fuzz-state-test",
+        .root_source_file = b.path("test/fuzz/state_fuzz_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_state_test.root_module.addImport("evm", evm_mod);
+    fuzz_state_test.root_module.addImport("primitives", primitives_mod);
+    const run_fuzz_state_test = b.addRunArtifact(fuzz_state_test);
+    const fuzz_state_test_step = b.step("fuzz-state", "Run state fuzz tests");
+    fuzz_state_test_step.dependOn(&run_fuzz_state_test.step);
+
     // Combined fuzz test step
     const fuzz_test_step = b.step("fuzz", "Run all fuzz tests");
     fuzz_test_step.dependOn(&run_fuzz_stack_test.step);
@@ -1159,6 +1172,7 @@ pub fn build(b: *std.Build) void {
     fuzz_test_step.dependOn(&run_fuzz_crypto_test.step);
     fuzz_test_step.dependOn(&run_fuzz_environment_test.step);
     fuzz_test_step.dependOn(&run_fuzz_storage_test.step);
+    fuzz_test_step.dependOn(&run_fuzz_state_test.step);
 
     // Documentation generation step
     const docs_step = b.step("docs", "Generate and install documentation");

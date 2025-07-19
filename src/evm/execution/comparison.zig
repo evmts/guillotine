@@ -160,9 +160,11 @@ pub fn op_iszero(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     }
 
     // Peek the operand unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const value = frame.stack.peek_unsafe().*;
 
-    const result: u256 = if (a == 0) 1 else 0;
+    // Optimized: Use @intFromBool for direct bool to int conversion
+    // This should compile to more efficient assembly than if/else
+    const result: u256 = @intFromBool(value == 0);
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
@@ -187,7 +189,8 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x01}, .{});
         defer contract.deinit(allocator, null);
         
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+        const primitives = @import("primitives");
+        var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
         defer frame.deinit();
         
         // Setup stack with test values

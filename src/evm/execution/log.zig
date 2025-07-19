@@ -23,8 +23,6 @@ pub fn make_log(comptime num_topics: u8) fn (usize, *Operation.Interpreter, *Ope
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
             const vm = @as(*Vm, @ptrCast(@alignCast(interpreter)));
 
-            // Debug logging removed for production
-
             // Check if we're in a static call
             if (frame.is_static) {
                 @branchHint(.unlikely);
@@ -35,31 +33,28 @@ pub fn make_log(comptime num_topics: u8) fn (usize, *Operation.Interpreter, *Ope
             const offset = try frame.stack.pop();
             const size = try frame.stack.pop();
 
-            // Debug logging removed for production
-
-            // Pop N topics in order and store them in REVERSE (revm: stack.popn::<N>() returns in push order)
-            var topics: [4]u256 = undefined;
-            for (0..num_topics) |i| {
-                topics[num_topics - 1 - i] = try frame.stack.pop();
-                // Topic popped successfully
-            }
-
-            if (size == 0) {
-                @branchHint(.unlikely);
-                // Empty data - emit empty log
-                try vm.emit_log(frame.contract.address, topics[0..num_topics], &[_]u8{});
-                return Operation.ExecutionResult{};
-            }
-
-            // Process non-empty log data
-
+            // Early bounds checking to avoid unnecessary topic pops on invalid input
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 @branchHint(.unlikely);
                 return ExecutionError.Error.OutOfOffset;
             }
 
+            // Stack-allocated topics array - zero heap allocations for LOG operations
+            var topics: [4]u256 = undefined;
+            // Pop N topics in reverse order (LIFO stack order) for efficient processing
+            for (0..num_topics) |i| {
+                topics[num_topics - 1 - i] = try frame.stack.pop();
+            }
+
             const offset_usize = @as(usize, @intCast(offset));
             const size_usize = @as(usize, @intCast(size));
+
+            if (size_usize == 0) {
+                @branchHint(.unlikely);
+                // Empty data - emit empty log without memory operations
+                try vm.emit_log(frame.contract.address, topics[0..num_topics], &[_]u8{});
+                return Operation.ExecutionResult{};
+            }
 
             // Convert to usize for memory operations
 
@@ -117,22 +112,23 @@ pub fn log_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
     const offset = try frame.stack.pop();
     const size = try frame.stack.pop();
 
-    // Pop N topics in order and store them in REVERSE
+    // Early bounds checking for better error handling
+    const offset_usize = std.math.cast(usize, offset) orelse return ExecutionError.Error.InvalidOffset;
+    const size_usize = std.math.cast(usize, size) orelse return ExecutionError.Error.InvalidSize;
+
+    // Stack-allocated topics array - zero heap allocations for LOG operations
     var topics: [4]u256 = undefined;
+    // Pop N topics in reverse order for efficient processing
     for (0..num_topics) |i| {
         topics[num_topics - 1 - i] = try frame.stack.pop();
     }
 
-    if (size == 0) {
+    if (size_usize == 0) {
         @branchHint(.unlikely);
-        // Empty data - emit empty log
+        // Empty data - emit empty log without memory operations
         try vm.emit_log(frame.contract.address, topics[0..num_topics], &[_]u8{});
         return Operation.ExecutionResult{};
     }
-
-    // Convert to usize for memory operations
-    const offset_usize = std.math.cast(usize, offset) orelse return ExecutionError.Error.InvalidOffset;
-    const size_usize = std.math.cast(usize, size) orelse return ExecutionError.Error.InvalidSize;
 
     // 1. Calculate memory expansion gas cost
     const current_size = frame.memory.context_size();

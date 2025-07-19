@@ -41,16 +41,18 @@ pub const Error = error{
     StackUnderflow,
 };
 
+/// Current number of elements on the stack.
+/// Invariant: 0 <= size <= CAPACITY
+/// Placed first for optimal access - this is checked frequently
+size: usize = 0,
+
 /// Stack storage aligned to 32-byte boundaries.
 /// Alignment improves performance on modern CPUs by:
 /// - Enabling SIMD operations
 /// - Reducing cache line splits
 /// - Improving memory prefetching
+/// Placed last to avoid increasing offsets of frequently accessed size field
 data: [CAPACITY]u256 align(32) = [_]u256{0} ** CAPACITY,
-
-/// Current number of elements on the stack.
-/// Invariant: 0 <= size <= CAPACITY
-size: usize = 0,
 
 // Compile-time validations for stack design assumptions
 comptime {

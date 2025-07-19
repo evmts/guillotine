@@ -41,22 +41,14 @@ const ReturnData = @import("../evm/return_data.zig").ReturnData;
 /// ```
 const Frame = @This();
 
-/// Current opcode being executed (for debugging/tracing).
-op: []const u8 = undefined,
+// Hot fields (frequently accessed, placed first for optimal cache performance)
+/// Remaining gas for this execution.
+/// Decremented by each operation; execution fails at 0.
+gas_remaining: u64 = 0,
 
-/// Gas cost of current operation.
-cost: u64 = 0,
-
-/// Error that occurred during execution, if any.
-err: ?ExecutionError.Error = null,
-
-/// Frame's memory space for temporary data storage.
-/// Grows dynamically and charges gas quadratically.
-memory: Memory,
-
-/// Operand stack for the stack machine.
-/// Limited to 1024 elements per EVM rules.
-stack: Stack,
+/// Current position in contract bytecode.
+/// Incremented by opcode size, modified by JUMP/JUMPI.
+pc: usize = 0,
 
 /// Contract being executed in this frame.
 /// Contains code, address, and contract metadata.
@@ -65,37 +57,49 @@ contract: *Contract,
 /// Allocator for dynamic memory allocations.
 allocator: std.mem.Allocator,
 
+// Medium-hot fields (moderately accessed)
 /// Flag indicating execution should halt.
 /// Set by STOP, RETURN, REVERT, or errors.
 stop: bool = false,
-
-/// Remaining gas for this execution.
-/// Decremented by each operation; execution fails at 0.
-gas_remaining: u64 = 0,
 
 /// Whether this is a STATICCALL context.
 /// Prohibits state modifications (SSTORE, CREATE, SELFDESTRUCT).
 is_static: bool = false,
 
-/// Return data from child calls.
-/// Used by RETURNDATASIZE and RETURNDATACOPY opcodes.
-return_data: ReturnData,
-
-/// Input data for this call (calldata).
-/// Accessed by CALLDATALOAD, CALLDATASIZE, CALLDATACOPY.
-input: []const u8 = &[_]u8{},
-
 /// Current call depth in the call stack.
 /// Limited to 1024 to prevent stack overflow attacks.
 depth: u32 = 0,
+
+/// Gas cost of current operation.
+cost: u64 = 0,
+
+/// Error that occurred during execution, if any.
+err: ?ExecutionError.Error = null,
+
+// Data fields (less frequently accessed)
+/// Input data for this call (calldata).
+/// Accessed by CALLDATALOAD, CALLDATASIZE, CALLDATACOPY.
+input: []const u8 = &[_]u8{},
 
 /// Output data to be returned from this frame.
 /// Set by RETURN or REVERT operations.
 output: []const u8 = &[_]u8{},
 
-/// Current position in contract bytecode.
-/// Incremented by opcode size, modified by JUMP/JUMPI.
-pc: usize = 0,
+/// Current opcode being executed (for debugging/tracing).
+op: []const u8 = undefined,
+
+// Large allocations (placed last to avoid increasing offsets of hot fields)
+/// Frame's memory space for temporary data storage.
+/// Grows dynamically and charges gas quadratically.
+memory: Memory,
+
+/// Operand stack for the stack machine.
+/// Limited to 1024 elements per EVM rules.
+stack: Stack,
+
+/// Return data from child calls.
+/// Used by RETURNDATASIZE and RETURNDATACOPY opcodes.
+return_data: ReturnData,
 
 /// Create a new execution frame with default settings.
 ///
@@ -116,8 +120,18 @@ pc: usize = 0,
 /// ```
 pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
     return Frame{
-        .allocator = allocator,
+        .gas_remaining = 0,
+        .pc = 0,
         .contract = contract,
+        .allocator = allocator,
+        .stop = false,
+        .is_static = false,
+        .depth = 0,
+        .cost = 0,
+        .err = null,
+        .input = &[_]u8{},
+        .output = &[_]u8{},
+        .op = undefined,
         .memory = try Memory.init_default(allocator),
         .stack = .{},
         .return_data = ReturnData.init(allocator),
@@ -173,21 +187,21 @@ pub fn init_with_state(
     pc: ?usize,
 ) !Frame {
     return Frame{
-        .allocator = allocator,
+        .gas_remaining = gas_remaining orelse 0,
+        .pc = pc orelse 0,
         .contract = contract,
-        .memory = memory orelse try Memory.init_default(allocator),
-        .stack = stack orelse .{},
-        .op = op orelse undefined,
+        .allocator = allocator,
+        .stop = stop orelse false,
+        .is_static = is_static orelse false,
+        .depth = depth orelse 0,
         .cost = cost orelse 0,
         .err = err,
-        .stop = stop orelse false,
-        .gas_remaining = gas_remaining orelse 0,
-        .is_static = is_static orelse false,
-        .return_data = ReturnData.init(allocator),
         .input = input orelse &[_]u8{},
-        .depth = depth orelse 0,
         .output = output orelse &[_]u8{},
-        .pc = pc orelse 0,
+        .op = op orelse undefined,
+        .memory = memory orelse try Memory.init_default(allocator),
+        .stack = stack orelse .{},
+        .return_data = ReturnData.init(allocator),
     };
 }
 

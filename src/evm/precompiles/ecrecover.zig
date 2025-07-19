@@ -47,6 +47,30 @@ const ECRECOVER_INPUT_SIZE: usize = 128;
 /// Expected output size for ECRECOVER (32 bytes)
 const ECRECOVER_OUTPUT_SIZE: usize = 32;
 
+// Input parsing constants for clearer code structure
+/// Offset of hash field in input (bytes 0-31)
+const HASH_OFFSET: usize = 0;
+/// Size of hash field (32 bytes)
+const HASH_SIZE: usize = 32;
+/// Offset of v field in input (bytes 32-63)
+const V_OFFSET: usize = 32;
+/// Size of v field (32 bytes, though only last byte is used)
+const V_SIZE: usize = 32;
+/// Offset of r field in input (bytes 64-95)
+const R_OFFSET: usize = 64;
+/// Size of r field (32 bytes)
+const R_SIZE: usize = 32;
+/// Offset of s field in input (bytes 96-127)
+const S_OFFSET: usize = 96;
+/// Size of s field (32 bytes)
+const S_SIZE: usize = 32;
+
+// Output formatting constants
+/// Offset for address in output (left-padded with 12 zero bytes)
+const ADDRESS_OFFSET_IN_OUTPUT: usize = 12;
+/// Size of Ethereum address (20 bytes)
+const ETHEREUM_ADDRESS_SIZE: usize = 20;
+
 /// Calculates the gas cost for ECRECOVER precompile execution
 ///
 /// ECRECOVER has a fixed gas cost regardless of input size or execution outcome.
@@ -105,11 +129,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
-    // Parse input components (each 32 bytes)
-    const hash = input[0..32];
-    const v_bytes = input[32..64];
-    const r_bytes = input[64..96];
-    const s_bytes = input[96..128];
+    // Parse input components using named offsets for clarity
+    const hash = input[HASH_OFFSET..HASH_OFFSET + HASH_SIZE];
+    const v_bytes = input[V_OFFSET..V_OFFSET + V_SIZE];
+    const r_bytes = input[R_OFFSET..R_OFFSET + R_SIZE];
+    const s_bytes = input[S_OFFSET..S_OFFSET + S_SIZE];
 
     // Convert byte arrays to u256 values
     const v = bytes_to_u256(v_bytes);
@@ -137,7 +161,7 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Clear output buffer and write the recovered address (left-padded to 32 bytes)
     @memset(output[0..ECRECOVER_OUTPUT_SIZE], 0);
-    @memcpy(output[12..32], &recovered_address);
+    @memcpy(output[ADDRESS_OFFSET_IN_OUTPUT..ADDRESS_OFFSET_IN_OUTPUT + ETHEREUM_ADDRESS_SIZE], &recovered_address);
 
     return PrecompileOutput.success_result(gas_cost, ECRECOVER_OUTPUT_SIZE);
 }

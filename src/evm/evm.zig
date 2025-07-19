@@ -30,27 +30,33 @@ const precompiles = @import("precompiles/precompiles.zig");
 /// including contract creation, calls, and state modifications.
 const Evm = @This();
 
+// Hot fields (frequently accessed during execution)
 /// Memory allocator for VM operations
 allocator: std.mem.Allocator,
-/// Return data from the most recent operation
-return_data: []u8 = &[_]u8{},
-/// Legacy stack field (unused in current implementation)
-stack: Stack = .{},
 /// Opcode dispatch table for the configured hardfork
 table: JumpTable,
-/// Protocol rules for the current hardfork
-chain_rules: ChainRules,
-// TODO should be injected
-/// World state including accounts, storage, and code
-state: EvmState,
-/// Warm/cold access tracking for EIP-2929 gas costs
-access_list: AccessList,
-/// Execution context providing transaction and block information
-context: Context,
 /// Current call depth for overflow protection
 depth: u16 = 0,
 /// Whether the current context is read-only (STATICCALL)
 read_only: bool = false,
+
+// Configuration fields (set at initialization)
+/// Protocol rules for the current hardfork
+chain_rules: ChainRules,
+/// Execution context providing transaction and block information
+context: Context,
+
+// Data fields (moderate access frequency)
+/// Return data from the most recent operation
+return_data: []u8 = &[_]u8{},
+
+// Large state structures (placed last to minimize offset impact)
+/// World state including accounts, storage, and code
+state: EvmState,
+/// Warm/cold access tracking for EIP-2929 gas costs
+access_list: AccessList,
+/// Legacy stack field (unused in current implementation)
+stack: Stack = .{},
 
 /// Initialize VM with a jump table and corresponding chain rules.
 ///
@@ -85,10 +91,14 @@ pub fn init(allocator: std.mem.Allocator, database: @import("state/database_inte
     return Evm{
         .allocator = allocator,
         .table = (jump_table orelse &JumpTable.DEFAULT).*,
+        .depth = 0,
+        .read_only = false,
         .chain_rules = (chain_rules orelse &ChainRules.DEFAULT).*,
+        .context = context,
+        .return_data = &[_]u8{},
         .state = state,
         .access_list = access_list,
-        .context = context,
+        .stack = .{},
     };
 }
 

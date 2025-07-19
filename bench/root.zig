@@ -11,6 +11,8 @@ pub const precompile_benchmark = @import("precompile_benchmark.zig");
 pub const opcode_benchmarks = @import("opcode_benchmarks.zig");
 pub const benchmarks = @import("benchmarks.zig");
 pub const frame_benchmark = @import("frame_benchmark_simplified.zig");
+pub const evm_integration_benchmark = @import("evm_integration_benchmark.zig");
+pub const root_module_benchmark = @import("root_module_benchmark.zig");
 
 pub fn run(allocator: Allocator) !void {
     std.log.info("Starting EVM benchmark suite", .{});
@@ -34,6 +36,15 @@ pub fn run(allocator: Allocator) !void {
     // Run original precompile dispatch benchmarks for comparison
     std.log.info("Running precompile dispatch benchmarks", .{});
     try precompile_benchmark.run_precompile_benchmarks(allocator);
+    
+    // Run EVM module integration and error handling benchmarks (Issue #49)
+    std.log.info("Running EVM integration and error handling benchmarks (Issue #49)", .{});
+    try evm_integration_benchmark.run_integration_benchmarks(allocator);
+    try evm_integration_benchmark.run_error_handling_benchmarks(allocator);
+    
+    // Run root module specific benchmarks (Issue #49)
+    std.log.info("Running root.zig module benchmarks (Issue #49)", .{});
+    try root_module_benchmark.run_root_module_benchmarks(allocator);
     
     std.log.info("Benchmark suite completed", .{});
 }
