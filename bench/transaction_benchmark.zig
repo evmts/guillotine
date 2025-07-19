@@ -463,7 +463,6 @@ fn create_test_proof(seed: usize) blob_types.KZGProof {
 
 // Tests to ensure benchmark functions compile
 test "transaction benchmark compilation" {
-    const allocator = std.testing.allocator;
 
     // Test that all benchmark functions compile
     _ = transaction_type_detection_benchmark;

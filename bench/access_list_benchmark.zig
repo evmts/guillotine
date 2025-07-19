@@ -515,7 +515,6 @@ fn create_test_address(seed: usize) primitives.Address.Address {
 
 // Tests to ensure benchmark functions compile
 test "access list benchmark compilation" {
-    const allocator = std.testing.allocator;
 
     // Test that all benchmark functions compile
     _ = address_warming_cooling_benchmark;

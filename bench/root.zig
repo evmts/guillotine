@@ -13,6 +13,7 @@ pub const benchmarks = @import("benchmarks.zig");
 pub const frame_benchmark = @import("frame_benchmark_simplified.zig");
 pub const evm_integration_benchmark = @import("evm_integration_benchmark.zig");
 pub const root_module_benchmark = @import("root_module_benchmark.zig");
+pub const eip4844_simple_benchmark = @import("eip4844_simple_benchmark.zig");
 
 pub fn run(allocator: Allocator) !void {
     std.log.info("Starting EVM benchmark suite", .{});
@@ -45,6 +46,10 @@ pub fn run(allocator: Allocator) !void {
     // Run root module specific benchmarks (Issue #49)
     std.log.info("Running root.zig module benchmarks (Issue #49)", .{});
     try root_module_benchmark.run_root_module_benchmarks(allocator);
+    
+    // Run simple EIP-4844 benchmarks (Issue #72)
+    std.log.info("Running simple EIP-4844 blob transaction benchmarks (Issue #72)", .{});
+    try eip4844_simple_benchmark.run_simple_eip4844_benchmarks(allocator);
     
     std.log.info("Benchmark suite completed", .{});
 }
