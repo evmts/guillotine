@@ -483,3 +483,183 @@ pub fn op_returndatacopy(pc: usize, interpreter: *Operation.Interpreter, state: 
 
     return Operation.ExecutionResult{};
 }
+
+// ============================================================================
+// BENCHMARKS - Memory Operations Performance Testing
+// ============================================================================
+
+/// Benchmark configuration for memory operations
+const MemoryBenchmarkConfig = struct {
+    iterations: usize = 10000,
+    warmup_iterations: usize = 1000,
+};
+
+/// Benchmark MLOAD opcode performance
+pub fn benchmark_mload_opcode(allocator: std.mem.Allocator, config: MemoryBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, &[_]u8{0x51}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Pre-populate memory with some data
+    _ = try frame.memory.ensure_context_capacity(1024);
+    try frame.memory.set_u256(0, 0x123456789ABCDEF0);
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.gas_remaining = 1000000;
+        try frame.stack.append(0); // Load from offset 0
+        _ = try op_mload(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.gas_remaining = 1000000;
+        try frame.stack.append(0); // Load from offset 0
+        _ = try op_mload(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark MSTORE opcode performance
+pub fn benchmark_mstore_opcode(allocator: std.mem.Allocator, config: MemoryBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, &[_]u8{0x52}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.gas_remaining = 1000000;
+        try frame.stack.append(0x123456789ABCDEF0); // Value to store
+        try frame.stack.append(32); // Offset to store at
+        _ = try op_mstore(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.gas_remaining = 1000000;
+        try frame.stack.append(0x123456789ABCDEF0); // Value to store
+        try frame.stack.append(32); // Offset to store at
+        _ = try op_mstore(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark CALLDATALOAD opcode performance
+pub fn benchmark_calldataload_opcode(allocator: std.mem.Allocator, config: MemoryBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, &[_]u8{0x35}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    // Create some test call data
+    const test_input = &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 } ** 8; // 64 bytes
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, test_input);
+    defer frame.deinit();
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(0); // Offset to load from
+        _ = try op_calldataload(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(0); // Offset to load from
+        _ = try op_calldataload(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Run all memory opcode benchmarks and print results
+pub fn run_all_memory_benchmarks(allocator: std.mem.Allocator) !void {
+    const config = MemoryBenchmarkConfig{};
+    
+    std.log.info("Running memory opcode benchmarks...", .{});
+    
+    const mload_time = try benchmark_mload_opcode(allocator, config);
+    const mstore_time = try benchmark_mstore_opcode(allocator, config);
+    const calldataload_time = try benchmark_calldataload_opcode(allocator, config);
+    
+    // Calculate ns per operation
+    const mload_ns_per_op = mload_time / config.iterations;
+    const mstore_ns_per_op = mstore_time / config.iterations;
+    const calldataload_ns_per_op = calldataload_time / config.iterations;
+    
+    std.log.info("MLOAD:        {} ns/op ({} total ns)", .{ mload_ns_per_op, mload_time });
+    std.log.info("MSTORE:       {} ns/op ({} total ns)", .{ mstore_ns_per_op, mstore_time });
+    std.log.info("CALLDATALOAD: {} ns/op ({} total ns)", .{ calldataload_ns_per_op, calldataload_time });
+}
+
+test "memory_opcode_benchmarks" {
+    const allocator = std.testing.allocator;
+    
+    // Run smaller benchmark for testing
+    const test_config = MemoryBenchmarkConfig{
+        .iterations = 100,
+        .warmup_iterations = 10,
+    };
+    
+    // Test that benchmarks execute without errors
+    _ = try benchmark_mload_opcode(allocator, test_config);
+    _ = try benchmark_mstore_opcode(allocator, test_config);
+    _ = try benchmark_calldataload_opcode(allocator, test_config);
+}

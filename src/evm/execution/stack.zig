@@ -384,3 +384,268 @@ test "optimized PUSH handles partial bytecode correctly" {
     // Should be 0x12340000 (padded with zeros)
     try std.testing.expectEqual(@as(u256, 0x12340000), value);
 }
+
+// ============================================================================
+// BENCHMARKS - Stack Operations Performance Testing
+// ============================================================================
+
+/// Benchmark configuration for stack operations
+const StackBenchmarkConfig = struct {
+    iterations: usize = 10000,
+    warmup_iterations: usize = 1000,
+};
+
+/// Benchmark POP opcode performance
+pub fn benchmark_pop_opcode(allocator: std.mem.Allocator, config: StackBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, &[_]u8{0x50}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        _ = try op_pop(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        _ = try op_pop(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark PUSH1 opcode performance
+pub fn benchmark_push1_opcode(allocator: std.mem.Allocator, config: StackBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    const code = [_]u8{ 0x60, 0xFF }; // PUSH1 0xFF
+    var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        _ = try op_push1(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        _ = try op_push1(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark PUSH32 opcode performance using make_push
+pub fn benchmark_push32_opcode(allocator: std.mem.Allocator, config: StackBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    // Create 32-byte value for PUSH32
+    var code = [_]u8{0x7F} ++ [_]u8{0xFF} ** 32; // PUSH32 with 32 0xFF bytes
+    var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const push32_fn = make_push(32);
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        _ = try push32_fn(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        _ = try push32_fn(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark DUP1 opcode performance using make_dup
+pub fn benchmark_dup1_opcode(allocator: std.mem.Allocator, config: StackBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, &[_]u8{0x80}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const dup1_fn = make_dup(1);
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        _ = try dup1_fn(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        _ = try dup1_fn(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark SWAP1 opcode performance using make_swap
+pub fn benchmark_swap1_opcode(allocator: std.mem.Allocator, config: StackBenchmarkConfig) !u64 {
+    const Vm = @import("../evm.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const Contract = @import("../frame/contract.zig");
+    const primitives = @import("primitives");
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, &[_]u8{0x90}, .{ .address = primitives.Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    const swap1_fn = make_swap(1);
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        try frame.stack.append(67890);
+        _ = try swap1_fn(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        try frame.stack.append(67890);
+        _ = try swap1_fn(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Run all stack opcode benchmarks and print results
+pub fn run_all_stack_benchmarks(allocator: std.mem.Allocator) !void {
+    const config = StackBenchmarkConfig{};
+    
+    std.log.info("Running stack opcode benchmarks...", .{});
+    
+    const pop_time = try benchmark_pop_opcode(allocator, config);
+    const push1_time = try benchmark_push1_opcode(allocator, config);
+    const push32_time = try benchmark_push32_opcode(allocator, config);
+    const dup1_time = try benchmark_dup1_opcode(allocator, config);
+    const swap1_time = try benchmark_swap1_opcode(allocator, config);
+    
+    // Calculate ns per operation
+    const pop_ns_per_op = pop_time / config.iterations;
+    const push1_ns_per_op = push1_time / config.iterations;
+    const push32_ns_per_op = push32_time / config.iterations;
+    const dup1_ns_per_op = dup1_time / config.iterations;
+    const swap1_ns_per_op = swap1_time / config.iterations;
+    
+    std.log.info("POP:    {} ns/op ({} total ns)", .{ pop_ns_per_op, pop_time });
+    std.log.info("PUSH1:  {} ns/op ({} total ns)", .{ push1_ns_per_op, push1_time });
+    std.log.info("PUSH32: {} ns/op ({} total ns)", .{ push32_ns_per_op, push32_time });
+    std.log.info("DUP1:   {} ns/op ({} total ns)", .{ dup1_ns_per_op, dup1_time });
+    std.log.info("SWAP1:  {} ns/op ({} total ns)", .{ swap1_ns_per_op, swap1_time });
+}
+
+test "stack_opcode_benchmarks" {
+    const allocator = std.testing.allocator;
+    
+    // Run smaller benchmark for testing
+    const test_config = StackBenchmarkConfig{
+        .iterations = 100,
+        .warmup_iterations = 10,
+    };
+    
+    // Test that benchmarks execute without errors
+    _ = try benchmark_pop_opcode(allocator, test_config);
+    _ = try benchmark_push1_opcode(allocator, test_config);
+    _ = try benchmark_push32_opcode(allocator, test_config);
+    _ = try benchmark_dup1_opcode(allocator, test_config);
+    _ = try benchmark_swap1_opcode(allocator, test_config);
+}

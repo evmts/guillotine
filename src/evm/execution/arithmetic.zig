@@ -1021,3 +1021,73 @@ test "fuzz_arithmetic_edge_cases_found" {
     
     try fuzz_arithmetic_operations(allocator, &operations);
 }
+
+// ============================================================================
+// BENCHMARKS - Arithmetic Operations Performance Testing
+// ============================================================================
+
+/// Benchmark configuration for arithmetic operations
+const ArithmeticBenchmarkConfig = struct {
+    iterations: usize = 10000,
+    warmup_iterations: usize = 1000,
+};
+
+/// Benchmark ADD opcode performance
+pub fn benchmark_add_opcode(allocator: std.mem.Allocator, config: ArithmeticBenchmarkConfig) !u64 {
+    var db = @import("../state/memory_database.zig").init(allocator);
+    defer db.deinit();
+    
+    var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+    defer vm.deinit();
+    
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x01}, .{});
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        try frame.stack.append(67890);
+        _ = try op_add(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        try frame.stack.append(12345);
+        try frame.stack.append(67890);
+        _ = try op_add(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Run all arithmetic opcode benchmarks and print results
+pub fn run_all_arithmetic_benchmarks(allocator: std.mem.Allocator) !void {
+    const config = ArithmeticBenchmarkConfig{};
+    
+    std.log.info("Running arithmetic opcode benchmarks...", .{});
+    
+    const add_time = try benchmark_add_opcode(allocator, config);
+    const add_ns_per_op = add_time / config.iterations;
+    
+    std.log.info("ADD: {} ns/op ({} total ns)", .{ add_ns_per_op, add_time });
+}
+
+test "arithmetic_opcode_benchmarks" {
+    const allocator = std.testing.allocator;
+    
+    const test_config = ArithmeticBenchmarkConfig{
+        .iterations = 100,
+        .warmup_iterations = 10,
+    };
+    
+    _ = try benchmark_add_opcode(allocator, test_config);
+}

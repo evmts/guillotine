@@ -594,3 +594,306 @@ test "fuzz_control_random_operations" {
     
     try fuzz_control_operations(allocator, operations.items);
 }
+
+// ============================================================================
+// BENCHMARKS - Control Flow Operations Performance Testing
+// ============================================================================
+
+/// Benchmark configuration for control flow operations
+const ControlBenchmarkConfig = struct {
+    iterations: usize = 10000,
+    warmup_iterations: usize = 1000,
+};
+
+/// Benchmark JUMP opcode performance
+pub fn benchmark_jump_opcode(allocator: std.mem.Allocator, config: ControlBenchmarkConfig) !u64 {
+    var memory = try @import("../memory/memory.zig").init_default(allocator);
+    defer memory.deinit();
+    
+    var db = @import("../state/memory_database.zig").init(allocator);
+    defer db.deinit();
+    
+    var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+    defer vm.deinit();
+    
+    // Create bytecode with JUMPDEST at position 10
+    var code = std.ArrayList(u8).init(allocator);
+    defer code.deinit();
+    
+    var i: usize = 0;
+    while (i < 256) : (i += 1) {
+        if (i == 10) {
+            try code.append(0x5B); // JUMPDEST
+        } else {
+            try code.append(0x00); // STOP
+        }
+    }
+    
+    var contract = try @import("../frame/contract.zig").init(allocator, code.items, .{});
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var j: usize = 0;
+    while (j < config.warmup_iterations) : (j += 1) {
+        frame.stack.reset();
+        frame.pc = 0;
+        try frame.stack.append(10); // Jump to position 10 (JUMPDEST)
+        _ = try op_jump(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    j = 0;
+    while (j < config.iterations) : (j += 1) {
+        frame.stack.reset();
+        frame.pc = 0;
+        try frame.stack.append(10); // Jump to position 10 (JUMPDEST)
+        _ = try op_jump(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark JUMPI opcode performance (conditional jump taken)
+pub fn benchmark_jumpi_taken_opcode(allocator: std.mem.Allocator, config: ControlBenchmarkConfig) !u64 {
+    var memory = try @import("../memory/memory.zig").init_default(allocator);
+    defer memory.deinit();
+    
+    var db = @import("../state/memory_database.zig").init(allocator);
+    defer db.deinit();
+    
+    var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+    defer vm.deinit();
+    
+    // Create bytecode with JUMPDEST at position 20
+    var code = std.ArrayList(u8).init(allocator);
+    defer code.deinit();
+    
+    var i: usize = 0;
+    while (i < 256) : (i += 1) {
+        if (i == 20) {
+            try code.append(0x5B); // JUMPDEST
+        } else {
+            try code.append(0x00); // STOP
+        }
+    }
+    
+    var contract = try @import("../frame/contract.zig").init(allocator, code.items, .{});
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var j: usize = 0;
+    while (j < config.warmup_iterations) : (j += 1) {
+        frame.stack.reset();
+        frame.pc = 0;
+        try frame.stack.append(1); // Condition (true)
+        try frame.stack.append(20); // Jump destination
+        _ = try op_jumpi(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    j = 0;
+    while (j < config.iterations) : (j += 1) {
+        frame.stack.reset();
+        frame.pc = 0;
+        try frame.stack.append(1); // Condition (true)
+        try frame.stack.append(20); // Jump destination
+        _ = try op_jumpi(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark JUMPI opcode performance (conditional jump not taken)
+pub fn benchmark_jumpi_not_taken_opcode(allocator: std.mem.Allocator, config: ControlBenchmarkConfig) !u64 {
+    var memory = try @import("../memory/memory.zig").init_default(allocator);
+    defer memory.deinit();
+    
+    var db = @import("../state/memory_database.zig").init(allocator);
+    defer db.deinit();
+    
+    var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+    defer vm.deinit();
+    
+    var code = std.ArrayList(u8).init(allocator);
+    defer code.deinit();
+    
+    var i: usize = 0;
+    while (i < 256) : (i += 1) {
+        try code.append(0x00); // STOP
+    }
+    
+    var contract = try @import("../frame/contract.zig").init(allocator, code.items, .{});
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var j: usize = 0;
+    while (j < config.warmup_iterations) : (j += 1) {
+        frame.stack.reset();
+        frame.pc = 0;
+        try frame.stack.append(0); // Condition (false)
+        try frame.stack.append(100); // Jump destination (won't be taken)
+        _ = try op_jumpi(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    j = 0;
+    while (j < config.iterations) : (j += 1) {
+        frame.stack.reset();
+        frame.pc = 0;
+        try frame.stack.append(0); // Condition (false)
+        try frame.stack.append(100); // Jump destination (won't be taken)
+        _ = try op_jumpi(0, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark PC opcode performance
+pub fn benchmark_pc_opcode(allocator: std.mem.Allocator, config: ControlBenchmarkConfig) !u64 {
+    var memory = try @import("../memory/memory.zig").init_default(allocator);
+    defer memory.deinit();
+    
+    var db = @import("../state/memory_database.zig").init(allocator);
+    defer db.deinit();
+    
+    var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+    defer vm.deinit();
+    
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x58}, .{});
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+    defer frame.deinit();
+    
+    // Warmup
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.pc = 42; // Set some PC value
+        _ = try op_pc(42, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.pc = 42; // Set some PC value
+        _ = try op_pc(42, @ptrCast(&vm), @ptrCast(&frame));
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Benchmark RETURN opcode performance
+pub fn benchmark_return_opcode(allocator: std.mem.Allocator, config: ControlBenchmarkConfig) !u64 {
+    var memory = try @import("../memory/memory.zig").init_default(allocator);
+    defer memory.deinit();
+    
+    var db = @import("../state/memory_database.zig").init(allocator);
+    defer db.deinit();
+    
+    var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+    defer vm.deinit();
+    
+    var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xF3}, .{});
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+    defer frame.deinit();
+    
+    // Pre-populate memory with some data to return
+    _ = try frame.memory.ensure_context_capacity(1024);
+    var return_data: [32]u8 = undefined;
+    std.mem.writeInt(u256, &return_data, 0x123456789ABCDEF0, .big);
+    try frame.memory.set_slice(0, &return_data);
+    
+    // Warmup - need to handle the STOP error that RETURN produces
+    var i: usize = 0;
+    while (i < config.warmup_iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.gas_remaining = 1000000;
+        try frame.stack.append(32); // Size
+        try frame.stack.append(0); // Offset
+        _ = op_return(0, @ptrCast(&vm), @ptrCast(&frame)) catch |err| switch (err) {
+            ExecutionError.Error.STOP => {},
+            else => return err,
+        };
+    }
+    
+    // Benchmark
+    const start_time = std.time.nanoTimestamp();
+    i = 0;
+    while (i < config.iterations) : (i += 1) {
+        frame.stack.reset();
+        frame.gas_remaining = 1000000;
+        try frame.stack.append(32); // Size
+        try frame.stack.append(0); // Offset
+        _ = op_return(0, @ptrCast(&vm), @ptrCast(&frame)) catch |err| switch (err) {
+            ExecutionError.Error.STOP => {},
+            else => return err,
+        };
+    }
+    const end_time = std.time.nanoTimestamp();
+    
+    return @intCast(end_time - start_time);
+}
+
+/// Run all control flow opcode benchmarks and print results
+pub fn run_all_control_benchmarks(allocator: std.mem.Allocator) !void {
+    const config = ControlBenchmarkConfig{};
+    
+    std.log.info("Running control flow opcode benchmarks...", .{});
+    
+    const jump_time = try benchmark_jump_opcode(allocator, config);
+    const jumpi_taken_time = try benchmark_jumpi_taken_opcode(allocator, config);
+    const jumpi_not_taken_time = try benchmark_jumpi_not_taken_opcode(allocator, config);
+    const pc_time = try benchmark_pc_opcode(allocator, config);
+    const return_time = try benchmark_return_opcode(allocator, config);
+    
+    // Calculate ns per operation
+    const jump_ns_per_op = jump_time / config.iterations;
+    const jumpi_taken_ns_per_op = jumpi_taken_time / config.iterations;
+    const jumpi_not_taken_ns_per_op = jumpi_not_taken_time / config.iterations;
+    const pc_ns_per_op = pc_time / config.iterations;
+    const return_ns_per_op = return_time / config.iterations;
+    
+    std.log.info("JUMP:            {} ns/op ({} total ns)", .{ jump_ns_per_op, jump_time });
+    std.log.info("JUMPI (taken):   {} ns/op ({} total ns)", .{ jumpi_taken_ns_per_op, jumpi_taken_time });
+    std.log.info("JUMPI (not):     {} ns/op ({} total ns)", .{ jumpi_not_taken_ns_per_op, jumpi_not_taken_time });
+    std.log.info("PC:              {} ns/op ({} total ns)", .{ pc_ns_per_op, pc_time });
+    std.log.info("RETURN:          {} ns/op ({} total ns)", .{ return_ns_per_op, return_time });
+}
+
+test "control_opcode_benchmarks" {
+    const allocator = std.testing.allocator;
+    
+    // Run smaller benchmark for testing
+    const test_config = ControlBenchmarkConfig{
+        .iterations = 100,
+        .warmup_iterations = 10,
+    };
+    
+    // Test that benchmarks execute without errors
+    _ = try benchmark_jump_opcode(allocator, test_config);
+    _ = try benchmark_jumpi_taken_opcode(allocator, test_config);
+    _ = try benchmark_jumpi_not_taken_opcode(allocator, test_config);
+    _ = try benchmark_pc_opcode(allocator, test_config);
+    _ = try benchmark_return_opcode(allocator, test_config);
+}

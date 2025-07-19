@@ -1,0 +1,1309 @@
+/// Comprehensive benchmarks for EVM opcode execution performance
+///
+/// This module provides detailed performance benchmarks for all opcode implementations
+/// in the Guillotine EVM, measuring execution time, gas efficiency, and memory usage.
+/// It's designed to identify performance bottlenecks and optimization opportunities
+/// in individual opcode implementations.
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const timing = @import("timing.zig");
+const BenchmarkSuite = timing.BenchmarkSuite;
+const BenchmarkConfig = timing.BenchmarkConfig;
+const BenchmarkResult = timing.BenchmarkResult;
+
+// EVM imports
+const evm = @import("evm");
+const Vm = evm.Evm;
+const Frame = evm.Frame;
+const Contract = evm.Contract;
+const MemoryDatabase = evm.MemoryDatabase;
+const Stack = evm.Stack;
+const Memory = evm.Memory;
+const Address = @import("primitives").Address;
+const Operation = evm.Operation;
+
+// Use evm module structure for opcode imports - they're exposed through the EVM module
+// We'll access individual opcodes through the jump table or directly create simple benchmarks
+
+/// Test setup helper for opcode benchmarks
+const OpcodeBenchmarkSetup = struct {
+    allocator: Allocator,
+    vm: *Vm,
+    frame: *Frame,
+    memory_db: *MemoryDatabase,
+    
+    const Self = @This();
+    
+    /// Initialize a minimal EVM environment for opcode benchmarking
+    fn init(allocator: Allocator) !Self {
+        var memory_db = try allocator.create(MemoryDatabase);
+        memory_db.* = MemoryDatabase.init(allocator);
+        
+        const db_interface = memory_db.toDatabaseInterface();
+        var vm = try allocator.create(Vm);
+        vm.* = try Vm.init(allocator, db_interface, null, null);
+        
+        const dummy_code = [_]u8{0x00}; // STOP opcode
+        var contract = try Contract.init(allocator, &dummy_code, .{ .address = Address.ZERO });
+        defer contract.deinit(allocator, null);
+        
+        var frame = try allocator.create(Frame);
+        frame.* = try Frame.init(allocator, vm, 1000000, contract, Address.ZERO, &.{});
+        
+        return Self{
+            .allocator = allocator,
+            .vm = vm,
+            .frame = frame,
+            .memory_db = memory_db,
+        };
+    }
+    
+    fn deinit(self: *Self) void {
+        self.frame.deinit();
+        self.allocator.destroy(self.frame);
+        self.vm.deinit();
+        self.allocator.destroy(self.vm);
+        self.memory_db.deinit();
+        self.allocator.destroy(self.memory_db);
+    }
+    
+    /// Reset frame state for next benchmark iteration
+    fn reset(self: *Self) void {
+        // Clear the stack
+        while (self.frame.stack.size > 0) {
+            _ = self.frame.stack.pop_unsafe();
+        }
+        
+        // Reset gas to a high value
+        self.frame.gas = 1000000;
+        
+        // Reset memory size
+        self.frame.memory.clear();
+    }
+    
+    /// Setup stack with common test values for arithmetic operations
+    fn setup_arithmetic_stack(self: *Self) !void {
+        try self.frame.stack.append(0x1000);  // Large value
+        try self.frame.stack.append(0x100);   // Medium value
+        try self.frame.stack.append(0x10);    // Small value
+        try self.frame.stack.append(0x2);     // Tiny value
+    }
+    
+    /// Setup stack with edge case values for thorough testing
+    fn setup_edge_case_stack(self: *Self) !void {
+        try self.frame.stack.append(std.math.maxInt(u256));      // Max value
+        try self.frame.stack.append(std.math.maxInt(u256) - 1);  // Near max
+        try self.frame.stack.append(1);                          // Min positive
+        try self.frame.stack.append(0);                          // Zero
+    }
+};
+
+/// Helper function to benchmark EVM bytecode execution
+fn benchmark_evm_bytecode(allocator: Allocator, bytecode: []const u8) !void {
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+    
+    var contract = try Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
+    defer contract.deinit(allocator, null);
+    
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
+    defer frame.deinit();
+    
+    // Execute the bytecode
+    const result = try vm.interpret(&frame);
+    
+    // Prevent optimization
+    std.mem.doNotOptimizeAway(result.gas_used);
+}
+
+/// Benchmark arithmetic operations (ADD, SUB, MUL, DIV, etc.) using EVM interpretation
+pub fn benchmark_arithmetic_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark ADD operation with actual bytecode
+    try suite.benchmark(BenchmarkConfig{
+        .name = "ADD_opcode",
+        .iterations = 5000,
+        .warmup_iterations = 500,
+    }, struct {
+        fn run() void {
+            benchmark_evm_bytecode(std.testing.allocator, &[_]u8{
+                0x60, 0x2A, // PUSH1 42
+                0x60, 0x64, // PUSH1 100  
+                0x01,       // ADD
+                0x00,       // STOP
+            }) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MUL operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MUL_opcode",
+        .iterations = 10000,
+        .warmup_iterations = 1000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(42);
+            setup.frame.stack.append_unsafe(100);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_mul(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark SUB operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "SUB_opcode",
+        .iterations = 10000,
+        .warmup_iterations = 1000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(100);
+            setup.frame.stack.append_unsafe(42);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_sub(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark DIV operation  
+    try suite.benchmark(BenchmarkConfig{
+        .name = "DIV_opcode", 
+        .iterations = 10000,
+        .warmup_iterations = 1000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(100);
+            setup.frame.stack.append_unsafe(10);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_div(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MOD operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MOD_opcode",
+        .iterations = 10000,
+        .warmup_iterations = 1000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(100);
+            setup.frame.stack.append_unsafe(7);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_mod(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark ADDMOD operation (more complex)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "ADDMOD_opcode",
+        .iterations = 5000,
+        .warmup_iterations = 500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(50);
+            setup.frame.stack.append_unsafe(30);
+            setup.frame.stack.append_unsafe(7);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_addmod(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MULMOD operation (most complex arithmetic)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MULMOD_opcode",
+        .iterations = 1000,
+        .warmup_iterations = 100,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(50);
+            setup.frame.stack.append_unsafe(30);
+            setup.frame.stack.append_unsafe(7);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_mulmod(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark EXP operation (variable cost based on exponent)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "EXP_opcode_small",
+        .iterations = 1000,
+        .warmup_iterations = 100,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(2);  // 2^4
+            setup.frame.stack.append_unsafe(4);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_exp(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark SIGNEXTEND operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "SIGNEXTEND_opcode",
+        .iterations = 5000,
+        .warmup_iterations = 500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0x80); // Sign bit set in byte 0
+            setup.frame.stack.append_unsafe(0);    // Extend from byte 0
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = arithmetic.op_signextend(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark stack operations (PUSH, POP, DUP, SWAP)
+pub fn benchmark_stack_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark POP operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "POP_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(42);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = stack_ops.op_pop(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark PUSH0 operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "PUSH0_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = stack_ops.op_push0(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark PUSH1 operation (optimized)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "PUSH1_opcode_optimized",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            // Add bytecode for PUSH1
+            const code = [_]u8{ 0x60, 0xFF }; // PUSH1 0xFF
+            setup.frame.contract.code = &code;
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = stack_ops.op_push1(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark DUP1 operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "DUP1_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(42);
+            
+            const dup1_fn = stack_ops.make_dup(1);
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = dup1_fn(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark SWAP1 operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "SWAP1_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(42);
+            setup.frame.stack.append_unsafe(100);
+            
+            const swap1_fn = stack_ops.make_swap(1);
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = swap1_fn(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark memory operations (MLOAD, MSTORE, etc.)
+pub fn benchmark_memory_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark MSTORE operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MSTORE_opcode",
+        .iterations = 5000,
+        .warmup_iterations = 500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0x12345678);  // value
+            setup.frame.stack.append_unsafe(0);           // offset
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = memory_ops.op_mstore(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MLOAD operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MLOAD_opcode",
+        .iterations = 5000,
+        .warmup_iterations = 500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            // Pre-store some data
+            setup.frame.stack.append_unsafe(0x12345678);
+            setup.frame.stack.append_unsafe(0);
+            _ = memory_ops.op_mstore(0, @ptrCast(setup.vm), @ptrCast(setup.frame)) catch unreachable;
+            
+            setup.frame.stack.append_unsafe(0);  // offset to load from
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = memory_ops.op_mload(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MSTORE8 operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MSTORE8_opcode",
+        .iterations = 8000,
+        .warmup_iterations = 800,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0xFF);  // byte value
+            setup.frame.stack.append_unsafe(0);     // offset
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = memory_ops.op_mstore8(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MSIZE operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MSIZE_opcode",
+        .iterations = 10000,
+        .warmup_iterations = 1000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = memory_ops.op_msize(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark MCOPY operation (complex memory operation)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "MCOPY_opcode",
+        .iterations = 1000,
+        .warmup_iterations = 100,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            // Pre-populate some memory
+            setup.frame.stack.append_unsafe(0x12345678);
+            setup.frame.stack.append_unsafe(0);
+            _ = memory_ops.op_mstore(0, @ptrCast(setup.vm), @ptrCast(setup.frame)) catch unreachable;
+            
+            // Setup MCOPY: copy 32 bytes from offset 0 to offset 64
+            setup.frame.stack.append_unsafe(64);  // dest
+            setup.frame.stack.append_unsafe(0);   // src
+            setup.frame.stack.append_unsafe(32);  // size
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = memory_ops.op_mcopy(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark comparison operations (LT, GT, EQ, ISZERO)
+pub fn benchmark_comparison_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark LT operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "LT_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(10);
+            setup.frame.stack.append_unsafe(20);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = comparison.op_lt(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark GT operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "GT_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(20);
+            setup.frame.stack.append_unsafe(10);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = comparison.op_gt(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark EQ operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "EQ_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(42);
+            setup.frame.stack.append_unsafe(42);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = comparison.op_eq(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark ISZERO operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "ISZERO_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = comparison.op_iszero(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark bitwise operations (AND, OR, XOR, NOT)
+pub fn benchmark_bitwise_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark AND operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "AND_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0xFF00FF00);
+            setup.frame.stack.append_unsafe(0x00FF00FF);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = bitwise.op_and(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark OR operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "OR_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0xFF00FF00);
+            setup.frame.stack.append_unsafe(0x00FF00FF);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = bitwise.op_or(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark XOR operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "XOR_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0xFF00FF00);
+            setup.frame.stack.append_unsafe(0x00FF00FF);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = bitwise.op_xor(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark NOT operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "NOT_opcode",
+        .iterations = 15000,
+        .warmup_iterations = 1500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0xFF00FF00);
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = bitwise.op_not(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark SHL operation (shift left)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "SHL_opcode",
+        .iterations = 12000,
+        .warmup_iterations = 1200,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0x123456);
+            setup.frame.stack.append_unsafe(4); // shift by 4 bits
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = bitwise.op_shl(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark SHR operation (shift right)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "SHR_opcode",
+        .iterations = 12000,
+        .warmup_iterations = 1200,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            setup.frame.stack.append_unsafe(0x123456);
+            setup.frame.stack.append_unsafe(4); // shift by 4 bits
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = bitwise.op_shr(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark control flow operations (JUMP, JUMPI, PC)
+pub fn benchmark_control_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark PC operation (program counter)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "PC_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = control.op_pc(42, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark JUMP operation (requires valid jump destinations)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "JUMP_opcode",
+        .iterations = 5000,
+        .warmup_iterations = 500,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            // Set up code with valid jump destinations
+            const code = [_]u8{ 0x5b, 0x00, 0x5b, 0x00 }; // JUMPDEST, STOP, JUMPDEST, STOP
+            setup.frame.contract.code = &code;
+            
+            // Mark jump destinations as valid  
+            try setup.frame.contract.code_analysis.mark_valid_jump_destination(0);
+            try setup.frame.contract.code_analysis.mark_valid_jump_destination(2);
+            
+            setup.frame.stack.append_unsafe(2); // jump to position 2
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = control.op_jump(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark JUMPI operation (conditional jump)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "JUMPI_opcode_taken",
+        .iterations = 3000,
+        .warmup_iterations = 300,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            // Set up code with valid jump destinations
+            const code = [_]u8{ 0x5b, 0x00, 0x5b, 0x00 }; // JUMPDEST, STOP, JUMPDEST, STOP
+            setup.frame.contract.code = &code;
+            
+            // Mark jump destinations as valid
+            try setup.frame.contract.code_analysis.mark_valid_jump_destination(0);
+            try setup.frame.contract.code_analysis.mark_valid_jump_destination(2);
+            
+            setup.frame.stack.append_unsafe(2); // jump to position 2
+            setup.frame.stack.append_unsafe(1); // condition (true)
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = control.op_jumpi(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark JUMPI operation (not taken)
+    try suite.benchmark(BenchmarkConfig{
+        .name = "JUMPI_opcode_not_taken",
+        .iterations = 8000,
+        .warmup_iterations = 800,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            setup.frame.stack.append_unsafe(2); // jump destination
+            setup.frame.stack.append_unsafe(0); // condition (false)
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = control.op_jumpi(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark crypto operations (SHA3/KECCAK256)
+pub fn benchmark_crypto_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark SHA3/KECCAK256 with small data
+    try suite.benchmark(BenchmarkConfig{
+        .name = "KECCAK256_small",
+        .iterations = 1000,
+        .warmup_iterations = 100,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            // Store some data in memory to hash
+            setup.frame.stack.append_unsafe(0x12345678);
+            setup.frame.stack.append_unsafe(0);
+            _ = memory_ops.op_mstore(0, @ptrCast(setup.vm), @ptrCast(setup.frame)) catch unreachable;
+            
+            // Setup KECCAK256: hash 32 bytes starting at offset 0
+            setup.frame.stack.append_unsafe(0);   // offset
+            setup.frame.stack.append_unsafe(32);  // size
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = crypto.op_keccak256(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark SHA3/KECCAK256 with larger data
+    try suite.benchmark(BenchmarkConfig{
+        .name = "KECCAK256_large",
+        .iterations = 200,
+        .warmup_iterations = 20,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            // Store multiple words in memory
+            for (0..16) |i| {
+                setup.frame.stack.append_unsafe(0x12345678 + @as(u256, i));
+                setup.frame.stack.append_unsafe(@as(u256, i) * 32);
+                _ = memory_ops.op_mstore(0, @ptrCast(setup.vm), @ptrCast(setup.frame)) catch unreachable;
+            }
+            
+            // Setup KECCAK256: hash 512 bytes starting at offset 0
+            setup.frame.stack.append_unsafe(0);    // offset
+            setup.frame.stack.append_unsafe(512);  // size
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = crypto.op_keccak256(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Benchmark environment operations (ADDRESS, CALLER, ORIGIN, etc.)
+pub fn benchmark_environment_operations(allocator: Allocator) !BenchmarkSuite {
+    var suite = BenchmarkSuite.init(allocator);
+    
+    // Benchmark ADDRESS operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "ADDRESS_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = environment.op_address(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark CALLER operation  
+    try suite.benchmark(BenchmarkConfig{
+        .name = "CALLER_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = environment.op_caller(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark CALLVALUE operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "CALLVALUE_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = environment.op_callvalue(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark ORIGIN operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "ORIGIN_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = environment.op_origin(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    // Benchmark GASPRICE operation
+    try suite.benchmark(BenchmarkConfig{
+        .name = "GASPRICE_opcode",
+        .iterations = 20000,
+        .warmup_iterations = 2000,
+    }, struct {
+        fn run() void {
+            var setup = OpcodeBenchmarkSetup.init(std.testing.allocator) catch unreachable;
+            defer setup.deinit();
+            
+            setup.reset();
+            
+            const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+            const state_ptr: *Operation.State = @ptrCast(setup.frame);
+            
+            _ = environment.op_gasprice(0, interpreter_ptr, state_ptr) catch unreachable;
+        }
+    }.run);
+    
+    return suite;
+}
+
+/// Run all opcode benchmarks and return comprehensive results
+pub fn run_comprehensive_opcode_benchmarks(allocator: Allocator) !void {
+    std.log.info("Starting comprehensive opcode benchmarks...", .{});
+    
+    // Run arithmetic benchmarks
+    std.log.info("Benchmarking arithmetic operations...", .{});
+    var arithmetic_suite = try benchmark_arithmetic_operations(allocator);
+    defer arithmetic_suite.deinit();
+    
+    // Run stack benchmarks
+    std.log.info("Benchmarking stack operations...", .{});
+    var stack_suite = try benchmark_stack_operations(allocator);
+    defer stack_suite.deinit();
+    
+    // Run memory benchmarks
+    std.log.info("Benchmarking memory operations...", .{});
+    var memory_suite = try benchmark_memory_operations(allocator);
+    defer memory_suite.deinit();
+    
+    // Run comparison benchmarks
+    std.log.info("Benchmarking comparison operations...", .{});
+    var comparison_suite = try benchmark_comparison_operations(allocator);
+    defer comparison_suite.deinit();
+    
+    // Run bitwise benchmarks
+    std.log.info("Benchmarking bitwise operations...", .{});
+    var bitwise_suite = try benchmark_bitwise_operations(allocator);
+    defer bitwise_suite.deinit();
+    
+    // Run control flow benchmarks
+    std.log.info("Benchmarking control flow operations...", .{});
+    var control_suite = try benchmark_control_operations(allocator);
+    defer control_suite.deinit();
+    
+    // Run crypto benchmarks
+    std.log.info("Benchmarking crypto operations...", .{});
+    var crypto_suite = try benchmark_crypto_operations(allocator);
+    defer crypto_suite.deinit();
+    
+    // Run environment benchmarks
+    std.log.info("Benchmarking environment operations...", .{});
+    var environment_suite = try benchmark_environment_operations(allocator);
+    defer environment_suite.deinit();
+    
+    // Print comprehensive results
+    std.log.info("\n=== COMPREHENSIVE OPCODE BENCHMARK RESULTS ===", .{});
+    
+    std.log.info("\n--- Arithmetic Operations ---", .{});
+    arithmetic_suite.print_results();
+    
+    std.log.info("\n--- Stack Operations ---", .{});
+    stack_suite.print_results();
+    
+    std.log.info("\n--- Memory Operations ---", .{});
+    memory_suite.print_results();
+    
+    std.log.info("\n--- Comparison Operations ---", .{});
+    comparison_suite.print_results();
+    
+    std.log.info("\n--- Bitwise Operations ---", .{});
+    bitwise_suite.print_results();
+    
+    std.log.info("\n--- Control Flow Operations ---", .{});
+    control_suite.print_results();
+    
+    std.log.info("\n--- Crypto Operations ---", .{});
+    crypto_suite.print_results();
+    
+    std.log.info("\n--- Environment Operations ---", .{});
+    environment_suite.print_results();
+    
+    // Analyze relative performance across all categories
+    try analyze_comprehensive_opcode_performance(&[_]*BenchmarkSuite{
+        &arithmetic_suite,
+        &stack_suite,
+        &memory_suite,
+        &comparison_suite,
+        &bitwise_suite,
+        &control_suite,
+        &crypto_suite,
+        &environment_suite,
+    });
+}
+
+/// Comprehensive analysis across all opcode categories  
+fn analyze_comprehensive_opcode_performance(suites: []*BenchmarkSuite) !void {
+    std.log.info("\n=== COMPREHENSIVE PERFORMANCE ANALYSIS ===", .{});
+    
+    // Find fastest and slowest operations across all categories
+    var fastest_time: u64 = std.math.maxInt(u64);
+    var slowest_time: u64 = 0;
+    var fastest_op: []const u8 = "";
+    var slowest_op: []const u8 = "";
+    var total_operations: u32 = 0;
+    var total_time: u64 = 0;
+    
+    for (suites) |suite| {
+        for (suite.results.items) |result| {
+            total_operations += 1;
+            total_time += result.mean_time_ns;
+            
+            if (result.mean_time_ns < fastest_time) {
+                fastest_time = result.mean_time_ns;
+                fastest_op = result.name;
+            }
+            if (result.mean_time_ns > slowest_time) {
+                slowest_time = result.mean_time_ns;
+                slowest_op = result.name;
+            }
+        }
+    }
+    
+    const avg_time = if (total_operations > 0) total_time / @as(u64, total_operations) else 0;
+    
+    std.log.info("Overall Statistics:", .{});
+    std.log.info("  Total operations benchmarked: {d}", .{total_operations});
+    std.log.info("  Average execution time: {d:.3}ns", .{avg_time});
+    std.log.info("  Fastest operation: {s} ({d:.3}ns)", .{ fastest_op, fastest_time });
+    std.log.info("  Slowest operation: {s} ({d:.3}ns)", .{ slowest_op, slowest_time });
+    
+    if (slowest_time > 0) {
+        const performance_ratio = @as(f64, @floatFromInt(slowest_time)) / @as(f64, @floatFromInt(fastest_time));
+        std.log.info("  Performance spread: {d:.2}x", .{performance_ratio});
+    }
+    
+    // Categorize operations by performance
+    std.log.info("\nOperation Categories by Performance:", .{});
+    const category_names = [_][]const u8{ "Arithmetic", "Stack", "Memory", "Comparison", "Bitwise", "Control", "Crypto", "Environment" };
+    
+    for (suites, category_names) |suite, category_name| {
+        classify_operations_by_performance(suite, category_name);
+    }
+    
+    // Generate performance insights
+    try generate_performance_insights(suites, category_names);
+}
+
+/// Generate insights and recommendations from benchmark data
+fn generate_performance_insights(suites: []*BenchmarkSuite, category_names: []const []const u8) !void {
+    std.log.info("\n=== PERFORMANCE INSIGHTS ===", .{});
+    
+    // Calculate category averages
+    var category_averages = std.ArrayList(struct { name: []const u8, avg_time: u64 }).init(std.heap.page_allocator);
+    defer category_averages.deinit();
+    
+    for (suites, category_names) |suite, category_name| {
+        if (suite.results.items.len == 0) continue;
+        
+        var category_total: u64 = 0;
+        for (suite.results.items) |result| {
+            category_total += result.mean_time_ns;
+        }
+        const category_avg = category_total / @as(u64, suite.results.items.len);
+        
+        try category_averages.append(.{ .name = category_name, .avg_time = category_avg });
+    }
+    
+    // Sort by performance (fastest first)
+    std.sort.insertion(@TypeOf(category_averages.items[0]), category_averages.items, {}, struct {
+        pub fn lessThan(_: void, lhs: @TypeOf(category_averages.items[0]), rhs: @TypeOf(category_averages.items[0])) bool {
+            return lhs.avg_time < rhs.avg_time;
+        }
+    }.lessThan);
+    
+    std.log.info("Category Performance Ranking (fastest to slowest):", .{});
+    for (category_averages.items, 1..) |category, rank| {
+        const performance_indicator = switch (rank) {
+            1, 2 => "⚡",
+            3, 4, 5 => "⚖️",
+            else => "🐌",
+        };
+        std.log.info("  {d}. {s} {s}: {d:.3}ns avg", .{ rank, performance_indicator, category.name, category.avg_time });
+    }
+    
+    // Identify optimization opportunities
+    std.log.info("\nOptimization Opportunities:", .{});
+    
+    // Find operations that are significantly slower than category average
+    for (suites, category_names) |suite, category_name| {
+        if (suite.results.items.len == 0) continue;
+        
+        var category_total: u64 = 0;
+        for (suite.results.items) |result| {
+            category_total += result.mean_time_ns;
+        }
+        const category_avg = category_total / @as(u64, suite.results.items.len);
+        
+        for (suite.results.items) |result| {
+            const relative_performance = @as(f64, @floatFromInt(result.mean_time_ns)) / @as(f64, @floatFromInt(category_avg));
+            if (relative_performance > 2.0) { // More than 2x slower than category average
+                std.log.info("  🔍 {s} ({s}): {d:.1}x slower than category average - potential optimization target", .{ result.name, category_name, relative_performance });
+            }
+        }
+    }
+}
+
+/// Legacy analysis function for backward compatibility
+fn analyze_opcode_performance(arithmetic_suite: *BenchmarkSuite, stack_suite: *BenchmarkSuite, memory_suite: *BenchmarkSuite) !void {
+    try analyze_comprehensive_opcode_performance(&[_]*BenchmarkSuite{ arithmetic_suite, stack_suite, memory_suite });
+}
+
+fn classify_operations_by_performance(suite: *BenchmarkSuite, category: []const u8) void {
+    var total_time: u64 = 0;
+    for (suite.results.items) |result| {
+        total_time += result.mean_time_ns;
+    }
+    
+    if (suite.results.items.len == 0) return;
+    
+    const avg_time = total_time / @as(u64, suite.results.items.len);
+    
+    std.log.info("{s} operations (avg: {d:.3}ns):", .{ category, avg_time });
+    
+    for (suite.results.items) |result| {
+        const relative_performance = if (avg_time > 0)
+            @as(f64, @floatFromInt(result.mean_time_ns)) / @as(f64, @floatFromInt(avg_time))
+        else
+            1.0;
+        
+        const performance_indicator = if (relative_performance < 0.8)
+            "⚡ Fast"
+        else if (relative_performance < 1.2)
+            "➡️  Normal"
+        else if (relative_performance < 2.0)
+            "🐌 Slow"
+        else
+            "🐌🐌 Very Slow";
+        
+        std.log.info("  {s}: {d:.3}ns {s}", .{ result.name, result.mean_time_ns, performance_indicator });
+    }
+}
+
+test "opcode benchmark infrastructure" {
+    const allocator = std.testing.allocator;
+    
+    // Test a simple arithmetic benchmark
+    var setup = try OpcodeBenchmarkSetup.init(allocator);
+    defer setup.deinit();
+    
+    setup.reset();
+    try setup.setup_arithmetic_stack();
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(setup.vm);
+    const state_ptr: *Operation.State = @ptrCast(setup.frame);
+    
+    // Test ADD operation
+    const initial_stack_size = setup.frame.stack.size;
+    _ = try arithmetic.op_add(0, interpreter_ptr, state_ptr);
+    
+    // ADD should consume 2 values and produce 1
+    try std.testing.expectEqual(initial_stack_size - 1, setup.frame.stack.size);
+}
+
+test "opcode benchmark memory allocation" {
+    const allocator = std.testing.allocator;
+    
+    var setup = try OpcodeBenchmarkSetup.init(allocator);
+    defer setup.deinit();
+    
+    // Test that we can setup and tear down multiple times without leaks
+    for (0..10) |_| {
+        setup.reset();
+        try setup.setup_arithmetic_stack();
+    }
+}
