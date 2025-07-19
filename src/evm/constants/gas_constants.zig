@@ -97,6 +97,7 @@ pub const CALL_GAS_RETENTION_DIVISOR = GasConstants.CALL_GAS_RETENTION_DIVISOR;
 
 // Re-export functions
 pub const memory_gas_cost = GasConstants.memory_gas_cost;
+pub const wordCount = GasConstants.wordCount;
 
 // Re-export the lookup table if needed
 pub const MEMORY_EXPANSION_LUT = blk: {
