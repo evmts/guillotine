@@ -259,7 +259,7 @@ pub fn unaudited_mulmod(a: u256, b: u256, m: u256) u256 {
     const b_mod = b % m;
 
     // For large multiplications, use the standard algorithm
-    var result: u256 = 0;
+    var result = @as(u256, 0);
     var multiplicand = a_mod;
     var multiplier = b_mod;
 
@@ -316,7 +316,7 @@ pub fn unaudited_powmod(base: u256, exp: u256, modulus: u256) u256 {
     if (modulus == 1) return 0;
     if (exp == 0) return 1;
 
-    var result: u256 = 1;
+    var result = @as(u256, 1);
     var base_mod = base % modulus;
     var exp_remaining = exp;
 
@@ -339,8 +339,8 @@ pub fn unaudited_invmod(a: u256, m: u256) ?u256 {
     if (a == 0) return null;
 
     // Extended Euclidean Algorithm with careful arithmetic
-    var old_r: u256 = a % m;
-    var r: u256 = m;
+    var old_r = @as(u256, a % m);
+    var r = @as(u256, m);
     var old_s: i512 = 1;
     var s: i512 = 0;
 

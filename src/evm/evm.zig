@@ -164,9 +164,9 @@ test "Evm.init default configuration" {
     defer evm.deinit();
     
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.return_data.len);
+    try testing.expectEqual(0, evm.stack.size);
+    try testing.expectEqual(0, evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -184,8 +184,8 @@ test "Evm.init custom jump table and chain rules" {
     defer evm.deinit();
     
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.return_data.len);
+    try testing.expectEqual(0, evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -200,8 +200,8 @@ test "Evm.init_with_hardfork" {
     defer evm.deinit();
     
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.return_data.len);
+    try testing.expectEqual(0, evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -229,7 +229,7 @@ test "Evm.init state initialization" {
     
     const test_addr = [_]u8{0x42} ** 20;
     const initial_balance = try evm.state.get_balance(test_addr);
-    try testing.expectEqual(@as(u256, 0), initial_balance);
+    try testing.expectEqual(0, initial_balance);
 }
 
 test "Evm.init access list initialization" {
@@ -257,10 +257,10 @@ test "Evm.init context initialization" {
     var evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(u256, 0), evm.context.block.number);
-    try testing.expectEqual(@as(u64, 0), evm.context.block.timestamp);
-    try testing.expectEqual(@as(u256, 0), evm.context.block.gas_limit);
-    try testing.expectEqual(@as(u256, 0), evm.context.block.base_fee);
+    try testing.expectEqual(0, evm.context.block.number);
+    try testing.expectEqual(0, evm.context.block.timestamp);
+    try testing.expectEqual(0, evm.context.block.gas_limit);
+    try testing.expectEqual(0, evm.context.block.base_fee);
 }
 
 test "Evm multiple VM instances" {
@@ -282,8 +282,8 @@ test "Evm multiple VM instances" {
     evm1.depth = 5;
     evm2.depth = 10;
     
-    try testing.expectEqual(@as(u16, 5), evm1.depth);
-    try testing.expectEqual(@as(u16, 10), evm2.depth);
+    try testing.expectEqual(5, evm1.depth);
+    try testing.expectEqual(10, evm2.depth);
 }
 
 test "Evm initialization with different hardforks" {
@@ -301,7 +301,7 @@ test "Evm initialization with different hardforks" {
         defer evm.deinit();
         
         try testing.expect(evm.allocator.ptr == allocator.ptr);
-        try testing.expectEqual(@as(u16, 0), evm.depth);
+        try testing.expectEqual(0, evm.depth);
         try testing.expectEqual(false, evm.read_only);
     }
 }
@@ -316,13 +316,13 @@ test "Evm initialization memory invariants" {
     var evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.return_data.len);
+    try testing.expectEqual(0, evm.stack.size);
+    try testing.expectEqual(0, evm.depth);
     try testing.expectEqual(false, evm.read_only);
     
     for (evm.stack.data) |value| {
-        try testing.expectEqual(@as(u256, 0), value);
+        try testing.expectEqual(0, value);
     }
 }
 
@@ -336,13 +336,13 @@ test "Evm depth tracking" {
     var evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.depth);
     
     evm.depth = 1024;
-    try testing.expectEqual(@as(u16, 1024), evm.depth);
+    try testing.expectEqual(1024, evm.depth);
     
     evm.depth = 0;
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.depth);
 }
 
 test "Evm read-only flag" {
@@ -374,14 +374,14 @@ test "Evm return data management" {
     var evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    try testing.expectEqual(0, evm.return_data.len);
     
     const test_data = [_]u8{ 0x01, 0x02, 0x03, 0x04 };
     const allocated_data = try allocator.dupe(u8, &test_data);
     defer allocator.free(allocated_data);
     
     evm.return_data = allocated_data;
-    try testing.expectEqual(@as(usize, 4), evm.return_data.len);
+    try testing.expectEqual(4, evm.return_data.len);
     try testing.expectEqualSlices(u8, &test_data, evm.return_data);
 }
 
@@ -396,7 +396,7 @@ test "Evm state access" {
     defer evm.deinit();
     
     const test_addr = [_]u8{0x42} ** 20;
-    const test_balance: u256 = 1000000;
+    const test_balance = 1000000;
     
     try evm.state.set_balance(test_addr, test_balance);
     const retrieved_balance = try evm.state.get_balance(test_addr);
@@ -431,14 +431,14 @@ test "Evm stack operations via stack field" {
     var evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
+    try testing.expectEqual(0, evm.stack.size);
     
     try evm.stack.append(42);
-    try testing.expectEqual(@as(usize, 1), evm.stack.size);
+    try testing.expectEqual(1, evm.stack.size);
     
     const value = try evm.stack.pop();
-    try testing.expectEqual(@as(u256, 42), value);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
+    try testing.expectEqual(42, value);
+    try testing.expectEqual(0, evm.stack.size);
 }
 
 test "Evm jump table access" {
@@ -487,7 +487,7 @@ test "Evm reinitialization behavior" {
     evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -525,7 +525,7 @@ test "Evm fuzz: initialization with random hardforks" {
         defer evm.deinit();
         
         try testing.expect(evm.allocator.ptr == allocator.ptr);
-        try testing.expectEqual(@as(u16, 0), evm.depth);
+        try testing.expectEqual(0, evm.depth);
         try testing.expectEqual(false, evm.read_only);
     }
 }
@@ -568,8 +568,8 @@ test "Evm integration: multiple state operations" {
     
     const addr1 = [_]u8{0x11} ** 20;
     const addr2 = [_]u8{0x22} ** 20;
-    const balance1: u256 = 1000;
-    const balance2: u256 = 2000;
+    const balance1 = 1000;
+    const balance2 = 2000;
     
     try evm.state.set_balance(addr1, balance1);
     try evm.state.set_balance(addr2, balance2);
@@ -593,15 +593,15 @@ test "Evm integration: state and context interaction" {
     defer evm.deinit();
     
     const test_addr = [_]u8{0x42} ** 20;
-    const test_balance: u256 = 500000;
+    const test_balance = 500000;
     
     try evm.state.set_balance(test_addr, test_balance);
     evm.context.block.number = 12345;
     evm.context.block.timestamp = 1234567890;
     
     try testing.expectEqual(test_balance, try evm.state.get_balance(test_addr));
-    try testing.expectEqual(@as(u256, 12345), evm.context.block.number);
-    try testing.expectEqual(@as(u64, 1234567890), evm.context.block.timestamp);
+    try testing.expectEqual(12345, evm.context.block.number);
+    try testing.expectEqual(1234567890, evm.context.block.timestamp);
 }
 
 test "Evm invariant: all fields properly initialized after init" {
@@ -615,21 +615,21 @@ test "Evm invariant: all fields properly initialized after init" {
     defer evm.deinit();
     
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(0, evm.return_data.len);
+    try testing.expectEqual(0, evm.stack.size);
+    try testing.expectEqual(0, evm.depth);
     try testing.expectEqual(false, evm.read_only);
     
     try testing.expect(evm.table.get(0x01) != null);
     try testing.expect(evm.chain_rules.is_precompile([_]u8{0} ** 20) == false);
     
     const test_addr = [_]u8{0x99} ** 20;
-    try testing.expectEqual(@as(u256, 0), try evm.state.get_balance(test_addr));
+    try testing.expectEqual(0, try evm.state.get_balance(test_addr));
     try testing.expectEqual(false, evm.access_list.is_address_warm(test_addr));
     
-    try testing.expectEqual(@as(u256, 0), evm.context.block.number);
-    try testing.expectEqual(@as(u64, 0), evm.context.block.timestamp);
-    try testing.expectEqual(@as(u256, 0), evm.context.block.gas_limit);
+    try testing.expectEqual(0, evm.context.block.number);
+    try testing.expectEqual(0, evm.context.block.timestamp);
+    try testing.expectEqual(0, evm.context.block.gas_limit);
 }
 
 test "Evm memory leak detection" {
@@ -649,7 +649,7 @@ test "Evm memory leak detection" {
         
         evm.return_data = test_data[0..50];
         
-        try testing.expectEqual(@as(usize, 50), evm.return_data.len);
+        try testing.expectEqual(50, evm.return_data.len);
     }
 }
 
@@ -663,10 +663,10 @@ test "Evm edge case: empty return data" {
     var evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
     
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    try testing.expectEqual(0, evm.return_data.len);
     
     evm.return_data = &[_]u8{};
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    try testing.expectEqual(0, evm.return_data.len);
 }
 
 test "Evm resource exhaustion simulation" {
@@ -680,15 +680,15 @@ test "Evm resource exhaustion simulation" {
     defer evm.deinit();
     
     evm.depth = 1023;
-    try testing.expectEqual(@as(u16, 1023), evm.depth);
+    try testing.expectEqual(1023, evm.depth);
     
     try evm.stack.append(1);
     try evm.stack.append(2);
     try evm.stack.append(3);
-    try testing.expectEqual(@as(usize, 3), evm.stack.size);
+    try testing.expectEqual(3, evm.stack.size);
     
     _ = try evm.stack.pop();
     _ = try evm.stack.pop();
     _ = try evm.stack.pop();
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
+    try testing.expectEqual(0, evm.stack.size);
 }

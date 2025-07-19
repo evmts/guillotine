@@ -178,7 +178,7 @@ pub fn bit_not(a: Hash) Hash {
 
 // Hash to/from integer conversion
 pub fn to_u256(hash: Hash) u256 {
-    var result: u256 = 0;
+    var result = @as(u256, 0);
     for (hash) |byte| {
         result = (result << 8) | byte;
     }
@@ -250,7 +250,7 @@ test "selector creation" {
 }
 
 test "u256 conversion" {
-    const value: u256 = 0x123456789abcdef0;
+    const value = 0x123456789abcdef0;
     const hash = from_u256(value);
     const converted_back = to_u256(hash);
     try testing.expectEqual(value, converted_back);
@@ -439,7 +439,7 @@ test "hash bitwise operations" {
 
     // Test NOT
     const not_result = bit_not(hash1);
-    const value_1234: u256 = 0x1234;
+    const value_1234 = 0x1234;
     const expected_not = from_u256(~value_1234);
     try testing.expectEqual(expected_not, not_result);
 }

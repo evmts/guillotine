@@ -253,10 +253,10 @@ pub fn fuzz_stack_operations(operations: []const FuzzOperation) !void {
                 if (old_size > 0) {
                     _ = try result;
                     try testing.expectEqual(old_size - 1, stack.size);
-                    try testing.expectEqual(@as(u256, 0), stack.data[stack.size]);
+                    try testing.expectEqual(0, stack.data[stack.size]);
                 } else {
                     try testing.expectError(Error.StackUnderflow, result);
-                    try testing.expectEqual(@as(usize, 0), stack.size);
+                    try testing.expectEqual(0, stack.size);
                 }
             },
             .peek => {
@@ -270,9 +270,9 @@ pub fn fuzz_stack_operations(operations: []const FuzzOperation) !void {
             },
             .clear => {
                 stack.clear();
-                try testing.expectEqual(@as(usize, 0), stack.size);
+                try testing.expectEqual(0, stack.size);
                 for (stack.data) |value| {
-                    try testing.expectEqual(@as(u256, 0), value);
+                    try testing.expectEqual(0, value);
                 }
             },
         }
@@ -294,7 +294,7 @@ fn validate_stack_invariants(stack: *const Stack) !void {
     try testing.expect(stack.size <= CAPACITY);
     
     for (stack.data[stack.size..]) |value| {
-        try testing.expectEqual(@as(u256, 0), value);
+        try testing.expectEqual(0, value);
     }
 }
 
@@ -319,7 +319,7 @@ test "fuzz_stack_overflow_boundary" {
     
     var i: usize = 0;
     while (i <= CAPACITY + 10) : (i += 1) {
-        try operations.append(.{ .push = @as(u256, i) });
+        try operations.append(.{ .push = i });
     }
     
     try fuzz_stack_operations(operations.items);
@@ -359,7 +359,7 @@ test "fuzz_stack_lifo_property" {
         try std.testing.expectEqual(expected, actual);
     }
     
-    try std.testing.expectEqual(@as(usize, 0), stack.size);
+    try std.testing.expectEqual(0, stack.size);
 }
 
 test "fuzz_stack_random_operations" {
@@ -412,16 +412,16 @@ test "fuzz_stack_unsafe_operations" {
     stack.append_unsafe(300);
     
     try std.testing.expectEqual(@as(usize, 3), stack.size);
-    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
+    try std.testing.expectEqual(300, stack.peek_unsafe().*);
     
     const val1 = stack.pop_unsafe();
     const val2 = stack.pop_unsafe();
     const val3 = stack.pop_unsafe();
     
-    try std.testing.expectEqual(@as(u256, 300), val1);
-    try std.testing.expectEqual(@as(u256, 200), val2);
+    try std.testing.expectEqual(300, val1);
+    try std.testing.expectEqual(200, val2);
     try std.testing.expectEqual(@as(u256, 100), val3);
-    try std.testing.expectEqual(@as(usize, 0), stack.size);
+    try std.testing.expectEqual(0, stack.size);
 }
 
 test "fuzz_stack_dup_operations" {
@@ -433,11 +433,11 @@ test "fuzz_stack_dup_operations" {
     
     stack.dup_unsafe(1);
     try std.testing.expectEqual(@as(usize, 4), stack.size);
-    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
+    try std.testing.expectEqual(300, stack.peek_unsafe().*);
     
     stack.dup_unsafe(2);
     try std.testing.expectEqual(@as(usize, 5), stack.size);
-    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
+    try std.testing.expectEqual(300, stack.peek_unsafe().*);
 }
 
 test "fuzz_stack_swap_operations" {
@@ -449,8 +449,8 @@ test "fuzz_stack_swap_operations" {
     
     stack.swap_unsafe(1);
     
-    try std.testing.expectEqual(@as(u256, 200), stack.data[2]);
-    try std.testing.expectEqual(@as(u256, 300), stack.data[1]);
+    try std.testing.expectEqual(200, stack.data[2]);
+    try std.testing.expectEqual(300, stack.data[1]);
     try std.testing.expectEqual(@as(u256, 100), stack.data[0]);
 }
 
@@ -470,9 +470,9 @@ test "fuzz_stack_multi_pop_operations" {
     
     const result3 = stack.pop3_unsafe();
     try std.testing.expectEqual(@as(u256, 100), result3.a);
-    try std.testing.expectEqual(@as(u256, 200), result3.b);
-    try std.testing.expectEqual(@as(u256, 300), result3.c);
-    try std.testing.expectEqual(@as(usize, 0), stack.size);
+    try std.testing.expectEqual(200, result3.b);
+    try std.testing.expectEqual(300, result3.c);
+    try std.testing.expectEqual(0, stack.size);
 }
 
 test "fuzz_stack_edge_values" {
@@ -503,7 +503,7 @@ test "memory_alignment_verification" {
     
     // Verify initial alignment of data array
     const data_ptr = @intFromPtr(&stack.data[0]);
-    try std.testing.expectEqual(@as(usize, 0), data_ptr % 32);
+    try std.testing.expectEqual(0, data_ptr % 32);
     
     // Fill stack with values
     var i: usize = 0;
@@ -515,7 +515,7 @@ test "memory_alignment_verification" {
     var j: usize = 0;
     while (j < stack.size) : (j += 10) {
         const ptr = @intFromPtr(&stack.data[j]);
-        try std.testing.expectEqual(@as(usize, 0), ptr % 32);
+        try std.testing.expectEqual(0, ptr % 32);
     }
     
     // Verify alignment after operations
@@ -524,7 +524,7 @@ test "memory_alignment_verification" {
     try stack.append(999);
     
     const final_ptr = @intFromPtr(&stack.data[0]);
-    try std.testing.expectEqual(@as(usize, 0), final_ptr % 32);
+    try std.testing.expectEqual(0, final_ptr % 32);
 }
 
 test "concurrent_usage_multiple_stacks" {
@@ -553,7 +553,7 @@ test "concurrent_usage_multiple_stacks" {
     try std.testing.expectEqual(@as(usize, 1), stack3.size);
     
     // Verify data integrity
-    try std.testing.expectEqual(@as(u256, 300), try stack1.pop());
+    try std.testing.expectEqual(300, try stack1.pop());
     try std.testing.expectEqual(@as(u256, 2000), try stack2.pop());
     try std.testing.expectEqual(@as(u256, 10000), try stack3.pop());
     
@@ -590,9 +590,9 @@ test "concurrent_usage_multiple_stacks" {
     
     // Verify independence
     try std.testing.expectEqual(@as(u256, 3), try stack_a.pop());
-    try std.testing.expectEqual(@as(u256, 300), try stack_b.pop());
+    try std.testing.expectEqual(300, try stack_b.pop());
     try std.testing.expectEqual(@as(u256, 2), try stack_a.pop());
-    try std.testing.expectEqual(@as(u256, 200), try stack_b.pop());
+    try std.testing.expectEqual(200, try stack_b.pop());
     
     // Test heap-allocated stacks
     const heap_stacks = try allocator.alloc(Stack, 5);
@@ -625,7 +625,7 @@ test "extended_fuzzing_unsafe_operations" {
     const pop2_result = stack.pop2_unsafe();
     try std.testing.expectEqual(@as(u256, 1), pop2_result.a);
     try std.testing.expectEqual(@as(u256, 2), pop2_result.b);
-    try std.testing.expectEqual(@as(usize, 0), stack.size);
+    try std.testing.expectEqual(0, stack.size);
     
     // Test pop3_unsafe edge cases
     stack.append_unsafe(10);
@@ -635,12 +635,12 @@ test "extended_fuzzing_unsafe_operations" {
     try std.testing.expectEqual(@as(u256, 10), pop3_result.a);
     try std.testing.expectEqual(@as(u256, 20), pop3_result.b);
     try std.testing.expectEqual(@as(u256, 30), pop3_result.c);
-    try std.testing.expectEqual(@as(usize, 0), stack.size);
+    try std.testing.expectEqual(0, stack.size);
     
     // Test set_top_unsafe
     stack.append_unsafe(100);
     stack.set_top_unsafe(200);
-    try std.testing.expectEqual(@as(u256, 200), stack.pop_unsafe());
+    try std.testing.expectEqual(200, stack.pop_unsafe());
     
     // Test swap_unsafe boundary conditions
     var i: usize = 0;
@@ -650,7 +650,7 @@ test "extended_fuzzing_unsafe_operations" {
     
     // Swap with maximum allowed distance (15)
     stack.swap_unsafe(15);
-    try std.testing.expectEqual(@as(u256, 0), stack.data[stack.size - 1]);
+    try std.testing.expectEqual(0, stack.data[stack.size - 1]);
     try std.testing.expectEqual(@as(u256, 15), stack.data[0]);
     
     // Clear and test dup_unsafe boundary conditions
@@ -664,7 +664,7 @@ test "extended_fuzzing_unsafe_operations" {
     
     // Test dup with max allowed value (16)
     stack.dup_unsafe(16);
-    try std.testing.expectEqual(@as(u256, 0), stack.peek_unsafe().*);
+    try std.testing.expectEqual(0, stack.peek_unsafe().*);
     try std.testing.expectEqual(@as(usize, 17), stack.size);
     
     // Random fuzz testing of unsafe operations
@@ -689,7 +689,7 @@ test "extended_fuzzing_unsafe_operations" {
                     const expected = stack.data[stack.size - 1];
                     const actual = stack.pop_unsafe();
                     try std.testing.expectEqual(expected, actual);
-                    try std.testing.expectEqual(@as(u256, 0), stack.data[stack.size]);
+                    try std.testing.expectEqual(0, stack.data[stack.size]);
                 }
             },
             2 => {
@@ -790,11 +790,11 @@ test "real_evm_patterns" {
     
     // DUP2 (duplicate 2nd from top)
     stack.dup_unsafe(2);
-    try std.testing.expectEqual(@as(u256, 200), stack.peek_unsafe().*);
+    try std.testing.expectEqual(200, stack.peek_unsafe().*);
     
     // SWAP1 (swap top two)
     stack.swap_unsafe(1);
-    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
+    try std.testing.expectEqual(300, stack.peek_unsafe().*);
     
     // Test 3: Deep stack manipulation (max depth scenario)
     stack.clear();
@@ -919,7 +919,7 @@ test "real_evm_patterns" {
     try std.testing.expectEqual(@as(u256, 0x5A17), salt);
     try std.testing.expectEqual(@as(u256, 0x100), size);
     try std.testing.expectEqual(@as(u256, 0x20), offset);
-    try std.testing.expectEqual(@as(u256, 0), create_value);
+    try std.testing.expectEqual(0, create_value);
 }
 
 test "performance_benchmarks" {
@@ -1117,7 +1117,7 @@ test "security_focused_tests" {
     try std.testing.expectEqual(secret_value, popped);
     
     // Verify the slot was cleared
-    try std.testing.expectEqual(@as(u256, 0), stack.data[data_location]);
+    try std.testing.expectEqual(0, stack.data[data_location]);
     
     // Test 2: Clear function zeroes all data
     var i: usize = 0;
@@ -1126,11 +1126,11 @@ test "security_focused_tests" {
     }
     
     stack.clear();
-    try std.testing.expectEqual(@as(usize, 0), stack.size);
+    try std.testing.expectEqual(0, stack.size);
     
     // Verify all data is zeroed
     for (stack.data) |value| {
-        try std.testing.expectEqual(@as(u256, 0), value);
+        try std.testing.expectEqual(0, value);
     }
     
     // Test 3: No information leakage between operations
@@ -1140,10 +1140,10 @@ test "security_focused_tests" {
     
     // Pop and verify clearing
     _ = stack.pop_unsafe();
-    try std.testing.expectEqual(@as(u256, 0), stack.data[2]);
+    try std.testing.expectEqual(0, stack.data[2]);
     
     _ = stack.pop_unsafe();
-    try std.testing.expectEqual(@as(u256, 0), stack.data[1]);
+    try std.testing.expectEqual(0, stack.data[1]);
     
     // Test 4: Pattern detection resistance
     // Fill with pattern
@@ -1161,7 +1161,7 @@ test "security_focused_tests" {
     // Verify cleared slots don't reveal pattern
     i = 25;
     while (i < 50) : (i += 1) {
-        try std.testing.expectEqual(@as(u256, 0), stack.data[i]);
+        try std.testing.expectEqual(0, stack.data[i]);
     }
     
     // Test 5: Stack isolation
@@ -1172,8 +1172,8 @@ test "security_focused_tests" {
     stack_a.append_unsafe(0x5EC4E7_DA7A_A);
     
     // Verify stack_b has no access to stack_a's data
-    try std.testing.expectEqual(@as(usize, 0), stack_b.size);
-    try std.testing.expectEqual(@as(u256, 0), stack_b.data[0]);
+    try std.testing.expectEqual(0, stack_b.size);
+    try std.testing.expectEqual(0, stack_b.data[0]);
     
     // Test 6: Bounds checking in safe operations
     stack.clear();
@@ -1217,7 +1217,7 @@ test "security_focused_tests" {
     // Verify no pattern remains
     i = 0;
     while (i < pattern.len) : (i += 1) {
-        try std.testing.expectEqual(@as(u256, 0), stack.data[i]);
+        try std.testing.expectEqual(0, stack.data[i]);
     }
     
     // Test 8: Timing attack resistance (basic check)

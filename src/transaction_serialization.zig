@@ -777,7 +777,7 @@ test "signing hash generation" {
     const tx_hash = try serializer.get_signing_hash(tx, 1);
 
     // Hash should be 32 bytes
-    try testing.expectEqual(@as(usize, 32), tx_hash.len);
+    try testing.expectEqual(32, tx_hash.len);
 
     // Hash should be deterministic
     const hash2 = try serializer.get_signing_hash(tx, 1);

@@ -201,8 +201,8 @@ test "transaction request to transaction conversion" {
 
     const tx = try request.to_transaction();
     try testing.expect(tx == .legacy);
-    try testing.expectEqual(@as(u256, 1000000000000000000), tx.legacy.value);
-    try testing.expectEqual(@as(u64, 21000), tx.legacy.gas_limit);
+    try testing.expectEqual(1000000000000000000, tx.legacy.value);
+    try testing.expectEqual(21000, tx.legacy.gas_limit);
 }
 
 test "transaction builder" {
@@ -220,7 +220,7 @@ test "transaction builder" {
 
     const tx = try builder.build_transaction(request);
     try testing.expect(tx == .eip1559);
-    try testing.expectEqual(@as(u64, 21000), tx.eip1559.gas_limit);
+    try testing.expectEqual(21000, tx.eip1559.gas_limit);
 }
 
 test "transaction utils" {
@@ -240,7 +240,7 @@ test "transaction utils" {
     try testing.expectEqual(TxType.legacy, TransactionUtils.get_transaction_type(legacy_tx));
 
     const estimated_gas = TransactionUtils.estimate_gas(legacy_tx);
-    try testing.expectEqual(@as(u64, 21000), estimated_gas);
+    try testing.expectEqual(21000, estimated_gas);
 }
 
 test "transaction preparation" {
@@ -252,7 +252,7 @@ test "transaction preparation" {
     };
 
     const prepared = builder.prepare_transaction_request(request);
-    try testing.expectEqual(@as(u64, 21000), prepared.gas.?);
+    try testing.expectEqual(21000, prepared.gas.?);
     try testing.expectEqual(TxType.legacy, prepared.transaction_type.?);
 }
 
@@ -269,8 +269,8 @@ test "eip1559 transaction" {
 
     const tx = try request.to_transaction();
     try testing.expect(tx == .eip1559);
-    try testing.expectEqual(@as(u64, 1), tx.eip1559.chain_id);
-    try testing.expectEqual(@as(u64, 42), tx.eip1559.nonce);
-    try testing.expectEqual(@as(u128, 20000000000), tx.eip1559.max_fee_per_gas);
-    try testing.expectEqual(@as(u128, 1000000000), tx.eip1559.max_priority_fee_per_gas);
+    try testing.expectEqual(1, tx.eip1559.chain_id);
+    try testing.expectEqual(42, tx.eip1559.nonce);
+    try testing.expectEqual(20000000000, tx.eip1559.max_fee_per_gas);
+    try testing.expectEqual(1000000000, tx.eip1559.max_priority_fee_per_gas);
 }
