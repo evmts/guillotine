@@ -37,53 +37,56 @@ const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
 const DatabaseError = @import("database_interface.zig").DatabaseError;
 const Account = @import("database_interface.zig").Account;
 
-/// Context for address hash map operations
-const AddressContext = struct {
-    pub fn hash(self: @This(), addr: [20]u8) u64 {
-        _ = self;
-        return std.hash_map.hashString(&addr);
-    }
+/// Generic hash context for HashMap operations with different key types.
+/// Supports byte arrays ([N]u8) and types with custom hash/eql methods like StorageKey.
+fn HashContext(comptime T: type) type {
+    return struct {
+        pub fn hash(self: @This(), key: T) u64 {
+            _ = self;
+            const type_info = @typeInfo(T);
+            
+            // Handle byte arrays ([N]u8) using hashString
+            if (type_info == .array and type_info.array.child == u8) {
+                return std.hash_map.hashString(&key);
+            }
+            // Handle types with custom hash method (like StorageKey)
+            else if (@hasDecl(T, "hash") and @hasDecl(T, "eql")) {
+                var hasher = std.hash.Wyhash.init(0);
+                key.hash(&hasher);
+                return hasher.final();
+            }
+            // Fallback for other types
+            else {
+                @compileError("Type " ++ @typeName(T) ++ " must either be a byte array or have hash() and eql() methods");
+            }
+        }
 
-    pub fn eql(self: @This(), a: [20]u8, b: [20]u8) bool {
-        _ = self;
-        return std.mem.eql(u8, &a, &b);
-    }
-};
-
-/// Context for storage key hash map operations
-const StorageKeyContext = struct {
-    pub fn hash(self: @This(), key: StorageKey) u64 {
-        _ = self;
-        var hasher = std.hash.Wyhash.init(0);
-        key.hash(&hasher);
-        return hasher.final();
-    }
-
-    pub fn eql(self: @This(), a: StorageKey, b: StorageKey) bool {
-        _ = self;
-        return StorageKey.eql(a, b);
-    }
-};
-
-/// Context for code hash (32-byte array) hash map operations
-const CodeHashContext = struct {
-    pub fn hash(self: @This(), code_hash: [32]u8) u64 {
-        _ = self;
-        return std.hash_map.hashString(&code_hash);
-    }
-
-    pub fn eql(self: @This(), a: [32]u8, b: [32]u8) bool {
-        _ = self;
-        return std.mem.eql(u8, &a, &b);
-    }
-};
+        pub fn eql(self: @This(), a: T, b: T) bool {
+            _ = self;
+            const type_info = @typeInfo(T);
+            
+            // Handle byte arrays ([N]u8) using mem.eql
+            if (type_info == .array and type_info.array.child == u8) {
+                return std.mem.eql(u8, &a, &b);
+            }
+            // Handle types with custom eql method (like StorageKey)
+            else if (@hasDecl(T, "eql")) {
+                return T.eql(a, b);
+            }
+            // Fallback for other types
+            else {
+                @compileError("Type " ++ @typeName(T) ++ " must either be a byte array or have eql() method");
+            }
+        }
+    };
+}
 
 /// Snapshot of database state for rollback support
 const Snapshot = struct {
     id: u64,
-    accounts: std.HashMap([20]u8, Account, AddressContext, 80),
-    storage: std.HashMap(StorageKey, u256, StorageKeyContext, 80),
-    code_storage: std.HashMap([32]u8, []u8, CodeHashContext, 80),
+    accounts: std.HashMap([20]u8, Account, HashContext([20]u8), 80),
+    storage: std.HashMap(StorageKey, u256, HashContext(StorageKey), 80),
+    code_storage: std.HashMap([32]u8, []u8, HashContext([32]u8), 80),
 
     fn deinit(self: *Snapshot, allocator: std.mem.Allocator) void {
         self.accounts.deinit();
@@ -97,12 +100,12 @@ const Snapshot = struct {
         self.code_storage.deinit();
     }
 
-    fn clone_from(allocator: std.mem.Allocator, source_accounts: *const std.HashMap([20]u8, Account, AddressContext, 80), source_storage: *const std.HashMap(StorageKey, u256, StorageKeyContext, 80), source_code: *const std.HashMap([32]u8, []u8, CodeHashContext, 80), snapshot_id: u64) !Snapshot {
+    fn clone_from(allocator: std.mem.Allocator, source_accounts: *const std.HashMap([20]u8, Account, HashContext([20]u8), 80), source_storage: *const std.HashMap(StorageKey, u256, HashContext(StorageKey), 80), source_code: *const std.HashMap([32]u8, []u8, HashContext([32]u8), 80), snapshot_id: u64) !Snapshot {
         var snapshot = Snapshot{
             .id = snapshot_id,
-            .accounts = std.HashMap([20]u8, Account, AddressContext, 80).init(allocator),
-            .storage = std.HashMap(StorageKey, u256, StorageKeyContext, 80).init(allocator),
-            .code_storage = std.HashMap([32]u8, []u8, CodeHashContext, 80).init(allocator),
+            .accounts = std.HashMap([20]u8, Account, HashContext([20]u8), 80).init(allocator),
+            .storage = std.HashMap(StorageKey, u256, HashContext(StorageKey), 80).init(allocator),
+            .code_storage = std.HashMap([32]u8, []u8, HashContext([32]u8), 80).init(allocator),
         };
 
         // Clone accounts
@@ -153,13 +156,13 @@ pub const MemoryDatabase = struct {
     allocator: std.mem.Allocator,
 
     /// Account data storage
-    accounts: std.HashMap([20]u8, Account, AddressContext, 80),
+    accounts: std.HashMap([20]u8, Account, HashContext([20]u8), 80),
 
     /// Contract storage (address, slot) -> value mapping
-    storage: std.HashMap(StorageKey, u256, StorageKeyContext, 80),
+    storage: std.HashMap(StorageKey, u256, HashContext(StorageKey), 80),
 
     /// Code storage by hash
-    code_storage: std.HashMap([32]u8, []u8, CodeHashContext, 80),
+    code_storage: std.HashMap([32]u8, []u8, HashContext([32]u8), 80),
 
     /// State snapshots for rollback support
     snapshots: std.ArrayList(Snapshot),
@@ -177,9 +180,9 @@ pub const MemoryDatabase = struct {
     pub fn init(allocator: std.mem.Allocator) MemoryDatabase {
         return MemoryDatabase{
             .allocator = allocator,
-            .accounts = std.HashMap([20]u8, Account, AddressContext, 80).init(allocator),
-            .storage = std.HashMap(StorageKey, u256, StorageKeyContext, 80).init(allocator),
-            .code_storage = std.HashMap([32]u8, []u8, CodeHashContext, 80).init(allocator),
+            .accounts = std.HashMap([20]u8, Account, HashContext([20]u8), 80).init(allocator),
+            .storage = std.HashMap(StorageKey, u256, HashContext(StorageKey), 80).init(allocator),
+            .code_storage = std.HashMap([32]u8, []u8, HashContext([32]u8), 80).init(allocator),
             .snapshots = std.ArrayList(Snapshot).init(allocator),
             .next_snapshot_id = 1,
             .batch_operations = null,
@@ -240,22 +243,7 @@ pub const MemoryDatabase = struct {
             });
         }
 
-        _ = self.accounts.remove(address);
-
-        // Remove all storage for this account
-        var storage_iter = self.storage.iterator();
-        var keys_to_remove = std.ArrayList(StorageKey).init(self.allocator);
-        defer keys_to_remove.deinit();
-
-        while (storage_iter.next()) |entry| {
-            if (std.mem.eql(u8, &entry.key_ptr.address, &address)) {
-                try keys_to_remove.append(entry.key_ptr.*);
-            }
-        }
-
-        for (keys_to_remove.items) |key| {
-            _ = self.storage.remove(key);
-        }
+        try self.remove_account_and_storage(address);
     }
 
     /// Check if account exists in the database
@@ -459,22 +447,7 @@ pub const MemoryDatabase = struct {
                     try self.accounts.put(op.address, op.account_data.?);
                 },
                 .DeleteAccount => {
-                    _ = self.accounts.remove(op.address);
-
-                    // Remove associated storage
-                    var storage_iter = self.storage.iterator();
-                    var keys_to_remove = std.ArrayList(StorageKey).init(self.allocator);
-                    defer keys_to_remove.deinit();
-
-                    while (storage_iter.next()) |entry| {
-                        if (std.mem.eql(u8, &entry.key_ptr.address, &op.address)) {
-                            try keys_to_remove.append(entry.key_ptr.*);
-                        }
-                    }
-
-                    for (keys_to_remove.items) |key| {
-                        _ = self.storage.remove(key);
-                    }
+                    try self.remove_account_and_storage(op.address);
                 },
                 .SetStorage => {
                     const storage_key = StorageKey{ .address = op.address, .slot = op.storage_key.? };
@@ -517,6 +490,26 @@ pub const MemoryDatabase = struct {
     fn add_batch_operation(self: *MemoryDatabase, operation: BatchOperation) DatabaseError!void {
         const batch_ops = &(self.batch_operations orelse return DatabaseError.NoBatchInProgress);
         try batch_ops.append(operation);
+    }
+
+    /// Helper to remove account and all its associated storage
+    fn remove_account_and_storage(self: *MemoryDatabase, address: [20]u8) DatabaseError!void {
+        _ = self.accounts.remove(address);
+
+        // Remove all storage for this account
+        var storage_iter = self.storage.iterator();
+        var keys_to_remove = std.ArrayList(StorageKey).init(self.allocator);
+        defer keys_to_remove.deinit();
+
+        while (storage_iter.next()) |entry| {
+            if (std.mem.eql(u8, &entry.key_ptr.address, &address)) {
+                try keys_to_remove.append(entry.key_ptr.*);
+            }
+        }
+
+        for (keys_to_remove.items) |key| {
+            _ = self.storage.remove(key);
+        }
     }
 
     /// Convert this memory database to a database interface
