@@ -101,9 +101,28 @@ pub fn get_operation(self: *const JumpTable, opcode: u8) *const Operation {
 ///
 /// This is the main dispatch function that:
 /// 1. Looks up the operation for the opcode
-/// 2. Validates stack requirements
+/// 2. Validates stack requirements (CRITICAL: This enables size optimization!)
 /// 3. Consumes gas
 /// 4. Executes the operation
+///
+/// ## SIZE OPTIMIZATION SAFETY GUARANTEE
+/// 
+/// The `validate_stack_requirements()` call at line 139 provides comprehensive
+/// stack validation for ALL operations using the min_stack/max_stack metadata
+/// from operation_config.zig. This validation ensures:
+/// 
+/// - Operations requiring 2 stack items (ADD, SUB, etc.) have >= 2 items
+/// - Operations requiring 3 stack items (ADDMOD, etc.) have >= 3 items  
+/// - Operations that push have sufficient capacity (stack.size <= max_stack)
+/// 
+/// BECAUSE of this validation, individual operations can safely use:
+/// - `stack.pop_unsafe()` without size checks
+/// - `stack.append_unsafe()` without capacity checks
+/// - `stack.dup_unsafe()` without bounds checks
+/// - `stack.swap_unsafe()` without bounds checks
+///
+/// This eliminates redundant size checks in hot paths, reducing binary size
+/// while maintaining EVM correctness and safety.
 ///
 /// @param self The jump table
 /// @param pc Current program counter

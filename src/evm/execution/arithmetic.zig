@@ -87,10 +87,8 @@ pub fn op_add(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
+    // Debug assertion: Jump table validation ensures we have >= 2 items
+    std.debug.assert(frame.stack.size >= 2);
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -131,11 +129,6 @@ pub fn op_mul(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
     const product = a *% b;
@@ -173,11 +166,6 @@ pub fn op_sub(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = pc;
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -224,11 +212,6 @@ pub fn op_div(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = pc;
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -281,11 +264,6 @@ pub fn op_sdiv(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     _ = pc;
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -347,11 +325,6 @@ pub fn op_mod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
 
@@ -403,11 +376,6 @@ pub fn op_smod(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     _ = pc;
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -467,10 +435,8 @@ pub fn op_addmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 3) {
-        @branchHint(.cold);
-        unreachable;
-    }
+    // Debug assertion: Jump table validation ensures we have >= 3 items
+    std.debug.assert(frame.stack.size >= 3);
 
     const n = frame.stack.pop_unsafe();
     const b = frame.stack.pop_unsafe();
@@ -533,11 +499,6 @@ pub fn op_mulmod(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     _ = pc;
     _ = interpreter;
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 3) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const n = frame.stack.pop_unsafe();
     const b = frame.stack.pop_unsafe();
@@ -623,11 +584,6 @@ pub fn op_exp(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
     const vm = @as(*Vm, @ptrCast(@alignCast(interpreter)));
     _ = vm;
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const exp = frame.stack.pop_unsafe();
     const base = frame.stack.peek_unsafe().*;
@@ -729,11 +685,6 @@ pub fn op_signextend(pc: usize, interpreter: *Operation.Interpreter, state: *Ope
     _ = interpreter;
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const byte_num = frame.stack.pop_unsafe();
     const x = frame.stack.peek_unsafe().*;
