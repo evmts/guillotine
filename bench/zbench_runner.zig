@@ -2,10 +2,15 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const evm_benchmark = @import("evm_benchmark.zig");
 const stack_benchmark = @import("stack_benchmark.zig");
+const memory_zbench = @import("memory_zbench.zig");
 
 pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     var benchmark = zbench.Benchmark.init(allocator, .{});
     defer benchmark.deinit();
+    
+    // Setup memory benchmarks
+    try memory_zbench.setup_benchmarks(allocator);
+    defer memory_zbench.cleanup_benchmarks();
     
     // Real EVM benchmarks (actual bytecode execution)
     try benchmark.add("EVM Arithmetic", evm_benchmark.evm_arithmetic_benchmark, .{});
@@ -60,6 +65,49 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     try benchmark.add("Stack set_top", stack_benchmark.bench_set_top, .{});
     try benchmark.add("Stack predictable pattern", stack_benchmark.bench_predictable_pattern, .{});
     try benchmark.add("Stack unpredictable pattern", stack_benchmark.bench_unpredictable_pattern, .{});
+    
+    // Memory benchmarks - Allocation and Expansion
+    try benchmark.add("Memory init (small)", memory_zbench.bench_memory_init_small, .{});
+    try benchmark.add("Memory init (large)", memory_zbench.bench_memory_init_large, .{});
+    try benchmark.add("Memory expansion (small)", memory_zbench.bench_memory_expansion_small, .{});
+    try benchmark.add("Memory expansion (large)", memory_zbench.bench_memory_expansion_large, .{});
+    try benchmark.add("Memory expansion (incremental)", memory_zbench.bench_memory_expansion_incremental, .{});
+    
+    // Memory benchmarks - Read Operations
+    try benchmark.add("Memory read u256 (sequential)", memory_zbench.bench_read_u256_sequential, .{});
+    try benchmark.add("Memory read u256 (random)", memory_zbench.bench_read_u256_random, .{});
+    try benchmark.add("Memory read slice (small)", memory_zbench.bench_read_slice_small, .{});
+    try benchmark.add("Memory read slice (large)", memory_zbench.bench_read_slice_large, .{});
+    try benchmark.add("Memory read byte (sequential)", memory_zbench.bench_read_byte_sequential, .{});
+    
+    // Memory benchmarks - Write Operations
+    try benchmark.add("Memory write u256 (sequential)", memory_zbench.bench_write_u256_sequential, .{});
+    try benchmark.add("Memory write u256 (random)", memory_zbench.bench_write_u256_random, .{});
+    try benchmark.add("Memory write data (small)", memory_zbench.bench_write_data_small, .{});
+    try benchmark.add("Memory write data (large)", memory_zbench.bench_write_data_large, .{});
+    try benchmark.add("Memory write data (bounded)", memory_zbench.bench_write_data_bounded, .{});
+    
+    // Memory benchmarks - Shared Buffer Architecture
+    try benchmark.add("Memory child context creation", memory_zbench.bench_child_context_creation, .{});
+    try benchmark.add("Memory child context access", memory_zbench.bench_child_context_access, .{});
+    
+    // Memory benchmarks - EVM Patterns
+    try benchmark.add("Memory EVM CODECOPY", memory_zbench.bench_evm_codecopy, .{});
+    try benchmark.add("Memory EVM CALLDATACOPY", memory_zbench.bench_evm_calldatacopy, .{});
+    try benchmark.add("Memory EVM RETURNDATACOPY", memory_zbench.bench_evm_returndatacopy, .{});
+    try benchmark.add("Memory EVM MLOAD/MSTORE", memory_zbench.bench_evm_mload_mstore, .{});
+    try benchmark.add("Memory EVM Keccak pattern", memory_zbench.bench_evm_keccak_pattern, .{});
+    try benchmark.add("Memory EVM expansion", memory_zbench.bench_evm_memory_expansion, .{});
+    
+    // Memory benchmarks - Edge Cases
+    try benchmark.add("Memory zero length ops", memory_zbench.bench_zero_length_ops, .{});
+    try benchmark.add("Memory near limit", memory_zbench.bench_near_memory_limit, .{});
+    try benchmark.add("Memory alignment patterns", memory_zbench.bench_alignment_patterns, .{});
+    
+    // Memory benchmarks - Copy vs Set
+    try benchmark.add("Memory memcpy (small)", memory_zbench.bench_memcpy_small, .{});
+    try benchmark.add("Memory memcpy (large)", memory_zbench.bench_memcpy_large, .{});
+    try benchmark.add("Memory memset pattern", memory_zbench.bench_memset_pattern, .{});
     
     // Run all benchmarks
     try benchmark.run(std.io.getStdOut().writer());
