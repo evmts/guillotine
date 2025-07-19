@@ -11,10 +11,8 @@ pub fn op_and(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
+    // Debug assertion: Jump table validation ensures we have >= 2 items
+    std.debug.assert(frame.stack.size >= 2);
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -32,11 +30,6 @@ pub fn op_or(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
 
@@ -52,11 +45,6 @@ pub fn op_xor(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = interpreter;
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
@@ -74,10 +62,8 @@ pub fn op_not(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 1) {
-        @branchHint(.cold);
-        unreachable;
-    }
+    // Debug assertion: Jump table validation ensures we have >= 1 item
+    std.debug.assert(frame.stack.size >= 1);
 
     const value = frame.stack.peek_unsafe().*;
 
@@ -93,11 +79,6 @@ pub fn op_byte(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     _ = interpreter;
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const i = frame.stack.pop_unsafe();
     const val = frame.stack.peek_unsafe().*;
@@ -126,11 +107,6 @@ pub fn op_shl(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
     const shift = frame.stack.pop_unsafe();
     const value = frame.stack.peek_unsafe().*;
 
@@ -154,11 +130,6 @@ pub fn op_shr(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
     const shift = frame.stack.pop_unsafe();
     const value = frame.stack.peek_unsafe().*;
 
@@ -181,11 +152,6 @@ pub fn op_sar(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     _ = interpreter;
 
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
-
-    if (frame.stack.size < 2) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     const shift = frame.stack.pop_unsafe();
     const value = frame.stack.peek_unsafe().*;
