@@ -174,6 +174,8 @@ pub const chain_rules = @import("hardforks/chain_rules.zig");
 
 /// Hardforks namespace for easier access
 pub const hardforks = struct {
+    pub const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
+    pub const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
     pub const chain_rules = @import("hardforks/chain_rules.zig");
     pub const hardfork = @import("hardforks/hardfork.zig");
 };

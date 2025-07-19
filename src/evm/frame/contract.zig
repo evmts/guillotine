@@ -1,42 +1,5 @@
-//! Production-quality Contract module for EVM execution context.
-//!
-//! This module provides the core abstraction for contract execution in the EVM,
-//! managing bytecode, gas accounting, storage access tracking, and JUMPDEST validation.
-//! It incorporates performance optimizations from modern EVM implementations including
-//! evmone, revm, and go-ethereum.
-//!
-//! ## Architecture
-//! The Contract structure represents a single execution frame in the EVM call stack.
-//! Each contract call (CALL, DELEGATECALL, STATICCALL, CREATE) creates a new Contract
-//! instance that tracks its own gas, storage access, and execution state.
-//!
-//! ## Performance Characteristics
-//! - **JUMPDEST validation**: O(log n) using binary search on pre-sorted positions
-//! - **Storage access**: O(1) with warm/cold tracking for EIP-2929
-//! - **Code analysis**: Cached globally with thread-safe access
-//! - **Memory management**: Zero-allocation paths for common operations
-//! - **Storage pooling**: Reuses hash maps to reduce allocation pressure
-//!
-//! ## Key Features
-//! 1. **Code Analysis Caching**: Bytecode is analyzed once and cached globally
-//! 2. **EIP-2929 Support**: Tracks warm/cold storage slots for gas calculation
-//! 3. **Static Call Protection**: Prevents state modifications in read-only contexts
-//! 4. **Gas Refund Tracking**: Manages gas refunds with EIP-3529 limits
-//! 5. **Deployment Support**: Handles both CREATE and CREATE2 deployment flows
-//!
-//! ## Thread Safety
-//! The global analysis cache uses mutex protection when multi-threaded,
-//! automatically degrading to no-op mutexes in single-threaded builds.
-//!
-//! ## Memory Management
-//! Contracts can optionally use a StoragePool to reuse hash maps across
-//! multiple contract executions, significantly reducing allocation overhead
-//! in high-throughput scenarios.
-//!
-//! ## Reference Implementations
-//! - go-ethereum: https://github.com/ethereum/go-ethereum/blob/master/core/vm/contract.go
-//! - revm: https://github.com/bluealloy/revm/blob/main/crates/interpreter/src/contract.rs
-//! - evmone: https://github.com/ethereum/evmone/blob/master/lib/evmone/execution_state.hpp
+//! Contract execution context with bytecode, gas accounting, and storage tracking.
+//! Cached JUMPDEST validation with warm/cold storage support for EIP-2929.
 const std = @import("std");
 const builtin = @import("builtin");
 const constants = @import("../constants/constants.zig");
@@ -67,37 +30,20 @@ const is_wasm = builtin.target.cpu.arch == .wasm32;
 // Only include mutex for non-WASM builds
 var cache_mutex = if (!is_wasm) std.Thread.Mutex{} else {};
 
-/// Contract represents the execution context for a single call frame in the EVM.
-///
-/// Each contract execution (whether from external transaction, internal call,
-/// or contract creation) operates within its own Contract instance. This design
-/// enables proper isolation, gas accounting, and state management across the
-/// call stack.
+/// Contract execution context for a single EVM call frame.
 const Contract = @This();
 
 // ============================================================================
 // Identity and Context Fields
 // ============================================================================
 
-/// The address where this contract's code is deployed.
-///
-/// - For regular calls: The callee's address
-/// - For DELEGATECALL: The current contract's address (code from elsewhere)
-/// - For CREATE/CREATE2: Initially zero, set after address calculation
+/// Contract's deployed address (callee for calls, zero for CREATE)
 address: primitives.Address.Address,
 
-/// The address that initiated this contract execution.
-///
-/// - For external transactions: The EOA that signed the transaction
-/// - For internal calls: The contract that executed CALL/DELEGATECALL/etc
-/// - For CREATE/CREATE2: The creating contract's address
-///
-/// Note: This is msg.sender in Solidity, not tx.origin
+/// Address that initiated this call (msg.sender in Solidity)
 caller: primitives.Address.Address,
 
-/// The amount of Wei sent with this contract call.
-///
-/// - Regular calls: Can be any amount (if not static)
+/// Wei amount sent with this call
 /// - DELEGATECALL: Always 0 (uses parent's value)
 /// - STATICCALL: Always 0 (no value transfer allowed)
 /// - CREATE/CREATE2: Initial balance for new contract
@@ -151,105 +97,50 @@ analysis: ?*const CodeAnalysis,
 /// Decremented by each operation according to its gas cost.
 /// If this reaches 0, execution halts with out-of-gas error.
 ///
-/// Gas forwarding rules:
-/// - CALL: Limited by 63/64 rule (EIP-150)
-/// - DELEGATECALL/STATICCALL: Same rules as CALL
-/// - CREATE/CREATE2: All remaining gas minus stipend
+/// Gas available for execution (limited by 63/64 rule for calls)
 gas: u64,
 
-/// Accumulated gas refund from storage operations.
-///
-/// Tracks gas to be refunded at transaction end from:
-/// - SSTORE: Clearing storage slots
-/// - SELFDESTRUCT: Contract destruction (pre-London)
-///
-/// Limited to gas_used / 5 by EIP-3529 (London hardfork).
+/// Gas refund from SSTORE/SELFDESTRUCT (limited by EIP-3529)
 gas_refund: u64,
 
 // ============================================================================
 // Input/Output Fields
 // ============================================================================
 
-/// Input data passed to this contract execution.
-///
-/// - External transactions: Transaction data field
-/// - CALL/STATICCALL: Data passed in call
-/// - DELEGATECALL: Data passed (preserves msg.data)
-/// - CREATE/CREATE2: Constructor arguments
-///
-/// Accessed via CALLDATALOAD, CALLDATASIZE, CALLDATACOPY opcodes.
+/// Input data (tx data, call data, or constructor args)
 input: []const u8,
 
 // ============================================================================
 // Execution Flags
 // ============================================================================
 
-/// Indicates this is a contract deployment (CREATE/CREATE2).
-///
-/// When true:
-/// - Executing initialization code (constructor)
-/// - No deployed code exists at the address yet
-/// - Result will be stored as contract code if successful
+/// True for CREATE/CREATE2 deployments
 is_deployment: bool,
 
-/// Indicates this is a system-level call.
-///
-/// System calls bypass certain checks and gas costs.
-/// Used for precompiles and protocol-level operations.
+/// True for system calls (precompiles, protocol ops)
 is_system_call: bool,
 
-/// Indicates read-only execution context (STATICCALL).
-///
-/// When true, these operations will fail:
-/// - SSTORE (storage modification)
-/// - LOG0-LOG4 (event emission)
-/// - CREATE/CREATE2 (contract creation)
-/// - SELFDESTRUCT (contract destruction)
-/// - CALL with value transfer
+/// True for STATICCALL (read-only, no state changes)
 is_static: bool,
 
 // ============================================================================
 // Storage Access Tracking (EIP-2929)
 // ============================================================================
 
-/// Tracks which storage slots have been accessed (warm vs cold).
-///
-/// EIP-2929 charges different gas costs:
-/// - Cold access (first time): 2100 gas
-/// - Warm access (subsequent): 100 gas
-///
-/// Key: storage slot, Value: true (accessed)
-/// Can be borrowed from StoragePool for efficiency.
+/// Storage slots accessed (EIP-2929 warm/cold tracking)
 storage_access: ?*std.AutoHashMap(u256, bool),
 
-/// Tracks original storage values for gas refund calculations.
-///
-/// Used by SSTORE to determine gas costs and refunds based on:
-/// - Original value (at transaction start)
-/// - Current value (in storage)
-/// - New value (being set)
-///
-/// Key: storage slot, Value: original value
+/// Original storage values for SSTORE gas calculations
 original_storage: ?*std.AutoHashMap(u256, u256),
 
-/// Whether this contract address was cold at call start.
-///
-/// Used for EIP-2929 gas calculations:
-/// - Cold contract: Additional 2600 gas for first access
-/// - Warm contract: No additional cost
-///
-/// Contracts become warm after first access in a transaction.
+/// True if contract address was cold at call start (EIP-2929)
 is_cold: bool,
 
 // ============================================================================
 // Optimization Fields
 // ============================================================================
 
-/// Quick flag indicating if bytecode contains any JUMPDEST opcodes.
-///
-/// Enables fast-path optimization:
-/// - If false, all jumps fail immediately (no valid destinations)
-/// - If true, full JUMPDEST analysis is needed
+/// Quick check: does bytecode contain JUMPDEST opcodes?
 ///
 /// Set during initialization by scanning bytecode.
 has_jumpdests: bool,

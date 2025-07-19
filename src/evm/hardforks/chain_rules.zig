@@ -2,286 +2,47 @@ const std = @import("std");
 const Hardfork = @import("hardfork.zig").Hardfork;
 const Log = @import("../log.zig");
 
-/// Configuration for Ethereum protocol rules and EIP activations across hardforks.
-///
-/// This structure defines which Ethereum Improvement Proposals (EIPs) and protocol
-/// rules are active during EVM execution. It serves as the central configuration
-/// point for hardfork-specific behavior, enabling the EVM to correctly execute
-/// transactions according to the rules of any supported Ethereum hardfork.
-///
-/// ## Purpose
-/// The Ethereum protocol evolves through hardforks that introduce new features,
-/// change gas costs, add opcodes, or modify execution semantics. This structure
-/// encapsulates all these changes, allowing the EVM to maintain compatibility
-/// with any point in Ethereum's history.
-///
-/// ## Default Configuration
-/// By default, all fields are set to support the latest stable hardfork (Cancun),
-/// ensuring new deployments get the most recent protocol features. Use the
-/// `for_hardfork()` method to configure for specific historical hardforks.
-///
-/// ## Usage Pattern
-/// ```zig
-/// // Create rules for a specific hardfork
-/// const rules = ChainRules.for_hardfork(.LONDON);
-///
-/// // Check if specific features are enabled
-/// if (rules.is_eip1559) {
-///     // Use EIP-1559 fee market logic
-/// }
-/// ```
-///
-/// ## Hardfork Progression
-/// The Ethereum mainnet hardfork progression:
-/// 1. Frontier (July 2015) - Initial release
-/// 2. Homestead (March 2016) - First major improvements
-/// 3. DAO Fork (July 2016) - Emergency fork after DAO hack
-/// 4. Tangerine Whistle (October 2016) - Gas repricing (EIP-150)
-/// 5. Spurious Dragon (November 2016) - State cleaning (EIP-158)
-/// 6. Byzantium (October 2017) - Major protocol upgrade
-/// 7. Constantinople (February 2019) - Efficiency improvements
-/// 8. Petersburg (February 2019) - Constantinople fix
-/// 9. Istanbul (December 2019) - Gas cost adjustments
-/// 10. Muir Glacier (January 2020) - Difficulty bomb delay
-/// 11. Berlin (April 2021) - Gas improvements (EIP-2929)
-/// 12. London (August 2021) - EIP-1559 fee market
-/// 13. Arrow Glacier (December 2021) - Difficulty bomb delay
-/// 14. Gray Glacier (June 2022) - Difficulty bomb delay
-/// 15. The Merge (September 2022) - Proof of Stake transition
-/// 16. Shanghai (April 2023) - Withdrawals enabled
-/// 17. Cancun (March 2024) - Proto-danksharding
-///
-/// ## Memory Layout
-/// This structure uses bool fields for efficient memory usage and fast access.
-/// The compiler typically packs multiple bools together for cache efficiency.
+/// Ethereum protocol rules and EIP activations for different hardforks.
+/// Defaults to latest stable hardfork (Cancun). Use for_hardfork() for historical forks.
 pub const ChainRules = @This();
 
-/// Homestead hardfork activation flag (March 2016).
-///
-/// ## Key Changes
-/// - Fixed critical issues from Frontier release
-/// - Introduced DELEGATECALL opcode (0xF4) for library pattern
-/// - Changed difficulty adjustment algorithm
-/// - Removed canary contracts
-/// - Fixed gas cost inconsistencies
-///
-/// ## EVM Impact
-/// - New opcode: DELEGATECALL for code reuse with caller's context
-/// - Modified CREATE behavior for out-of-gas scenarios
-/// - Changed gas costs for CALL operations
+/// Homestead (Mar 2016): DELEGATECALL opcode, difficulty adjustment
 is_homestead: bool = true,
 
-/// EIP-150 "Tangerine Whistle" hardfork activation (October 2016).
-///
-/// ## Purpose
-/// Addressed denial-of-service attack vectors by repricing operations
-/// that were underpriced relative to their computational complexity.
-///
-/// ## Key Changes
-/// - Increased gas costs for EXTCODESIZE, EXTCODECOPY, BALANCE, CALL, CALLCODE, DELEGATECALL
-/// - Increased gas costs for SLOAD from 50 to 200
-/// - 63/64 rule for CALL operations gas forwarding
-/// - Max call depth reduced from 1024 to 1024 (stack-based)
-///
-/// ## Security Impact
-/// Mitigated "Shanghai attacks" that exploited underpriced opcodes
-/// to create transactions consuming excessive resources.
+/// EIP-150 (Oct 2016): Gas repricing, 63/64 rule, DoS attack mitigation
 is_eip150: bool = true,
 
-/// EIP-158 "Spurious Dragon" hardfork activation (November 2016).
-///
-/// ## Purpose
-/// State size reduction through removal of empty accounts,
-/// complementing EIP-150's gas repricing.
-///
-/// ## Key Changes
-/// - Empty account deletion (nonce=0, balance=0, code empty)
-/// - Changed SELFDESTRUCT refund behavior
-/// - Introduced EXP cost increase for large exponents
+/// EIP-158 (Nov 2016): Empty account deletion, state cleaning
 /// - Replay attack protection via chain ID
 ///
 /// ## State Impact
-/// Significantly reduced state size by removing ~20 million empty
-/// accounts created by previous attacks.
 is_eip158: bool = true,
 
-/// EIP-1559 fee market mechanism activation (London hardfork).
-///
-/// ## Purpose
-/// Revolutionary change to Ethereum's fee mechanism introducing
-/// base fee burning and priority fees (tips).
-///
-/// ## Key Changes
-/// - Dynamic base fee adjusted per block based on utilization
-/// - Base fee burned, reducing ETH supply
-/// - Priority fee (tip) goes to miners/validators
-/// - New transaction type (Type 2) with maxFeePerGas and maxPriorityFeePerGas
-/// - BASEFEE opcode (0x48) to access current base fee
-///
-/// ## Economic Impact
-/// - More predictable gas prices
-/// - ETH becomes deflationary under high usage
-/// - Better UX with fee estimation
+/// EIP-1559: Base fee burning, priority fees, BASEFEE opcode
 is_eip1559: bool = true,
 
-/// Constantinople hardfork activation (February 2019).
-///
-/// ## Purpose
-/// Optimization-focused upgrade adding cheaper operations and
-/// preparing for future scaling solutions.
-///
-/// ## Key Changes
-/// - New opcodes: SHL (0x1B), SHR (0x1C), SAR (0x1D) for bitwise shifting
-/// - New opcode: EXTCODEHASH (0x3F) for cheaper code hash access
-/// - CREATE2 (0xF5) for deterministic contract addresses
-/// - Reduced gas costs for SSTORE operations (EIP-1283)
-/// - Delayed difficulty bomb by 12 months
-///
-/// ## Developer Impact
-/// - Bitwise operations enable more efficient algorithms
-/// - CREATE2 enables counterfactual instantiation patterns
-/// - Cheaper storage operations for certain patterns
+/// Constantinople (Feb 2019): Shift opcodes, EXTCODEHASH, CREATE2
 is_constantinople: bool = true,
 
-/// Petersburg hardfork activation (February 2019).
-///
-/// ## Purpose
-/// Emergency fix to Constantinople, disabling EIP-1283 due to
-/// reentrancy concerns discovered before mainnet deployment.
-///
-/// ## Key Changes
-/// - Removed EIP-1283 (SSTORE gas metering) from Constantinople
-/// - Kept all other Constantinople features
-/// - Essentially Constantinople minus problematic EIP
-///
-/// ## Historical Note
-/// Constantinople was deployed on testnet but postponed on mainnet
-/// when security researchers found the reentrancy issue. Petersburg
-/// represents the actually deployed version.
+/// Petersburg (Feb 2019): Constantinople with EIP-1283 disabled
 is_petersburg: bool = true,
 
-/// Istanbul hardfork activation (December 2019).
-///
-/// ## Purpose
-/// Gas cost adjustments based on real-world usage data and addition
-/// of new opcodes for layer 2 support.
-///
-/// ## Key Changes
-/// - EIP-152: Blake2b precompile for interoperability
-/// - EIP-1108: Reduced alt_bn128 precompile gas costs
-/// - EIP-1344: CHAINID opcode (0x46) for replay protection
-/// - EIP-1884: Repricing for trie-size dependent opcodes
-/// - EIP-2028: Reduced calldata gas cost (16 gas per non-zero byte)
-/// - EIP-2200: Rebalanced SSTORE gas cost with stipend
-///
-/// ## Opcodes Added
-/// - CHAINID (0x46): Returns the current chain ID
-/// - SELFBALANCE (0x47): Get balance without expensive BALANCE call
-///
-/// ## Performance Impact
-/// Significant reduction in costs for L2 solutions using calldata.
+/// Istanbul (Dec 2019): CHAINID, SELFBALANCE opcodes, gas repricing
 is_istanbul: bool = true,
 
-/// Berlin hardfork activation (April 2021).
-///
-/// ## Purpose
-/// Major gas model reform introducing access lists and fixing
-/// long-standing issues with state access pricing.
-///
-/// ## Key Changes
-/// - EIP-2565: Reduced ModExp precompile gas cost
-/// - EIP-2718: Typed transaction envelope framework
-/// - EIP-2929: Gas cost increase for state access opcodes
-/// - EIP-2930: Optional access lists (Type 1 transactions)
-///
-/// ## Access List Impact
-/// - First-time SLOAD: 2100 gas (cold) vs 100 gas (warm)
-/// - First-time account access: 2600 gas (cold) vs 100 gas (warm)
-/// - Transactions can pre-declare accessed state for gas savings
-///
-/// ## Developer Considerations
-/// Access lists allow contracts to optimize gas usage by pre-warming
-/// storage slots and addresses they'll interact with.
+/// Berlin (Apr 2021): Gas repricing, access lists, cold/warm state access
 is_berlin: bool = true,
 
-/// London hardfork activation (August 2021).
-///
-/// ## Purpose
-/// Most significant economic change to Ethereum, introducing base fee
-/// burning and dramatically improving fee predictability.
-///
-/// ## Key Changes
-/// - EIP-1559: Fee market reform with base fee burning
-/// - EIP-3198: BASEFEE opcode (0x48) to read current base fee
-/// - EIP-3529: Reduction in refunds (SELFDESTRUCT, SSTORE)
-/// - EIP-3541: Reject contracts starting with 0xEF byte
-/// - EIP-3554: Difficulty bomb delay
-///
-/// ## EIP-3541 Impact
-/// Reserves 0xEF prefix for future EVM Object Format (EOF),
-/// preventing deployment of contracts with this prefix.
-///
-/// ## Economic Changes
-/// - Base fee burned makes ETH potentially deflationary
-/// - Gas price volatility significantly reduced
-/// - Better fee estimation and user experience
+/// London (Aug 2021): EIP-1559 fee market, BASEFEE opcode, 0xEF prefix rejection
 is_london: bool = true,
 
-/// The Merge activation (September 2022).
-///
-/// ## Purpose
-/// Historic transition from Proof of Work to Proof of Stake,
-/// reducing energy consumption by ~99.95%.
-///
-/// ## Key Changes
-/// - EIP-3675: Consensus layer transition
-/// - EIP-4399: DIFFICULTY (0x44) renamed to PREVRANDAO
-/// - Removed block mining rewards
-/// - Block time fixed at ~12 seconds
-///
-/// ## PREVRANDAO Usage
-/// The DIFFICULTY opcode now returns the previous block's RANDAO
-/// value, providing a source of randomness from the beacon chain.
-/// Not suitable for high-security randomness needs.
-///
-/// ## Network Impact
-/// - No more uncle blocks
-/// - Predictable block times
-/// - Validators replace miners
+/// The Merge (Sep 2022): PoW to PoS, DIFFICULTY→PREVRANDAO
 is_merge: bool = true,
 
-/// Shanghai hardfork activation (April 2023).
-///
-/// ## Purpose
-/// First major upgrade post-Merge, enabling validator withdrawals
-/// and introducing efficiency improvements.
-///
-/// ## Key Changes
-/// - EIP-3651: Warm COINBASE address (reduced gas for MEV)
-/// - EIP-3855: PUSH0 opcode (0x5F) for gas efficiency
-/// - EIP-3860: Limit and meter initcode size
-/// - EIP-4895: Beacon chain withdrawals
-///
-/// ## PUSH0 Impact
-/// New opcode that pushes zero onto stack for 2 gas,
-/// replacing common pattern of `PUSH1 0` (3 gas).
-///
-/// ## Withdrawal Mechanism
-/// Validators can finally withdraw staked ETH, completing
-/// the Proof of Stake transition.
+/// Shanghai (Apr 2023): PUSH0 opcode, validator withdrawals, initcode limits
 is_shanghai: bool = true,
 
-/// Cancun hardfork activation (March 2024).
-///
-/// ## Purpose
-/// Major scalability upgrade introducing blob transactions for L2s
-/// and transient storage for advanced contract patterns.
-///
-/// ## Key Changes
-/// - EIP-1153: Transient storage opcodes (TLOAD 0x5C, TSTORE 0x5D)
-/// - EIP-4844: Proto-danksharding with blob transactions
-/// - EIP-4788: Beacon block root in EVM
-/// - EIP-5656: MCOPY opcode (0x5E) for memory copying
+/// Cancun (Mar 2024): Proto-danksharding, transient storage, MCOPY
 /// - EIP-6780: SELFDESTRUCT only in same transaction
 /// - EIP-7516: BLOBBASEFEE opcode (0x4A)
 ///
@@ -436,55 +197,12 @@ is_eip3855: bool = true,
 /// ## Key Limits
 /// - Maximum initcode size: 49152 bytes (2x max contract size)
 /// - Gas cost: 2 gas per 32-byte word of initcode
-///
-/// ## Affected Operations
-/// - CREATE: Limited initcode size
-/// - CREATE2: Limited initcode size
-/// - Contract creation transactions
-///
-/// ## Security Rationale
-/// Previously unlimited initcode could cause nodes to consume
-/// excessive resources during contract deployment verification.
 is_eip3860: bool = true,
 
-/// EIP-4895 beacon chain withdrawals activation (Shanghai hardfork).
-///
-/// ## Purpose
-/// Enables validators to withdraw staked ETH from the beacon chain
-/// to the execution layer, completing the PoS transition.
-///
-/// ## Mechanism
-/// - Withdrawals are processed as system-level operations
-/// - Not regular transactions - no gas cost or signature
-/// - Automatically credited to withdrawal addresses
-/// - Up to 16 withdrawals per block
-///
-/// ## Validator Operations
-/// - Partial withdrawals: Excess balance above 32 ETH
-/// - Full withdrawals: Complete exit from validation
-///
-/// ## Network Impact
-/// Completes the Ethereum staking lifecycle, allowing validators
-/// to access their staked funds and rewards.
+/// EIP-4895: Beacon chain validator withdrawals
 is_eip4895: bool = true,
 
-/// EIP-4844 proto-danksharding activation (Cancun hardfork).
-///
-/// ## Purpose
-/// Introduces blob-carrying transactions for scalable data availability,
-/// reducing L2 costs by ~10-100x through temporary data storage.
-///
-/// ## Blob Details
-/// - Size: 4096 field elements (~125 KB)
-/// - Max per block: 6 blobs (~750 KB)
-/// - Retention: ~18 days (4096 epochs)
-/// - Separate fee market with blob base fee
-///
-/// ## New Components
-/// - Type 3 transactions with blob commitments
-/// - KZG commitments for data availability proofs
-/// - Blob fee market independent of execution gas
-/// - BLOBHASH opcode (0x49) to access blob commitments
+/// EIP-4844: Blob transactions for L2 data availability
 ///
 /// ## L2 Impact
 /// Dramatically reduces costs for rollups by providing

@@ -1,48 +1,25 @@
-/// EVM gas cost constants for opcode execution
-///
-/// This module defines all gas cost constants used in EVM execution according
-/// to the Ethereum Yellow Paper and various EIPs. Gas costs are critical for
-/// preventing denial-of-service attacks and fairly pricing computational resources.
-///
-/// ## Gas Cost Categories
-///
-/// Operations are grouped by computational complexity:
-/// - **Quick** (2 gas): Trivial operations like PC, MSIZE, GAS
-/// - **Fastest** (3 gas): Simple arithmetic like ADD, SUB, NOT, LT, GT
-/// - **Fast** (5 gas): More complex arithmetic like MUL, DIV, MOD
-/// - **Mid** (8 gas): Advanced arithmetic like ADDMOD, MULMOD, SIGNEXTEND
-/// - **Slow** (10 gas): Operations requiring more computation
-/// - **Ext** (20+ gas): External operations like BALANCE, EXTCODESIZE
+/// EVM gas cost constants organized by computational complexity
 
 // ============================================================================
 // Basic Opcode Costs
 // ============================================================================
 
-/// Gas cost for very cheap operations
-/// Operations: ADDRESS, ORIGIN, CALLER, CALLVALUE, CALLDATASIZE, CODESIZE,
-/// GASPRICE, RETURNDATASIZE, PC, MSIZE, GAS, CHAINID, SELFBALANCE
+/// 2 gas: Trivial ops (PC, MSIZE, ADDRESS, etc)
 pub const GasQuickStep: u64 = 2;
 
-/// Gas cost for simple arithmetic and logic operations
-/// Operations: ADD, SUB, NOT, LT, GT, SLT, SGT, EQ, ISZERO, AND, OR, XOR,
-/// CALLDATALOAD, MLOAD, MSTORE, MSTORE8, PUSH operations, DUP operations,
-/// SWAP operations
+/// 3 gas: Simple arithmetic (ADD, SUB, MLOAD, PUSH, etc)
 pub const GasFastestStep: u64 = 3;
 
-/// Gas cost for multiplication and division operations
-/// Operations: MUL, DIV, SDIV, MOD, SMOD, EXP (per byte of exponent)
+/// 5 gas: MUL, DIV, MOD operations
 pub const GasFastStep: u64 = 5;
 
-/// Gas cost for advanced arithmetic operations
-/// Operations: ADDMOD, MULMOD, SIGNEXTEND, KECCAK256 (base cost)
+/// 8 gas: Advanced arithmetic (ADDMOD, MULMOD, SIGNEXTEND)
 pub const GasMidStep: u64 = 8;
 
-/// Gas cost for operations requiring moderate computation
-/// Operations: JUMPI
+/// 10 gas: JUMPI and similar
 pub const GasSlowStep: u64 = 10;
 
-/// Gas cost for operations that interact with other accounts/contracts
-/// Operations: BALANCE, EXTCODESIZE, BLOCKHASH
+/// 20 gas: External operations (BALANCE, EXTCODESIZE)
 pub const GasExtStep: u64 = 20;
 
 // ============================================================================
