@@ -1,7 +1,7 @@
 const std = @import("std");
 const Log = @import("../log.zig");
-const Memory = @import("./memory.zig").Memory;
-const MemoryError = @import("errors.zig").MemoryError;
+const memory = @import("./memory.zig");
+const errors = @import("errors.zig");
 const context = @import("context.zig");
 
 // NOTE: This file has been reviewed for issue #8 optimization opportunities.
@@ -12,13 +12,13 @@ const context = @import("context.zig");
 // No further optimizations are needed.
 
 /// Write arbitrary data at context-relative offset.
-pub inline fn set_data(self: *Memory, relative_offset: usize, data: []const u8) MemoryError!void {
+pub inline fn set_data(self: *memory.Memory, relative_offset: usize, data: []const u8) errors.MemoryError!void {
     // Debug logging removed for fuzz testing compatibility
     if (data.len == 0) return;
 
     const end = std.math.add(usize, relative_offset, data.len) catch {
         // Debug logging removed for fuzz testing compatibility
-        return MemoryError.InvalidSize;
+        return errors.MemoryError.InvalidSize;
     };
     _ = try self.ensure_context_capacity(end);
 
@@ -30,15 +30,15 @@ pub inline fn set_data(self: *Memory, relative_offset: usize, data: []const u8) 
 
 /// Write data with source offset and length (handles partial copies and zero-fills).
 pub fn set_data_bounded(
-    self: *Memory,
+    self: *memory.Memory,
     relative_memory_offset: usize,
     data: []const u8,
     data_offset: usize,
     len: usize,
-) MemoryError!void {
+) errors.MemoryError!void {
     if (len == 0) return;
 
-    const end = std.math.add(usize, relative_memory_offset, len) catch return MemoryError.InvalidSize;
+    const end = std.math.add(usize, relative_memory_offset, len) catch return errors.MemoryError.InvalidSize;
     _ = try self.ensure_context_capacity(end);
 
     const abs_offset = self.my_checkpoint + relative_memory_offset;
@@ -69,7 +69,7 @@ pub fn set_data_bounded(
 }
 
 /// Write u256 value at context-relative offset (for test compatibility)
-pub inline fn set_u256(self: *Memory, relative_offset: usize, value: u256) MemoryError!void {
+pub inline fn set_u256(self: *memory.Memory, relative_offset: usize, value: u256) errors.MemoryError!void {
     _ = try self.ensure_context_capacity(relative_offset + 32);
     const abs_offset = self.my_checkpoint + relative_offset;
     const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + 32].ptr);

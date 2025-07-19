@@ -1,7 +1,7 @@
 const std = @import("std");
 const crypto = std.crypto;
 const primitives = @import("primitives");
-const Address = primitives.Address.Address;
+// Direct use: primitives.Address.Address
 
 /// ⚠️ UNAUDITED CUSTOM CRYPTO IMPLEMENTATION - NOT SECURITY AUDITED ⚠️
 ///
@@ -149,7 +149,7 @@ pub fn unaudited_recover_address(
     recovery_id: u8,
     r: u256,
     s: u256,
-) !Address {
+) !primitives.Address.Address {
     if (hash.len != 32) return error.InvalidHashLength;
     if (recovery_id > 1) return error.InvalidRecoveryId;
     if (!unaudited_validate_signature(r, s)) return error.InvalidSignature;
@@ -210,7 +210,7 @@ pub fn unaudited_recover_address(
     var hash_out: [32]u8 = undefined;
     keccak.final(&hash_out);
 
-    var address: Address = undefined;
+    var address: primitives.Address.Address = undefined;
     @memcpy(&address, hash_out[12..32]);
 
     return address;
@@ -580,7 +580,7 @@ test "Ethereum test vectors - signature recovery" {
         r: u256,
         s: u256,
         v: u8,
-        expected_address: Address,
+        expected_address: primitives.Address.Address,
     };
 
     const test_vectors = [_]TestVector{
