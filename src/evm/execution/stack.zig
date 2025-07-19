@@ -85,11 +85,6 @@ pub fn make_push(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.S
 
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-            if (frame.stack.size >= Stack.CAPACITY) {
-                @branchHint(.cold);
-                unreachable;
-            }
-
             var value: u256 = 0;
             const code = frame.contract.code;
 
@@ -121,11 +116,6 @@ pub fn push_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const opcode = frame.contract.code[pc];
     const n = opcode - 0x5f; // PUSH1 is 0x60, so n = opcode - 0x5f
 
-    if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
     var value: u256 = 0;
     const code = frame.contract.code;
 
@@ -156,15 +146,6 @@ pub fn make_dup(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.St
 
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-            if (frame.stack.size < n) {
-                @branchHint(.cold);
-                unreachable;
-            }
-            if (frame.stack.size >= Stack.CAPACITY) {
-                @branchHint(.cold);
-                unreachable;
-            }
-
             frame.stack.dup_unsafe(n);
 
             return Operation.ExecutionResult{};
@@ -179,15 +160,6 @@ pub fn dup_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
     const opcode = frame.contract.code[pc];
     const n = opcode - 0x7f; // DUP1 is 0x80, so n = opcode - 0x7f
-
-    if (frame.stack.size < n) {
-        @branchHint(.cold);
-        unreachable;
-    }
-    if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     frame.stack.dup_unsafe(@intCast(n));
 
@@ -205,11 +177,6 @@ pub fn make_swap(comptime n: u8) fn (usize, *Operation.Interpreter, *Operation.S
 
             const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
-            if (frame.stack.size < n + 1) {
-                @branchHint(.cold);
-                unreachable;
-            }
-
             frame.stack.swap_unsafe(n);
 
             return Operation.ExecutionResult{};
@@ -224,11 +191,6 @@ pub fn swap_n(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
     const opcode = frame.contract.code[pc];
     const n = opcode - 0x8f; // SWAP1 is 0x90, so n = opcode - 0x8f
-
-    if (frame.stack.size < n + 1) {
-        @branchHint(.cold);
-        unreachable;
-    }
 
     frame.stack.swap_unsafe(@intCast(n));
 

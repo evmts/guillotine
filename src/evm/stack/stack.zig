@@ -16,9 +16,27 @@ const std = @import("std");
 /// - Unsafe variants used after jump table validation
 /// - Direct memory access patterns for maximum speed
 ///
-/// ## Safety Model
-/// Operations are validated at the jump table level, allowing individual
-/// opcodes to use faster unsafe operations without redundant bounds checking.
+/// ## SIZE OPTIMIZATION SAFETY MODEL
+/// 
+/// This stack provides two operation variants:
+/// 1. **Safe operations** (`append()`, `pop()`) - Include bounds checking
+/// 2. **Unsafe operations** (`append_unsafe()`, `pop_unsafe()`) - No bounds checking
+/// 
+/// The unsafe variants are used in opcode implementations after the jump table
+/// performs comprehensive validation via `validate_stack_requirements()`. This
+/// centralized validation approach:
+/// 
+/// - Eliminates redundant checks in individual opcodes (smaller binary)
+/// - Maintains safety by validating ALL operations before execution
+/// - Enables maximum performance in the hot path
+/// 
+/// **SAFETY GUARANTEE**: All unsafe operations assume preconditions are met:
+/// - `pop_unsafe()`: Stack must not be empty
+/// - `append_unsafe()`: Stack must have capacity  
+/// - `dup_unsafe(n)`: Stack must have >= n items and capacity for +1
+/// - `swap_unsafe(n)`: Stack must have >= n+1 items
+/// 
+/// These preconditions are enforced by jump table validation.
 ///
 /// Example:
 /// ```zig
