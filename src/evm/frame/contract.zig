@@ -11,22 +11,22 @@
 //! instance that tracks its own gas, storage access, and execution state.
 //!
 //! ## Performance Characteristics
-//! - **JUMPDEST validation**: O(log n) using binary search on pre-sorted positions
+//! - **JUMPDEST validation**: O(n) using linear search for size optimization
 //! - **Storage access**: O(1) with warm/cold tracking for EIP-2929
-//! - **Code analysis**: Cached globally with thread-safe access
+//! - **Code analysis**: Performed on-demand for size optimization
 //! - **Memory management**: Zero-allocation paths for common operations
 //! - **Storage pooling**: Reuses hash maps to reduce allocation pressure
 //!
 //! ## Key Features
-//! 1. **Code Analysis Caching**: Bytecode is analyzed once and cached globally
+//! 1. **Code Analysis**: Bytecode is analyzed on-demand for size optimization
 //! 2. **EIP-2929 Support**: Tracks warm/cold storage slots for gas calculation
 //! 3. **Static Call Protection**: Prevents state modifications in read-only contexts
 //! 4. **Gas Refund Tracking**: Manages gas refunds with EIP-3529 limits
 //! 5. **Deployment Support**: Handles both CREATE and CREATE2 deployment flows
 //!
-//! ## Thread Safety
-//! The global analysis cache uses mutex protection when multi-threaded,
-//! automatically degrading to no-op mutexes in single-threaded builds.
+//! ## Size Optimization
+//! Analysis is performed on-demand without caching to minimize memory usage
+//! and binary size, trading some performance for reduced resource consumption.
 //!
 //! ## Memory Management
 //! Contracts can optionally use a StoragePool to reuse hash maps across
@@ -50,6 +50,19 @@ const Log = @import("../log.zig");
 /// Maximum gas refund allowed (EIP-3529)
 const MAX_REFUND_QUOTIENT = 5;
 
+/// Helper function to create and initialize a HashMap
+fn createHashMap(comptime K: type, comptime V: type, allocator: std.mem.Allocator) !*std.AutoHashMap(K, V) {
+    const map = try allocator.create(std.AutoHashMap(K, V));
+    errdefer allocator.destroy(map);
+    map.* = std.AutoHashMap(K, V).init(allocator);
+    return map;
+}
+
+/// Helper function to log errors consistently
+fn logError(comptime context: []const u8, err: anyerror) void {
+    Log.debug("{s}: {any}", .{context, err});
+}
+
 /// Error types for Contract operations
 pub const ContractError = std.mem.Allocator.Error || StorageOperationError;
 pub const StorageOperationError = error{
@@ -58,14 +71,8 @@ pub const StorageOperationError = error{
 };
 pub const CodeAnalysisError = std.mem.Allocator.Error;
 
-/// Global analysis cache
-var analysis_cache: ?std.AutoHashMap([32]u8, *CodeAnalysis) = null;
-
 // Comptime check for WASM target
 const is_wasm = builtin.target.cpu.arch == .wasm32;
-
-// Only include mutex for non-WASM builds
-var cache_mutex = if (!is_wasm) std.Thread.Mutex{} else {};
 
 /// Contract represents the execution context for a single call frame in the EVM.
 ///
@@ -245,24 +252,6 @@ is_cold: bool,
 // Optimization Fields
 // ============================================================================
 
-/// Quick flag indicating if bytecode contains any JUMPDEST opcodes.
-///
-/// Enables fast-path optimization:
-/// - If false, all jumps fail immediately (no valid destinations)
-/// - If true, full JUMPDEST analysis is needed
-///
-/// Set during initialization by scanning bytecode.
-has_jumpdests: bool,
-
-/// Flag indicating empty bytecode.
-///
-/// Empty contracts (no code) are common in Ethereum:
-/// - EOAs (externally owned accounts)
-/// - Destroyed contracts
-/// - Contracts that failed deployment
-///
-/// Enables fast-path for calls to codeless addresses.
-is_empty: bool,
 
 /// Creates a new Contract for executing existing deployed code.
 ///
@@ -320,8 +309,6 @@ pub fn init(
         .gas_refund = 0,
         .is_deployment = false,
         .is_system_call = false,
-        .has_jumpdests = contains_jumpdest(code),
-        .is_empty = code.len == 0,
     };
 }
 
@@ -383,8 +370,6 @@ pub fn init_deployment(
         .gas_refund = 0,
         .is_deployment = true,
         .is_system_call = false,
-        .has_jumpdests = contains_jumpdest(code),
-        .is_empty = code.len == 0,
     };
 
     if (salt == null) return contract;
@@ -396,9 +381,8 @@ pub fn init_deployment(
 
 /// Performs a quick scan to check if bytecode contains any JUMPDEST opcodes.
 ///
-/// This is a fast O(n) scan used during contract initialization to set
-/// the `has_jumpdests` flag. If no JUMPDESTs exist, we can skip all
-/// jump validation as any JUMP/JUMPI will fail.
+/// This is a fast O(n) scan used for on-demand optimization.
+/// If no JUMPDESTs exist, we can skip all jump validation as any JUMP/JUMPI will fail.
 ///
 /// ## Note
 /// This doesn't account for JUMPDEST bytes inside PUSH data.
@@ -431,8 +415,8 @@ fn contains_jumpdest(code: []const u8) bool {
 ///
 /// ## Performance
 /// - Fast path: Empty code or no JUMPDESTs (immediate false)
-/// - Analyzed code: O(log n) binary search
-/// - First jump: O(n) analysis then O(log n) search
+/// - Analyzed code: O(n) linear search
+/// - First jump: O(n) analysis then O(n) search
 ///
 /// ## Example
 /// ```zig
@@ -442,39 +426,22 @@ fn contains_jumpdest(code: []const u8) bool {
 /// ```
 pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256) bool {
     // Fast path: empty code or out of bounds
-    if (self.is_empty or dest >= self.code_size) return false;
+    if (self.code.len == 0 or dest >= self.code_size) return false;
 
-    // Fast path: no JUMPDESTs in code
-    if (!self.has_jumpdests) return false;
+    // Fast path: no JUMPDESTs in code (compute on-demand for size optimization)
+    if (!contains_jumpdest(self.code)) return false;
     const pos: u32 = @intCast(@min(dest, std.math.maxInt(u32)));
 
     // Ensure analysis is performed
     self.ensure_analysis(allocator);
 
-    // Search for JUMPDEST position
+    // Search for JUMPDEST position using linear search (optimized for size)
     if (self.analysis) |analysis| {
         if (analysis.jumpdest_positions.len > 0) {
-            if (comptime builtin.mode == .ReleaseSmall) {
-                // Linear search in ReleaseSmall mode (saves ~49KB by avoiding sort)
-                for (analysis.jumpdest_positions) |jumpdest_pos| {
-                    if (jumpdest_pos == pos) return true;
-                }
-                return false;
-            } else {
-                // Binary search for performance in other modes
-                const Context = struct { target: u32 };
-                const found = std.sort.binarySearch(
-                    u32,
-                    analysis.jumpdest_positions,
-                    Context{ .target = pos },
-                    struct {
-                        fn compare(ctx: Context, item: u32) std.math.Order {
-                            return std.math.order(ctx.target, item);
-                        }
-                    }.compare,
-                );
-                return found != null;
+            for (analysis.jumpdest_positions) |jumpdest_pos| {
+                if (jumpdest_pos == pos) return true;
             }
+            return false;
         }
     }
     // Fallback: check if position is code and contains JUMPDEST opcode
@@ -486,10 +453,10 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
 
 /// Ensure code analysis is performed
 fn ensure_analysis(self: *Contract, allocator: std.mem.Allocator) void {
-    if (self.analysis == null and !self.is_empty) {
+    if (self.analysis == null and self.code.len > 0) {
         self.analysis = analyze_code(allocator, self.code, self.code_hash) catch |err| {
             // Log analysis failure for debugging - but continue execution
-            Log.debug("Contract.ensure_analysis: analyze_code failed: {any}", .{err});
+            logError("Contract.ensure_analysis: analyze_code failed", err);
             return;
         };
     }
@@ -559,16 +526,15 @@ pub fn mark_storage_slot_warm(self: *Contract, allocator: std.mem.Allocator, slo
         if (pool) |p| {
             self.storage_access = p.borrow_access_map() catch |err| switch (err) {
                 StoragePool.BorrowAccessMapError.OutOfAllocatorMemory => {
-                    Log.debug("Contract.mark_storage_slot_warm: failed to borrow access map: {any}", .{err});
+                    logError("Contract.mark_storage_slot_warm: failed to borrow access map", err);
                     return MarkStorageSlotWarmError.OutOfAllocatorMemory;
                 },
             };
         } else {
-            self.storage_access = allocator.create(std.AutoHashMap(u256, bool)) catch |err| {
-                Log.debug("Contract.mark_storage_slot_warm: allocation failed: {any}", .{err});
+            self.storage_access = createHashMap(u256, bool, allocator) catch |err| {
+                logError("Contract.mark_storage_slot_warm: allocation failed", err);
                 return MarkStorageSlotWarmError.OutOfAllocatorMemory;
             };
-            self.storage_access.?.* = std.AutoHashMap(u256, bool).init(allocator);
         }
     }
 
@@ -576,7 +542,7 @@ pub fn mark_storage_slot_warm(self: *Contract, allocator: std.mem.Allocator, slo
     const was_cold = !map.contains(slot);
     if (was_cold) {
         map.put(slot, true) catch |err| {
-            Log.debug("Contract.mark_storage_slot_warm: map.put failed: {any}", .{err});
+            logError("Contract.mark_storage_slot_warm: map.put failed", err);
             return MarkStorageSlotWarmError.OutOfAllocatorMemory;
         };
     }
@@ -598,25 +564,24 @@ pub fn mark_storage_slots_warm(self: *Contract, allocator: std.mem.Allocator, sl
     if (self.storage_access == null) {
         if (pool) |p| {
             self.storage_access = p.borrow_access_map() catch |err| {
-                Log.debug("Failed to borrow access map from pool: {any}", .{err});
+                logError("Failed to borrow access map from pool", err);
                 return switch (err) {
                     StoragePool.BorrowAccessMapError.OutOfAllocatorMemory => StorageOperationError.OutOfAllocatorMemory,
                 };
             };
         } else {
-            self.storage_access = allocator.create(std.AutoHashMap(u256, bool)) catch |err| {
-                Log.debug("Failed to create storage access map: {any}", .{err});
+            self.storage_access = createHashMap(u256, bool, allocator) catch |err| {
+                logError("Failed to create storage access map", err);
                 return switch (err) {
                     std.mem.Allocator.Error.OutOfMemory => std.mem.Allocator.Error.OutOfMemory,
                 };
             };
-            self.storage_access.?.* = std.AutoHashMap(u256, bool).init(allocator);
         }
     }
 
     const map = self.storage_access.?;
     map.ensureTotalCapacity(@as(u32, @intCast(map.count() + slots.len))) catch |err| {
-        Log.debug("Failed to ensure capacity for {d} storage slots: {any}", .{ slots.len, err });
+        logError("Failed to ensure capacity for storage slots", err);
         return switch (err) {
             std.mem.Allocator.Error.OutOfMemory => std.mem.Allocator.Error.OutOfMemory,
         };
@@ -632,24 +597,23 @@ pub fn set_original_storage_value(self: *Contract, allocator: std.mem.Allocator,
     if (self.original_storage == null) {
         if (pool) |p| {
             self.original_storage = p.borrow_storage_map() catch |err| {
-                Log.debug("Failed to borrow storage map from pool: {any}", .{err});
+                logError("Failed to borrow storage map from pool", err);
                 return switch (err) {
                     StoragePool.BorrowStorageMapError.OutOfAllocatorMemory => StorageOperationError.OutOfAllocatorMemory,
                 };
             };
         } else {
-            self.original_storage = allocator.create(std.AutoHashMap(u256, u256)) catch |err| {
-                Log.debug("Failed to create original storage map: {any}", .{err});
+            self.original_storage = createHashMap(u256, u256, allocator) catch |err| {
+                logError("Failed to create original storage map", err);
                 return switch (err) {
                     std.mem.Allocator.Error.OutOfMemory => std.mem.Allocator.Error.OutOfMemory,
                 };
             };
-            self.original_storage.?.* = std.AutoHashMap(u256, u256).init(allocator);
         }
     }
 
     self.original_storage.?.put(slot, value) catch |err| {
-        Log.debug("Failed to store original storage value for slot {d}: {any}", .{ slot, err });
+        logError("Failed to store original storage value", err);
         return switch (err) {
             std.mem.Allocator.Error.OutOfMemory => std.mem.Allocator.Error.OutOfMemory,
         };
@@ -678,8 +642,6 @@ pub fn set_call_code(self: *Contract, hash: [32]u8, code: []const u8) void {
     self.code = code;
     self.code_hash = hash;
     self.code_size = code.len;
-    self.has_jumpdests = contains_jumpdest(code);
-    self.is_empty = code.len == 0;
     self.analysis = null;
 }
 
@@ -706,34 +668,28 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
             self.original_storage = null;
         }
     }
-    // Analysis is typically cached globally, so don't free
+    // Note: Analysis is now created per-contract and should be freed when contract is destroyed
+    // However, this is currently handled by the caller (typically the VM)
 }
 
-/// Analyzes bytecode and caches the results globally for reuse.
+/// Analyzes bytecode to extract JUMPDEST positions and code structure.
 ///
-/// This function performs comprehensive static analysis on EVM bytecode:
+/// This function performs static analysis on EVM bytecode:
 /// 1. Identifies code vs data segments (for JUMPDEST validation)
-/// 2. Extracts and sorts all JUMPDEST positions
+/// 2. Extracts all JUMPDEST positions
 /// 3. Detects special opcodes (CREATE, SELFDESTRUCT, dynamic jumps)
-/// 4. Caches results by code hash for reuse
 ///
 /// ## Parameters
 /// - `allocator`: Memory allocator for analysis structures
 /// - `code`: The bytecode to analyze
-/// - `code_hash`: Hash for cache lookup/storage
+/// - `code_hash`: Unused parameter (kept for API compatibility)
 ///
 /// ## Returns
-/// Pointer to CodeAnalysis (cached or newly created)
+/// Pointer to CodeAnalysis (always newly created)
 ///
 /// ## Performance
-/// - First analysis: O(n) where n is code length
-/// - Subsequent calls: O(1) cache lookup
-/// - Thread-safe with mutex protection
-///
-/// ## Caching Strategy
-/// Analysis results are cached globally by code hash. This is highly
-/// effective as the same contract code is often executed many times
-/// across different addresses (e.g., proxy patterns, token contracts).
+/// - Analysis: O(n) where n is code length
+/// - No caching for size optimization
 ///
 /// ## Example
 /// ```zig
@@ -742,24 +698,13 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
 ///     bytecode,
 ///     bytecode_hash,
 /// );
-/// // Analysis is now cached for future use
+/// defer analysis.deinit(allocator);
 /// ```
 pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8) CodeAnalysisError!*const CodeAnalysis {
-    if (comptime !is_wasm) {
-        cache_mutex.lock();
-        defer cache_mutex.unlock();
-    }
-
-    if (analysis_cache == null) {
-        analysis_cache = std.AutoHashMap([32]u8, *CodeAnalysis).init(allocator);
-    }
-
-    if (analysis_cache.?.get(code_hash)) |cached| {
-        return cached;
-    }
+    _ = code_hash; // Unused for size optimization
 
     const analysis = allocator.create(CodeAnalysis) catch |err| {
-        Log.debug("Failed to allocate CodeAnalysis: {any}", .{err});
+        logError("Failed to allocate CodeAnalysis", err);
         return err;
     };
     errdefer allocator.destroy(analysis);
@@ -776,7 +721,7 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
 
         if (op == constants.JUMPDEST and analysis.code_segments.is_set_unchecked(i)) {
             jumpdests.append(@as(u32, @intCast(i))) catch |err| {
-                Log.debug("Failed to append jumpdest position {d}: {any}", .{ i, err });
+                logError("Failed to append jumpdest position", err);
                 return err;
             };
         }
@@ -789,12 +734,9 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
         }
     }
 
-    // Sort for binary search (skip in ReleaseSmall mode to save ~49KB)
-    if (comptime builtin.mode != .ReleaseSmall) {
-        std.mem.sort(u32, jumpdests.items, {}, comptime std.sort.asc(u32));
-    }
+    // No need to sort - linear search is used for size optimization
     analysis.jumpdest_positions = jumpdests.toOwnedSlice() catch |err| {
-        Log.debug("Failed to convert jumpdests to owned slice: {any}", .{err});
+        logError("Failed to convert jumpdests to owned slice", err);
         return err;
     };
 
@@ -804,11 +746,6 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     analysis.has_static_jumps = false;
     analysis.has_selfdestruct = contains_op(code, &[_]u8{constants.SELFDESTRUCT});
     analysis.has_create = contains_op(code, &[_]u8{ constants.CREATE, constants.CREATE2 });
-
-    analysis_cache.?.put(code_hash, analysis) catch |err| {
-        Log.debug("Failed to cache code analysis: {any}", .{err});
-        // Continue without caching - return the analysis anyway
-    };
 
     return analysis;
 }
@@ -823,23 +760,6 @@ pub fn contains_op(code: []const u8, opcodes: []const u8) bool {
     return false;
 }
 
-/// Clear the global analysis cache
-pub fn clear_analysis_cache(allocator: std.mem.Allocator) void {
-    if (comptime !is_wasm) {
-        cache_mutex.lock();
-        defer cache_mutex.unlock();
-    }
-
-    if (analysis_cache) |*cache| {
-        var iter = cache.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.*.deinit(allocator);
-            allocator.destroy(entry.value_ptr.*);
-        }
-        cache.deinit();
-        analysis_cache = null;
-    }
-}
 
 /// Analyze jump destinations - public wrapper for ensure_analysis
 pub fn analyze_jumpdests(self: *Contract, allocator: std.mem.Allocator) void {
@@ -881,7 +801,5 @@ pub fn init_at_address(
         .gas_refund = 0,
         .is_deployment = false,
         .is_system_call = false,
-        .has_jumpdests = contains_jumpdest(bytecode),
-        .is_empty = bytecode.len == 0,
     };
 }

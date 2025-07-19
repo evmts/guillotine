@@ -40,6 +40,22 @@ const ReturnData = @import("../evm/return_data.zig").ReturnData;
 /// ```
 const Frame = @This();
 
+/// Configuration options for Frame initialization with specific state
+pub const InitOptions = struct {
+    op: ?[]const u8 = null,
+    cost: ?u64 = null,
+    err: ?ExecutionError.Error = null,
+    memory: ?Memory = null,
+    stack: ?Stack = null,
+    stop: ?bool = null,
+    gas_remaining: ?u64 = null,
+    is_static: ?bool = null,
+    input: ?[]const u8 = null,
+    depth: ?u32 = null,
+    output: ?[]const u8 = null,
+    pc: ?usize = null,
+};
+
 /// Current opcode being executed (for debugging/tracing).
 op: []const u8 = undefined,
 
@@ -123,26 +139,15 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
     };
 }
 
-/// Create a frame with specific initial state.
+/// Create a frame with specific initial state using options struct.
 ///
 /// Used for creating frames with pre-existing state, such as when
 /// resuming execution or creating child frames with inherited state.
 /// All parameters are optional and default to sensible values.
 ///
 /// @param allocator Memory allocator
-/// @param contract Contract to execute
-/// @param op Current opcode (optional)
-/// @param cost Gas cost of current op (optional)
-/// @param err Existing error state (optional)
-/// @param memory Pre-initialized memory (optional)
-/// @param stack Pre-initialized stack (optional)
-/// @param stop Halt flag (optional)
-/// @param gas_remaining Available gas (optional)
-/// @param is_static Static call flag (optional)
-/// @param input Call data (optional)
-/// @param depth Call stack depth (optional)
-/// @param output Output buffer (optional)
-/// @param pc Current PC (optional)
+/// @param contract Contract to execute  
+/// @param options Configuration options for initial state
 /// @return Configured frame instance
 /// @throws OutOfMemory if memory initialization fails
 ///
@@ -158,35 +163,24 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
 pub fn init_with_state(
     allocator: std.mem.Allocator,
     contract: *Contract,
-    op: ?[]const u8,
-    cost: ?u64,
-    err: ?ExecutionError.Error,
-    memory: ?Memory,
-    stack: ?Stack,
-    stop: ?bool,
-    gas_remaining: ?u64,
-    is_static: ?bool,
-    input: ?[]const u8,
-    depth: ?u32,
-    output: ?[]const u8,
-    pc: ?usize,
+    options: InitOptions,
 ) !Frame {
     return Frame{
         .allocator = allocator,
         .contract = contract,
-        .memory = memory orelse try Memory.init_default(allocator),
-        .stack = stack orelse .{},
-        .op = op orelse undefined,
-        .cost = cost orelse 0,
-        .err = err,
-        .stop = stop orelse false,
-        .gas_remaining = gas_remaining orelse 0,
-        .is_static = is_static orelse false,
+        .memory = options.memory orelse try Memory.init_default(allocator),
+        .stack = options.stack orelse .{},
+        .op = options.op orelse undefined,
+        .cost = options.cost orelse 0,
+        .err = options.err,
+        .stop = options.stop orelse false,
+        .gas_remaining = options.gas_remaining orelse 0,
+        .is_static = options.is_static orelse false,
         .return_data = ReturnData.init(allocator),
-        .input = input orelse &[_]u8{},
-        .depth = depth orelse 0,
-        .output = output orelse &[_]u8{},
-        .pc = pc orelse 0,
+        .input = options.input orelse &[_]u8{},
+        .depth = options.depth orelse 0,
+        .output = options.output orelse &[_]u8{},
+        .pc = options.pc orelse 0,
     };
 }
 
