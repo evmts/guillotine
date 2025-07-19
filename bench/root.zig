@@ -12,6 +12,7 @@ pub const opcode_benchmarks = @import("opcode_benchmarks.zig");
 pub const benchmarks = @import("benchmarks.zig");
 pub const evm_integration_benchmark = @import("evm_integration_benchmark.zig");
 pub const root_module_benchmark = @import("root_module_benchmark.zig");
+pub const frame_benchmark = @import("frame_benchmark.zig");
 
 pub fn run(allocator: Allocator) !void {
     std.log.info("Starting EVM benchmark suite", .{});
