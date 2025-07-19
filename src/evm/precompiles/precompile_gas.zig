@@ -1,4 +1,6 @@
 const std = @import("std");
+const primitives = @import("primitives");
+const gas_constants = primitives.GasConstants;
 
 /// Gas calculation utilities for precompiles
 ///
@@ -16,7 +18,7 @@ const std = @import("std");
 /// @param per_word_cost Gas cost per 32-byte word of input
 /// @return Total gas cost for the operation
 pub fn calculate_linear_cost(input_size: usize, base_cost: u64, per_word_cost: u64) u64 {
-    const word_count = (input_size + 31) / 32;
+    const word_count = gas_constants.wordCount(input_size);
     return base_cost + per_word_cost * @as(u64, @intCast(word_count));
 }
 
@@ -30,7 +32,7 @@ pub fn calculate_linear_cost(input_size: usize, base_cost: u64, per_word_cost: u
 /// @param per_word_cost Gas cost per 32-byte word of input
 /// @return Total gas cost or error if overflow occurs
 pub fn calculate_linear_cost_checked(input_size: usize, base_cost: u64, per_word_cost: u64) !u64 {
-    const word_count = (input_size + 31) / 32;
+    const word_count = gas_constants.wordCount(input_size);
     const word_count_u64 = std.math.cast(u64, word_count) orelse {
         @branchHint(.cold);
         return error.Overflow;
@@ -77,7 +79,7 @@ pub fn validate_gas_limit(input_size: usize, base_cost: u64, per_word_cost: u64,
 /// @param byte_size Size in bytes
 /// @return Number of 32-byte words (rounded up)
 pub fn bytes_to_words(byte_size: usize) usize {
-    return (byte_size + 31) / 32;
+    return gas_constants.wordCount(byte_size);
 }
 
 /// Calculates gas cost for dynamic-length operations

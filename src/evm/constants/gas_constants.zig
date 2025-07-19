@@ -97,4 +97,5 @@ pub const CALL_GAS_RETENTION_DIVISOR = GasConstants.CALL_GAS_RETENTION_DIVISOR;
 
 // Re-export functions
 pub const memory_gas_cost = GasConstants.memory_gas_cost;
+pub const wordCount = GasConstants.wordCount;
 

@@ -4,6 +4,7 @@ const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const primitives = @import("primitives");
 const crypto = @import("crypto");
+const gas_utils = @import("../constants/gas_constants.zig");
 
 /// RIPEMD160 precompile implementation (address 0x03)
 ///
@@ -51,7 +52,7 @@ const RIPEMD160_HASH_SIZE: usize = 20;
 /// @param input_size Size of the input data in bytes
 /// @return Total gas cost for the operation
 pub fn calculate_gas(input_size: usize) u64 {
-    const word_count = (input_size + 31) / 32;
+    const word_count = gas_utils.wordCount(input_size);
     return RIPEMD160_BASE_GAS_COST + RIPEMD160_WORD_GAS_COST * @as(u64, @intCast(word_count));
 }
 
@@ -68,7 +69,7 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
         return error.Overflow;
     }
 
-    const word_count = (input_size + 31) / 32;
+    const word_count = gas_utils.wordCount(input_size);
 
     // Check for overflow in multiplication
     if (word_count > std.math.maxInt(u64) / RIPEMD160_WORD_GAS_COST) {
