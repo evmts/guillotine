@@ -56,70 +56,6 @@ pub const CallInput = struct {
     /// Original value for DELEGATECALL context preservation (optional)
     original_value: ?u256 = null,
 
-    /// Create CallInput for a CALL operation
-    pub fn call(
-        contract_address: primitives.Address.Address,
-        caller: primitives.Address.Address,
-        value: u256,
-        input: []const u8,
-        gas_limit: u64,
-        is_static: bool,
-        depth: u32,
-    ) CallInput {
-        return CallInput{
-            .contract_address = contract_address,
-            .caller = caller,
-            .value = value,
-            .input = input,
-            .gas_limit = gas_limit,
-            .is_static = is_static,
-            .depth = depth,
-        };
-    }
-
-    /// Create CallInput for a DELEGATECALL operation
-    /// Preserves original caller and value from parent context
-    pub fn delegate_call(
-        contract_address: primitives.Address.Address,
-        original_caller: primitives.Address.Address,
-        original_value: u256,
-        input: []const u8,
-        gas_limit: u64,
-        is_static: bool,
-        depth: u32,
-    ) CallInput {
-        return CallInput{
-            .contract_address = contract_address,
-            .caller = original_caller, // Preserve original caller
-            .value = original_value, // Preserve original value
-            .input = input,
-            .gas_limit = gas_limit,
-            .is_static = is_static,
-            .depth = depth,
-            .original_caller = original_caller,
-            .original_value = original_value,
-        };
-    }
-
-    /// Create CallInput for a STATICCALL operation
-    /// Implicitly sets value to 0 and is_static to true
-    pub fn static_call(
-        contract_address: primitives.Address.Address,
-        caller: primitives.Address.Address,
-        input: []const u8,
-        gas_limit: u64,
-        depth: u32,
-    ) CallInput {
-        return CallInput{
-            .contract_address = contract_address,
-            .caller = caller,
-            .value = 0, // Static calls cannot transfer value
-            .input = input,
-            .gas_limit = gas_limit,
-            .is_static = true, // Force static context
-            .depth = depth,
-        };
-    }
 };
 
 /// Result of a contract call operation
@@ -138,25 +74,6 @@ pub const CallResult = struct {
     /// Output data returned by the called contract
     output: ?[]const u8,
 
-    /// Create a successful call result
-    pub fn success_result(gas_used: u64, gas_left: u64, output: ?[]const u8) CallResult {
-        return CallResult{
-            .success = true,
-            .gas_used = gas_used,
-            .gas_left = gas_left,
-            .output = output,
-        };
-    }
-
-    /// Create a failed call result
-    pub fn failure_result(gas_used: u64, gas_left: u64, output: ?[]const u8) CallResult {
-        return CallResult{
-            .success = false,
-            .gas_used = gas_used,
-            .gas_left = gas_left,
-            .output = output,
-        };
-    }
 };
 
 
@@ -250,53 +167,6 @@ fn check_offset_bounds(value: u256) ExecutionError.Error!void {
     }
 }
 
-// Snapshot and revert helper functions for opcode-level state management
-
-/// Create a snapshot for opcode-level state management
-///
-/// This function provides a convenient way for opcodes to create state snapshots
-/// before performing operations that might need to be reverted.
-///
-/// ## Parameters
-/// - `vm`: VM instance to create snapshot on
-///
-/// ## Returns
-/// - Success: Snapshot identifier
-/// - Error: OutOfMemory if snapshot allocation fails
-pub fn create_snapshot(vm: *Vm) std.mem.Allocator.Error!usize {
-    Log.debug("system.create_snapshot: Creating state snapshot", .{});
-    return try vm.create_snapshot();
-}
-
-/// Commit a snapshot, making all changes permanent
-///
-/// This function commits all state changes made since the snapshot was created.
-/// Once committed, the changes cannot be reverted using this snapshot.
-///
-/// ## Parameters
-/// - `vm`: VM instance to commit snapshot on
-/// - `snapshot_id`: Identifier of the snapshot to commit
-pub fn commit_snapshot(vm: *Vm, snapshot_id: usize) void {
-    Log.debug("system.commit_snapshot: Committing snapshot id={}", .{snapshot_id});
-    vm.commit_snapshot(snapshot_id);
-}
-
-/// Revert to a snapshot, undoing all changes since the snapshot was created
-///
-/// This function restores the VM state to exactly how it was when the snapshot
-/// was created. This is used for opcodes like REVERT and for failed operations.
-///
-/// ## Parameters
-/// - `vm`: VM instance to revert snapshot on
-/// - `snapshot_id`: Identifier of the snapshot to revert to
-///
-/// ## Returns
-/// - Success: void
-/// - Error: Invalid snapshot ID or reversion failure
-pub fn revert_to_snapshot(vm: *Vm, snapshot_id: usize) !void {
-    Log.debug("system.revert_to_snapshot: Reverting to snapshot id={}", .{snapshot_id});
-    try vm.revert_to_snapshot(snapshot_id);
-}
 
 pub fn op_create(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
