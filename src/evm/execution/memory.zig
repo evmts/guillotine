@@ -7,6 +7,52 @@ const Frame = @import("../frame/frame.zig");
 const Memory = @import("../memory/memory.zig");
 const gas_constants = @import("../constants/gas_constants.zig");
 
+// Helper to check if u256 fits in usize and convert to usize
+fn check_offset_bounds(value: u256) ExecutionError.Error!usize {
+    if (value > std.math.maxInt(usize)) {
+        @branchHint(.unlikely);
+        return ExecutionError.Error.OutOfOffset;
+    }
+    return @as(usize, @intCast(value));
+}
+
+// Helper to calculate memory expansion gas cost and consume it
+fn calculate_memory_gas(frame: *Frame, new_size: usize) !void {
+    const current_size = frame.memory.context_size();
+    const gas_cost = gas_constants.memory_gas_cost(current_size, new_size);
+    try frame.consume_gas(gas_cost);
+}
+
+// Helper to calculate word-aligned size
+fn word_aligned_size(size: usize) usize {
+    return ((size + 31) / 32) * 32;
+}
+
+// Helper to convert u256 to big-endian bytes
+fn u256_to_big_endian_bytes(value: u256) [32]u8 {
+    var bytes: [32]u8 = undefined;
+    var temp = value;
+    var i: usize = 0;
+    while (i < 32) : (i += 1) {
+        bytes[31 - i] = @intCast(temp & 0xFF);
+        temp = temp >> 8;
+    }
+    return bytes;
+}
+
+// Common copy operation helper
+fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) !void {
+    // Calculate memory expansion gas cost
+    const new_size = mem_offset + size;
+    try calculate_memory_gas(frame, new_size);
+    
+    // Dynamic gas for copy operation
+    const word_size = (size + 31) / 32;
+    try frame.consume_gas(gas_constants.COPY_GAS * word_size);
+    
+    // Ensure memory is available
+    _ = try frame.memory.ensure_context_capacity(new_size);
+}
 
 pub fn op_mload(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
@@ -22,23 +68,14 @@ pub fn op_mload(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
     const offset = frame.stack.peek_unsafe().*;
 
-    if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        return ExecutionError.Error.OutOfOffset;
-    }
-
-    const offset_usize = @as(usize, @intCast(offset));
-
-    // Calculate memory expansion gas cost
-    const current_size = frame.memory.context_size();
+    const offset_usize = try check_offset_bounds(offset);
     const new_size = offset_usize + 32;
-    const gas_cost = gas_constants.memory_gas_cost(current_size, new_size);
-
-    try frame.consume_gas(gas_cost);
+    
+    try calculate_memory_gas(frame, new_size);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
-    const word_aligned_size = ((offset_usize + 32 + 31) / 32) * 32;
-    _ = try frame.memory.ensure_context_capacity(word_aligned_size);
+    const aligned_size = word_aligned_size(new_size);
+    _ = try frame.memory.ensure_context_capacity(aligned_size);
 
     // Read 32 bytes from memory
     const value = try frame.memory.get_u256(offset_usize);
@@ -66,33 +103,17 @@ pub fn op_mstore(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
-    if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        return ExecutionError.Error.OutOfOffset;
-    }
-
-    const offset_usize = @as(usize, @intCast(offset));
-
-    // Calculate memory expansion gas cost
-    const current_size = frame.memory.context_size();
+    const offset_usize = try check_offset_bounds(offset);
     const new_size = offset_usize + 32; // MSTORE writes 32 bytes
-    const expansion_gas_cost = gas_constants.memory_gas_cost(current_size, new_size);
-
-    try frame.consume_gas(expansion_gas_cost);
+    
+    try calculate_memory_gas(frame, new_size);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
-    const word_aligned_size = ((offset_usize + 32 + 31) / 32) * 32;
-    _ = try frame.memory.ensure_context_capacity(word_aligned_size);
+    const aligned_size = word_aligned_size(new_size);
+    _ = try frame.memory.ensure_context_capacity(aligned_size);
 
     // Write 32 bytes to memory (big-endian)
-    var bytes: [32]u8 = undefined;
-    // Convert u256 to big-endian bytes
-    var temp = value;
-    var i: usize = 0;
-    while (i < 32) : (i += 1) {
-        bytes[31 - i] = @intCast(temp & 0xFF);
-        temp = temp >> 8;
-    }
+    const bytes = u256_to_big_endian_bytes(value);
     try frame.memory.set_data(offset_usize, &bytes);
 
     return Operation.ExecutionResult{};
@@ -115,22 +136,14 @@ pub fn op_mstore8(pc: usize, interpreter: *Operation.Interpreter, state: *Operat
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
-    if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        return ExecutionError.Error.OutOfOffset;
-    }
-
-    const offset_usize = @as(usize, @intCast(offset));
-
-    // Calculate memory expansion gas cost
-    const current_size = frame.memory.context_size();
+    const offset_usize = try check_offset_bounds(offset);
     const new_size = offset_usize + 1;
-    const gas_cost = gas_constants.memory_gas_cost(current_size, new_size);
-    try frame.consume_gas(gas_cost);
+    
+    try calculate_memory_gas(frame, new_size);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
-    const word_aligned_size = ((new_size + 31) / 32) * 32;
-    _ = try frame.memory.ensure_context_capacity(word_aligned_size);
+    const aligned_size = word_aligned_size(new_size);
+    _ = try frame.memory.ensure_context_capacity(aligned_size);
 
     // Write single byte to memory
     const byte_value = @as(u8, @truncate(value));
@@ -154,10 +167,10 @@ pub fn op_msize(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     // MSIZE returns the size in bytes, but memory is always expanded in 32-byte words
     // So we need to round up to the nearest word boundary
     const size = frame.memory.context_size();
-    const word_aligned_size = ((size + 31) / 32) * 32;
+    const aligned_size = word_aligned_size(size);
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(word_aligned_size)));
+    frame.stack.append_unsafe(@as(u256, @intCast(aligned_size)));
 
     return Operation.ExecutionResult{};
 }
@@ -184,14 +197,9 @@ pub fn op_mcopy(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
         return Operation.ExecutionResult{};
     }
 
-    if (dest > std.math.maxInt(usize) or src > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        return ExecutionError.Error.OutOfOffset;
-    }
-
-    const dest_usize = @as(usize, @intCast(dest));
-    const src_usize = @as(usize, @intCast(src));
-    const size_usize = @as(usize, @intCast(size));
+    const dest_usize = try check_offset_bounds(dest);
+    const src_usize = try check_offset_bounds(src);
+    const size_usize = try check_offset_bounds(size);
 
     // Calculate memory expansion gas cost
     const current_size = frame.memory.context_size();
@@ -245,14 +253,11 @@ pub fn op_calldataload(pc: usize, interpreter: *Operation.Interpreter, state: *O
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
     const offset = frame.stack.peek_unsafe().*;
 
-    if (offset > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        // Replace top of stack with 0
+    const offset_usize = check_offset_bounds(offset) catch {
+        // Replace top of stack with 0 if offset is out of bounds
         frame.stack.set_top_unsafe(0);
         return Operation.ExecutionResult{};
-    }
-
-    const offset_usize = @as(usize, @intCast(offset));
+    };
 
     // Read 32 bytes from calldata (pad with zeros)
     var result: u256 = 0;
@@ -313,27 +318,12 @@ pub fn op_calldatacopy(pc: usize, interpreter: *Operation.Interpreter, state: *O
         return Operation.ExecutionResult{};
     }
 
-    if (mem_offset > std.math.maxInt(usize) or data_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        return ExecutionError.Error.OutOfOffset;
-    }
+    const mem_offset_usize = try check_offset_bounds(mem_offset);
+    const data_offset_usize = try check_offset_bounds(data_offset);
+    const size_usize = try check_offset_bounds(size);
 
-    const mem_offset_usize = @as(usize, @intCast(mem_offset));
-    const data_offset_usize = @as(usize, @intCast(data_offset));
-    const size_usize = @as(usize, @intCast(size));
-
-    // Calculate memory expansion gas cost
-    const current_size = frame.memory.context_size();
-    const new_size = mem_offset_usize + size_usize;
-    const memory_gas = gas_constants.memory_gas_cost(current_size, new_size);
-    try frame.consume_gas(memory_gas);
-
-    // Dynamic gas for copy operation
-    const word_size = (size_usize + 31) / 32;
-    try frame.consume_gas(gas_constants.COPY_GAS * word_size);
-
-    // Ensure memory is available
-    _ = try frame.memory.ensure_context_capacity(mem_offset_usize + size_usize);
+    // Common copy operation handling (gas calculation and memory expansion)
+    try perform_copy_operation(frame, mem_offset_usize, size_usize);
 
     // Copy calldata to memory
     try frame.memory.set_data_bounded(mem_offset_usize, frame.input, data_offset_usize, size_usize);
@@ -383,24 +373,12 @@ pub fn op_codecopy(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
         return Operation.ExecutionResult{};
     }
 
-    if (mem_offset > std.math.maxInt(usize) or code_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) return ExecutionError.Error.OutOfOffset;
+    const mem_offset_usize = try check_offset_bounds(mem_offset);
+    const code_offset_usize = try check_offset_bounds(code_offset);
+    const size_usize = try check_offset_bounds(size);
 
-    const mem_offset_usize = @as(usize, @intCast(mem_offset));
-    const code_offset_usize = @as(usize, @intCast(code_offset));
-    const size_usize = @as(usize, @intCast(size));
-
-    // Calculate memory expansion gas cost
-    const current_size = frame.memory.context_size();
-    const new_size = mem_offset_usize + size_usize;
-    const memory_gas = gas_constants.memory_gas_cost(current_size, new_size);
-    try frame.consume_gas(memory_gas);
-
-    // Dynamic gas for copy operation
-    const word_size = (size_usize + 31) / 32;
-    try frame.consume_gas(gas_constants.COPY_GAS * word_size);
-
-    // Ensure memory is available
-    _ = try frame.memory.ensure_context_capacity(mem_offset_usize + size_usize);
+    // Common copy operation handling (gas calculation and memory expansion)
+    try perform_copy_operation(frame, mem_offset_usize, size_usize);
 
     // Copy code to memory
     try frame.memory.set_data_bounded(mem_offset_usize, frame.contract.code, code_offset_usize, size_usize);
@@ -449,14 +427,9 @@ pub fn op_returndatacopy(pc: usize, interpreter: *Operation.Interpreter, state: 
         return Operation.ExecutionResult{};
     }
 
-    if (mem_offset > std.math.maxInt(usize) or data_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
-        return ExecutionError.Error.OutOfOffset;
-    }
-
-    const mem_offset_usize = @as(usize, @intCast(mem_offset));
-    const data_offset_usize = @as(usize, @intCast(data_offset));
-    const size_usize = @as(usize, @intCast(size));
+    const mem_offset_usize = try check_offset_bounds(mem_offset);
+    const data_offset_usize = try check_offset_bounds(data_offset);
+    const size_usize = try check_offset_bounds(size);
 
     // Check bounds
     if (data_offset_usize + size_usize > frame.return_data.size()) {
@@ -464,18 +437,8 @@ pub fn op_returndatacopy(pc: usize, interpreter: *Operation.Interpreter, state: 
         return ExecutionError.Error.ReturnDataOutOfBounds;
     }
 
-    // Calculate memory expansion gas cost
-    const current_size = frame.memory.context_size();
-    const new_size = mem_offset_usize + size_usize;
-    const memory_gas = gas_constants.memory_gas_cost(current_size, new_size);
-    try frame.consume_gas(memory_gas);
-
-    // Dynamic gas for copy operation
-    const word_size = (size_usize + 31) / 32;
-    try frame.consume_gas(gas_constants.COPY_GAS * word_size);
-
-    // Ensure memory is available
-    _ = try frame.memory.ensure_context_capacity(mem_offset_usize + size_usize);
+    // Common copy operation handling (gas calculation and memory expansion)
+    try perform_copy_operation(frame, mem_offset_usize, size_usize);
 
     // Copy return data to memory
     const return_data = frame.return_data.get();
