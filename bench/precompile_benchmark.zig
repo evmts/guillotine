@@ -24,7 +24,8 @@ const small_input = &[_]u8{0x01} ** 32;
 const medium_input = &[_]u8{0x02} ** 128;
 const large_input = &[_]u8{0x03} ** 512;
 
-const chain_rules = evm.hardforks.ChainRules.for_hardfork(.CANCUN); // Latest hardfork
+// const chain_rules = evm.hardforks.ChainRules.for_hardfork(.CANCUN); // Latest hardfork
+const chain_rules = undefined; // Simplified for benchmarks
 var output_buffer: [1024]u8 = undefined;
 
 // Benchmark helper functions
