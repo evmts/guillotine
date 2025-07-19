@@ -160,6 +160,7 @@ pub const BenchmarkSuite = struct {
 
 // Helper function to benchmark a function with arguments
 pub fn benchmark_with_args(allocator: Allocator, config: BenchmarkConfig, comptime func: anytype, args: anytype) !BenchmarkResult {
+    _ = allocator;
     std.log.info("Running benchmark: {s}", .{config.name});
     
     // Warmup
