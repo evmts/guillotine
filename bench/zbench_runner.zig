@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const evm_benchmark = @import("evm_benchmark.zig");
 const stack_benchmark = @import("stack_benchmark.zig");
+const state_benchmarks = @import("state_benchmarks.zig");
 
 pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     var benchmark = zbench.Benchmark.init(allocator, .{});
@@ -60,6 +61,14 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     try benchmark.add("Stack set_top", stack_benchmark.bench_set_top, .{});
     try benchmark.add("Stack predictable pattern", stack_benchmark.bench_predictable_pattern, .{});
     try benchmark.add("Stack unpredictable pattern", stack_benchmark.bench_unpredictable_pattern, .{});
+    
+    // State management benchmarks (Issue #61)
+    try benchmark.add("State Account Read", state_benchmarks.zbench_account_read, .{});
+    try benchmark.add("State Account Write", state_benchmarks.zbench_account_write, .{});
+    try benchmark.add("State Storage Ops", state_benchmarks.zbench_storage_ops, .{});
+    try benchmark.add("State Root Calc", state_benchmarks.zbench_state_root, .{});
+    try benchmark.add("State Journal Ops", state_benchmarks.zbench_journal_ops, .{});
+    try benchmark.add("State Full EVM", state_benchmarks.zbench_evm_state_full, .{});
     
     // Run all benchmarks
     try benchmark.run(std.io.getStdOut().writer());
