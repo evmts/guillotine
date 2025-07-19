@@ -390,12 +390,29 @@ pub const CALL_GAS_RETENTION_DIVISOR: u64 = 64;
 pub fn memory_gas_cost(current_size: u64, new_size: u64) u64 {
     if (new_size <= current_size) return 0;
 
-    const current_words = (current_size + 31) / 32;
-    const new_words = (new_size + 31) / 32;
+    const current_words = wordCount(current_size);
+    const new_words = wordCount(new_size);
 
     // Calculate cost for each size
     const current_cost = MemoryGas * current_words + (current_words * current_words) / QuadCoeffDiv;
     const new_cost = MemoryGas * new_words + (new_words * new_words) / QuadCoeffDiv;
 
     return new_cost - current_cost;
+}
+
+/// Calculate the number of 32-byte words required for a given byte size
+///
+/// This is a shared utility function used throughout the EVM for gas calculations
+/// that depend on word counts. Many operations charge per 32-byte word.
+///
+/// ## Parameters
+/// - `bytes`: Size in bytes
+///
+/// ## Returns  
+/// - Number of 32-byte words (rounded up)
+///
+/// ## Formula
+/// word_count = ceil(bytes / 32) = (bytes + 31) / 32
+pub inline fn wordCount(bytes: usize) usize {
+    return (bytes + 31) / 32;
 }

@@ -1,4 +1,6 @@
 const std = @import("std");
+const primitives = @import("primitives");
+const gas_constants = primitives.GasConstants;
 
 /// EVM Memory Limit Constants
 ///
@@ -26,7 +28,7 @@ pub const PERMISSIVE_MEMORY_LIMIT: u64 = 64 * 1024 * 1024;
 
 /// Calculate the gas cost for a given memory size
 pub fn calculate_memory_gas_cost(size_bytes: u64) u64 {
-    const words = (size_bytes + 31) / 32;
+    const words = gas_constants.wordCount(size_bytes);
     const linear_cost = 3 * words;
     const quadratic_cost = (words * words) / 512;
     return linear_cost + quadratic_cost;
