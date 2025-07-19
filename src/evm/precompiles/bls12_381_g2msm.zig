@@ -50,7 +50,6 @@ fn get_gas_discount(num_pairs: usize) u16 {
 /// Calculates the gas cost for G2MSM operation
 pub fn calculate_gas(input_size: usize) u64 {
     if (input_size == 0 or input_size % G2MSM_PAIR_SIZE != 0) {
-        @branchHint(.cold);
         return std.math.maxInt(u64);
     }
 
@@ -66,13 +65,11 @@ pub fn calculate_gas(input_size: usize) u64 {
 /// Calculates the gas cost with overflow protection
 pub fn calculate_gas_checked(input_size: usize) !u64 {
     if (input_size == 0 or input_size % G2MSM_PAIR_SIZE != 0) {
-        @branchHint(.cold);
         return error.InvalidInput;
     }
 
     const num_pairs = input_size / G2MSM_PAIR_SIZE;
     if (num_pairs > 10000) {
-        @branchHint(.cold);
         return error.InputTooLarge;
     }
 
@@ -80,12 +77,10 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
     const per_pair_gas = (G2MSM_PER_PAIR_GAS_COST * discount) / 1000;
 
     const pair_total = std.math.mul(u64, num_pairs, per_pair_gas) catch {
-        @branchHint(.cold);
         return error.GasOverflow;
     };
 
     const total_gas = std.math.add(u64, G2MSM_BASE_GAS_COST, pair_total) catch {
-        @branchHint(.cold);
         return error.GasOverflow;
     };
 
@@ -95,7 +90,6 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// Validates field element (placeholder implementation)
 pub fn validate_field_element(element: []const u8) bool {
     if (element.len != 64) {
-        @branchHint(.cold);
         return false;
     }
     return true; // Placeholder - accept all for now
@@ -105,20 +99,17 @@ pub fn validate_field_element(element: []const u8) bool {
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
     // Validate input length
     if (input.len == 0 or input.len % G2MSM_PAIR_SIZE != 0) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
     }
 
     // Check gas requirement
     const gas_cost = calculate_gas(input.len);
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // Validate output buffer size
     if (output.len < G2MSM_OUTPUT_SIZE) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -131,7 +122,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 /// Validates the gas requirement without executing
 pub fn validate_gas_requirement(input_size: usize, gas_limit: u64) bool {
     if (input_size == 0 or input_size % G2MSM_PAIR_SIZE != 0) {
-        @branchHint(.cold);
         return false;
     }
 

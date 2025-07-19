@@ -38,10 +38,8 @@ pub const BlobGasMarket = struct {
 
         // Adjust base fee based on whether usage exceeded or fell short of target
         if (parent_blob_gas_used > TARGET_BLOB_GAS_PER_BLOCK) {
-            @branchHint(.likely); // Most blocks are expected to have some blob usage
             return calculate_blob_fee_increase(parent_blob_gas_used, parent_blob_base_fee);
         } else {
-            @branchHint(.unlikely); // Zero or low blob usage is less common
             return calculate_blob_fee_decrease(parent_blob_gas_used, parent_blob_base_fee);
         }
     }
@@ -103,12 +101,10 @@ pub const BlobGasMarket = struct {
     /// @return true if the blob count is valid, false otherwise
     pub fn validate_blob_gas_limit(blob_count: u32) bool {
         if (blob_count == 0) {
-            @branchHint(.cold); // Blob transactions must have at least one blob
             return false;
         }
 
         if (blob_count > blob_types.MAX_BLOBS_PER_TRANSACTION) {
-            @branchHint(.cold); // More than 6 blobs per transaction is invalid
             return false;
         }
 
@@ -135,7 +131,6 @@ pub const BlobGasMarket = struct {
     ) bool {
         // Check if the sender's maximum fee per blob gas is sufficient
         if (max_fee_per_blob_gas < current_blob_base_fee) {
-            @branchHint(.cold); // Insufficient fee is an error condition
             return false;
         }
 

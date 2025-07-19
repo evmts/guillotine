@@ -85,7 +85,6 @@ pub const KZGVerifier = struct {
     ) KZGVerificationError!bool {
         // Check that trusted setup is loaded
         if (self.trusted_setup == null) {
-            @branchHint(.cold);
             return KZGVerificationError.TrustedSetupNotLoaded;
         }
 
@@ -116,7 +115,6 @@ pub const KZGVerifier = struct {
         blob: *const blob_types.Blob,
     ) KZGVerificationError!blob_types.KZGCommitment {
         if (self.trusted_setup == null) {
-            @branchHint(.cold);
             return KZGVerificationError.TrustedSetupNotLoaded;
         }
 
@@ -163,7 +161,6 @@ pub const KZGVerifier = struct {
         proof: *const blob_types.KZGProof,
     ) KZGVerificationError!bool {
         if (self.trusted_setup == null) {
-            @branchHint(.cold);
             return KZGVerificationError.TrustedSetupNotLoaded;
         }
 
@@ -172,7 +169,6 @@ pub const KZGVerifier = struct {
         try self.validate_proof(proof);
 
         if (!z.is_valid() or !y.is_valid()) {
-            @branchHint(.cold);
             return KZGVerificationError.InvalidFieldElement;
         }
 
@@ -196,7 +192,6 @@ pub const KZGVerifier = struct {
 
         if (commitment.is_zero()) {
             // Zero commitment is technically valid but suspicious
-            @branchHint(.cold);
         }
     }
 
@@ -210,7 +205,6 @@ pub const KZGVerifier = struct {
         // 3. Check that the point is in the correct subgroup
 
         if (proof.is_zero()) {
-            @branchHint(.cold);
             return KZGVerificationError.InvalidProof;
         }
     }
@@ -221,7 +215,6 @@ pub const KZGVerifier = struct {
 
         // Validate that all field elements in the blob are valid
         if (!blob.validate()) {
-            @branchHint(.cold);
             return KZGVerificationError.InvalidBlob;
         }
     }

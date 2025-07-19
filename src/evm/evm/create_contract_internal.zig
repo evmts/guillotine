@@ -11,14 +11,12 @@ const Vm = @import("../evm.zig");
 pub fn create_contract_internal(self: *Vm, creator: primitives.Address.Address, value: u256, init_code: []const u8, gas: u64, new_address: primitives.Address.Address) (std.mem.Allocator.Error || @import("../state/database_interface.zig").DatabaseError || ExecutionError.Error)!CreateResult {
     Log.debug("VM.create_contract_internal: Creating contract from {any} to {any}, value={}, gas={}", .{ creator, new_address, value, gas });
     if (self.state.get_code(new_address).len > 0) {
-        @branchHint(.unlikely);
         // Contract already exists at this address - fail
         return CreateResult.init_failure(gas, null);
     }
 
     const creator_balance = self.state.get_balance(creator);
     if (creator_balance < value) {
-        @branchHint(.unlikely);
         // Insufficient balance - fail
         return CreateResult.init_failure(gas, null);
     }

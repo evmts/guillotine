@@ -36,7 +36,6 @@ const gas_constants = @import("../constants/gas_constants.zig");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const ChainRules = @import("../hardforks/chain_rules.zig");
-const ec_validation = @import("ec_validation.zig");
 
 // Conditional imports based on target
 const bn254_backend = if (builtin.target.cpu.arch == .wasm32)
@@ -54,11 +53,9 @@ else
 /// @return Gas cost for ECPAIRING operation
 pub fn calculate_gas(num_pairs: usize, chain_rules: ChainRules) u64 {
     if (chain_rules.is_istanbul) {
-        @branchHint(.likely);
         return gas_constants.ECPAIRING_BASE_GAS_COST +
             gas_constants.ECPAIRING_PER_PAIR_GAS_COST * @as(u64, @intCast(num_pairs));
     } else {
-        @branchHint(.cold);
         return gas_constants.ECPAIRING_BASE_GAS_COST_BYZANTIUM +
             gas_constants.ECPAIRING_PER_PAIR_GAS_COST_BYZANTIUM * @as(u64, @intCast(num_pairs));
     }
@@ -105,21 +102,21 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// @return PrecompileOutput with success/failure and gas usage
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
     // Validate output buffer size
-    if (ec_validation.validate_output_buffer_size(output, 32)) |failure_result| {
-        return failure_result;
+    if (output.len < 32) {
+        return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
     // Validate input length (must be multiple of 192 bytes)
-    if (ec_validation.validate_input_size_multiple(input.len, 192)) |failure_result| {
-        return failure_result;
+    if (input.len % 192 != 0) {
+        return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
     const num_pairs = input.len / 192;
 
     // Calculate and validate gas cost
     const gas_cost = calculate_gas(num_pairs, chain_rules);
-    if (ec_validation.validate_gas_requirement(gas_cost, gas_limit)) |failure_result| {
-        return failure_result;
+    if (gas_cost > gas_limit) {
+        return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     if (builtin.target.cpu.arch == .wasm32) {
@@ -139,13 +136,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
         // Use Rust implementation for native targets
         // Ensure BN254 Rust library is initialized
         bn254_backend.init() catch {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         };
 
         // Perform elliptic curve pairing check using Rust BN254 library
         bn254_backend.ecpairing(input, output[0..32]) catch {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         };
     }

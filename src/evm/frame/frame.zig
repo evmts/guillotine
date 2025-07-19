@@ -242,7 +242,6 @@ pub const ConsumeGasError = error{
 /// ```
 pub fn consume_gas(self: *Frame, amount: u64) ConsumeGasError!void {
     if (amount > self.gas_remaining) {
-        @branchHint(.cold);
         return ConsumeGasError.OutOfGas;
     }
     self.gas_remaining -= amount;

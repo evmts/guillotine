@@ -83,11 +83,9 @@ pub const PrecompileOutput = union(enum) {
     pub fn get_gas_used(self: PrecompileOutput) u64 {
         return switch (self) {
             .success => |result| {
-                @branchHint(.likely);
                 return result.gas_used;
             },
             .failure => {
-                @branchHint(.cold);
                 return 0;
             },
         };
@@ -98,11 +96,9 @@ pub const PrecompileOutput = union(enum) {
     pub fn get_output_size(self: PrecompileOutput) usize {
         return switch (self) {
             .success => |result| {
-                @branchHint(.likely);
                 return result.output_size;
             },
             .failure => {
-                @branchHint(.cold);
                 return 0;
             },
         };
@@ -113,11 +109,9 @@ pub const PrecompileOutput = union(enum) {
     pub fn get_error(self: PrecompileOutput) ?PrecompileError {
         return switch (self) {
             .success => {
-                @branchHint(.likely);
                 return null;
             },
             .failure => |err| {
-                @branchHint(.cold);
                 return err;
             },
         };

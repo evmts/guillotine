@@ -11,7 +11,6 @@ const Vm = @import("../evm.zig");
 /// Runs the main VM loop, executing opcodes sequentially while tracking
 /// gas consumption and handling control flow changes.
 pub fn interpret_with_context(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
-    @branchHint(.likely);
     Log.debug("VM.interpret_with_context: Starting execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
     self.depth += 1;
@@ -35,12 +34,10 @@ pub fn interpret_with_context(self: *Vm, contract: *Contract, input: []const u8,
     const state_ptr = @as(*Operation.State, @ptrCast(&frame));
 
     while (pc < contract.code_size) {
-        @branchHint(.likely);
         const opcode = contract.get_op(pc);
         frame.pc = pc;
 
         const result = self.table.execute(pc, interpreter_ptr, state_ptr, opcode) catch |err| {
-            @branchHint(.cold);
             contract.gas = frame.gas_remaining;
             self.return_data = @constCast(frame.return_data.get());
 
@@ -60,7 +57,6 @@ pub fn interpret_with_context(self: *Vm, contract: *Contract, input: []const u8,
 
             return switch (err) {
                 ExecutionError.Error.InvalidOpcode => {
-                    @branchHint(.cold);
                     // INVALID opcode consumes all remaining gas
                     frame.gas_remaining = 0;
                     contract.gas = 0;
@@ -87,7 +83,6 @@ pub fn interpret_with_context(self: *Vm, contract: *Contract, input: []const u8,
                 ExecutionError.Error.MaxCodeSizeExceeded,
                 ExecutionError.Error.OutOfMemory,
                 => {
-                    @branchHint(.cold);
                     return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, err, output);
                 },
                 else => return err, // Unexpected error
@@ -95,7 +90,6 @@ pub fn interpret_with_context(self: *Vm, contract: *Contract, input: []const u8,
         };
 
         if (frame.pc != pc) {
-            @branchHint(.likely);
             pc = frame.pc;
         } else {
             pc += result.bytes_consumed;

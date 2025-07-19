@@ -42,7 +42,6 @@ pub fn is_precompile(address: primitives.Address.Address) bool {
     const part2 = std.mem.readInt(u64, address[8..16], .big);
     // check bytes 16, 17, 18
     if (part1 != 0 or part2 != 0 or address[16] != 0 or address[17] != 0 or address[18] != 0) {
-        @branchHint(.cold);
         return false;
     }
 
@@ -56,7 +55,6 @@ pub fn is_precompile(address: primitives.Address.Address) bool {
 /// @return The precompile ID (1-10) or 0 if not a precompile
 pub fn get_precompile_id(address: primitives.Address.Address) u8 {
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return 0;
     }
     return address[19];

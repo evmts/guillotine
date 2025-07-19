@@ -142,13 +142,11 @@ pub const BlobTransaction = struct {
         // Validate blob count constraints
         const blob_count = self.get_blob_count();
         if (blob_count == 0 or blob_count > blob_types.MAX_BLOBS_PER_TRANSACTION) {
-            @branchHint(.cold);
             return BlobTransactionError.InvalidBlobCount;
         }
 
         // Validate blob gas limit
         if (!blob_gas_market.BlobGasMarket.validate_blob_gas_limit(blob_count)) {
-            @branchHint(.cold);
             return BlobTransactionError.BlobGasLimitExceeded;
         }
 
@@ -157,13 +155,11 @@ pub const BlobTransaction = struct {
             self.max_fee_per_blob_gas,
             current_blob_base_fee,
         )) {
-            @branchHint(.cold);
             return BlobTransactionError.InsufficientBlobGasFee;
         }
 
         // Validate that blob transactions must have a recipient (no contract creation)
         if (self.to == null) {
-            @branchHint(.cold);
             return BlobTransactionError.InvalidBlobData;
         }
 
@@ -180,22 +176,18 @@ pub const BlobTransaction = struct {
     fn validate_blob_sidecar(self: *const BlobTransaction, blobs: []const blob_types.Blob) BlobTransactionError!void {
         // All arrays must have the same length
         if (blobs.len != self.blob_versioned_hashes.len) {
-            @branchHint(.cold);
             return BlobTransactionError.MismatchedArrayLengths;
         }
 
         const commitments = self.commitments orelse {
-            @branchHint(.cold);
             return BlobTransactionError.MismatchedArrayLengths;
         };
 
         const proofs = self.proofs orelse {
-            @branchHint(.cold);
             return BlobTransactionError.MismatchedArrayLengths;
         };
 
         if (commitments.len != blobs.len or proofs.len != blobs.len) {
-            @branchHint(.cold);
             return BlobTransactionError.MismatchedArrayLengths;
         }
 
@@ -205,25 +197,21 @@ pub const BlobTransaction = struct {
 
             // Validate blob data
             if (!blob.validate()) {
-                @branchHint(.cold);
                 return BlobTransactionError.InvalidBlobData;
             }
 
             // Validate versioned hash matches commitment
             if (!blob_types.validate_commitment_hash(commitment, versioned_hash)) {
-                @branchHint(.cold);
                 return BlobTransactionError.InvalidVersionedHash;
             }
 
             // Validate KZG proof (requires KZG verifier)
             if (kzg_verification.get_global_verifier()) |verifier| {
                 const verification_result = verifier.verify_blob_kzg_proof(blob, commitment, proof) catch {
-                    @branchHint(.cold);
                     return BlobTransactionError.KZGVerificationFailed;
                 };
 
                 if (!verification_result) {
-                    @branchHint(.cold);
                     return BlobTransactionError.KZGVerificationFailed;
                 }
             }
@@ -244,7 +232,6 @@ pub const BlobTransaction = struct {
         proofs: []const blob_types.KZGProof,
     ) BlobTransactionError!void {
         if (blobs.len != commitments.len or blobs.len != proofs.len) {
-            @branchHint(.cold);
             return BlobTransactionError.MismatchedArrayLengths;
         }
 
@@ -427,7 +414,6 @@ pub const BlobTransactionValidator = struct {
         const total_blob_gas = current_block_blob_gas_used + transaction_blob_gas;
 
         if (total_blob_gas > blob_gas_market.MAX_BLOB_GAS_PER_BLOCK) {
-            @branchHint(.cold);
             return BlobTransactionError.BlobGasLimitExceeded;
         }
     }

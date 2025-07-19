@@ -25,13 +25,11 @@ pub const DelegatecallContractError = std.mem.Allocator.Error || ExecutionError.
 /// @param gas The gas limit for the execution
 /// @param is_static Whether this is part of a static call chain
 pub fn delegatecall_contract(self: *Vm, current: primitives.Address.Address, code_address: primitives.Address.Address, caller: primitives.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) DelegatecallContractError!CallResult {
-    @branchHint(.likely);
 
     Log.debug("VM.delegatecall_contract: DELEGATECALL from {any} to {any}, caller={any}, value={}, gas={}, static={}", .{ current, code_address, caller, value, gas, is_static });
 
     // Check call depth limit (1024)
     if (self.depth >= 1024) {
-        @branchHint(.unlikely);
         Log.debug("VM.delegatecall_contract: Call depth limit exceeded", .{});
         return CallResult{ .success = false, .gas_left = gas, .output = null };
     }
@@ -50,7 +48,6 @@ pub fn delegatecall_contract(self: *Vm, current: primitives.Address.Address, cod
     // Base cost is 100 gas for DELEGATECALL
     const intrinsic_gas: u64 = 100;
     if (gas < intrinsic_gas) {
-        @branchHint(.unlikely);
         Log.debug("VM.delegatecall_contract: Insufficient gas for delegatecall", .{});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     }

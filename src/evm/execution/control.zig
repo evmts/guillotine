@@ -26,7 +26,6 @@ pub fn op_jump(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 1) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -35,13 +34,11 @@ pub fn op_jump(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 
     // Check if destination is a valid JUMPDEST (pass u256 directly)
     if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.InvalidJump;
     }
 
     // After validation, convert to usize for setting pc
     if (dest > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.InvalidJump;
     }
 
@@ -57,7 +54,6 @@ pub fn op_jumpi(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -68,16 +64,13 @@ pub fn op_jumpi(pc: usize, interpreter: *Operation.Interpreter, state: *Operatio
     const condition = values.a; // Second from top
 
     if (condition != 0) {
-        @branchHint(.likely);
         // Check if destination is a valid JUMPDEST (pass u256 directly)
         if (!frame.contract.valid_jumpdest(frame.allocator, destination)) {
-            @branchHint(.unlikely);
             return ExecutionError.Error.InvalidJump;
         }
 
         // After validation, convert to usize for setting pc
         if (destination > std.math.maxInt(usize)) {
-            @branchHint(.unlikely);
             return ExecutionError.Error.InvalidJump;
         }
 
@@ -93,7 +86,6 @@ pub fn op_pc(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size >= Stack.CAPACITY) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -119,7 +111,6 @@ pub fn op_return(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -132,11 +123,9 @@ pub fn op_return(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     Log.debug("RETURN opcode: offset={}, size={}", .{ offset, size });
 
     if (size == 0) {
-        @branchHint(.unlikely);
         frame.output = &[_]u8{};
     } else {
         if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-            @branchHint(.unlikely);
             return ExecutionError.Error.OutOfOffset;
         }
 
@@ -181,7 +170,6 @@ pub fn op_revert(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -192,11 +180,9 @@ pub fn op_revert(pc: usize, interpreter: *Operation.Interpreter, state: *Operati
     const size = values.b; // Top
 
     if (size == 0) {
-        @branchHint(.unlikely);
         frame.output = &[_]u8{};
     } else {
         if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-            @branchHint(.unlikely);
             return ExecutionError.Error.OutOfOffset;
         }
 
@@ -246,12 +232,10 @@ pub fn op_selfdestruct(pc: usize, interpreter: *Operation.Interpreter, state: *O
 
     // Check if we're in a static call
     if (frame.is_static) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
     if (frame.stack.size < 1) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -266,7 +250,6 @@ pub fn op_selfdestruct(pc: usize, interpreter: *Operation.Interpreter, state: *O
     };
     const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
     if (is_cold) {
-        @branchHint(.likely);
         // Cold address access costs more (2600 gas)
         try frame.consume_gas(gas_constants.ColdAccountAccessCost);
     }

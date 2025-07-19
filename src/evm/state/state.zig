@@ -155,7 +155,6 @@ pub fn deinit(self: *EvmState) void {
 pub fn get_storage(self: *const EvmState, address: Address, slot: u256) u256 {
     // Use database interface to get storage value
     const value = self.database.get_storage(address, slot) catch |err| {
-        @branchHint(.cold);
         Log.debug("EvmState.get_storage: Database error {}, returning 0", .{err});
         return 0;
     };
@@ -198,17 +197,14 @@ pub fn set_storage(self: *EvmState, address: Address, slot: u256, value: u256) D
 pub fn get_balance(self: *const EvmState, address: Address) u256 {
     // Get account from database
     const account = self.database.get_account(address) catch |err| {
-        @branchHint(.cold);
         Log.debug("EvmState.get_balance: Database error {}, returning 0", .{err});
         return 0;
     };
 
     if (account) |acc| {
-        @branchHint(.likely);
         Log.debug("EvmState.get_balance: addr={x}, balance={}", .{ primitives.Address.to_u256(address), acc.balance });
         return acc.balance;
     } else {
-        @branchHint(.cold);
         Log.debug("EvmState.get_balance: addr={x}, balance=0 (new account)", .{primitives.Address.to_u256(address)});
         return 0;
     }
@@ -275,7 +271,6 @@ pub fn remove_balance(self: *EvmState, address: Address) DatabaseError!void {
 pub fn get_code(self: *const EvmState, address: Address) []const u8 {
     // Get account to find code hash
     const account = self.database.get_account(address) catch |err| {
-        @branchHint(.cold);
         Log.debug("EvmState.get_code: Database error {}, returning empty", .{err});
         return &[_]u8{};
     };
@@ -284,14 +279,12 @@ pub fn get_code(self: *const EvmState, address: Address) []const u8 {
         // Check if account has code (non-zero code hash)
         const zero_hash = [_]u8{0} ** 32;
         if (std.mem.eql(u8, &acc.code_hash, &zero_hash)) {
-            @branchHint(.cold);
             Log.debug("EvmState.get_code: addr={x}, code_len=0 (EOA)", .{primitives.Address.to_u256(address)});
             return &[_]u8{};
         }
 
         // Get code by hash
         const code = self.database.get_code(acc.code_hash) catch |err| {
-            @branchHint(.cold);
             Log.debug("EvmState.get_code: Code fetch error {}, returning empty", .{err});
             return &[_]u8{};
         };
@@ -299,7 +292,6 @@ pub fn get_code(self: *const EvmState, address: Address) []const u8 {
         Log.debug("EvmState.get_code: addr={x}, code_len={}", .{ primitives.Address.to_u256(address), code.len });
         return code;
     } else {
-        @branchHint(.cold);
         Log.debug("EvmState.get_code: addr={x}, code_len=0 (non-existent account)", .{primitives.Address.to_u256(address)});
         return &[_]u8{};
     }
@@ -369,17 +361,14 @@ pub fn remove_code(self: *EvmState, address: Address) DatabaseError!void {
 pub fn get_nonce(self: *const EvmState, address: Address) u64 {
     // Get account from database
     const account = self.database.get_account(address) catch |err| {
-        @branchHint(.cold);
         Log.debug("EvmState.get_nonce: Database error {}, returning 0", .{err});
         return 0;
     };
 
     if (account) |acc| {
-        @branchHint(.likely);
         Log.debug("EvmState.get_nonce: addr={x}, nonce={}", .{ primitives.Address.to_u256(address), acc.nonce });
         return acc.nonce;
     } else {
-        @branchHint(.cold);
         Log.debug("EvmState.get_nonce: addr={x}, nonce=0 (new account)", .{primitives.Address.to_u256(address)});
         return 0;
     }
@@ -477,11 +466,9 @@ pub fn get_transient_storage(self: *const EvmState, address: Address, slot: u256
     const key = StorageKey{ .address = address, .slot = slot };
     // Hot path: transient storage hit
     if (self.transient_storage.get(key)) |value| {
-        @branchHint(.likely);
         Log.debug("EvmState.get_transient_storage: addr={x}, slot={}, value={}", .{ primitives.Address.to_u256(address), slot, value });
         return value;
     } else {
-        @branchHint(.cold);
         // Cold path: uninitialized transient storage defaults to 0
         Log.debug("EvmState.get_transient_storage: addr={x}, slot={}, value=0 (uninitialized)", .{ primitives.Address.to_u256(address), slot });
         return 0;
@@ -583,7 +570,6 @@ pub fn emit_log(self: *EvmState, address: Address, topics: []const u256, data: [
 /// - Error: If log_index is invalid
 pub fn remove_log(self: *EvmState, log_index: usize) !void {
     if (log_index >= self.logs.items.len) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -595,7 +581,6 @@ pub fn remove_log(self: *EvmState, log_index: usize) !void {
     // Remove the log by truncating the array
     // This works because logs are always removed in reverse order during revert
     if (log_index != self.logs.items.len - 1) {
-        @branchHint(.cold);
         unreachable;
     }
     _ = self.logs.pop();

@@ -17,19 +17,16 @@ pub fn op_sha3(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 
     if (size == 0) {
-        @branchHint(.unlikely);
         // Even with size 0, we need to validate the offset is reasonable
         if (offset > 0) {
             // Check if offset is beyond reasonable memory limits
             const offset_usize = @as(usize, @intCast(offset));
             const memory_limits = @import("../constants/memory_limits.zig");
             if (offset_usize > memory_limits.MAX_MEMORY_SIZE) {
-                @branchHint(.unlikely);
                 return ExecutionError.Error.OutOfOffset;
             }
         }
@@ -44,14 +41,12 @@ pub fn op_sha3(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
 
     // Check if offset + size would overflow
     const end = std.math.add(usize, offset_usize, size_usize) catch {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     };
 
     // Check if the end position exceeds reasonable memory limits
     const memory_limits = @import("../constants/memory_limits.zig");
     if (end > memory_limits.MAX_MEMORY_SIZE) {
-        @branchHint(.unlikely);
         return ExecutionError.Error.OutOfOffset;
     }
 

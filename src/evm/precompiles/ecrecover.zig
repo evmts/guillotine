@@ -113,19 +113,16 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Check if we have enough gas - this is always the first check
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // ECRECOVER requires exactly 128 bytes of input
     if (input.len != ECRECOVER_INPUT_SIZE) {
-        @branchHint(.cold);
         return PrecompileOutput.success_result(gas_cost, 0); // Return empty on invalid input
     }
 
     // Validate output buffer size
     if (output.len < ECRECOVER_OUTPUT_SIZE) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -142,20 +139,17 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Validate signature parameters
     if (!secp256k1.unaudited_validate_signature(r, s)) {
-        @branchHint(.cold);
         return PrecompileOutput.success_result(gas_cost, 0); // Return empty on invalid params
     }
 
     // Extract recovery ID from v value
     const recovery_id = extract_recovery_id(v);
     if (recovery_id > 1) {
-        @branchHint(.cold);
         return PrecompileOutput.success_result(gas_cost, 0); // Return empty on invalid recovery ID
     }
 
     // Recover public key from signature (placeholder implementation)
     const recovered_address = recover_address(hash, recovery_id, r, s) catch {
-        @branchHint(.cold);
         return PrecompileOutput.success_result(gas_cost, 0); // Return empty on recovery failure
     };
 
@@ -226,7 +220,6 @@ fn recover_address(hash: []const u8, recovery_id: u8, r: u256, s: u256) !primiti
 pub fn validate_call(input_size: usize, gas_limit: u64) bool {
     // Check gas requirement
     if (ECRECOVER_GAS_COST > gas_limit) {
-        @branchHint(.cold);
         return false;
     }
 

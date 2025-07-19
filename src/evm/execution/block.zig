@@ -17,13 +17,10 @@ pub fn op_blockhash(pc: usize, interpreter: *Operation.Interpreter, state: *Oper
     const current_block = vm.context.block_number;
 
     if (block_number >= current_block) {
-        @branchHint(.unlikely);
         try frame.stack.append(0);
     } else if (current_block > block_number + 256) {
-        @branchHint(.unlikely);
         try frame.stack.append(0);
     } else if (block_number == 0) {
-        @branchHint(.unlikely);
         try frame.stack.append(0);
     } else {
         // Return a pseudo-hash based on block number for testing
@@ -120,7 +117,6 @@ pub fn op_blobhash(pc: usize, interpreter: *Operation.Interpreter, state: *Opera
 
     // EIP-4844: Get blob hash at index
     if (index >= vm.context.blob_hashes.len) {
-        @branchHint(.unlikely);
         try frame.stack.append(0);
     } else {
         const idx = @as(usize, @intCast(index));

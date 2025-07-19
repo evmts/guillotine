@@ -57,13 +57,11 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
     // Validate input size first
     if (input.len != BLAKE2F_INPUT_SIZE) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
     // Validate output buffer size
     if (output.len < BLAKE2F_OUTPUT_SIZE) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -73,7 +71,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Validate final flag (must be 0 or 1)
     if (final_flag != 0 and final_flag != 1) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -82,13 +79,11 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Check if we have enough gas
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
     // Perform BLAKE2f compression using primitives
     crypto.HashAlgorithms.BLAKE2F.unaudited_compress_eip152(input, output[0..BLAKE2F_OUTPUT_SIZE]) catch {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     };
 

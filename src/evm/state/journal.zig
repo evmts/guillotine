@@ -238,7 +238,6 @@ pub const Journal = struct {
     /// ```
     pub fn commit(self: *Journal, snapshot_id: SnapshotId) void {
         if (snapshot_id >= self.snapshots.items.len) {
-            @branchHint(.cold);
             unreachable;
         }
 
@@ -278,7 +277,6 @@ pub const Journal = struct {
     /// ```
     pub fn revert(self: *Journal, snapshot_id: SnapshotId, state: anytype) !void {
         if (snapshot_id >= self.snapshots.items.len) {
-            @branchHint(.cold);
             unreachable;
         }
 

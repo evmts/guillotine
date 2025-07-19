@@ -7,57 +7,9 @@ const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const ChainRules = @import("../hardforks/chain_rules.zig");
 
-// Import all precompile modules
-const ecrecover = @import("ecrecover.zig");
-const sha256 = @import("sha256.zig");
-const ripemd160 = @import("ripemd160.zig");
-const identity = @import("identity.zig");
-const modexp = @import("modexp.zig");
-const ecadd = @import("ecadd.zig");
-const ecmul = @import("ecmul.zig");
-const ecpairing = @import("ecpairing.zig");
-const blake2f = @import("blake2f.zig");
-const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
-
 /// Compile-time flag to disable all precompiles
 /// Set via build options: -Dno_precompiles=true
 const no_precompiles = if (@hasDecl(build_options, "no_precompiles")) build_options.no_precompiles else false;
-
-/// Function type for precompiles that don't require chain rules
-const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput;
-
-/// Function type for precompiles that require chain rules (EC operations)
-const PrecompileFnWithChainRules = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
-
-/// Unified precompile handler that wraps both function types
-const PrecompileHandler = union(enum) {
-    standard: PrecompileFn,
-    with_chain_rules: PrecompileFnWithChainRules,
-};
-
-/// Compile-time function table for O(1) precompile dispatch
-/// Index is (precompile_id - 1) since precompile IDs start at 1
-const PRECOMPILE_TABLE = blk: {
-    var table: [10]?PrecompileHandler = .{null} ** 10;
-    
-    // Standard precompiles (no chain rules)
-    table[0] = PrecompileHandler{ .standard = &ecrecover.execute }; // ID 1: ECRECOVER
-    table[1] = PrecompileHandler{ .standard = &sha256.execute }; // ID 2: SHA256
-    table[2] = PrecompileHandler{ .standard = &ripemd160.execute }; // ID 3: RIPEMD160
-    table[3] = PrecompileHandler{ .standard = &identity.execute }; // ID 4: IDENTITY
-    table[4] = PrecompileHandler{ .standard = &modexp.execute }; // ID 5: MODEXP
-    
-    // EC precompiles (require chain rules)
-    table[5] = PrecompileHandler{ .with_chain_rules = &ecadd.execute }; // ID 6: ECADD
-    table[6] = PrecompileHandler{ .with_chain_rules = &ecmul.execute }; // ID 7: ECMUL
-    table[7] = PrecompileHandler{ .with_chain_rules = &ecpairing.execute }; // ID 8: ECPAIRING
-    
-    // Standard precompiles
-    table[8] = PrecompileHandler{ .standard = &blake2f.execute }; // ID 9: BLAKE2F
-    table[9] = PrecompileHandler{ .standard = &kzg_point_evaluation.execute }; // ID 10: POINT_EVALUATION
-    
-    break :blk table;
-};
 
 /// Main precompile dispatcher module
 ///
@@ -96,7 +48,6 @@ pub fn is_precompile(address: primitives.Address.Address) bool {
 /// @return true if the precompile is available with these chain rules
 pub fn is_available(address: primitives.Address.Address, chain_rules: ChainRules) bool {
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return false;
     }
 
@@ -134,33 +85,64 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
     } else {
         // Check if this is a valid precompile address
         if (!is_precompile(address)) {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         }
 
         // Check if this precompile is available with the current chain rules
         if (!is_available(address, chain_rules)) {
-            @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         }
 
         const precompile_id = addresses.get_precompile_id(address);
 
-        // Use table lookup for O(1) dispatch
-        if (precompile_id < 1 or precompile_id > 10) {
-            @branchHint(.cold);
-            return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-        }
+        // Route to specific precompile implementation
+        return switch (precompile_id) {
+            4 => {
+                const identity = @import("identity.zig");
+                return identity.execute(input, output, gas_limit);
+            }, // IDENTITY
 
-        const handler = PRECOMPILE_TABLE[precompile_id - 1] orelse {
-            @branchHint(.cold);
-            return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-        };
+            // Placeholder implementations for future precompiles
+            1 => {
+                const ecrecover = @import("ecrecover.zig");
+                return ecrecover.execute(input, output, gas_limit);
+            }, // ECRECOVER
+            2 => {
+                const sha256 = @import("sha256.zig");
+                return sha256.execute(input, output, gas_limit);
+            }, // SHA256
+            3 => {
+                const ripemd160 = @import("ripemd160.zig");
+                return ripemd160.execute(input, output, gas_limit);
+            }, // RIPEMD160
+            5 => {
+                const modexp = @import("modexp.zig");
+                return modexp.execute(input, output, gas_limit);
+            }, // MODEXP
+            6 => {
+                const ecadd = @import("ecadd.zig");
+                return ecadd.execute(input, output, gas_limit, chain_rules);
+            }, // ECADD
+            7 => {
+                const ecmul = @import("ecmul.zig");
+                return ecmul.execute(input, output, gas_limit, chain_rules);
+            }, // ECMUL
+            8 => {
+                const ecpairing = @import("ecpairing.zig");
+                return ecpairing.execute(input, output, gas_limit, chain_rules);
+            }, // ECPAIRING
+            9 => {
+                const blake2f = @import("blake2f.zig");
+                return blake2f.execute(input, output, gas_limit);
+            }, // BLAKE2F
+            10 => {
+                const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
+                return kzg_point_evaluation.execute(input, output, gas_limit);
+            }, // POINT_EVALUATION
 
-        // Dispatch based on handler type
-        return switch (handler) {
-            .standard => |fn_ptr| fn_ptr(input, output, gas_limit),
-            .with_chain_rules => |fn_ptr| fn_ptr(input, output, gas_limit, chain_rules),
+            else => {
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            },
         };
     }
 }
@@ -181,28 +163,61 @@ pub fn estimate_gas(address: primitives.Address.Address, input_size: usize, chai
     }
 
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return error.InvalidPrecompile;
     }
 
     if (!is_available(address, chain_rules)) {
-        @branchHint(.cold);
         return error.PrecompileNotAvailable;
     }
 
     const precompile_id = addresses.get_precompile_id(address);
 
     return switch (precompile_id) {
-        1 => ecrecover.calculate_gas_checked(input_size),
-        2 => sha256.calculate_gas_checked(input_size),
-        3 => ripemd160.calculate_gas_checked(input_size),
-        4 => identity.calculate_gas_checked(input_size),
-        5 => modexp.MODEXP_MIN_GAS, // MODEXP gas calculation requires parsing the input
-        6 => ecadd.calculate_gas_checked(input_size),
-        7 => ecmul.calculate_gas_checked(input_size),
-        8 => ecpairing.calculate_gas_checked(input_size),
-        9 => blake2f.calculate_gas_checked(input_size),
-        10 => kzg_point_evaluation.calculate_gas_checked(input_size),
+        4 => blk: {
+            const identity = @import("identity.zig");
+            break :blk identity.calculate_gas_checked(input_size);
+        }, // IDENTITY
+
+        // Placeholder gas calculations for future precompiles
+        1 => blk: {
+            const ecrecover = @import("ecrecover.zig");
+            break :blk ecrecover.calculate_gas_checked(input_size);
+        }, // ECRECOVER
+        2 => blk: {
+            const sha256 = @import("sha256.zig");
+            break :blk sha256.calculate_gas_checked(input_size);
+        }, // SHA256
+        3 => blk: {
+            const ripemd160 = @import("ripemd160.zig");
+            break :blk ripemd160.calculate_gas_checked(input_size);
+        }, // RIPEMD160
+        5 => blk: {
+            // MODEXP gas calculation requires parsing the input
+            // For estimation, we return minimum gas
+            const modexp = @import("modexp.zig");
+            break :blk modexp.MODEXP_MIN_GAS;
+        }, // MODEXP
+        6 => blk: {
+            const ecadd = @import("ecadd.zig");
+            break :blk ecadd.calculate_gas_checked(input_size);
+        }, // ECADD
+        7 => blk: {
+            const ecmul = @import("ecmul.zig");
+            break :blk ecmul.calculate_gas_checked(input_size);
+        }, // ECMUL
+        8 => blk: {
+            const ecpairing = @import("ecpairing.zig");
+            break :blk ecpairing.calculate_gas_checked(input_size);
+        }, // ECPAIRING
+        9 => blk: {
+            const blake2f = @import("blake2f.zig");
+            break :blk blake2f.calculate_gas_checked(input_size);
+        }, // BLAKE2F
+        10 => blk: {
+            const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
+            break :blk kzg_point_evaluation.calculate_gas_checked(input_size);
+        }, // POINT_EVALUATION
+
         else => error.InvalidPrecompile,
     };
 }
@@ -223,28 +238,51 @@ pub fn get_output_size(address: primitives.Address.Address, input_size: usize, c
     }
 
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return error.InvalidPrecompile;
     }
 
     if (!is_available(address, chain_rules)) {
-        @branchHint(.cold);
         return error.PrecompileNotAvailable;
     }
 
     const precompile_id = addresses.get_precompile_id(address);
 
     return switch (precompile_id) {
-        1 => ecrecover.get_output_size(input_size),
-        2 => sha256.get_output_size(input_size),
-        3 => ripemd160.get_output_size(input_size),
-        4 => identity.get_output_size(input_size),
-        5 => 32, // MODEXP output size depends on modulus length, return default
+        4 => blk: {
+            const identity = @import("identity.zig");
+            break :blk identity.get_output_size(input_size);
+        }, // IDENTITY
+
+        // Placeholder output sizes for future precompiles
+        1 => blk: {
+            const ecrecover = @import("ecrecover.zig");
+            break :blk ecrecover.get_output_size(input_size);
+        }, // ECRECOVER
+        2 => blk: {
+            const sha256 = @import("sha256.zig");
+            break :blk sha256.get_output_size(input_size);
+        }, // SHA256
+        3 => blk: {
+            const ripemd160 = @import("ripemd160.zig");
+            break :blk ripemd160.get_output_size(input_size);
+        }, // RIPEMD160
+        5 => blk: {
+            // MODEXP output size depends on modulus length which requires parsing input
+            // For size estimation, return a reasonable default
+            break :blk 32;
+        }, // MODEXP
         6 => 64, // ECADD - fixed 64 bytes (point)
         7 => 64, // ECMUL - fixed 64 bytes (point)
         8 => 32, // ECPAIRING - fixed 32 bytes (boolean result)
-        9 => blake2f.get_output_size(input_size),
-        10 => kzg_point_evaluation.get_output_size(input_size),
+        9 => blk: {
+            const blake2f = @import("blake2f.zig");
+            break :blk blake2f.get_output_size(input_size);
+        }, // BLAKE2F
+        10 => blk: {
+            const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
+            break :blk kzg_point_evaluation.get_output_size(input_size);
+        }, // POINT_EVALUATION
+
         else => error.InvalidPrecompile,
     };
 }
@@ -261,16 +299,13 @@ pub fn get_output_size(address: primitives.Address.Address, input_size: usize, c
 /// @return true if the call would succeed
 pub fn validate_call(address: primitives.Address.Address, input_size: usize, gas_limit: u64, chain_rules: ChainRules) bool {
     if (!is_precompile(address)) {
-        @branchHint(.cold);
         return false;
     }
     if (!is_available(address, chain_rules)) {
-        @branchHint(.cold);
         return false;
     }
 
     const gas_cost = estimate_gas(address, input_size, chain_rules) catch {
-        @branchHint(.cold);
         return false;
     };
     return gas_cost <= gas_limit;

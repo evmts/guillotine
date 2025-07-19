@@ -80,7 +80,6 @@ fn calculate_adjusted_exponent_length(exp_len: usize, exp_bytes: []const u8) u64
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
     // Need at least 96 bytes for the three length fields
     if (input.len < 96) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -92,14 +91,12 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
     // Check for reasonable limits to prevent excessive memory allocation
     const max_size = 1024 * 1024; // 1MB limit
     if (base_len > max_size or exp_len > max_size or mod_len > max_size) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
     // Calculate required input size
     const required_input_size = 96 + base_len + exp_len + mod_len;
     if (input.len < required_input_size) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
@@ -117,7 +114,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Check if we have enough gas
     if (gas_cost > gas_limit) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
 
@@ -136,7 +132,6 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Validate output buffer size
     if (output.len < mod_len) {
-        @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 

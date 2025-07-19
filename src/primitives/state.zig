@@ -89,10 +89,8 @@ pub const StorageKey = struct {
     pub fn eql(a: StorageKey, b: StorageKey) bool {
         // Fast path for identical keys (likely in hot loops)
         if (std.mem.eql(u8, &a.address, &b.address) and a.slot == b.slot) {
-            @branchHint(.likely);
             return true;
         } else {
-            @branchHint(.cold);
             return false;
         }
     }

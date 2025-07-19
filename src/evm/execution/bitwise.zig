@@ -12,7 +12,6 @@ pub fn op_and(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -33,7 +32,6 @@ pub fn op_or(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.S
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -54,7 +52,6 @@ pub fn op_xor(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -75,7 +72,6 @@ pub fn op_not(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 1) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -95,7 +91,6 @@ pub fn op_byte(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -105,7 +100,6 @@ pub fn op_byte(pc: usize, interpreter: *Operation.Interpreter, state: *Operation
     var result: u256 = undefined;
 
     if (i >= 32) {
-        @branchHint(.unlikely);
         result = 0;
     } else {
         const i_usize = @as(usize, @intCast(i));
@@ -127,7 +121,6 @@ pub fn op_shl(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -137,7 +130,6 @@ pub fn op_shl(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     var result: u256 = undefined;
 
     if (shift >= 256) {
-        @branchHint(.unlikely);
         result = 0;
     } else {
         result = value << @intCast(shift);
@@ -155,7 +147,6 @@ pub fn op_shr(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -165,7 +156,6 @@ pub fn op_shr(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     var result: u256 = undefined;
 
     if (shift >= 256) {
-        @branchHint(.unlikely);
         result = 0;
     } else {
         result = value >> @intCast(shift);
@@ -183,7 +173,6 @@ pub fn op_sar(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
 
     if (frame.stack.size < 2) {
-        @branchHint(.cold);
         unreachable;
     }
 
@@ -193,7 +182,6 @@ pub fn op_sar(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     var result: u256 = undefined;
 
     if (shift >= 256) {
-        @branchHint(.unlikely);
         const sign_bit = value >> 255;
         if (sign_bit == 1) {
             result = std.math.maxInt(u256);
