@@ -4,7 +4,6 @@ const timing = @import("timing.zig");
 const BenchmarkSuite = timing.BenchmarkSuite;
 const BenchmarkConfig = timing.BenchmarkConfig;
 const opcode_benchmarks = @import("opcode_benchmarks.zig");
-const comprehensive_precompile_benchmark = @import("comprehensive_precompile_benchmark.zig");
 
 pub fn run_all_benchmarks(allocator: Allocator) !void {
     std.debug.print("=== Running All Guillotine Benchmarks ===\n", .{});
@@ -12,9 +11,6 @@ pub fn run_all_benchmarks(allocator: Allocator) !void {
     // Run comprehensive opcode benchmarks (new for issue #62)
     std.debug.print("\n🚀 Starting Comprehensive Opcode Benchmarks...\n", .{});
     try opcode_benchmarks.run_comprehensive_opcode_benchmarks(allocator);
-    
-    // Run precompile benchmarks first (most important for issue #68)
-    try run_all_precompile_benchmarks(allocator);
     
     // Run other benchmark categories
     var suite = BenchmarkSuite.init(allocator);
@@ -200,43 +196,6 @@ fn add_crypto_benchmarks(suite: *BenchmarkSuite) !void {
     });
 }
 
-/// Run comprehensive precompile benchmarks
-pub fn run_precompile_benchmarks(allocator: Allocator) !void {
-    std.debug.print("=== Comprehensive Precompile Benchmarks ===\n", .{});
-    try comprehensive_precompile_benchmark.run_comprehensive_precompile_benchmarks(allocator);
-}
-
-/// Run precompile dispatch microbenchmark
-pub fn run_precompile_microbenchmarks() void {
-    comprehensive_precompile_benchmark.run_dispatch_microbenchmark();
-}
-
-/// Run precompile comparative analysis
-pub fn run_precompile_comparative_analysis(allocator: Allocator) !void {
-    try comprehensive_precompile_benchmark.run_comparative_analysis(allocator);
-}
-
-/// Run all precompile-related benchmarks
-pub fn run_all_precompile_benchmarks(allocator: Allocator) !void {
-    std.debug.print("\n=== All Precompile Performance Tests ===\n", .{});
-    
-    // Run comprehensive benchmarks
-    try run_precompile_benchmarks(allocator);
-    
-    // Run microbenchmarks
-    run_precompile_microbenchmarks();
-    
-    // Run comparative analysis
-    try run_precompile_comparative_analysis(allocator);
-    
-    std.debug.print("\n=== Precompile Benchmark Summary ===\n", .{});
-    std.debug.print("All precompile benchmarks completed successfully.\n", .{});
-    std.debug.print("Key insights:\n", .{});
-    std.debug.print("- IDENTITY precompile is most frequently used and should be highly optimized\n", .{});
-    std.debug.print("- SHA256 and RIPEMD160 show linear scaling with input size\n", .{});
-    std.debug.print("- ECRECOVER is computationally expensive but has fixed cost\n", .{});
-    std.debug.print("- Dispatch overhead should be minimal compared to computation time\n", .{});
-}
 
 pub fn run_comparison_benchmarks(allocator: Allocator) !void {
     var suite = BenchmarkSuite.init(allocator);

@@ -20,10 +20,6 @@ pub fn run(allocator: Allocator) !void {
     std.log.info("Running comprehensive opcode benchmarks", .{});
     try opcode_benchmarks.run_comprehensive_opcode_benchmarks(allocator);
     
-    // Run the comprehensive precompile benchmarks (Issue #68)
-    std.log.info("Running comprehensive precompile benchmarks", .{});
-    try benchmarks.run_all_precompile_benchmarks(allocator);
-    
     // Run the zbench-based benchmarks
     std.log.info("Running zbench benchmarks", .{});
     try zbench_runner.run_benchmarks(allocator, zbench);
