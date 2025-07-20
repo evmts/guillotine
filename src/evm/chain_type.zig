@@ -4,8 +4,6 @@ const std = @import("std");
 pub const ChainType = enum {
     /// Ethereum mainnet and testnets
     ETHEREUM,
-    /// Arbitrum Layer 2
-    ARBITRUM,
     /// Optimism Layer 2
     OPTIMISM,
 
@@ -16,11 +14,6 @@ pub const ChainType = enum {
             1 => .ETHEREUM,
             // Ethereum testnets
             3, 4, 5, 11155111 => .ETHEREUM, // Ropsten, Rinkeby, Goerli, Sepolia
-            
-            // Arbitrum chains
-            42161 => .ARBITRUM, // Arbitrum One
-            421614 => .ARBITRUM, // Arbitrum Sepolia
-            42170 => .ARBITRUM, // Arbitrum Nova
             
             // Optimism chains  
             10 => .OPTIMISM, // OP Mainnet
@@ -34,7 +27,6 @@ pub const ChainType = enum {
 
 test "ChainType.fromChainId" {
     try std.testing.expectEqual(ChainType.ETHEREUM, ChainType.fromChainId(1));
-    try std.testing.expectEqual(ChainType.ARBITRUM, ChainType.fromChainId(42161));
     try std.testing.expectEqual(ChainType.OPTIMISM, ChainType.fromChainId(10));
     try std.testing.expectEqual(ChainType.ETHEREUM, ChainType.fromChainId(999999));
 }

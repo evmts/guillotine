@@ -183,6 +183,20 @@ pub const hardforks = struct {
     pub const hardfork = @import("hardforks/hardfork.zig");
 };
 
+/// Optimism L2 support
+pub const optimism = struct {
+    pub const DepositTransaction = @import("optimism/deposit_transaction.zig").DepositTransaction;
+    pub const OptimismContext = @import("optimism/deposit_transaction.zig").OptimismContext;
+    pub const OptimismHardfork = @import("optimism/hardfork.zig").OptimismHardfork;
+    pub const OptimismRules = @import("optimism/hardfork.zig").OptimismRules;
+    pub const L1BlockInfo = @import("optimism/l1_block_info.zig").L1BlockInfo;
+    pub const L1BlockSlots = @import("optimism/l1_block_info.zig").L1BlockSlots;
+    pub const L1GasConstants = @import("optimism/l1_block_info.zig").L1GasConstants;
+    pub const calculateDataGas = @import("optimism/l1_block_info.zig").calculateDataGas;
+    pub const calculateL1Cost = @import("optimism/l1_cost.zig").calculateL1Cost;
+    pub const calculateOperatorFee = @import("optimism/l1_cost.zig").calculateOperatorFee;
+};
+
 /// EVM opcode definitions and utilities
 pub const opcode = @import("opcodes/opcode.zig");
 

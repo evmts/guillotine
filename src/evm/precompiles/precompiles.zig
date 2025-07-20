@@ -22,8 +22,6 @@ const blake2f = @import("blake2f.zig");
 const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 
 // Import L2 precompile modules
-const arb_sys = @import("arbitrum/arb_sys.zig");
-const arb_info = @import("arbitrum/arb_info.zig");
 const l1_block = @import("optimism/l1_block.zig");
 
 /// Compile-time flag to disable all precompiles
@@ -201,15 +199,6 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
     // Try L2 precompiles
     if (is_l2_precompile(address, chain_rules.chain_type)) {
         return switch (chain_rules.chain_type) {
-            .ARBITRUM => {
-                if (std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_SYS)) {
-                    return arb_sys.execute(input, output, gas_limit);
-                } else if (std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_INFO)) {
-                    return arb_info.execute(input, output, gas_limit);
-                }
-                // Add other Arbitrum precompiles as they're implemented
-                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-            },
             .OPTIMISM => {
                 if (std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L1_BLOCK)) {
                     return l1_block.execute(input, output, gas_limit);

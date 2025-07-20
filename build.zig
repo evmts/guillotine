@@ -1029,6 +1029,19 @@ pub fn build(b: *std.Build) void {
     const delegatecall_test_step = b.step("test-delegatecall", "Run DELEGATECALL tests");
     delegatecall_test_step.dependOn(&run_delegatecall_test.step);
 
+    // Add Optimism L1 cost test
+    const optimism_l1_cost_test = b.addTest(.{
+        .name = "optimism-l1-cost-test",
+        .root_source_file = b.path("test/evm/optimism_l1_cost_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    optimism_l1_cost_test.root_module.addImport("primitives", primitives_mod);
+    optimism_l1_cost_test.root_module.addImport("evm", evm_mod);
+    optimism_l1_cost_test.root_module.addImport("crypto", crypto_mod);
+    const run_optimism_l1_cost_test = b.addRunArtifact(optimism_l1_cost_test);
+    const optimism_l1_cost_test_step = b.step("test-optimism-l1-cost", "Run Optimism L1 cost tests");
+    optimism_l1_cost_test_step.dependOn(&run_optimism_l1_cost_test.step);
 
     // Add combined E2E test step
     const e2e_all_test_step = b.step("test-e2e", "Run all E2E tests");
@@ -1065,6 +1078,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_contract_call_test.step);
     // Hardfork tests removed completely
     test_step.dependOn(&run_delegatecall_test.step);
+    test_step.dependOn(&run_optimism_l1_cost_test.step);
     // TODO: Re-enable when Rust integration is fixed
     // test_step.dependOn(&run_compiler_test.step);
     // test_step.dependOn(&run_snail_tracer_test.step);
