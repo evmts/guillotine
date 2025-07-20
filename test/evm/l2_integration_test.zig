@@ -26,6 +26,31 @@ test "Arbitrum ArbSys precompile integration" {
     try std.testing.expectEqual(@as(u8, 42), output[31]); // Mock block number
 }
 
+test "Arbitrum ArbGasInfo precompile integration" {
+    const allocator = std.testing.allocator;
+    
+    // Create Arbitrum chain rules
+    const chain_rules = Evm.chain_rules.for_hardfork_and_chain(.CANCUN, .ARBITRUM);
+    
+    // ArbGasInfo address
+    const arb_gas_info_address = Address.from_hex("0x000000000000000000000000000000000000006c") catch unreachable;
+    
+    // Check that ArbGasInfo is available on Arbitrum
+    try std.testing.expect(Evm.Precompiles.is_available(arb_gas_info_address, chain_rules));
+    
+    // getPricesInWei() selector
+    const input = &[_]u8{ 0x41, 0xb2, 0x47, 0xa8 };
+    var output: [192]u8 = undefined;
+    
+    const result = Evm.Precompiles.execute_precompile(arb_gas_info_address, input, &output, 1000, chain_rules);
+    
+    try std.testing.expect(result.is_success());
+    try std.testing.expectEqual(@as(u64, 150), result.get_gas_used());
+    try std.testing.expectEqual(@as(usize, 192), result.get_output_size());
+    // Check one of the return values
+    try std.testing.expectEqual(@as(u8, 16), output[63]); // perL1CalldataUnit
+}
+
 test "Optimism L1Block precompile integration" {
     const allocator = std.testing.allocator;
     

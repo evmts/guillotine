@@ -24,6 +24,7 @@ const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 // Import L2 precompile modules
 const arb_sys = @import("arbitrum/arb_sys.zig");
 const arb_info = @import("arbitrum/arb_info.zig");
+const arb_gas_info = @import("arbitrum/arb_gas_info.zig");
 const l1_block = @import("optimism/l1_block.zig");
 
 /// Compile-time flag to disable all precompiles
@@ -206,6 +207,8 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
                     return arb_sys.execute(input, output, gas_limit);
                 } else if (std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_INFO)) {
                     return arb_info.execute(input, output, gas_limit);
+                } else if (std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_GAS_INFO)) {
+                    return arb_gas_info.execute(input, output, gas_limit);
                 }
                 // Add other Arbitrum precompiles as they're implemented
                 return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
