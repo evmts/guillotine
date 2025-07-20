@@ -174,6 +174,9 @@ pub const bitvec = @import("frame/bitvec.zig");
 /// Chain-specific validation rules
 pub const chain_rules = @import("hardforks/chain_rules.zig");
 
+/// Chain type enumeration for L2 support
+pub const ChainType = @import("chain_type.zig").ChainType;
+
 /// Hardforks namespace for easier access
 pub const hardforks = struct {
     pub const chain_rules = @import("hardforks/chain_rules.zig");

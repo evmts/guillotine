@@ -3,9 +3,11 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 const primitives = @import("primitives");
 const addresses = @import("precompile_addresses.zig");
+const l2_addresses = @import("l2_precompile_addresses.zig");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const ChainRules = @import("../hardforks/chain_rules.zig");
+const ChainType = @import("../chain_type.zig").ChainType;
 
 // Import all precompile modules
 const ecrecover = @import("ecrecover.zig");
@@ -18,6 +20,11 @@ const ecmul = @import("ecmul.zig");
 const ecpairing = @import("ecpairing.zig");
 const blake2f = @import("blake2f.zig");
 const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
+
+// Import L2 precompile modules
+const arb_sys = @import("arbitrum/arb_sys.zig");
+const arb_info = @import("arbitrum/arb_info.zig");
+const l1_block = @import("optimism/l1_block.zig");
 
 /// Compile-time flag to disable all precompiles
 /// Set via build options: -Dno_precompiles=true
@@ -85,6 +92,30 @@ pub fn is_precompile(address: primitives.Address.Address) bool {
     return addresses.is_precompile(address);
 }
 
+/// Checks if the given address is an L2 precompile
+fn is_l2_precompile(address: primitives.Address.Address, chain_type: ChainType) bool {
+    if (comptime no_precompiles) return false;
+    
+    return switch (chain_type) {
+        .ETHEREUM => false,
+        .ARBITRUM => std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_SYS) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_INFO) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_ADDRESS_TABLE) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_OS_TEST) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_RETRYABLE_TX) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_GAS_INFO) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_AGGREGATOR) or
+                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_STATISTICS),
+        .OPTIMISM => std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L1_BLOCK) or
+                    std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L2_TO_L1_MESSAGE_PASSER) or
+                    std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L2_CROSS_DOMAIN_MESSENGER) or
+                    std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L2_STANDARD_BRIDGE) or
+                    std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.SEQUENCER_FEE_VAULT) or
+                    std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.OPTIMISM_MINTABLE_ERC20_FACTORY) or
+                    std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.GAS_PRICE_ORACLE),
+    };
+}
+
 /// Checks if a precompile is available in the given chain rules
 ///
 /// Different precompiles were introduced in different hardforks. This function
@@ -95,21 +126,27 @@ pub fn is_precompile(address: primitives.Address.Address) bool {
 /// @param chain_rules The current chain rules configuration
 /// @return true if the precompile is available with these chain rules
 pub fn is_available(address: primitives.Address.Address, chain_rules: ChainRules) bool {
-    if (!is_precompile(address)) {
-        @branchHint(.cold);
-        return false;
+    // Check standard Ethereum precompiles first
+    if (is_precompile(address)) {
+        const precompile_id = addresses.get_precompile_id(address);
+
+        return switch (precompile_id) {
+            1, 2, 3, 4 => true, // ECRECOVER, SHA256, RIPEMD160, IDENTITY available from Frontier
+            5 => chain_rules.is_byzantium, // MODEXP from Byzantium
+            6, 7, 8 => chain_rules.is_byzantium, // ECADD, ECMUL, ECPAIRING from Byzantium
+            9 => chain_rules.is_istanbul, // BLAKE2F from Istanbul
+            10 => chain_rules.is_cancun, // POINT_EVALUATION from Cancun
+            else => false,
+        };
     }
-
-    const precompile_id = addresses.get_precompile_id(address);
-
-    return switch (precompile_id) {
-        1, 2, 3, 4 => true, // ECRECOVER, SHA256, RIPEMD160, IDENTITY available from Frontier
-        5 => chain_rules.is_byzantium, // MODEXP from Byzantium
-        6, 7, 8 => chain_rules.is_byzantium, // ECADD, ECMUL, ECPAIRING from Byzantium
-        9 => chain_rules.is_istanbul, // BLAKE2F from Istanbul
-        10 => chain_rules.is_cancun, // POINT_EVALUATION from Cancun
-        else => false,
-    };
+    
+    // Check L2 precompiles
+    if (is_l2_precompile(address, chain_rules.chain_type)) {
+        // L2 precompiles are available on their respective chains
+        return true;
+    }
+    
+    return false;
 }
 
 /// Executes a precompile with the given parameters
@@ -131,19 +168,16 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
     // When precompiles are disabled, always fail
     if (comptime no_precompiles) {
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-    } else {
-        // Check if this is a valid precompile address
-        if (!is_precompile(address)) {
-            @branchHint(.cold);
-            return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-        }
-
-        // Check if this precompile is available with the current chain rules
-        if (!is_available(address, chain_rules)) {
-            @branchHint(.cold);
-            return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-        }
-
+    }
+    
+    // Check if this precompile is available with the current chain rules
+    if (!is_available(address, chain_rules)) {
+        @branchHint(.cold);
+        return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+    }
+    
+    // Try standard Ethereum precompiles first
+    if (is_precompile(address)) {
         const precompile_id = addresses.get_precompile_id(address);
 
         // Use table lookup for O(1) dispatch
@@ -163,6 +197,31 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
             .with_chain_rules => |fn_ptr| fn_ptr(input, output, gas_limit, chain_rules),
         };
     }
+    
+    // Try L2 precompiles
+    if (is_l2_precompile(address, chain_rules.chain_type)) {
+        return switch (chain_rules.chain_type) {
+            .ARBITRUM => {
+                if (std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_SYS)) {
+                    return arb_sys.execute(input, output, gas_limit);
+                } else if (std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_INFO)) {
+                    return arb_info.execute(input, output, gas_limit);
+                }
+                // Add other Arbitrum precompiles as they're implemented
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            },
+            .OPTIMISM => {
+                if (std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L1_BLOCK)) {
+                    return l1_block.execute(input, output, gas_limit);
+                }
+                // Add other Optimism precompiles as they're implemented
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            },
+            .ETHEREUM => unreachable, // Already checked by is_l2_precompile
+        };
+    }
+    
+    return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
 }
 
 /// Estimates the gas cost for a precompile call
