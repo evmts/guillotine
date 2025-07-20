@@ -96,14 +96,6 @@ fn is_l2_precompile(address: primitives.Address.Address, chain_type: ChainType) 
     
     return switch (chain_type) {
         .ETHEREUM => false,
-        .ARBITRUM => std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_SYS) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_INFO) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_ADDRESS_TABLE) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_OS_TEST) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_RETRYABLE_TX) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_GAS_INFO) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_AGGREGATOR) or
-                    std.mem.eql(u8, &address, &l2_addresses.ARBITRUM.ARB_STATISTICS),
         .OPTIMISM => std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L1_BLOCK) or
                     std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L2_TO_L1_MESSAGE_PASSER) or
                     std.mem.eql(u8, &address, &l2_addresses.OPTIMISM.L2_CROSS_DOMAIN_MESSENGER) or
