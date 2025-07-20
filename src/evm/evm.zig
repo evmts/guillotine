@@ -23,6 +23,7 @@ const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const basic_blocks = @import("analysis/basic_blocks.zig");
 const BlockExecutionConfig = @import("execution/block_executor.zig").BlockExecutionConfig;
+// const EvmMemoryAllocator = @import("memory/evm_allocator.zig").EvmMemoryAllocator;
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -171,6 +172,8 @@ pub fn init_with_state(
         .context = context,
         .depth = depth orelse 0,
         .read_only = read_only orelse false,
+        .block_execution_config = .{ .enabled = false },
+        .block_cache = null,
     };
 }
 
@@ -194,18 +197,24 @@ pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
     Contract.clear_analysis_cache(self.allocator);
+    if (self.block_cache) |cache| {
+        cache.deinit();
+        self.allocator.destroy(cache);
+        self.block_cache = null;
+    }
 }
 
 /// Reset the EVM for reuse without deallocating memory.
 /// This is efficient for executing multiple contracts in sequence.
 /// Clears all state but keeps the allocated memory for reuse.
 pub fn reset(self: *Evm) void {
-    // Reset allocator without deallocating (no custom allocator to reset)
-    
     // Reset execution state
     self.depth = 0;
     self.read_only = false;
     self.return_data = &[_]u8{};
+    
+    // State and access list would need their own reset methods
+    // For now, they maintain their state across resets
 }
 
 /// Enable block-based gas accounting optimization.
