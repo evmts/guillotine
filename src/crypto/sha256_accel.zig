@@ -120,26 +120,42 @@ pub const SHA256_Accel = struct {
             W[j] = std.mem.readInt(u32, block[j * 4 ..][0..4], .big);
         }
         
-        // Extend message schedule using SIMD operations
-        var j: usize = 16;
-        while (j < 64) : (j += 4) {
-            // Process 4 words at a time using vectors
-            const vec_size = 4;
-            var w_vec: @Vector(vec_size, u32) = undefined;
-            
-            inline for (0..vec_size) |k| {
-                if (j + k < 64) {
-                    const w0 = W[j + k - 16];
-                    const w1 = W[j + k - 15];
-                    const w9 = W[j + k - 7];
-                    const w14 = W[j + k - 2];
-                    
-                    const s0 = rotr(w1, 7) ^ rotr(w1, 18) ^ (w1 >> 3);
-                    const s1 = rotr(w14, 17) ^ rotr(w14, 19) ^ (w14 >> 10);
-                    
-                    w_vec[k] = w0 +% s0 +% w9 +% s1;
-                    W[j + k] = w_vec[k];
+        // Extend message schedule
+        if (comptime builtin.target.cpu.arch == .x86_64) {
+            // SIMD optimized version for x86_64
+            var j: usize = 16;
+            while (j < 64) : (j += 4) {
+                // Process 4 words at a time using vectors
+                const vec_size = 4;
+                var w_vec: @Vector(vec_size, u32) = undefined;
+                
+                inline for (0..vec_size) |k| {
+                    if (j + k < 64) {
+                        const w0 = W[j + k - 16];
+                        const w1 = W[j + k - 15];
+                        const w9 = W[j + k - 7];
+                        const w14 = W[j + k - 2];
+                        
+                        const s0 = rotr(w1, 7) ^ rotr(w1, 18) ^ (w1 >> 3);
+                        const s1 = rotr(w14, 17) ^ rotr(w14, 19) ^ (w14 >> 10);
+                        
+                        w_vec[k] = w0 +% s0 +% w9 +% s1;
+                        W[j + k] = w_vec[k];
+                    }
                 }
+            }
+        } else {
+            // Fallback for non-x86_64 architectures
+            for (16..64) |j| {
+                const w0 = W[j - 16];
+                const w1 = W[j - 15];
+                const w9 = W[j - 7];
+                const w14 = W[j - 2];
+                
+                const s0 = rotr(w1, 7) ^ rotr(w1, 18) ^ (w1 >> 3);
+                const s1 = rotr(w14, 17) ^ rotr(w14, 19) ^ (w14 >> 10);
+                
+                W[j] = w0 +% s0 +% w9 +% s1;
             }
         }
         

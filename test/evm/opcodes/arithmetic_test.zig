@@ -44,9 +44,9 @@ test "Arithmetic: ADD basic operations" {
     // Test 1: Simple addition
     try frame.stack.append(5);
     try frame.stack.append(10);
-    var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
-    var state = Evm.Operation.State{ .frame = &frame };
-    _ = try evm.table.execute(0, &interpreter, &state, 0x01);
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+    _ = try evm.table.execute(0, interpreter_ptr, state_ptr, 0x01);
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 15), result);
     try testing.expectEqual(@as(usize, 0), frame.stack.size);
@@ -111,8 +111,13 @@ test "Arithmetic: SUB basic operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple subtraction
     try frame.stack.append(10);
@@ -172,8 +177,13 @@ test "Arithmetic: MUL basic operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple multiplication
     try frame.stack.append(7);
@@ -235,8 +245,13 @@ test "Arithmetic: DIV basic operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple division
     try frame.stack.append(42);
@@ -295,8 +310,13 @@ test "Arithmetic: MOD basic operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple modulo
     try frame.stack.append(50);
@@ -355,8 +375,13 @@ test "Arithmetic: ADDMOD complex operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple addmod
     try frame.stack.append(5);
@@ -419,8 +444,13 @@ test "Arithmetic: MULMOD complex operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple mulmod
     try frame.stack.append(5);
@@ -484,8 +514,13 @@ test "Arithmetic: EXP exponential operations" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test 1: Simple exponentiation
     try frame.stack.append(2);
@@ -555,8 +590,13 @@ test "Arithmetic: Stack underflow errors" {
         .build();
     defer frame.deinit();
 
+<<<<<<< HEAD
     var interpreter = Evm.Operation.Interpreter{ .vm = &evm };
     var state = Evm.Operation.State{ .frame = &frame };
+=======
+    const interpreter_ptr: *Evm.Operation.Interpreter = @ptrCast(@alignCast(&evm));
+    const state_ptr: *Evm.Operation.State = @ptrCast(@alignCast(&frame));
+>>>>>>> ec93750 (fix: Add @alignCast to pointer casts in arithmetic_test.zig for ARM64 compatibility)
 
     // Test ADD with empty stack
     try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, &interpreter, &state, 0x01));

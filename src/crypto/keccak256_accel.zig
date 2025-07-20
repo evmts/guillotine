@@ -50,29 +50,33 @@ pub const Keccak256_Accel = struct {
         // XOR block into state (rate is 17 u64 words for Keccak256)
         const words_in_rate = RATE / 8;
         
-        // Use vectors for parallel XOR operations
-        const vec_size = 4;
         var i: usize = 0;
         
-        // Process 4 words at a time with SIMD
-        while (i + vec_size <= words_in_rate) : (i += vec_size) {
-            var state_vec: @Vector(vec_size, u64) = undefined;
-            var block_vec: @Vector(vec_size, u64) = undefined;
+        // Use SIMD optimization only on x86_64
+        if (comptime builtin.target.cpu.arch == .x86_64) {
+            // Use vectors for parallel XOR operations
+            const vec_size = 4;
             
-            // Load state and block data
-            inline for (0..vec_size) |j| {
-                state_vec[j] = state[i + j];
-                block_vec[j] = std.mem.readInt(u64, block[(i + j) * 8 ..][0..8], .little);
-            }
-            
-            // XOR and store back
-            state_vec ^= block_vec;
-            inline for (0..vec_size) |j| {
-                state[i + j] = state_vec[j];
+            // Process 4 words at a time with SIMD
+            while (i + vec_size <= words_in_rate) : (i += vec_size) {
+                var state_vec: @Vector(vec_size, u64) = undefined;
+                var block_vec: @Vector(vec_size, u64) = undefined;
+                
+                // Load state and block data
+                inline for (0..vec_size) |j| {
+                    state_vec[j] = state[i + j];
+                    block_vec[j] = std.mem.readInt(u64, block[(i + j) * 8 ..][0..8], .little);
+                }
+                
+                // XOR and store back
+                state_vec ^= block_vec;
+                inline for (0..vec_size) |j| {
+                    state[i + j] = state_vec[j];
+                }
             }
         }
         
-        // Handle remaining words
+        // Handle remaining words (fallback for non-x86_64 and remainder words)
         while (i < words_in_rate) : (i += 1) {
             state[i] ^= std.mem.readInt(u64, block[i * 8 ..][0..8], .little);
         }
@@ -105,39 +109,63 @@ pub const Keccak256_Accel = struct {
         };
         
         for (RC) |rc| {
-            // Theta step with SIMD
+            // Theta step
             var C: [5]u64 = undefined;
             var D: [5]u64 = undefined;
             
-            // Compute column parities using vectors
-            const vec_C: @Vector(5, u64) = .{
-                state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20],
-                state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21],
-                state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22],
-                state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23],
-                state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24],
-            };
+            // Compute column parities
+            if (comptime builtin.target.cpu.arch == .x86_64) {
+                // Use vectors for parallel computation on x86_64
+                const vec_C: @Vector(5, u64) = .{
+                    state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20],
+                    state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21],
+                    state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22],
+                    state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23],
+                    state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24],
+                };
+                
+                // Extract values from vector
+                inline for (0..5) |x| {
+                    C[x] = vec_C[x];
+                }
+            } else {
+                // Fallback for non-x86_64 architectures
+                C[0] = state[0] ^ state[5] ^ state[10] ^ state[15] ^ state[20];
+                C[1] = state[1] ^ state[6] ^ state[11] ^ state[16] ^ state[21];
+                C[2] = state[2] ^ state[7] ^ state[12] ^ state[17] ^ state[22];
+                C[3] = state[3] ^ state[8] ^ state[13] ^ state[18] ^ state[23];
+                C[4] = state[4] ^ state[9] ^ state[14] ^ state[19] ^ state[24];
+            }
             
             // Compute D values
             inline for (0..5) |x| {
-                C[x] = vec_C[x];
                 D[x] = C[(x + 4) % 5] ^ rotl(C[(x + 1) % 5], 1);
             }
             
-            // Apply theta using SIMD
-            inline for (0..5) |y| {
-                const base = y * 5;
-                var row_vec: @Vector(5, u64) = .{
-                    state[base + 0],
-                    state[base + 1],
-                    state[base + 2],
-                    state[base + 3],
-                    state[base + 4],
-                };
-                const D_vec: @Vector(5, u64) = .{ D[0], D[1], D[2], D[3], D[4] };
-                row_vec ^= D_vec;
-                inline for (0..5) |x| {
-                    state[base + x] = row_vec[x];
+            // Apply theta
+            if (comptime builtin.target.cpu.arch == .x86_64) {
+                // Use SIMD for row processing on x86_64
+                inline for (0..5) |y| {
+                    const base = y * 5;
+                    var row_vec: @Vector(5, u64) = .{
+                        state[base + 0],
+                        state[base + 1],
+                        state[base + 2],
+                        state[base + 3],
+                        state[base + 4],
+                    };
+                    const D_vec: @Vector(5, u64) = .{ D[0], D[1], D[2], D[3], D[4] };
+                    row_vec ^= D_vec;
+                    inline for (0..5) |x| {
+                        state[base + x] = row_vec[x];
+                    }
+                }
+            } else {
+                // Fallback for non-x86_64 architectures
+                inline for (0..5) |y| {
+                    inline for (0..5) |x| {
+                        state[y * 5 + x] ^= D[x];
+                    }
                 }
             }
             
