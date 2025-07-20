@@ -1,20 +1,47 @@
 const std = @import("std");
 const PrecompileOutput = @import("../precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("../precompile_result.zig").PrecompileError;
+const primitives = @import("primitives");
+const Address = primitives.Address;
+const L1BlockSlots = @import("../../optimism/l1_block_info.zig").L1BlockSlots;
+const L1BlockInfo = @import("../../optimism/l1_block_info.zig").L1BlockInfo;
+const OptimismRules = @import("../../optimism/hardfork.zig").OptimismRules;
+
+/// L1Block precompile address
+pub const L1_BLOCK_ADDRESS = Address.from_hex("0x4200000000000000000000000000000000000015") catch unreachable;
+
+/// Context for L1Block precompile execution
+pub const L1BlockContext = struct {
+    /// Function to read storage from L1Block contract
+    storage_reader: *const fn (address: Address, slot: u256) u256,
+    /// Optimism rules for hardfork-specific behavior
+    op_rules: OptimismRules,
+};
 
 /// L1Block precompile (0x4200000000000000000000000000000000000015)
-/// Provides information about the L1 chain
+/// Provides information about the L1 chain by reading from contract storage
 ///
-/// Key functions:
-/// - number() - L1 block number
-/// - timestamp() - L1 block timestamp  
-/// - basefee() - L1 base fee
-/// - hash() - L1 block hash
-/// - sequenceNumber() - L2 block number within epoch
+/// Storage layout:
+/// - Slot 0: L1 block number
+/// - Slot 1: L1 block timestamp
+/// - Slot 2: L1 base fee
+/// - Slot 3: L1 block hash (or packed fee scalars in Ecotone+)
+/// - Slot 4: Sequence number
+/// - Slot 5: Batcher hash (or L1 fee overhead pre-Ecotone)
+/// - Slot 6: L1 fee scalar (pre-Ecotone)
+/// - Slot 7: L1 blob base fee (Ecotone+)
+/// - Slot 8: Operator fee params (Isthmus+)
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
-    const gas_cost = 100; // Fixed gas cost for L1Block queries
+    // TODO: This is a temporary implementation that returns mock values
+    // In production, this needs access to the storage reader context
+    return executeMock(input, output, gas_limit);
+}
+
+/// Execute with storage access (production implementation)
+pub fn executeWithContext(input: []const u8, output: []u8, gas_limit: u64, context: L1BlockContext) PrecompileOutput {
+    const base_gas_cost = 100;
     
-    if (gas_cost > gas_limit) {
+    if (base_gas_cost > gas_limit) {
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
     
@@ -25,40 +52,103 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
     // Get function selector (first 4 bytes)
     const selector = std.mem.readInt(u32, input[0..4], .big);
     
+    // Read storage based on selector
     const result: usize = switch (selector) {
-        // number()
+        // number() - 0x8381f58a
         0x8381f58a => blk: {
             if (output.len < 32) {
                 return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
             }
-            // Return mock L1 block number
-            @memset(output[0..32], 0);
-            output[30] = 0x01;
-            output[31] = 0x00; // 256
+            const value = context.storage_reader(L1_BLOCK_ADDRESS, L1BlockSlots.NUMBER);
+            std.mem.writeInt(u256, output[0..32], value, .big);
             break :blk 32;
         },
-        // timestamp()
+        // timestamp() - 0xb80777ea
         0xb80777ea => blk: {
             if (output.len < 32) {
                 return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
             }
-            // Return mock timestamp
+            const value = context.storage_reader(L1_BLOCK_ADDRESS, L1BlockSlots.TIMESTAMP);
+            std.mem.writeInt(u256, output[0..32], value, .big);
+            break :blk 32;
+        },
+        // basefee() - 0x5cf24969
+        0x5cf24969 => blk: {
+            if (output.len < 32) {
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            }
+            const value = context.storage_reader(L1_BLOCK_ADDRESS, L1BlockSlots.BASE_FEE);
+            std.mem.writeInt(u256, output[0..32], value, .big);
+            break :blk 32;
+        },
+        // hash() - 0x09bd5a60
+        0x09bd5a60 => blk: {
+            if (output.len < 32) {
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            }
+            const value = context.storage_reader(L1_BLOCK_ADDRESS, L1BlockSlots.HASH);
+            std.mem.writeInt(u256, output[0..32], value, .big);
+            break :blk 32;
+        },
+        // blobBaseFee() - 0xf8206140 (Ecotone+)
+        0xf8206140 => blk: {
+            if (!context.op_rules.isEcotone()) {
+                return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
+            }
+            if (output.len < 32) {
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            }
+            const value = context.storage_reader(L1_BLOCK_ADDRESS, L1BlockSlots.BLOB_BASE_FEE);
+            std.mem.writeInt(u256, output[0..32], value, .big);
+            break :blk 32;
+        },
+        else => return PrecompileOutput.failure_result(PrecompileError.InvalidInput),
+    };
+    
+    return PrecompileOutput.success_result(base_gas_cost, result);
+}
+
+/// Temporary mock implementation until storage access is integrated
+fn executeMock(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
+    const gas_cost = 100;
+    
+    if (gas_cost > gas_limit) {
+        return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
+    }
+    
+    if (input.len < 4) {
+        return PrecompileOutput.failure_result(PrecompileError.InvalidInput);
+    }
+    
+    const selector = std.mem.readInt(u32, input[0..4], .big);
+    
+    const result: usize = switch (selector) {
+        0x8381f58a => blk: {
+            if (output.len < 32) {
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            }
             @memset(output[0..32], 0);
-            // Mock timestamp (approx 2024)
+            output[30] = 0x01;
+            output[31] = 0x00;
+            break :blk 32;
+        },
+        0xb80777ea => blk: {
+            if (output.len < 32) {
+                return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+            }
+            @memset(output[0..32], 0);
             output[28] = 0x65;
             output[29] = 0x00;
             output[30] = 0x00;
             output[31] = 0x00;
             break :blk 32;
         },
-        // basefee()
         0x5cf24969 => blk: {
             if (output.len < 32) {
                 return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
             }
-            // Return mock base fee
             @memset(output[0..32], 0);
-            output[31] = 30; // 30 gwei
+            output[31] = 30;
             break :blk 32;
         },
         else => return PrecompileOutput.failure_result(PrecompileError.InvalidInput),
