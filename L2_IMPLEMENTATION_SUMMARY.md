@@ -29,8 +29,9 @@ This implementation adds comprehensive support for Arbitrum and Optimism Layer 2
   - ArbStatistics (0x6f)
 
 - **Implementations**:
-  - `arb_sys.zig`: Implements arbBlockNumber(), arbBlockHash(), isTopLevelCall()
+  - `arb_sys.zig`: Implements arbBlockNumber(), arbChainID(), arbOSVersion(), isTopLevelCall()
   - `arb_info.zig`: Implements getBalance()
+  - `arb_gas_info.zig`: Implements getPricesInWei(), getCurrentTxL1GasFees(), getGasAccountingParams()
 
 #### Optimism Precompiles
 - **Address definitions**:
@@ -78,12 +79,13 @@ This implementation adds comprehensive support for Arbitrum and Optimism Layer 2
 
 ## Future Work
 
-1. Complete implementation of remaining Arbitrum precompiles
+1. Complete implementation of remaining Arbitrum precompiles (ArbAggregator, ArbRetryableTx, ArbAddressTable, ArbStatistics)
 2. Add more Optimism system contracts
 3. Implement Arbitrum-specific opcodes
 4. Add deposit transaction execution in VM
-5. Integrate L2-specific gas pricing models
+5. Integrate actual L2-specific gas pricing models (currently using mock values)
 6. Add cross-layer message handling
+7. Connect precompiles to actual state storage instead of returning mock values
 
 ## Testing
 
