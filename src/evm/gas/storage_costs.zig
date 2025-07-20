@@ -109,7 +109,7 @@ pub const STORAGE_COST_TABLE = if (builtin.mode == .ReleaseSmall) void else gene
 /// Get storage cost for a given hardfork and storage status
 /// Uses pre-computed table for O(1) lookup when available, otherwise calculates at runtime
 pub fn getStorageCost(hardfork: Hardfork, status: StorageStatus) StorageCost {
-    if (builtin.mode == .ReleaseSmall) {
+    if (comptime builtin.mode == .ReleaseSmall) {
         return calculateStorageCostRuntime(hardfork, status);
     } else {
         const fork_idx = @intFromEnum(hardfork);

@@ -326,7 +326,7 @@ pub fn compile_time_vs_runtime_benchmark(allocator: Allocator) !BenchmarkResult 
             // Runtime determined hardfork
             const hardforks = [_]Hardfork{ .BYZANTIUM, .LONDON, .CANCUN };
             for (hardforks) |hf| {
-                const rt_rules = ChainRules.for_hardfork(hf);
+                const rt_rules = ChainRules.for_hardfork_runtime(hf);
                 if (rt_rules.is_cancun) {
                     result2 += 1;
                 }

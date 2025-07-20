@@ -245,7 +245,7 @@ pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
 /// const table = JumpTable.init_from_hardfork(.CANCUN);
 /// // Table includes all opcodes through Cancun
 /// ```
-pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
+pub fn init_from_hardfork(comptime hardfork: Hardfork) JumpTable {
     @setEvalBranchQuota(10000);
     var jt = JumpTable.init();
     // With ALL_OPERATIONS sorted by hardfork, we can iterate once.

@@ -661,11 +661,16 @@ const HARDFORK_RULES = [_]HardforkRule{
     .{ .field_name = "is_eip5656", .introduced_in = .CANCUN },
 };
 
-pub fn for_hardfork(hardfork: Hardfork) ChainRules {
+pub fn for_hardfork(comptime hardfork: Hardfork) ChainRules {
     return for_hardfork_and_chain(hardfork, .ETHEREUM);
 }
 
-pub fn for_hardfork_and_chain(hardfork: Hardfork, chain: ChainType) ChainRules {
+/// Runtime version of for_hardfork for use in benchmarks and other runtime contexts
+pub fn for_hardfork_runtime(hardfork: Hardfork) ChainRules {
+    return for_hardfork_and_chain_runtime(hardfork, .ETHEREUM);
+}
+
+pub fn for_hardfork_and_chain(comptime hardfork: Hardfork, comptime chain: ChainType) ChainRules {
     var rules = ChainRules{}; // All fields default to true
     rules.chain_type = chain;
 
@@ -678,6 +683,65 @@ pub fn for_hardfork_and_chain(hardfork: Hardfork, chain: ChainType) ChainRules {
         } else {
             @branchHint(.likely);
         }
+    }
+
+    return rules;
+}
+
+/// Runtime version of for_hardfork_and_chain for use in benchmarks and other runtime contexts
+pub fn for_hardfork_and_chain_runtime(hardfork: Hardfork, chain: ChainType) ChainRules {
+    var rules = ChainRules{}; // All fields default to true
+    rules.chain_type = chain;
+
+    // Manually disable features based on hardfork
+    const fork_idx = @intFromEnum(hardfork);
+    
+    if (fork_idx < @intFromEnum(Hardfork.HOMESTEAD)) {
+        rules.is_homestead = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.TANGERINE_WHISTLE)) {
+        rules.is_eip150 = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.SPURIOUS_DRAGON)) {
+        rules.is_eip158 = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.BYZANTIUM)) {
+        rules.is_byzantium = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.CONSTANTINOPLE)) {
+        rules.is_constantinople = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.PETERSBURG)) {
+        rules.is_petersburg = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.ISTANBUL)) {
+        rules.is_istanbul = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.BERLIN)) {
+        rules.is_berlin = false;
+        rules.is_eip2930 = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.LONDON)) {
+        rules.is_london = false;
+        rules.is_eip1559 = false;
+        rules.is_eip3198 = false;
+        rules.is_eip3541 = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.MERGE)) {
+        rules.is_merge = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.SHANGHAI)) {
+        rules.is_shanghai = false;
+        rules.is_eip3651 = false;
+        rules.is_eip3855 = false;
+        rules.is_eip3860 = false;
+        rules.is_eip4895 = false;
+    }
+    if (fork_idx < @intFromEnum(Hardfork.CANCUN)) {
+        rules.is_cancun = false;
+        rules.is_eip4844 = false;
+        rules.is_eip1153 = false;
+        rules.is_eip5656 = false;
     }
 
     return rules;

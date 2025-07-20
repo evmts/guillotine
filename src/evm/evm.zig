@@ -183,9 +183,9 @@ pub fn init_with_state(
 /// @param hardfork Ethereum hardfork to configure for
 /// @return Initialized EVM instance
 /// @throws std.mem.Allocator.Error if allocation fails
-pub fn init_with_hardfork(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface, hardfork: Hardfork) !Evm {
-    const table = JumpTable.init_from_hardfork(hardfork);
-    const rules = ChainRules.for_hardfork(hardfork);
+pub fn init_with_hardfork(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface, comptime hardfork: Hardfork) !Evm {
+    const table = comptime JumpTable.init_from_hardfork(hardfork);
+    const rules = comptime ChainRules.for_hardfork(hardfork);
     return try init_with_state(allocator, database, null, table, rules, null, null);
 }
 
@@ -197,9 +197,9 @@ pub fn init_with_hardfork(allocator: std.mem.Allocator, database: @import("state
 /// @param chain_type Type of chain (ETHEREUM, ARBITRUM, OPTIMISM)
 /// @return Initialized EVM instance with L2 support
 /// @throws std.mem.Allocator.Error if allocation fails
-pub fn init_with_hardfork_and_chain(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface, hardfork: Hardfork, chain_type: ChainType) !Evm {
-    const table = JumpTable.init_from_hardfork(hardfork);
-    const rules = ChainRules.for_hardfork_and_chain(hardfork, chain_type);
+pub fn init_with_hardfork_and_chain(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface, comptime hardfork: Hardfork, comptime chain_type: ChainType) !Evm {
+    const table = comptime JumpTable.init_from_hardfork(hardfork);
+    const rules = comptime ChainRules.for_hardfork_and_chain(hardfork, chain_type);
     return try init_with_state(allocator, database, null, table, rules, null, null);
 }
 
