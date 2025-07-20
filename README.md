@@ -83,7 +83,7 @@ zig build test --fuzz
 
 ## Library Integration
 
-For external projects that want to integrate Guillotine as a library dependency.
+For external projects that want to integrate Guillotine as a library dependency. Soon we will be making these requirements not necessary
 
 ### Required Dependencies
 
