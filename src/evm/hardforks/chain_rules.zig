@@ -1,6 +1,7 @@
 const std = @import("std");
 const Hardfork = @import("hardfork.zig").Hardfork;
 const Log = @import("../log.zig");
+const ChainType = @import("../chain_type.zig").ChainType;
 
 /// Configuration for Ethereum protocol rules and EIP activations across hardforks.
 ///
@@ -306,6 +307,18 @@ is_cancun: bool = true,
 /// This flag is reserved for future use and should remain
 /// false until Prague specifications are finalized.
 is_prague: bool = false,
+
+/// Chain type for L2-specific behavior.
+///
+/// ## Purpose
+/// Identifies the blockchain network type to enable chain-specific
+/// features like custom precompiles and opcodes for Layer 2 solutions.
+///
+/// ## L2 Support
+/// - ETHEREUM: Standard Ethereum execution rules
+/// - ARBITRUM: Enables Arbitrum-specific precompiles and opcodes
+/// - OPTIMISM: Enables Optimism-specific features and deposit transactions
+chain_type: ChainType = .ETHEREUM,
 
 /// Verkle trees activation flag (future upgrade).
 ///
@@ -649,7 +662,12 @@ const HARDFORK_RULES = [_]HardforkRule{
 };
 
 pub fn for_hardfork(hardfork: Hardfork) ChainRules {
+    return for_hardfork_and_chain(hardfork, .ETHEREUM);
+}
+
+pub fn for_hardfork_and_chain(hardfork: Hardfork, chain: ChainType) ChainRules {
     var rules = ChainRules{}; // All fields default to true
+    rules.chain_type = chain;
 
     // Disable features that were introduced after the target hardfork
     inline for (HARDFORK_RULES) |rule| {

@@ -21,6 +21,7 @@ pub const CallResult = @import("evm/call_result.zig").CallResult;
 pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
+const ChainType = @import("chain_type.zig").ChainType;
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -186,6 +187,20 @@ pub fn init_with_state(
 pub fn init_with_hardfork(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface, hardfork: Hardfork) !Evm {
     const table = JumpTable.init_from_hardfork(hardfork);
     const rules = ChainRules.for_hardfork(hardfork);
+    return try init_with_state(allocator, database, null, table, rules, null, null);
+}
+
+/// Initialize EVM with a specific hardfork and chain type (for L2 support).
+/// Creates an EVM configured for a specific Layer 2 chain (Arbitrum, Optimism).
+/// @param allocator Memory allocator for VM operations
+/// @param database Database interface for state management
+/// @param hardfork Ethereum hardfork to configure for
+/// @param chain_type Type of chain (ETHEREUM, ARBITRUM, OPTIMISM)
+/// @return Initialized EVM instance with L2 support
+/// @throws std.mem.Allocator.Error if allocation fails
+pub fn init_with_hardfork_and_chain(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface, hardfork: Hardfork, chain_type: ChainType) !Evm {
+    const table = JumpTable.init_from_hardfork(hardfork);
+    const rules = ChainRules.for_hardfork_and_chain(hardfork, chain_type);
     return try init_with_state(allocator, database, null, table, rules, null, null);
 }
 
