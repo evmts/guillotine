@@ -1171,6 +1171,18 @@ pub fn build(b: *std.Build) void {
     const delegatecall_test_step = b.step("test-delegatecall", "Run DELEGATECALL tests");
     delegatecall_test_step.dependOn(&run_delegatecall_test.step);
 
+    // Add SnailTracer test
+    const snailtracer_test = b.addTest(.{
+        .name = "snailtracer-test",
+        .root_source_file = b.path("test/evm/snailtracer_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    snailtracer_test.root_module.addImport("primitives", primitives_mod);
+    snailtracer_test.root_module.addImport("evm", evm_mod);
+    const run_snailtracer_test = b.addRunArtifact(snailtracer_test);
+    const snailtracer_test_step = b.step("test-snailtracer", "Run SnailTracer tests");
+    snailtracer_test_step.dependOn(&run_snailtracer_test.step);
 
     // Add combined E2E test step
     const e2e_all_test_step = b.step("test-e2e", "Run all E2E tests");
@@ -1209,9 +1221,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_contract_call_test.step);
     // Hardfork tests removed completely
     test_step.dependOn(&run_delegatecall_test.step);
+    test_step.dependOn(&run_snailtracer_test.step);
     // TODO: Re-enable when Rust integration is fixed
     // test_step.dependOn(&run_compiler_test.step);
-    // test_step.dependOn(&run_snail_tracer_test.step);
 
     // Add Fuzz Testing
     const fuzz_stack_test = b.addTest(.{
