@@ -20,8 +20,9 @@ pub fn op_lt(pc: usize, interpreter: Operation.Interpreter, state: Operation.Sta
     // Peek the new top operand (a) unsafely
     const a = frame.stack.peek_unsafe().*;
 
-    // EVM LT computes: a < b (where a was second from top, b was top)
-    const result: u256 = switch (std.math.order(a, b)) {
+    // EVM LT computes: top < second-from-top (b < a)
+    // Stack: [a, b] with b on top, we pop b and peek a
+    const result: u256 = switch (std.math.order(b, a)) {
         .lt => 1,
         .eq, .gt => 0,
     };
@@ -43,8 +44,9 @@ pub fn op_gt(pc: usize, interpreter: Operation.Interpreter, state: Operation.Sta
     // Peek the new top operand (a) unsafely
     const a = frame.stack.peek_unsafe().*;
 
-    // EVM GT computes: a > b (where a was second from top, b was top)
-    const result: u256 = switch (std.math.order(a, b)) {
+    // EVM GT computes: top > second-from-top (b > a)
+    // Stack: [a, b] with b on top, we pop b and peek a
+    const result: u256 = switch (std.math.order(b, a)) {
         .gt => 1,
         .eq, .lt => 0,
     };
@@ -67,10 +69,12 @@ pub fn op_slt(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const a = frame.stack.peek_unsafe().*;
 
     // Signed less than
+    // EVM spec: SLT compares top < second-from-top (b < a)
+    // Stack: [a, b] with b on top, we pop b and peek a
     const a_i256 = @as(i256, @bitCast(a));
     const b_i256 = @as(i256, @bitCast(b));
 
-    const result: u256 = switch (std.math.order(a_i256, b_i256)) {
+    const result: u256 = switch (std.math.order(b_i256, a_i256)) {
         .lt => 1,
         .eq, .gt => 0,
     };
@@ -93,10 +97,12 @@ pub fn op_sgt(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const a = frame.stack.peek_unsafe().*;
 
     // Signed greater than
+    // EVM spec: SGT compares top > second-from-top (b > a)
+    // Stack: [a, b] with b on top, we pop b and peek a
     const a_i256 = @as(i256, @bitCast(a));
     const b_i256 = @as(i256, @bitCast(b));
 
-    const result: u256 = if (a_i256 > b_i256) 1 else 0;
+    const result: u256 = if (b_i256 > a_i256) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
@@ -166,6 +172,8 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         // Setup stack with test values
         switch (op.op_type) {
             .lt, .gt, .slt, .sgt, .eq => {
+                // Stack order: push a first, then b, so b is on top
+                // This matches EVM behavior where operations work on [second-from-top, top]
                 try frame.stack.append(op.a);
                 try frame.stack.append(op.b);
             },
@@ -219,23 +227,27 @@ fn validate_comparison_result(stack: *const Stack, op: FuzzComparisonOperation) 
     // Verify specific comparison properties
     switch (op.op_type) {
         .lt => {
-            const expected: u256 = if (op.a < op.b) 1 else 0;
+            // LT computes: top < second-from-top (b < a)
+            const expected: u256 = if (op.b < op.a) 1 else 0;
             try testing.expectEqual(expected, result);
         },
         .gt => {
-            const expected: u256 = if (op.a > op.b) 1 else 0;
+            // GT computes: top > second-from-top (b > a)
+            const expected: u256 = if (op.b > op.a) 1 else 0;
             try testing.expectEqual(expected, result);
         },
         .slt => {
+            // SLT computes: top < second-from-top (signed) (b < a)
             const a_i256 = @as(i256, @bitCast(op.a));
             const b_i256 = @as(i256, @bitCast(op.b));
-            const expected: u256 = if (a_i256 < b_i256) 1 else 0;
+            const expected: u256 = if (b_i256 < a_i256) 1 else 0;
             try testing.expectEqual(expected, result);
         },
         .sgt => {
+            // SGT computes: top > second-from-top (signed) (b > a)
             const a_i256 = @as(i256, @bitCast(op.a));
             const b_i256 = @as(i256, @bitCast(op.b));
-            const expected: u256 = if (a_i256 > b_i256) 1 else 0;
+            const expected: u256 = if (b_i256 > a_i256) 1 else 0;
             try testing.expectEqual(expected, result);
         },
         .eq => {

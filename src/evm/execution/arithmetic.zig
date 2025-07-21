@@ -197,7 +197,7 @@ pub fn op_div(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
 
-    // EVM DIV does top / second, not second / top!
+    // EVM DIV computes: top / second_from_top = b / a
     const result = if (a == 0) blk: {
         @branchHint(.unlikely);
         break :blk 0;
