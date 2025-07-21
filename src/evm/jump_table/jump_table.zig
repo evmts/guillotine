@@ -176,7 +176,19 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
     }
 
     const res = try operation.execute(pc, interpreter, state);
-    Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed, gas_remaining={}", .{ opcode, frame.gas_remaining });
+    Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed, gas_remaining={}, stack_size={}", .{ opcode, frame.gas_remaining, frame.stack.size });
+    
+    // Log stack contents for debugging (show top few values)
+    if (frame.stack.size > 0) {
+        const display_count = @min(frame.stack.size, 4);
+        Log.debug("Stack top {} values:", .{display_count});
+        var i: usize = 0;
+        while (i < display_count) : (i += 1) {
+            const idx = frame.stack.size - 1 - i;
+            Log.debug("  [{d}]: 0x{x}", .{ i, frame.stack.data[idx] });
+        }
+    }
+    
     return res;
 }
 

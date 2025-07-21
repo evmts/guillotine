@@ -428,8 +428,8 @@ test "E2E: Division by zero - EVM behavior" {
 
     // Test division by zero (EVM returns 0)
     const div_zero_bytecode = [_]u8{
-        0x60, 0x05, // PUSH1 5
-        0x60, 0x00, // PUSH1 0
+        0x60, 0x00, // PUSH1 0 (divisor)
+        0x60, 0x05, // PUSH1 5 (dividend)
         0x04, // DIV (5 / 0)
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE

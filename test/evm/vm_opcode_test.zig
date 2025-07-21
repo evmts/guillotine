@@ -775,8 +775,8 @@ test "VM: DIV opcode" {
     defer destroy_test_evm(allocator, evm, test_setup.memory_db);
 
     const bytecode = [_]u8{
-        0x60, 0x0F, // PUSH1 15 (dividend)
         0x60, 0x03, // PUSH1 3 (divisor)
+        0x60, 0x0F, // PUSH1 15 (dividend)
         0x04, // DIV (15 / 3 = 5)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE
@@ -800,8 +800,8 @@ test "VM: DIV by zero returns zero" {
     defer destroy_test_evm(allocator, evm, test_setup.memory_db);
 
     const bytecode = [_]u8{
-        0x60, 0x0A, // PUSH1 10 (dividend)
         0x60, 0x00, // PUSH1 0 (divisor)
+        0x60, 0x0A, // PUSH1 10 (dividend)
         0x04, // DIV (10 / 0)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE
@@ -826,8 +826,8 @@ test "VM: DIV with remainder" {
 
     // Test integer division truncation: 17 / 5 = 3
     const bytecode = [_]u8{
-        0x60, 0x11, // PUSH1 17 (dividend)
         0x60, 0x05, // PUSH1 5 (divisor)
+        0x60, 0x11, // PUSH1 17 (dividend)
         0x04, // DIV (17 / 5)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE
@@ -852,8 +852,8 @@ test "VM: DIV by one" {
 
     // Test division by one (identity)
     const bytecode = [_]u8{
-        0x61, 0x04, 0xD2, // PUSH2 1234 (dividend)
         0x60, 0x01, // PUSH1 1 (divisor)
+        0x61, 0x04, 0xD2, // PUSH2 1234 (dividend)
         0x04, // DIV (1234 / 1)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE
@@ -878,8 +878,8 @@ test "VM: DIV zero dividend" {
 
     // Test 0 / n = 0
     const bytecode = [_]u8{
-        0x60, 0x00, // PUSH1 0 (dividend)
         0x60, 0x42, // PUSH1 66 (divisor)
+        0x60, 0x00, // PUSH1 0 (dividend)
         0x04, // DIV (0 / 66)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE
@@ -904,11 +904,12 @@ test "VM: DIV complex sequence" {
 
     // Test: 100 / 2 / 5 = 10
     const bytecode = [_]u8{
-        0x60, 0x64, // PUSH1 100
         0x60, 0x02, // PUSH1 2
-        0x04, // DIV (result: 50)
+        0x60, 0x64, // PUSH1 100
+        0x04, // DIV (result: 50 on stack)
         0x60, 0x05, // PUSH1 5
-        0x04, // DIV (result: 10)
+        0x90, // SWAP1 to put 5 second from top, 50 on top
+        0x04, // DIV (50 / 5 = 10)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
@@ -933,6 +934,8 @@ test "VM: DIV large numbers" {
     // Test large number division
     // 2^128 / 2^64 = 2^64
     const bytecode = [_]u8{
+        0x68, // PUSH9 (for 2^64) - divisor
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 2^64
         0x70, // PUSH17 (for 2^128) - dividend
         0x01,
         0x00,
@@ -943,8 +946,6 @@ test "VM: DIV large numbers" {
         0x00,
         0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 2^128
-        0x68, // PUSH9 (for 2^64) - divisor
-        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 2^64
         0x04, // DIV,
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE

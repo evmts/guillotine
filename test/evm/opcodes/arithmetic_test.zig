@@ -239,24 +239,24 @@ test "Arithmetic: DIV basic operations" {
     const state: Evm.Operation.State = &frame;
 
     // Test 1: Simple division
-    try frame.stack.append(42);
-    try frame.stack.append(6);
+    try frame.stack.append(6);  // divisor (second from top)
+    try frame.stack.append(42); // dividend (top)
     _ = try evm.table.execute(0, interpreter, state, 0x04);
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 7), result); // 42 / 6 = 7
 
     // Test 2: Division by zero
     frame.stack.clear();
-    try frame.stack.append(42);
-    try frame.stack.append(0);
+    try frame.stack.append(0);  // divisor (second from top)
+    try frame.stack.append(42); // dividend (top)
     _ = try evm.table.execute(0, interpreter, state, 0x04);
     const zero_result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), zero_result); // Division by zero returns 0
 
     // Test 3: Division with remainder
     frame.stack.clear();
-    try frame.stack.append(50);
-    try frame.stack.append(7);
+    try frame.stack.append(7);  // divisor (second from top)
+    try frame.stack.append(50); // dividend (top)
     _ = try evm.table.execute(0, interpreter, state, 0x04);
     const remainder_result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 7), remainder_result); // 50 / 7 = 7 (integer division)

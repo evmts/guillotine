@@ -146,8 +146,8 @@ test "E2E: Interface compliance - polymorphic behavior" {
         0x52, // MSTORE
 
         // Test ConcreteB behavior: baseValue + bonus (bonus = baseValue/10)
-        0x60, 0x32, // PUSH1 50 (same base value)
         0x60, 0x0A, // PUSH1 10 (divisor for bonus)
+        0x60, 0x32, // PUSH1 50 (dividend)
         0x04, // DIV (50/10 = 5, bonus)
         0x60, 0x32, // PUSH1 50 (base value)
         0x01, // ADD (baseValue + bonus = 55)

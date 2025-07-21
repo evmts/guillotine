@@ -197,10 +197,15 @@ pub fn op_div(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
 
-    const result = if (b == 0) blk: {
+    // EVM DIV does top / second, not second / top!
+    const result = if (a == 0) blk: {
         @branchHint(.unlikely);
         break :blk 0;
-    } else a / b;
+    } else b / a;
+    
+    // Debug logging for DIV operation
+    const Log = @import("../log.zig");
+    Log.debug("DIV operation: 0x{x} / 0x{x} = 0x{x}", .{a, b, result});
 
     frame.stack.set_top_unsafe(result);
 

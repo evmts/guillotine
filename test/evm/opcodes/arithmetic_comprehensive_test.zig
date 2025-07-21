@@ -472,8 +472,8 @@ test "DIV (0x04): Basic division" {
     defer frame.deinit();
 
     // Test basic division: 20 / 5 = 4
-    try frame.stack.append(20);
-    try frame.stack.append(5);
+    try frame.stack.append(5);  // divisor (second from top)
+    try frame.stack.append(20); // dividend (top)
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -517,8 +517,8 @@ test "DIV: Division by zero returns zero" {
     defer frame.deinit();
 
     // Test division by zero: 100 / 0 = 0
-    try frame.stack.append(100);
-    try frame.stack.append(0);
+    try frame.stack.append(0);   // divisor (second from top)
+    try frame.stack.append(100); // dividend (top)
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -562,8 +562,8 @@ test "DIV: Integer division truncates" {
     defer frame.deinit();
 
     // Test truncation: 7 / 3 = 2 (not 2.33...)
-    try frame.stack.append(7);
-    try frame.stack.append(3);
+    try frame.stack.append(3);  // divisor (second from top)
+    try frame.stack.append(7);  // dividend (top)
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
