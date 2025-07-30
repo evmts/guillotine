@@ -45,7 +45,7 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
     const db_interface = database.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    errdefer evm.deinit();
+    errdefer evm.deinit(allocator);
     
     var storage_changes = std.AutoHashMap(StorageKey, u256).init(allocator);
     errdefer storage_changes.deinit();
@@ -70,7 +70,7 @@ pub fn deinit(self: *DevtoolEvm) void {
         self.allocator.destroy(contract);
     }
     if (self.current_frame) |frame| {
-        frame.deinit();
+        frame.deinit(self.allocator);
         self.allocator.destroy(frame);
     }
     
@@ -78,7 +78,7 @@ pub fn deinit(self: *DevtoolEvm) void {
         self.allocator.free(self.bytecode);
     }
     self.storage_changes.deinit();
-    self.evm.deinit();
+    self.evm.deinit(self.allocator);
     self.database.deinit();
 }
 
@@ -145,7 +145,7 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
         self.current_contract = null;
     }
     if (self.current_frame) |frame| {
-        frame.deinit();
+        frame.deinit(self.allocator);
         self.allocator.destroy(frame);
         self.current_frame = null;
     }

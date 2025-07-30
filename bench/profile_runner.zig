@@ -277,7 +277,7 @@ fn execute_bytecode_iterations(allocator: Allocator, bytecode: []const u8, itera
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
     
     // Set up contract with bytecode
     const caller_address = Address.ZERO;
@@ -302,13 +302,13 @@ fn execute_bytecode_iterations(allocator: Allocator, bytecode: []const u8, itera
         defer contract.deinit(allocator, null);
         
         // Create frame
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(1_000_000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
         
         // Execute bytecode
         const interpreter: Operation.Interpreter = &evm;

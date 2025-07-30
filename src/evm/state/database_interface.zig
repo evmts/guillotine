@@ -15,10 +15,10 @@
 //! ```zig
 //! // Create a memory database
 //! var memory_db = MemoryDatabase.init(allocator);
-//! defer memory_db.deinit();
+//! defer memory_db.deinit(allocator);
 //!
 //! // Convert to interface
-//! const db_interface = memory_db.to_database_interface();
+//! const db_interface = memory_db.to_database_interface(allocator);
 //!
 //! // Use through interface
 //! const account = try db_interface.get_account(address);
@@ -107,6 +107,8 @@ pub const DatabaseInterface = struct {
     ptr: *anyopaque,
     /// Function pointer table for the implementation
     vtable: *const VTable,
+    /// Allocator for operations that require memory management
+    allocator: std.mem.Allocator,
 
     /// Virtual function table defining all database operations
     pub const VTable = struct {
@@ -148,6 +150,7 @@ pub const DatabaseInterface = struct {
     /// the appropriate vtable for the given implementation type.
     ///
     /// ## Parameters
+    /// - `allocator`: Memory allocator for operations that require memory management
     /// - `implementation`: Pointer to the database implementation
     ///
     /// ## Returns
@@ -155,7 +158,7 @@ pub const DatabaseInterface = struct {
     ///
     /// ## Type Requirements
     /// The implementation must provide all required methods with correct signatures
-    pub fn init(implementation: anytype) DatabaseInterface {
+    pub fn init(allocator: std.mem.Allocator, implementation: anytype) DatabaseInterface {
         const Impl = @TypeOf(implementation);
         const impl_info = @typeInfo(Impl);
 
@@ -273,6 +276,7 @@ pub const DatabaseInterface = struct {
         return DatabaseInterface{
             .ptr = implementation,
             .vtable = &gen.vtable,
+            .allocator = allocator,
         };
     }
 

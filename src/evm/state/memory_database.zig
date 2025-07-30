@@ -133,7 +133,7 @@ const BatchOperation = struct {
 
 /// Memory-based database implementation
 pub const MemoryDatabase = struct {
-    /// Memory allocator for all database allocations
+    /// Allocator for memory management
     allocator: std.mem.Allocator,
 
     /// Account data storage
@@ -505,7 +505,7 @@ pub const MemoryDatabase = struct {
 
     /// Convert this memory database to a database interface
     pub fn to_database_interface(self: *MemoryDatabase) DatabaseInterface {
-        return DatabaseInterface.init(self);
+        return DatabaseInterface.init(self.allocator, self);
     }
 };
 

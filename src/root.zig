@@ -156,7 +156,7 @@ export fn guillotine_deinit() void {
     log(.info, .guillotine_c, "Destroying Guillotine EVM", .{});
 
     if (vm_instance) |vm| {
-        vm.deinit();
+        vm.deinit(allocator);
         allocator.destroy(vm);
         vm_instance = null;
     }
