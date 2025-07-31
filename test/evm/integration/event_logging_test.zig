@@ -37,7 +37,7 @@ test "Integration: ERC20 Transfer event logging" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -52,13 +52,13 @@ test "Integration: ERC20 Transfer event logging" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Transfer event: Transfer(address indexed from, address indexed to, uint256 value)
     // Event signature hash (topic0)
@@ -115,7 +115,7 @@ test "Integration: multiple event emissions" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -130,13 +130,13 @@ test "Integration: multiple event emissions" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -211,7 +211,7 @@ test "Integration: event with dynamic array data" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -226,13 +226,13 @@ test "Integration: event with dynamic array data" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate logging a dynamic array
     // In Solidity: event DataLogged(uint256 indexed id, bytes data);
@@ -284,7 +284,7 @@ test "Integration: log gas consumption patterns" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -299,13 +299,13 @@ test "Integration: log gas consumption patterns" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -361,7 +361,7 @@ test "Integration: logging restrictions in static calls" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract in static mode
     var contract = Contract.init_at_address(
@@ -376,13 +376,13 @@ test "Integration: logging restrictions in static calls" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -419,7 +419,7 @@ test "Integration: event topics for bloom filter" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -434,13 +434,13 @@ test "Integration: event topics for bloom filter" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -506,7 +506,7 @@ test "Integration: log memory expansion costs" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -521,13 +521,13 @@ test "Integration: log memory expansion costs" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -562,7 +562,7 @@ test "Integration: event filtering by topics" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     var contract = Contract.init_at_address(
@@ -577,13 +577,13 @@ test "Integration: event filtering by topics" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;

@@ -10,7 +10,7 @@ test "fuzz_comparison_lt_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -25,14 +25,14 @@ test "fuzz_comparison_lt_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test LT operation: 5 < 10
     try frame.stack.append(5);  // a
@@ -53,7 +53,7 @@ test "fuzz_comparison_eq_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -68,14 +68,14 @@ test "fuzz_comparison_eq_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test EQ operation: 42 == 42
     try frame.stack.append(42); // b
@@ -96,7 +96,7 @@ test "fuzz_comparison_iszero_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -111,14 +111,14 @@ test "fuzz_comparison_iszero_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test ISZERO operation with zero
     try frame.stack.append(0);

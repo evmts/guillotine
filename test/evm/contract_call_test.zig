@@ -14,7 +14,7 @@ test "contract call: empty contract returns success" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller = primitives.Address.from_u256(0x1111);
     const empty_contract = primitives.Address.from_u256(0x2222);
@@ -45,7 +45,7 @@ test "contract call: value transfer to empty contract" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller = primitives.Address.from_u256(0x1111);
     const recipient = primitives.Address.from_u256(0x2222);
@@ -73,7 +73,7 @@ test "contract call: insufficient balance for value transfer" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller = primitives.Address.from_u256(0x1111);
     const recipient = primitives.Address.from_u256(0x2222);
@@ -102,7 +102,7 @@ test "contract call: static call cannot transfer value" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller = primitives.Address.from_u256(0x1111);
     const recipient = primitives.Address.from_u256(0x2222);
@@ -129,7 +129,7 @@ test "contract call: simple contract execution" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const deployer = primitives.Address.from_u256(0x1111);
     const caller = primitives.Address.from_u256(0x2222);
@@ -157,7 +157,7 @@ test "contract call: simple contract execution" {
         0xf3, // RETURN
     };
 
-    const create_result = try vm.create_contract(deployer, 0, init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     try testing.expect(create_result.success);
@@ -191,7 +191,7 @@ test "contract call: gas consumption tracking" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const deployer = primitives.Address.from_u256(0x1111);
     const caller = primitives.Address.from_u256(0x2222);
@@ -223,7 +223,7 @@ test "contract call: gas consumption tracking" {
         0xf3, // RETURN
     };
 
-    const create_result = try vm.create_contract(deployer, 0, init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     try testing.expect(create_result.success);
@@ -261,7 +261,7 @@ test "contract call: revert handling" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const deployer = primitives.Address.from_u256(0x1111);
     const caller = primitives.Address.from_u256(0x2222);
@@ -289,7 +289,7 @@ test "contract call: revert handling" {
         0xfd, // REVERT
     };
 
-    const create_result = try vm.create_contract(deployer, 0, init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     try testing.expect(create_result.success);
@@ -325,7 +325,7 @@ test "contract call: input data passing" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const deployer = primitives.Address.from_u256(0x1111);
     const caller = primitives.Address.from_u256(0x2222);
@@ -354,7 +354,7 @@ test "contract call: input data passing" {
         0xf3, // RETURN
     };
 
-    const create_result = try vm.create_contract(deployer, 0, init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     try testing.expect(create_result.success);
@@ -383,7 +383,7 @@ test "contract call: call depth limit" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller = primitives.Address.from_u256(0x1111);
     const contract = primitives.Address.from_u256(0x2222);
@@ -420,7 +420,7 @@ test "contract call: value transfer rollback on failure" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const deployer = primitives.Address.from_u256(0x1111);
     const caller = primitives.Address.from_u256(0x2222);
@@ -445,7 +445,7 @@ test "contract call: value transfer rollback on failure" {
         0xfd, // REVERT
     };
 
-    const create_result = try vm.create_contract(deployer, 0, init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     try testing.expect(create_result.success);

@@ -30,7 +30,7 @@ test "E2E: Dynamic arrays - push, pop, and indexing" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Simplified array simulation - just test storage operations
     // This tests the EVM's ability to handle basic storage patterns
@@ -113,7 +113,7 @@ test "E2E: Mappings - various key types and nested access" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Simplified mapping test - just use hash-based storage
     const mapping_test_bytecode = [_]u8{
@@ -185,7 +185,7 @@ test "E2E: Struct simulation - packed and unpacked storage" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Simulate struct { uint128 a; uint128 b; } packed into one storage slot
     const struct_test_bytecode = [_]u8{
@@ -274,7 +274,7 @@ test "E2E: String/Bytes operations - encoding and manipulation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test bytes manipulation and hashing
     const bytes_test_bytecode = [_]u8{
@@ -346,7 +346,7 @@ test "E2E: Nested structures - arrays of mappings simulation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Simplified nested structure simulation - avoid complex memory operations
     const nested_test_bytecode = [_]u8{
@@ -428,7 +428,7 @@ test "E2E: Storage patterns - efficiency and gas optimization" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Compare gas costs of memory vs storage operations
     const initial_gas: u64 = 100_000;

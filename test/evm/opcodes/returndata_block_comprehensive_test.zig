@@ -21,7 +21,7 @@ test "EXTCODESIZE (0x3B): Get external code size" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Deploy a contract with code
     const test_code = [_]u8{
@@ -51,13 +51,13 @@ test "EXTCODESIZE (0x3B): Get external code size" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -92,7 +92,7 @@ test "EXTCODECOPY (0x3C): Copy external code to memory" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const external_code = [_]u8{
         0x60, 0x42, // PUSH1 0x42
@@ -119,13 +119,13 @@ test "EXTCODECOPY (0x3C): Copy external code to memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -176,7 +176,7 @@ test "RETURNDATASIZE (0x3D): Get return data size" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x33} ** 20;
@@ -192,13 +192,13 @@ test "RETURNDATASIZE (0x3D): Get return data size" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -234,7 +234,7 @@ test "RETURNDATACOPY (0x3E): Copy return data to memory" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x33} ** 20;
@@ -250,13 +250,13 @@ test "RETURNDATACOPY (0x3E): Copy return data to memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const return_data = [_]u8{
         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
@@ -303,7 +303,7 @@ test "EXTCODEHASH (0x3F): Get external code hash" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Set up contract with known code
     const test_code = [_]u8{ 0x60, 0x00, 0x60, 0x01, 0x01 }; // PUSH1 0, PUSH1 1, ADD
@@ -325,13 +325,13 @@ test "EXTCODEHASH (0x3F): Get external code hash" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -368,7 +368,7 @@ test "BLOCKHASH (0x40): Get block hash" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Set up block context
     const alice_addr = [_]u8{0x11} ** 20;
@@ -401,13 +401,13 @@ test "BLOCKHASH (0x40): Get block hash" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -461,7 +461,7 @@ test "COINBASE (0x41): Get block coinbase" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Set coinbase address
     const coinbase_addr = [_]u8{ 0xC0, 0x1B, 0xBA, 0x5E } ++ [_]u8{0} ** 16;
@@ -495,13 +495,13 @@ test "COINBASE (0x41): Get block coinbase" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -523,7 +523,7 @@ test "TIMESTAMP (0x42): Get block timestamp" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_cases = [_]u64{
         0, // Genesis
@@ -563,13 +563,13 @@ test "TIMESTAMP (0x42): Get block timestamp" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(1000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -591,7 +591,7 @@ test "NUMBER (0x43): Get block number" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_cases = [_]u64{
         0, // Genesis
@@ -632,13 +632,13 @@ test "NUMBER (0x43): Get block number" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(1000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -660,7 +660,7 @@ test "PREVRANDAO (0x44): Get previous RANDAO" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Post-merge, DIFFICULTY opcode returns PREVRANDAO
     const test_values = [_]u256{
@@ -700,13 +700,13 @@ test "PREVRANDAO (0x44): Get previous RANDAO" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(1000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -732,7 +732,7 @@ test "EXTCODE* opcodes: Gas consumption with EIP-2929" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Set up external code
     const code = [_]u8{ 0x60, 0x42 };
@@ -754,13 +754,13 @@ test "EXTCODE* opcodes: Gas consumption with EIP-2929" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -790,7 +790,7 @@ test "Block opcodes: Gas consumption" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x33} ** 20;
@@ -806,13 +806,13 @@ test "Block opcodes: Gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const simple_opcodes = [_]struct {
         opcode: u8,
@@ -864,7 +864,7 @@ test "RETURNDATACOPY: Out of bounds access" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x33} ** 20;
@@ -880,13 +880,13 @@ test "RETURNDATACOPY: Out of bounds access" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const return_data = [_]u8{ 0x42, 0x43, 0x44, 0x45 };
     try frame.return_data.set(&return_data);
@@ -926,7 +926,7 @@ test "Memory copy opcodes: Memory expansion" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Set up external code
     const code = [_]u8{0xFF} ** 32;
@@ -948,13 +948,13 @@ test "Memory copy opcodes: Memory expansion" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100)
-        .build();
-    defer frame.deinit(); // Limited gas
+        .build(allocator);
+    defer frame.deinit(allocator); // Limited gas
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -980,7 +980,7 @@ test "BLOCKHASH: Edge cases" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const alice_addr = [_]u8{0x11} ** 20;
     const context = Evm.Context.init_with_values(
@@ -1012,13 +1012,13 @@ test "BLOCKHASH: Edge cases" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;

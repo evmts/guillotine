@@ -22,7 +22,7 @@ test "Integration: Memory operations with arithmetic" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -40,13 +40,13 @@ test "Integration: Memory operations with arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Store result of arithmetic operation in memory
     // Calculate 10 + 20 = 30, store at offset 0
@@ -86,7 +86,7 @@ test "Integration: Storage with conditional updates" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -104,13 +104,13 @@ test "Integration: Storage with conditional updates" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set initial storage value
     const slot: u256 = 42;
@@ -167,7 +167,7 @@ test "Integration: Memory copy operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -185,13 +185,13 @@ test "Integration: Memory copy operations" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -239,7 +239,7 @@ test "Integration: Transient storage with arithmetic" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -257,13 +257,13 @@ test "Integration: Transient storage with arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -314,7 +314,7 @@ test "Integration: MSTORE8 with bitwise operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -332,13 +332,13 @@ test "Integration: MSTORE8 with bitwise operations" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -375,7 +375,7 @@ test "Integration: Storage slot calculation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -393,13 +393,13 @@ test "Integration: Storage slot calculation" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(30000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -446,7 +446,7 @@ test "Integration: Memory expansion tracking" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -464,13 +464,13 @@ test "Integration: Memory expansion tracking" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;
@@ -526,7 +526,7 @@ test "Integration: Cold/warm storage access patterns" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const zero_address = primitives.Address.ZERO_ADDRESS;
@@ -544,13 +544,13 @@ test "Integration: Cold/warm storage access patterns" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Operation.Interpreter = &evm;
     const state: Operation.State = &frame;

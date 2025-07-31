@@ -19,7 +19,7 @@ pub fn example() !void {
     // Use with EVM Memory component
     const Memory = @import("memory.zig");
     var memory = try Memory.init(allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     // Execute contract...
     

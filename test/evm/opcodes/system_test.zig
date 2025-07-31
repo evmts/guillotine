@@ -24,7 +24,7 @@ test "CREATE: create new contract" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -42,13 +42,13 @@ test "CREATE: create new contract" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure (CREATE should return 0)
     frame.depth = 1024;
@@ -87,7 +87,7 @@ test "CREATE: empty init code creates empty contract" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -105,13 +105,13 @@ test "CREATE: empty init code creates empty contract" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push size, offset, value
     try frame.stack.append(0); // size (will be popped 3rd)
@@ -140,7 +140,7 @@ test "CREATE: write protection in static call" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -158,14 +158,14 @@ test "CREATE: write protection in static call" {
     defer contract.deinit(allocator, null);
 
     // Create frame with static call
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
         .isStatic(true)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push size, offset, value
     try frame.stack.append(0); // size (will be popped 3rd)
@@ -191,7 +191,7 @@ test "CREATE: depth limit" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -209,13 +209,13 @@ test "CREATE: depth limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame with max depth
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -247,7 +247,7 @@ test "CREATE2: create with deterministic address" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -265,13 +265,13 @@ test "CREATE2: create with deterministic address" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -312,7 +312,7 @@ test "CALL: basic call behavior" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -330,13 +330,13 @@ test "CALL: basic call behavior" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -382,7 +382,7 @@ test "CALL: failed call" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -400,13 +400,13 @@ test "CALL: failed call" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -442,7 +442,7 @@ test "CALL: cold address access costs more gas" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -460,13 +460,13 @@ test "CALL: cold address access costs more gas" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -506,7 +506,7 @@ test "CALL: value transfer in static call fails" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -524,14 +524,14 @@ test "CALL: value transfer in static call fails" {
     defer contract.deinit(allocator, null);
 
     // Create frame with static call
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
         .isStatic(true)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push in reverse order for stack (LIFO) with non-zero value
     try frame.stack.append(0); // ret_size
@@ -563,7 +563,7 @@ test "DELEGATECALL: execute code in current context" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -581,13 +581,13 @@ test "DELEGATECALL: execute code in current context" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -626,7 +626,7 @@ test "STATICCALL: read-only call" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -644,13 +644,13 @@ test "STATICCALL: read-only call" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -689,7 +689,7 @@ test "CALL: depth limit" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -707,13 +707,13 @@ test "CALL: depth limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame with max depth
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
@@ -750,7 +750,7 @@ test "CREATE: gas consumption" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -768,13 +768,13 @@ test "CREATE: gas consumption" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Write init code to memory
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 };
@@ -812,7 +812,7 @@ test "CREATE2: additional gas for hashing" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -830,13 +830,13 @@ test "CREATE2: additional gas for hashing" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Write init code to memory
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 };
@@ -876,7 +876,7 @@ test "CREATE: stack underflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -894,13 +894,13 @@ test "CREATE: stack underflow" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push only two values (need three)
     try frame.stack.append(0); // offset
@@ -925,7 +925,7 @@ test "CALL: stack underflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -943,13 +943,13 @@ test "CALL: stack underflow" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push only six values (need seven)
     try frame.stack.append(0); // to
@@ -979,7 +979,7 @@ test "CREATE: memory expansion for init code" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -997,13 +997,13 @@ test "CREATE: memory expansion for init code" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set up sufficient balance for contract creation
     try evm.state.set_balance(contract_address, 1000000);
@@ -1044,7 +1044,7 @@ test "CREATE: EIP-3860 initcode size limit" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -1062,13 +1062,13 @@ test "CREATE: EIP-3860 initcode size limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push parameters with size exceeding MaxInitcodeSize (49152)
     try frame.stack.append(49153); // size (one byte over limit)
@@ -1094,7 +1094,7 @@ test "CREATE: EIP-3860 initcode word gas" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -1112,13 +1112,13 @@ test "CREATE: EIP-3860 initcode word gas" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set up sufficient balance for contract creation
     try evm.state.set_balance(contract_address, 1000000);
@@ -1158,7 +1158,7 @@ test "CREATE2: EIP-3860 initcode size limit" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = [_]u8{0} ** 19 ++ [_]u8{1};
@@ -1176,13 +1176,13 @@ test "CREATE2: EIP-3860 initcode size limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push parameters with size exceeding MaxInitcodeSize (49152)
     try frame.stack.append(0x123); // salt (will be popped 4th)

@@ -10,5 +10,5 @@ pub const CreateContractProtectedError = ValidateStaticContextError || CreateCon
 /// Prevents contract creation during static calls.
 pub fn create_contract_protected(self: *Vm, creator: primitives.Address.Address, value: u256, init_code: []const u8, gas: u64) CreateContractProtectedError!CreateResult {
     try self.validate_static_context();
-    return self.create_contract(creator, value, init_code, gas);
+    return self.create_contract(self.allocator, creator, value, init_code, gas);
 }

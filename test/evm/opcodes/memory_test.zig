@@ -19,7 +19,7 @@ test "MLOAD: load 32 bytes from memory" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -35,13 +35,13 @@ test "MLOAD: load 32 bytes from memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -77,7 +77,7 @@ test "MLOAD: load with offset" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -93,13 +93,13 @@ test "MLOAD: load with offset" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -134,7 +134,7 @@ test "MLOAD: load from uninitialized memory returns zeros" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -150,13 +150,13 @@ test "MLOAD: load from uninitialized memory returns zeros" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -182,7 +182,7 @@ test "MSTORE: store 32 bytes to memory" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -198,13 +198,13 @@ test "MSTORE: store 32 bytes to memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -234,7 +234,7 @@ test "MSTORE: store with offset" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -250,13 +250,13 @@ test "MSTORE: store with offset" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -288,7 +288,7 @@ test "MSTORE8: store single byte to memory" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -304,13 +304,13 @@ test "MSTORE8: store single byte to memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -342,7 +342,7 @@ test "MSTORE8: store only lowest byte" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -358,13 +358,13 @@ test "MSTORE8: store only lowest byte" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -392,7 +392,7 @@ test "MSIZE: get memory size" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -408,13 +408,13 @@ test "MSIZE: get memory size" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -449,7 +449,7 @@ test "MCOPY: copy memory to memory" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -465,13 +465,13 @@ test "MCOPY: copy memory to memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -515,7 +515,7 @@ test "MCOPY: overlapping copy forward" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -531,13 +531,13 @@ test "MCOPY: overlapping copy forward" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -574,7 +574,7 @@ test "MCOPY: overlapping copy backward" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -590,13 +590,13 @@ test "MCOPY: overlapping copy backward" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -633,7 +633,7 @@ test "MCOPY: zero length copy" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -649,13 +649,13 @@ test "MCOPY: zero length copy" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -684,7 +684,7 @@ test "MLOAD: memory expansion gas" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -700,13 +700,13 @@ test "MLOAD: memory expansion gas" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -734,7 +734,7 @@ test "MSTORE: memory expansion gas" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -750,13 +750,13 @@ test "MSTORE: memory expansion gas" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -785,7 +785,7 @@ test "MCOPY: gas consumption" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -801,13 +801,13 @@ test "MCOPY: gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -841,7 +841,7 @@ test "MLOAD: stack underflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -857,13 +857,13 @@ test "MLOAD: stack underflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -885,7 +885,7 @@ test "MSTORE: stack underflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -901,13 +901,13 @@ test "MSTORE: stack underflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -930,7 +930,7 @@ test "MCOPY: stack underflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -946,13 +946,13 @@ test "MCOPY: stack underflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -978,7 +978,7 @@ test "MLOAD: offset overflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -994,13 +994,13 @@ test "MLOAD: offset overflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -1023,7 +1023,7 @@ test "MCOPY: source offset overflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -1039,13 +1039,13 @@ test "MCOPY: source offset overflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;

@@ -23,7 +23,7 @@ test "Integration: SHA3 with dynamic data" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -45,13 +45,13 @@ test "Integration: SHA3 with dynamic data" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Store some data in memory to hash
     const data1: u256 = 0x1234567890ABCDEF;
@@ -113,7 +113,7 @@ test "Integration: Logging with topics and data" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -135,13 +135,13 @@ test "Integration: Logging with topics and data" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Store event data in memory
     const event_data = [_]u8{
@@ -189,7 +189,7 @@ test "Integration: LOG operations with multiple topics" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -211,13 +211,13 @@ test "Integration: LOG operations with multiple topics" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Prepare log data
     const log_data = "Hello, Ethereum!";
@@ -268,7 +268,7 @@ test "Integration: Hash-based address calculation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -290,13 +290,13 @@ test "Integration: Hash-based address calculation" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate CREATE2 address calculation
     // address = keccak256(0xff ++ deployer ++ salt ++ keccak256(init_code))[12:]
@@ -355,7 +355,7 @@ test "Integration: Event emission patterns" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -378,13 +378,13 @@ test "Integration: Event emission patterns" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate ERC20 Transfer event
     // Transfer(address indexed from, address indexed to, uint256 value)
@@ -455,7 +455,7 @@ test "Integration: Dynamic log data with memory expansion" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -477,13 +477,13 @@ test "Integration: Dynamic log data with memory expansion" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Create dynamic-sized log data
     const message = "This is a longer message that will cause memory expansion when logged!";
@@ -535,7 +535,7 @@ test "Integration: SHA3 for signature verification" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -557,13 +557,13 @@ test "Integration: SHA3 for signature verification" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate function selector calculation
     // keccak256("transfer(address,uint256)")[:4]
@@ -600,7 +600,7 @@ test "Integration: Log in static context fails" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -622,13 +622,13 @@ test "Integration: Log in static context fails" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set static context
     frame.is_static = true;

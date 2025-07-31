@@ -10,7 +10,7 @@ test "fuzz_environment_address_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const contract_address = primitives.Address.from_u256(0x1234567890ABCDEF);
     const test_code = [_]u8{0x01};
@@ -26,14 +26,14 @@ test "fuzz_environment_address_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test ADDRESS operation
     var interpreter = evm.Operation.Interpreter = &vm;
@@ -51,7 +51,7 @@ test "fuzz_environment_caller_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller_address = primitives.Address.from_u256(0xABCDEF1234567890);
     const test_code = [_]u8{0x01};
@@ -67,14 +67,14 @@ test "fuzz_environment_caller_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test CALLER operation
     var interpreter = evm.Operation.Interpreter = &vm;
@@ -92,7 +92,7 @@ test "fuzz_environment_callvalue_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const call_value: u256 = 1000000000000000000; // 1 ETH in wei
     const test_code = [_]u8{0x01};
@@ -108,14 +108,14 @@ test "fuzz_environment_callvalue_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test CALLVALUE operation
     var interpreter = evm.Operation.Interpreter = &vm;
@@ -133,7 +133,7 @@ test "fuzz_environment_codesize_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }; // Simple bytecode
     var contract = evm.Contract.init(
@@ -148,14 +148,14 @@ test "fuzz_environment_codesize_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test CODESIZE operation
     var interpreter = evm.Operation.Interpreter = &vm;

@@ -460,11 +460,11 @@ fn contains_jumpdest(code: []const u8) bool {
 ///
 /// ## Example
 /// ```zig
-/// if (!contract.valid_jumpdest(allocator, jump_target)) {
+/// if (!Contract.valid_jumpdest(allocator, &contract, jump_target)) {
 ///     return ExecutionError.InvalidJump;
 /// }
 /// ```
-pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256) bool {
+pub fn valid_jumpdest(allocator: std.mem.Allocator, self: *Contract, dest: u256) bool {
     // Fast path: empty code or out of bounds
     if (self.is_empty or dest >= self.code_size) return false;
 
@@ -560,7 +560,7 @@ pub const MarkStorageSlotWarmError = error{
 };
 
 /// Mark storage slot as warm with pool support
-pub fn mark_storage_slot_warm(self: *Contract, allocator: std.mem.Allocator, slot: u256, pool: ?*StoragePool) MarkStorageSlotWarmError!bool {
+pub fn mark_storage_slot_warm(allocator: std.mem.Allocator, self: *Contract, slot: u256, pool: ?*StoragePool) MarkStorageSlotWarmError!bool {
     if (self.storage_access == null) {
         if (pool) |p| {
             self.storage_access = p.borrow_access_map() catch |err| switch (err) {
@@ -597,7 +597,7 @@ pub fn is_storage_slot_cold(self: *const Contract, slot: u256) bool {
 }
 
 /// Batch mark storage slots as warm
-pub fn mark_storage_slots_warm(self: *Contract, allocator: std.mem.Allocator, slots: []const u256, pool: ?*StoragePool) ContractError!void {
+pub fn mark_storage_slots_warm(allocator: std.mem.Allocator, self: *Contract, slots: []const u256, pool: ?*StoragePool) ContractError!void {
     if (slots.len == 0) return;
 
     if (self.storage_access == null) {
@@ -632,7 +632,7 @@ pub fn mark_storage_slots_warm(self: *Contract, allocator: std.mem.Allocator, sl
 }
 
 /// Store original storage value
-pub fn set_original_storage_value(self: *Contract, allocator: std.mem.Allocator, slot: u256, value: u256, pool: ?*StoragePool) ContractError!void {
+pub fn set_original_storage_value(allocator: std.mem.Allocator, self: *Contract, slot: u256, value: u256, pool: ?*StoragePool) ContractError!void {
     if (self.original_storage == null) {
         if (pool) |p| {
             self.original_storage = p.borrow_storage_map() catch |err| {

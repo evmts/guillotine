@@ -10,7 +10,7 @@ test "fuzz_storage_sload_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -25,13 +25,13 @@ test "fuzz_storage_sload_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var frame_builder = evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const slot: u256 = 0x123456789ABCDEF;
     
@@ -53,7 +53,7 @@ test "fuzz_storage_sstore_sload_roundtrip" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -68,13 +68,13 @@ test "fuzz_storage_sstore_sload_roundtrip" {
     );
     defer contract.deinit(allocator, null);
     
-    var frame_builder = evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const slot: u256 = 0x123456789ABCDEF;
     const value: u256 = 0xFEDCBA9876543210;
@@ -102,7 +102,7 @@ test "fuzz_storage_tload_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -117,13 +117,13 @@ test "fuzz_storage_tload_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var frame_builder = evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const slot: u256 = 0x123456789ABCDEF;
     
@@ -145,7 +145,7 @@ test "fuzz_storage_tstore_tload_roundtrip" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -160,13 +160,13 @@ test "fuzz_storage_tstore_tload_roundtrip" {
     );
     defer contract.deinit(allocator, null);
     
-    var frame_builder = evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const slot: u256 = 0x123456789ABCDEF;
     const value: u256 = 0xFEDCBA9876543210;

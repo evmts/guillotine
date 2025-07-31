@@ -536,7 +536,7 @@ pub fn op_create(pc: usize, interpreter: Operation.Interpreter, state: Operation
     frame.return_data.clear();
 
     // Create the contract
-    const result = try vm.create_contract(frame.contract.address, value, init_code, gas_for_call);
+    const result = try vm.create_contract(vm.allocator, frame.contract.address, value, init_code, gas_for_call);
 
     // Handle result
     try handle_create_result(frame, vm, result, gas_for_call);
@@ -951,7 +951,7 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
 
         const db_interface = memory_db.to_database_interface();
         var vm = try Vm.init(allocator, db_interface, null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
 
         // Set up target contract if needed for call operations
         if (op.target_exists) {
@@ -976,7 +976,7 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         try vm.state.set_balance(contract.address, 10000000);
 
         var frame = try Frame.init(allocator, &vm, op.gas_limit, contract, primitives.Address.from_u256(0x5678), op.calldata);
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         frame.depth = op.depth;
         frame.is_static = op.is_static;

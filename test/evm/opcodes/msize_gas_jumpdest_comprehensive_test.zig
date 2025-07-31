@@ -22,7 +22,7 @@ test "MSIZE (0x59): Get current memory size" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -38,13 +38,13 @@ test "MSIZE (0x59): Get current memory size" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -102,7 +102,7 @@ test "GAS (0x5A): Get remaining gas" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -129,13 +129,13 @@ test "GAS (0x5A): Get remaining gas" {
     };
 
     for (test_cases) |initial_gas| {
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(initial_gas)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -176,7 +176,7 @@ test "JUMPDEST (0x5B): Mark valid jump destination" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create bytecode with multiple JUMPDESTs
     const code = [_]u8{
@@ -202,13 +202,13 @@ test "JUMPDEST (0x5B): Mark valid jump destination" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -225,20 +225,20 @@ test "JUMPDEST (0x5B): Mark valid jump destination" {
     try testing.expectEqual(@as(u64, gas_before - 1), frame.gas_remaining);
 
     // Test 2: Verify jump destinations are valid
-    try testing.expect(contract.valid_jumpdest(allocator, 0)); // Position 0
-    try testing.expect(contract.valid_jumpdest(allocator, 3)); // Position 3
-    try testing.expect(contract.valid_jumpdest(allocator, 6)); // Position 6
+    try testing.expect(Contract.valid_jumpdest(allocator, &contract, 0)); // Position 0
+    try testing.expect(Contract.valid_jumpdest(allocator, &contract, 3)); // Position 3
+    try testing.expect(Contract.valid_jumpdest(allocator, &contract, 6)); // Position 6
 
     // Test 3: Verify non-JUMPDEST positions are invalid
-    try testing.expect(!contract.valid_jumpdest(allocator, 1)); // PUSH1 opcode
-    try testing.expect(!contract.valid_jumpdest(allocator, 2)); // PUSH1 data
-    try testing.expect(!contract.valid_jumpdest(allocator, 4)); // PUSH1 opcode
-    try testing.expect(!contract.valid_jumpdest(allocator, 5)); // PUSH1 data
-    try testing.expect(!contract.valid_jumpdest(allocator, 7)); // STOP
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, 1)); // PUSH1 opcode
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, 2)); // PUSH1 data
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, 4)); // PUSH1 opcode
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, 5)); // PUSH1 data
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, 7)); // STOP
 
     // Test 4: Verify out of bounds positions are invalid
-    try testing.expect(!contract.valid_jumpdest(allocator, 100));
-    try testing.expect(!contract.valid_jumpdest(allocator, std.math.maxInt(u256)));
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, 100));
+    try testing.expect(!Contract.valid_jumpdest(allocator, &contract, std.math.maxInt(u256)));
 }
 
 // ============================
@@ -255,7 +255,7 @@ test "MSIZE, GAS, JUMPDEST: Gas consumption" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -271,13 +271,13 @@ test "MSIZE, GAS, JUMPDEST: Gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -318,7 +318,7 @@ test "MSIZE: Memory expansion scenarios" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -334,13 +334,13 @@ test "MSIZE: Memory expansion scenarios" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -375,7 +375,7 @@ test "GAS: Low gas scenarios" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -392,13 +392,13 @@ test "GAS: Low gas scenarios" {
     defer contract.deinit(allocator, null);
 
     // Test with exactly enough gas for GAS opcode
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(2)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -423,7 +423,7 @@ test "JUMPDEST: Code analysis integration" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Complex bytecode with JUMPDEST in data section
     const code = [_]u8{
@@ -456,18 +456,18 @@ test "JUMPDEST: Code analysis integration" {
     contract.analyze_jumpdests(allocator);
 
     // The JUMPDEST at position 5 SHOULD be valid (it's standalone, not PUSH data)
-    try testing.expect(contract.valid_jumpdest(allocator, 5));
+    try testing.expect(Contract.valid_jumpdest(allocator, &contract, 5));
 
     // The JUMPDEST at position 8 should be valid
-    try testing.expect(contract.valid_jumpdest(allocator, 8));
+    try testing.expect(Contract.valid_jumpdest(allocator, &contract, 8));
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -494,7 +494,7 @@ test "Stack operations: MSIZE and GAS push exactly one value" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -510,13 +510,13 @@ test "Stack operations: MSIZE and GAS push exactly one value" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;

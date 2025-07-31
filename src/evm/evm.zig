@@ -32,8 +32,6 @@ const Evm = @This();
 /// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH = 1024;
 // Hot fields (frequently accessed during execution)
-/// Memory allocator for VM operations
-allocator: std.mem.Allocator,
 /// Opcode dispatch table for the configured hardfork
 table: JumpTable,
 /// Current call depth for overflow protection
@@ -42,6 +40,8 @@ depth: u16 = 0,
 read_only: bool = false,
 
 // Configuration fields (set at initialization)
+/// Memory allocator for dynamic allocations
+allocator: std.mem.Allocator,
 /// Protocol rules for the current hardfork
 chain_rules: ChainRules,
 /// Execution context providing transaction and block information
@@ -69,7 +69,6 @@ comptime {
 /// allocator and database are optional and will use sensible defaults if not provided.
 /// For a more convenient API, use EvmBuilder.
 ///
-/// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
 /// @param return_data Return data buffer (optional, defaults to empty slice)
 /// @param table Opcode dispatch table (optional, defaults to JumpTable.DEFAULT)
@@ -84,13 +83,13 @@ comptime {
 /// ```zig
 /// var builder = EvmBuilder.init(allocator, database);
 /// var evm = try builder.with_depth(5).with_read_only(true).build();
-/// defer evm.deinit();
+/// defer evm.deinit(allocator);
 /// ```
 ///
 /// Example using direct initialization:
 /// ```zig
-/// var evm = try Evm.init(allocator, database, null, null, null, null, 0, false);
-/// defer evm.deinit();
+/// var evm = try Evm.init(database, null, null, null, null, 0, false);
+/// defer evm.deinit(allocator);
 /// ```
 pub fn init(
     allocator: std.mem.Allocator,
@@ -105,11 +104,11 @@ pub fn init(
     Log.debug("Evm.init: Initializing EVM with configuration", .{});
 
     var state = try EvmState.init(allocator, database);
-    errdefer state.deinit();
+    errdefer state.deinit(allocator);
 
     const ctx = context orelse Context.init();
     var access_list = AccessList.init(allocator, ctx);
-    errdefer access_list.deinit();
+    errdefer access_list.deinit(allocator);
 
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
@@ -127,10 +126,11 @@ pub fn init(
 
 /// Free all VM resources.
 /// Must be called when finished with the VM to prevent memory leaks.
-pub fn deinit(self: *Evm) void {
-    self.state.deinit();
+/// @param allocator The allocator that was used to create this VM
+pub fn deinit(self: *Evm, allocator: std.mem.Allocator) void {
+    self.state.deinit(allocator);
     self.access_list.deinit();
-    Contract.clear_analysis_cache(self.allocator);
+    Contract.clear_analysis_cache(allocator);
 }
 
 /// Reset the EVM for reuse without deallocating memory.
@@ -182,7 +182,7 @@ test "Evm.init default configuration" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -201,7 +201,7 @@ test "Evm.init_with_state custom jump table and chain rules" {
     const custom_rules = ChainRules.for_hardfork(.BERLIN);
 
     var evm = try Evm.init_with_state(allocator, db_interface, null, null, custom_table, custom_rules, null, null);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -217,7 +217,7 @@ test "Evm.init_with_hardfork" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -234,7 +234,7 @@ test "Evm.deinit proper cleanup" {
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
 
-    evm.deinit();
+    evm.deinit(allocator);
 }
 
 test "Evm.init state initialization" {
@@ -245,7 +245,7 @@ test "Evm.init state initialization" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_addr = [_]u8{0x42} ** 20;
     const initial_balance = try evm.state.get_balance(test_addr);
@@ -260,7 +260,7 @@ test "Evm.init access list initialization" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_addr = [_]u8{0x42} ** 20;
     const is_warm = evm.access_list.is_address_warm(test_addr);
@@ -275,7 +275,7 @@ test "Evm.init context initialization" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(u256, 0), evm.context.block.number);
     try testing.expectEqual(@as(u64, 0), evm.context.block.timestamp);
@@ -295,9 +295,9 @@ test "Evm multiple VM instances" {
     const db_interface2 = memory_db2.to_database_interface();
 
     var evm1 = try Evm.init(allocator, db_interface1, null, null);
-    defer evm1.deinit();
+    defer evm1.deinit(allocator);
     var evm2 = try Evm.init(allocator, db_interface2, null, null);
-    defer evm2.deinit();
+    defer evm2.deinit(allocator);
 
     evm1.depth = 5;
     evm2.depth = 10;
@@ -318,7 +318,7 @@ test "Evm initialization with different hardforks" {
 
     for (hardforks) |hardfork| {
         var evm = try Evm.init_with_hardfork(allocator, db_interface, hardfork);
-        defer evm.deinit();
+        defer evm.deinit(allocator);
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
         try testing.expectEqual(@as(u16, 0), evm.depth);
@@ -334,7 +334,7 @@ test "Evm initialization memory invariants" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
     try testing.expectEqual(@as(u16, 0), evm.depth);
@@ -349,7 +349,7 @@ test "Evm depth tracking" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(u16, 0), evm.depth);
 
@@ -368,7 +368,7 @@ test "Evm read-only flag" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(false, evm.read_only);
 
@@ -387,7 +387,7 @@ test "Evm return data management" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
 
@@ -408,7 +408,7 @@ test "Evm state access" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_addr = [_]u8{0x42} ** 20;
     const test_balance: u256 = 1000000;
@@ -426,7 +426,7 @@ test "Evm access list operations" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_addr = [_]u8{0x42} ** 20;
 
@@ -444,7 +444,7 @@ test "Evm jump table access" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const add_opcode: u8 = 0x01;
     const operation = evm.table.get(add_opcode);
@@ -459,7 +459,7 @@ test "Evm chain rules access" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_addr = [_]u8{0x42} ** 20;
     const is_precompile = evm.chain_rules.is_precompile(test_addr);
@@ -477,10 +477,10 @@ test "Evm reinitialization behavior" {
     var evm = try Evm.init(allocator, db_interface);
     evm.depth = 5;
     evm.read_only = true;
-    evm.deinit();
+    evm.deinit(allocator);
 
     evm = try Evm.init(allocator, db_interface, null, null);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(u16, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
@@ -494,7 +494,7 @@ test "Evm edge case: maximum depth" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     evm.depth = std.math.maxInt(u16);
     try testing.expectEqual(std.math.maxInt(u16), evm.depth);
@@ -517,7 +517,7 @@ test "Evm fuzz: initialization with random hardforks" {
     while (i < 50) : (i += 1) {
         const hardfork = hardforks[random.intRangeAtMost(usize, 0, hardforks.len - 1)];
         var evm = try Evm.init_with_hardfork(allocator, db_interface, hardfork);
-        defer evm.deinit();
+        defer evm.deinit(allocator);
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
         try testing.expectEqual(@as(u16, 0), evm.depth);
@@ -533,7 +533,7 @@ test "Evm fuzz: random depth and read_only values" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(123);
     const random = prng.random();
@@ -559,7 +559,7 @@ test "Evm integration: multiple state operations" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const addr1 = [_]u8{0x11} ** 20;
     const addr2 = [_]u8{0x22} ** 20;
@@ -585,7 +585,7 @@ test "Evm integration: state and context interaction" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const test_addr = [_]u8{0x42} ** 20;
     const test_balance: u256 = 500000;
@@ -607,7 +607,7 @@ test "Evm invariant: all fields properly initialized after init" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -636,7 +636,7 @@ test "Evm memory leak detection" {
 
         const db_interface = memory_db.to_database_interface();
         var evm = try Evm.init(allocator, db_interface);
-        defer evm.deinit();
+        defer evm.deinit(allocator);
 
         const test_data = try allocator.alloc(u8, 100);
         defer allocator.free(test_data);
@@ -655,7 +655,7 @@ test "Evm edge case: empty return data" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
 
@@ -671,7 +671,7 @@ test "Evm resource exhaustion simulation" {
 
     const db_interface = memory_db.to_database_interface();
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     evm.depth = 1023;
     try testing.expectEqual(@as(u16, 1023), evm.depth);
@@ -689,7 +689,7 @@ test "Evm.init_with_state creates EVM with custom settings" {
     const custom_rules = ChainRules.for_hardfork(.BERLIN);
 
     var evm = try Evm.init_with_state(allocator, db_interface, test_return_data, .{}, custom_table, custom_rules, 42, true);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqualSlices(u8, test_return_data, evm.return_data);
     try testing.expectEqual(@as(usize, 0), evm.stack.size);
@@ -706,7 +706,7 @@ test "Evm.init_with_state uses defaults for null parameters" {
     const db_interface = memory_db.to_database_interface();
 
     var evm = try Evm.init_with_state(allocator, db_interface, null, null, null, null, null, null);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
     try testing.expectEqual(@as(usize, 0), evm.stack.size);
@@ -723,7 +723,7 @@ test "Evm builder pattern: step by step configuration" {
     const db_interface = memory_db.to_database_interface();
 
     var evm = try Evm.init(allocator, db_interface);
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     evm.depth = 5;
     evm.read_only = true;
@@ -746,10 +746,10 @@ test "Evm init_with_state vs init comparison" {
     const db_interface = memory_db.to_database_interface();
 
     var evm1 = try Evm.init(allocator, db_interface);
-    defer evm1.deinit();
+    defer evm1.deinit(allocator);
 
     var evm2 = try Evm.init_with_state(allocator, db_interface, null, null, null, null, null, null);
-    defer evm2.deinit();
+    defer evm2.deinit(allocator);
 
     try testing.expectEqual(evm1.depth, evm2.depth);
     try testing.expectEqual(evm1.read_only, evm2.read_only);
@@ -766,13 +766,13 @@ test "Evm child instance creation pattern" {
     const db_interface = memory_db.to_database_interface();
 
     var parent_evm = try Evm.init(allocator, db_interface);
-    defer parent_evm.deinit();
+    defer parent_evm.deinit(allocator);
 
     parent_evm.depth = 3;
     parent_evm.read_only = true;
 
     var child_evm = try Evm.init_with_state(allocator, db_interface, null, null, null, null, parent_evm.depth + 1, parent_evm.read_only);
-    defer child_evm.deinit();
+    defer child_evm.deinit(allocator);
 
     try testing.expectEqual(@as(u16, 4), child_evm.depth);
     try testing.expectEqual(true, child_evm.read_only);
@@ -793,7 +793,7 @@ test "Evm initialization with different hardforks using builder" {
         const rules = ChainRules.for_hardfork(hardfork);
 
         var evm = try Evm.init_with_state(allocator, db_interface, null, null, table, rules, null, null);
-        defer evm.deinit();
+        defer evm.deinit(allocator);
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
     }
@@ -812,7 +812,7 @@ test "Evm builder pattern memory management" {
         var evm = try Evm.init(allocator, db_interface);
         evm.depth = @intCast(i);
         evm.read_only = (i % 2 == 0);
-        evm.deinit();
+        evm.deinit(allocator);
     }
 }
 
@@ -841,7 +841,7 @@ test "fuzz_evm_initialization_states" {
 
             // Test initialization with various state combinations
             var evm = try Evm.init_with_hardfork(allocator, db_interface, hardfork);
-            defer evm.deinit();
+            defer evm.deinit(allocator);
 
             // Verify initial state
             try testing.expectEqual(@as(u16, 0), evm.depth);
@@ -877,7 +877,7 @@ test "fuzz_evm_depth_management" {
             const db_interface = memory_db.to_database_interface();
 
             var evm = try Evm.init(allocator, db_interface);
-            defer evm.deinit();
+            defer evm.deinit(allocator);
 
             // Test various depth values from fuzz input
             const depths = [_]u16{
@@ -919,7 +919,7 @@ test "fuzz_evm_state_consistency" {
             const initial_read_only = (input[2] % 2) == 1;
 
             var evm = try Evm.init_with_state(allocator, db_interface, null, null, null, initial_depth, initial_read_only);
-            defer evm.deinit();
+            defer evm.deinit(allocator);
 
             // Verify initial state was set correctly
             try testing.expectEqual(initial_depth, evm.depth);
@@ -969,7 +969,7 @@ test "fuzz_evm_frame_pool_management" {
             const db_interface = memory_db.to_database_interface();
 
             var evm = try Evm.init(allocator, db_interface);
-            defer evm.deinit();
+            defer evm.deinit(allocator);
 
             // Test frame pool initialization tracking with fuzz input
             const pool_indices = [_]usize{
@@ -1023,7 +1023,7 @@ test "fuzz_evm_hardfork_configurations" {
             const hardfork = hardforks[hardfork_idx];
 
             var evm = try Evm.init_with_hardfork(allocator, db_interface, hardfork);
-            defer evm.deinit();
+            defer evm.deinit(allocator);
 
             // Verify EVM was configured for the specified hardfork
             try testing.expect(evm.chain_rules.hardfork() == hardfork);
@@ -1050,7 +1050,7 @@ test "fuzz_evm_hardfork_configurations" {
                 const second_hardfork = hardforks[second_hardfork_idx];
 
                 var evm2 = try Evm.init_with_hardfork(allocator, db_interface, second_hardfork);
-                defer evm2.deinit();
+                defer evm2.deinit(allocator);
 
                 try testing.expect(evm2.chain_rules.hardfork() == second_hardfork);
 

@@ -18,7 +18,7 @@ fn create_test_evm(allocator: std.mem.Allocator) !struct { evm: EVM, memory_db: 
 }
 
 fn destroy_test_evm(allocator: std.mem.Allocator, evm: *EVM, memory_db: *MemoryDatabase) void {
-    evm.deinit();
+    evm.deinit(allocator);
     memory_db.deinit();
     allocator.destroy(memory_db);
 }

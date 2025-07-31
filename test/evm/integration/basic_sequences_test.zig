@@ -23,7 +23,7 @@ test "Integration: arithmetic calculation sequence" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -41,13 +41,13 @@ test "Integration: arithmetic calculation sequence" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate: (5 + 3) * 2 - 1 = 15
 
@@ -92,7 +92,7 @@ test "Integration: stack manipulation with DUP and SWAP" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -110,13 +110,13 @@ test "Integration: stack manipulation with DUP and SWAP" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push initial values
     try frame.stack.append(10);
@@ -167,7 +167,7 @@ test "Integration: memory to storage workflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -185,13 +185,13 @@ test "Integration: memory to storage workflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -233,7 +233,7 @@ test "Integration: conditional branching" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract with code
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -266,13 +266,13 @@ test "Integration: conditional branching" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -322,7 +322,7 @@ test "Integration: hash and compare workflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -340,13 +340,13 @@ test "Integration: hash and compare workflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -407,7 +407,7 @@ test "Integration: call data processing" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -441,14 +441,14 @@ test "Integration: call data processing" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
         .withInput(&call_data)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -497,7 +497,7 @@ test "Integration: gas tracking through operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -515,13 +515,13 @@ test "Integration: gas tracking through operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -575,7 +575,7 @@ test "Integration: error handling in sequences" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -593,13 +593,13 @@ test "Integration: error handling in sequences" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -636,7 +636,7 @@ test "Integration: transient storage usage" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a test contract
     const contract_addr = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -654,13 +654,13 @@ test "Integration: transient storage usage" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;

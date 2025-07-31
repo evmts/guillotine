@@ -17,7 +17,7 @@ test "TenThousandHashes benchmark test" {
     // Initialize EVM using builder pattern
     var builder = evm.Evm.EvmBuilder.init(allocator, db_interface);
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Pre-compiled bytecode for TenThousandHashes contract
     // This is the actual bytecode for the contract:

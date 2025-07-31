@@ -34,7 +34,7 @@ test "integration: simple arithmetic sequence" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: PUSH1 5, PUSH1 3, ADD, PUSH1 2, MUL
     // Expected result: (5 + 3) * 2 = 16
@@ -63,13 +63,13 @@ test "integration: simple arithmetic sequence" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -92,7 +92,7 @@ test "integration: memory operations sequence" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Store 42 at memory position 0, then load it
     const bytecode = [_]u8{
@@ -124,13 +124,13 @@ test "integration: memory operations sequence" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -152,7 +152,7 @@ test "integration: storage operations sequence" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xc0ffee000000000000000000000000000000cafe);
 
@@ -186,13 +186,13 @@ test "integration: storage operations sequence" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -214,7 +214,7 @@ test "integration: control flow with jumps" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: conditional jump over invalid instruction
     const bytecode = [_]u8{
@@ -248,13 +248,13 @@ test "integration: control flow with jumps" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -276,7 +276,7 @@ test "integration: environment access sequence" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xc0ffee000000000000000000000000000000cafe);
 
@@ -311,13 +311,13 @@ test "integration: environment access sequence" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -340,7 +340,7 @@ test "integration: stack operations sequence" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Complex stack manipulation
     const bytecode = [_]u8{
@@ -375,13 +375,13 @@ test "integration: stack operations sequence" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -404,7 +404,7 @@ test "integration: return data handling" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Return some data
     const bytecode = [_]u8{
@@ -432,13 +432,13 @@ test "integration: return data handling" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -465,7 +465,7 @@ test "integration: revert with reason" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Revert with error message
     const bytecode = [_]u8{
@@ -493,13 +493,13 @@ test "integration: revert with reason" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -526,7 +526,7 @@ test "integration: gas consumption tracking" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const initial_gas: u64 = 10000;
 
@@ -554,13 +554,13 @@ test "integration: gas consumption tracking" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(initial_gas)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -584,7 +584,7 @@ test "integration: out of gas scenario" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Try to execute with insufficient gas
     const bytecode = [_]u8{
@@ -610,13 +610,13 @@ test "integration: out of gas scenario" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(5)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -636,7 +636,7 @@ test "integration: invalid opcode handling" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Execute invalid opcode
     const bytecode = [_]u8{
@@ -661,13 +661,13 @@ test "integration: invalid opcode handling" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -687,7 +687,7 @@ test "integration: transient storage operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xc0ffee000000000000000000000000000000cafe);
 
@@ -721,13 +721,13 @@ test "integration: transient storage operations" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -749,7 +749,7 @@ test "integration: logging operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xc0ffee000000000000000000000000000000cafe);
 
@@ -782,13 +782,13 @@ test "integration: logging operations" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -816,7 +816,7 @@ test "integration: cold/warm storage access (EIP-2929)" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xc0ffee000000000000000000000000000000cafe);
 
@@ -848,13 +848,13 @@ test "integration: cold/warm storage access (EIP-2929)" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(initial_gas)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -878,7 +878,7 @@ test "integration: push0 operation (Shanghai)" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Use PUSH0 from Shanghai hardfork
     const bytecode = [_]u8{
@@ -908,13 +908,13 @@ test "integration: push0 operation (Shanghai)" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -936,7 +936,7 @@ test "integration: mcopy operation (Cancun)" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test program: Copy memory using MCOPY
     const bytecode = [_]u8{
@@ -1004,13 +1004,13 @@ test "integration: mcopy operation (Cancun)" {
     try evm.state.set_code(Address.ZERO_ADDRESS, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);

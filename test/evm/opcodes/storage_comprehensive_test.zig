@@ -25,7 +25,7 @@ test "SLOAD (0x54): Load from storage" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const code = [_]u8{0x54}; // SLOAD
     const caller = [_]u8{0x11} ** 20;
@@ -42,13 +42,13 @@ test "SLOAD (0x54): Load from storage" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(3000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -75,7 +75,7 @@ test "SLOAD: Load from uninitialized slot returns zero" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -91,13 +91,13 @@ test "SLOAD: Load from uninitialized slot returns zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(3000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -120,7 +120,7 @@ test "SLOAD: Multiple loads from same slot" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -136,13 +136,13 @@ test "SLOAD: Multiple loads from same slot" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(6000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -168,7 +168,7 @@ test "SLOAD: EIP-2929 cold/warm access" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -184,13 +184,13 @@ test "SLOAD: EIP-2929 cold/warm access" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -232,7 +232,7 @@ test "SSTORE (0x55): Store to storage" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const code = [_]u8{0x55}; // SSTORE
     const caller = [_]u8{0x11} ** 20;
@@ -249,13 +249,13 @@ test "SSTORE (0x55): Store to storage" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(30000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -280,7 +280,7 @@ test "SSTORE: Static call protection" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -296,13 +296,13 @@ test "SSTORE: Static call protection" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -333,7 +333,7 @@ test "SSTORE: Static call protection" {
 //     defer contract.deinit(allocator, null);
 //
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 50000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 //
 //     // First set a non-zero value
 //     try test_vm.set_storage(helpers.TestAddresses.CONTRACT, 0x50, 0x123);
@@ -361,7 +361,7 @@ test "SSTORE: EIP-2200 gas cost scenarios" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -377,13 +377,13 @@ test "SSTORE: EIP-2200 gas cost scenarios" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -423,7 +423,7 @@ test "SSTORE: Large storage values" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -439,13 +439,13 @@ test "SSTORE: Large storage values" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -481,7 +481,7 @@ test "Storage opcodes: Gas consumption patterns" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.with_hardfork(.ISTANBUL).build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -497,13 +497,13 @@ test "Storage opcodes: Gas consumption patterns" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -546,7 +546,7 @@ test "Storage opcodes: Stack underflow" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test SLOAD with empty stack
     const caller = [_]u8{0x11} ** 20;
@@ -563,13 +563,13 @@ test "Storage opcodes: Stack underflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -590,13 +590,13 @@ test "Storage opcodes: Stack underflow" {
     );
     defer contract2.deinit(allocator, null);
 
-    var frame_builder2 = Frame.builder(allocator);
+    var frame_builder2 = Frame.builder();
     var frame2 = try frame_builder2
         .withVm(&evm)
         .withContract(&contract2)
         .withGas(1000)
-        .build();
-    defer frame2.deinit();
+        .build(allocator);
+    defer frame2.deinit(allocator);
 
     const state2: Evm.Operation.State = &frame2;
 
@@ -623,7 +623,7 @@ test "Storage: Multiple consecutive operations" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const code = [_]u8{
         0x60, 0x01, // PUSH1 0x01 (value1)
@@ -652,13 +652,13 @@ test "Storage: Multiple consecutive operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -705,7 +705,7 @@ test "SSTORE: Overwriting values" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const slot = 0xBEEF;
     const caller = [_]u8{0x11} ** 20;
@@ -727,13 +727,13 @@ test "SSTORE: Overwriting values" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(30000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -761,7 +761,7 @@ test "SSTORE: EIP-2200 complete gas cost scenarios" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -777,13 +777,13 @@ test "SSTORE: EIP-2200 complete gas cost scenarios" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -831,7 +831,7 @@ test "SSTORE: Zero value edge cases" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -847,13 +847,13 @@ test "SSTORE: Zero value edge cases" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -883,7 +883,7 @@ test "SSTORE: Same value edge cases" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -899,13 +899,13 @@ test "SSTORE: Same value edge cases" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -949,7 +949,7 @@ test "Storage: Boundary value testing" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const boundary_values = [_]u256{
         0, // Zero
@@ -978,13 +978,13 @@ test "Storage: Boundary value testing" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(50000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -1016,7 +1016,7 @@ test "Storage: Large slot number testing" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const large_slots = [_]u256{
         0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, // Max u256
@@ -1041,13 +1041,13 @@ test "Storage: Large slot number testing" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
+        var frame_builder = Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(50000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
@@ -1083,7 +1083,7 @@ test "Storage: Contract slot warming pattern" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -1099,13 +1099,13 @@ test "Storage: Contract slot warming pattern" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -1139,7 +1139,7 @@ test "Storage: Complex access patterns" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -1155,13 +1155,13 @@ test "Storage: Complex access patterns" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -1197,7 +1197,7 @@ test "SSTORE: EIP-1706 gas stipend protection" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.with_hardfork(.ISTANBUL).build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -1214,13 +1214,13 @@ test "SSTORE: EIP-1706 gas stipend protection" {
     defer contract.deinit(allocator, null);
 
     // Set gas remaining to exactly the stipend limit (2300)
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(2300)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -1242,7 +1242,7 @@ test "Storage: Rapid alternating operations" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x11} ** 20;
@@ -1258,13 +1258,13 @@ test "Storage: Rapid alternating operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(200000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -1300,7 +1300,7 @@ test "Storage: Multiple contracts isolation" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create two different contracts
     const caller = [_]u8{0x11} ** 20;
@@ -1331,21 +1331,21 @@ test "Storage: Multiple contracts isolation" {
     );
     defer contract2.deinit(allocator, null);
 
-    var frame_builder1 = Frame.builder(allocator);
+    var frame_builder1 = Frame.builder();
     var frame1 = try frame_builder1
         .withVm(&evm)
         .withContract(&contract1)
         .withGas(30000)
-        .build();
-    defer frame1.deinit();
+        .build(allocator);
+    defer frame1.deinit(allocator);
 
-    var frame_builder2 = Frame.builder(allocator);
+    var frame_builder2 = Frame.builder();
     var frame2 = try frame_builder2
         .withVm(&evm)
         .withContract(&contract2)
         .withGas(30000)
-        .build();
-    defer frame2.deinit();
+        .build(allocator);
+    defer frame2.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state1: Evm.Operation.State = &frame1;

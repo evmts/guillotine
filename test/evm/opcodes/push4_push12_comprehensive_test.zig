@@ -22,7 +22,7 @@ test "PUSH4 (0x63): Push 4 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -46,13 +46,13 @@ test "PUSH4 (0x63): Push 4 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -83,7 +83,7 @@ test "PUSH5 (0x64): Push 5 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -107,13 +107,13 @@ test "PUSH5 (0x64): Push 5 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -144,7 +144,7 @@ test "PUSH6 (0x65): Push 6 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -168,13 +168,13 @@ test "PUSH6 (0x65): Push 6 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -205,7 +205,7 @@ test "PUSH7 (0x66): Push 7 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -228,13 +228,13 @@ test "PUSH7 (0x66): Push 7 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -265,7 +265,7 @@ test "PUSH8 (0x67): Push 8 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -289,13 +289,13 @@ test "PUSH8 (0x67): Push 8 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -326,7 +326,7 @@ test "PUSH9 (0x68): Push 9 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -349,13 +349,13 @@ test "PUSH9 (0x68): Push 9 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -390,7 +390,7 @@ test "PUSH10 (0x69): Push 10 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -413,13 +413,13 @@ test "PUSH10 (0x69): Push 10 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -454,7 +454,7 @@ test "PUSH11 (0x6A): Push 11 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -477,13 +477,13 @@ test "PUSH11 (0x6A): Push 11 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -518,7 +518,7 @@ test "PUSH12 (0x6B): Push 12 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -542,13 +542,13 @@ test "PUSH12 (0x6B): Push 12 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -584,7 +584,7 @@ test "PUSH13 (0x6C): Push 13 bytes onto stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -606,13 +606,13 @@ test "PUSH13 (0x6C): Push 13 bytes onto stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -641,7 +641,7 @@ test "PUSH4-PUSH12: Gas consumption" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -672,13 +672,13 @@ test "PUSH4-PUSH12: Gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -733,7 +733,7 @@ test "PUSH operations: Boundary conditions with truncated data" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -758,13 +758,13 @@ test "PUSH operations: Boundary conditions with truncated data" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -795,7 +795,7 @@ test "PUSH operations: Sequential pushes filling stack" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -822,13 +822,13 @@ test "PUSH operations: Sequential pushes filling stack" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -863,7 +863,7 @@ test "PUSH operations: Verify big-endian byte order" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -885,13 +885,13 @@ test "PUSH operations: Verify big-endian byte order" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;

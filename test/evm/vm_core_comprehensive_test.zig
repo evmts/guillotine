@@ -140,7 +140,7 @@ test "VMCore: VM initialization with default hardfork" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Verify VM is properly initialized
     try testing.expectEqual(@as(u16, 0), vm.depth);
@@ -165,7 +165,7 @@ test "VMCore: VM initialization with specific hardfork" {
 
         const db_interface = memory_db.to_database_interface();
         var vm = try VM.init_with_hardfork(allocator, db_interface, hardfork);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
 
         // Verify hardfork-specific initialization
         try testing.expectEqual(@as(u16, 0), vm.depth);
@@ -185,7 +185,7 @@ test "VMCore: VM program counter management and control flow" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test bytecode with PC-modifying operations
     const bytecode = [_]u8{
@@ -227,7 +227,7 @@ test "VMCore: VM execution loop with gas tracking" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Simple bytecode: PUSH1 1, PUSH1 2, ADD, STOP
     const bytecode = [_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01, 0x00 };
@@ -265,7 +265,7 @@ test "VMCore: VM depth tracking in nested calls" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test depth increments properly
     try testing.expectEqual(@as(u16, 0), vm.depth);
@@ -301,7 +301,7 @@ test "VMCore: VM static context enforcement" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -334,7 +334,7 @@ test "VMCore: VM instruction dispatch error handling" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test invalid opcode
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -380,13 +380,13 @@ test "VMCore: Frame initialization and cleanup" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(0)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Verify frame initialization
     try testing.expectEqual(&contract, frame.contract);
@@ -437,13 +437,13 @@ test "VMCore: Frame state inheritance and context switching" {
     defer child_contract.deinit(allocator, null);
 
     // Create parent frame
-    var parent_frame_builder = Frame.builder(allocator);
+    var parent_frame_builder = Frame.builder();
     var parent_frame = try parent_frame_builder
         .withVm(&evm)
         .withContract(&parent_contract)
         .withGas(0)
         .build();
-    defer parent_frame.deinit();
+    defer parent_frame.deinit(allocator);
     parent_frame.depth = 5;
     parent_frame.is_static = true;
     parent_frame.gas_remaining = 50000;
@@ -466,7 +466,7 @@ test "VMCore: Frame state inheritance and context switching" {
         null, // output
         null, // pc
     );
-    defer child_frame.deinit();
+    defer child_frame.deinit(allocator);
 
     // Verify inheritance
     try testing.expectEqual(@as(u32, 6), child_frame.depth);
@@ -496,13 +496,13 @@ test "VMCore: Frame gas consumption and tracking" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Test successful gas consumption
     try frame.consume_gas(100);
@@ -542,13 +542,13 @@ test "VMCore: Frame call depth limits" {
 
     // Test depth progression
     const max_depth = 1024;
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(0)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Test various depth levels
     const test_depths = [_]u32{ 0, 100, 500, 1000, 1023, 1024 };
@@ -581,13 +581,13 @@ test "VMCore: Frame stack and memory integration" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Test stack operations
     try frame.stack.append(42);
@@ -618,7 +618,7 @@ test "VMCore: Memory expansion algorithms and gas calculations" {
     const allocator = testing.allocator;
 
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     // Test memory expansion with gas calculation
     // Memory gas formula: (3 * new_size_words) + (new_size_words^2 / 512)
@@ -645,7 +645,7 @@ test "VMCore: Memory bounds checking and safety" {
     const allocator = testing.allocator;
 
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     // Test normal operations within bounds
     try memory.store_word(0, 0x123456789abcdef);
@@ -670,7 +670,7 @@ test "VMCore: Memory word alignment and data handling" {
     const allocator = testing.allocator;
 
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     // Test aligned word operations
     try memory.store_word(0, 0x123456789abcdef0);
@@ -694,7 +694,7 @@ test "VMCore: Memory copy operations and data integrity" {
     const allocator = testing.allocator;
 
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     // Initialize source data
     const source_data = [_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 };
@@ -869,7 +869,7 @@ test "VMCore: Integration - Complete execution flow" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Bytecode: PUSH1 10, PUSH1 20, ADD, MSTORE(0), MLOAD(0), STOP
     const bytecode = [_]u8{
@@ -914,7 +914,7 @@ test "VMCore: Integration - Error propagation across components" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test stack underflow error propagation
     const bytecode = [_]u8{0x01}; // ADD with empty stack
@@ -949,7 +949,7 @@ test "VMCore: Integration - Memory and gas coordination" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try VM.init(allocator, db_interface);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test large memory allocation with limited gas
     const bytecode = [_]u8{

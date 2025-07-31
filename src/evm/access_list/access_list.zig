@@ -35,7 +35,6 @@ pub const WARM_SLOAD_COST: u64 = 100;
 // Additional costs for CALL operations
 pub const COLD_CALL_EXTRA_COST: u64 = COLD_ACCOUNT_ACCESS_COST - WARM_ACCOUNT_ACCESS_COST;
 
-allocator: std.mem.Allocator,
 /// Warm addresses - addresses that have been accessed
 addresses: std.AutoHashMap(primitives.Address.Address, void),
 /// Warm storage slots - storage slots that have been accessed
@@ -45,7 +44,6 @@ context: Context,
 
 pub fn init(allocator: std.mem.Allocator, context: Context) AccessList {
     return .{
-        .allocator = allocator,
         .addresses = std.AutoHashMap(primitives.Address.Address, void).init(allocator),
         .storage_slots = std.HashMap(AccessListStorageKey, void, AccessListStorageKeyContext, 80).init(allocator),
         .context = context,

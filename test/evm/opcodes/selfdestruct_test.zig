@@ -16,7 +16,7 @@ test "SELFDESTRUCT: Basic functionality" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = Evm.Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{1});
@@ -34,13 +34,13 @@ test "SELFDESTRUCT: Basic functionality" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set contract balance
     try evm.state.set_balance(contract_address, 1000);
@@ -79,7 +79,7 @@ test "SELFDESTRUCT: Forbidden in static call" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create contract
     const contract_address = Evm.Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{1});
@@ -97,14 +97,14 @@ test "SELFDESTRUCT: Forbidden in static call" {
     defer contract.deinit(allocator, null);
 
     // Create frame with static call flag
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withStaticFlag(true)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push recipient address to stack
     const bob_address = Evm.Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{3});
@@ -134,7 +134,7 @@ test "SELFDESTRUCT: Gas costs by hardfork" {
         var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
         var evm = try builder.build();
-        defer evm.deinit();
+        defer evm.deinit(allocator);
         evm.hardfork = .FRONTIER;
 
         // Create contract
@@ -153,13 +153,13 @@ test "SELFDESTRUCT: Gas costs by hardfork" {
         defer contract.deinit(allocator, null);
 
         // Create frame
-        var frame_builder = Evm.Frame.builder(allocator);
+        var frame_builder = Evm.Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(10000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         // Push recipient address to stack
         const bob_address = Evm.Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{3});
@@ -189,7 +189,7 @@ test "SELFDESTRUCT: Gas costs by hardfork" {
         var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
         var evm = try builder.build();
-        defer evm.deinit();
+        defer evm.deinit(allocator);
         evm.hardfork = .TANGERINE_WHISTLE;
 
         // Create contract
@@ -208,13 +208,13 @@ test "SELFDESTRUCT: Gas costs by hardfork" {
         defer contract.deinit(allocator, null);
 
         // Create frame
-        var frame_builder = Evm.Frame.builder(allocator);
+        var frame_builder = Evm.Frame.builder();
         var frame = try frame_builder
             .withVm(&evm)
             .withContract(&contract)
             .withGas(50000)
-            .build();
-        defer frame.deinit();
+            .build(allocator);
+        defer frame.deinit(allocator);
 
         // Push recipient address to stack
         const bob_address = Evm.Address.fromBytes([_]u8{0} ** 19 ++ [_]u8{3});
@@ -246,7 +246,7 @@ test "SELFDESTRUCT: Account creation cost (EIP-161)" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
     evm.hardfork = .SPURIOUS_DRAGON; // First hardfork with EIP-161
 
     // Create contract
@@ -265,13 +265,13 @@ test "SELFDESTRUCT: Account creation cost (EIP-161)" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Use a fresh address that doesn't exist (no balance, code, or nonce)
     var rng = std.rand.DefaultPrng.init(@intCast(std.time.milliTimestamp()));

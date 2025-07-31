@@ -5,6 +5,7 @@ const ExecutionError = @import("execution_error.zig");
 const ExecutionResult = @import("execution_result.zig");
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
+const Contract = @import("../frame/contract.zig");
 const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
 const AccessList = @import("../access_list/access_list.zig").AccessList;
@@ -21,7 +22,6 @@ pub fn op_stop(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 
 pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
     _ = pc;
-    _ = interpreter;
 
     const frame = state;
 
@@ -31,7 +31,7 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     const dest = frame.stack.pop_unsafe();
 
     // Check if destination is a valid JUMPDEST (pass u256 directly)
-    if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
+    if (!Contract.valid_jumpdest(interpreter.allocator, frame.contract, dest)) {
         @branchHint(.unlikely);
         return ExecutionError.Error.InvalidJump;
     }
@@ -49,7 +49,6 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 
 pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
     _ = pc;
-    _ = interpreter;
 
     const frame = state;
 
@@ -64,7 +63,7 @@ pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     if (condition != 0) {
         @branchHint(.likely);
         // Check if destination is a valid JUMPDEST (pass u256 directly)
-        if (!frame.contract.valid_jumpdest(frame.allocator, destination)) {
+        if (!Contract.valid_jumpdest(interpreter.allocator, frame.contract, destination)) {
             @branchHint(.unlikely);
             return ExecutionError.Error.InvalidJump;
         }
@@ -265,13 +264,13 @@ pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const
     for (operations) |op| {
         // Create clean VM and frame for each test
         var memory = try @import("../memory/memory.zig").init_default(allocator);
-        defer memory.deinit();
+        defer memory.deinit(allocator);
 
         var db = @import("../state/memory_database.zig").init(allocator);
         defer db.deinit();
 
         var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
 
         // Create bytecode with JUMPDEST at positions we want to jump to
         var code = std.ArrayList(u8).init(allocator);
@@ -291,7 +290,7 @@ pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Set initial PC if needed
         if (op.initial_pc) |pc| {

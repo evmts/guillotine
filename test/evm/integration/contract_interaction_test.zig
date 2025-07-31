@@ -21,7 +21,7 @@ test "Integration: contract creation and initialization" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -43,13 +43,13 @@ test "Integration: contract creation and initialization" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Create simple init code that stores a value and returns runtime code
     // PUSH1 0x42 PUSH1 0x00 SSTORE   (store 0x42 at slot 0)
@@ -103,7 +103,7 @@ test "Integration: inter-contract calls" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -126,13 +126,13 @@ test "Integration: inter-contract calls" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set up accounts
     try vm.set_balance(contract_address, 10000);
@@ -186,7 +186,7 @@ test "Integration: delegatecall context preservation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -209,13 +209,13 @@ test "Integration: delegatecall context preservation" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
     frame.value = 1000;
 
     // Prepare call data
@@ -262,7 +262,7 @@ test "Integration: staticcall restrictions" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -285,13 +285,13 @@ test "Integration: staticcall restrictions" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set up for STATICCALL
     vm.call_result = .{
@@ -352,7 +352,7 @@ test "Integration: CREATE2 deterministic deployment" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -374,13 +374,13 @@ test "Integration: CREATE2 deterministic deployment" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simple init code
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 }; // PUSH1 0 PUSH1 0 RETURN
@@ -434,7 +434,7 @@ test "Integration: selfdestruct with balance transfer" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -457,13 +457,13 @@ test "Integration: selfdestruct with balance transfer" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set up contract with balance
     const contract_balance: u256 = 5000;
@@ -496,7 +496,7 @@ test "Integration: call depth limit enforcement" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -519,13 +519,13 @@ test "Integration: call depth limit enforcement" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set depth to maximum
     frame.depth = 1024;
@@ -571,7 +571,7 @@ test "Integration: return data buffer management" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create contract
     const contract_address = Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -594,13 +594,13 @@ test "Integration: return data buffer management" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(50000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Initial state - no return data
     const interpreter1: Operation.Interpreter = &vm;

@@ -242,8 +242,7 @@ pub fn peek(self: *const Stack) Error!u256 {
 }
 
 // Fuzz testing functions
-pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const FuzzOperation) !void {
-    _ = allocator;
+pub fn fuzz_stack_operations(operations: []const FuzzOperation) !void {
     var stack = Stack{};
     const testing = std.testing;
     
@@ -326,7 +325,7 @@ test "fuzz_stack_basic_operations" {
         .{ .push = 42 },
     };
     
-    try fuzz_stack_operations(std.testing.allocator, &operations);
+    try fuzz_stack_operations(&operations);
 }
 
 test "fuzz_stack_overflow_boundary" {
@@ -338,7 +337,7 @@ test "fuzz_stack_overflow_boundary" {
         try operations.append(.{ .push = @as(u256, i) });
     }
     
-    try fuzz_stack_operations(std.testing.allocator, operations.items);
+    try fuzz_stack_operations(operations.items);
 }
 
 test "fuzz_stack_underflow_boundary" {
@@ -351,7 +350,7 @@ test "fuzz_stack_underflow_boundary" {
         .{ .pop = {} },
     };
     
-    try fuzz_stack_operations(std.testing.allocator, &operations);
+    try fuzz_stack_operations(&operations);
 }
 
 test "fuzz_stack_lifo_property" {

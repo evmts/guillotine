@@ -8,7 +8,7 @@ const calculate_num_words = Memory.calculate_num_words;
 // Fuzz testing functions
 pub fn fuzz_memory_operations(allocator: std.mem.Allocator, operations: []const FuzzMemoryOperation) !void {
     var memory = try Memory.init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     const testing = std.testing;
     
@@ -262,7 +262,7 @@ fn validate_memory_invariants(memory: *const Memory) !void {
 //     const allocator = std.testing.allocator;
 //     
 //     var memory = try Memory.init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
-//     defer memory.deinit();
+//     defer memory.deinit(allocator);
 //     
 //     const source_data = "Hello, World! This is a test string for bounded operations.";
 //     

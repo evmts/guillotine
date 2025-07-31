@@ -18,7 +18,7 @@ test "RETURN sets output correctly" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Bytecode that stores 0xDEADBEEF and returns it
     const bytecode = &[_]u8{
@@ -67,7 +67,7 @@ test "constructor returns runtime code" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Simple constructor that returns "HELLO"
     const init_code = &[_]u8{
@@ -81,7 +81,7 @@ test "constructor returns runtime code" {
     };
     const deployer: Address.Address = [_]u8{0x12} ** 20;
 
-    const create_result = try vm.create_contract(deployer, 0, init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     try testing.expect(create_result.success);

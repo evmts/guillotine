@@ -3,6 +3,7 @@ const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
+const Contract = @import("../frame/contract.zig");
 const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
@@ -19,7 +20,7 @@ pub fn op_sload(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     const slot = frame.stack.peek_unsafe().*;
 
     if (vm.chain_rules.is_berlin) {
-        const is_cold = frame.contract.mark_storage_slot_warm(frame.allocator, slot, null) catch {
+        const is_cold = Contract.mark_storage_slot_warm(interpreter.allocator, frame.contract, slot, null) catch {
             return ExecutionError.Error.OutOfMemory;
         };
         const gas_cost = if (is_cold) GasConstants.ColdSloadCost else GasConstants.WarmStorageReadCost;
@@ -64,7 +65,7 @@ pub fn op_sstore(pc: usize, interpreter: Operation.Interpreter, state: Operation
 
     const current_value = vm.state.get_storage(frame.contract.address, slot);
 
-    const is_cold = frame.contract.mark_storage_slot_warm(frame.allocator, slot, null) catch {
+    const is_cold = Contract.mark_storage_slot_warm(interpreter.allocator, frame.contract, slot, null) catch {
         return ExecutionError.Error.OutOfMemory;
     };
 
@@ -144,18 +145,17 @@ pub fn op_tstore(pc: usize, interpreter: Operation.Interpreter, state: Operation
 pub fn fuzz_storage_operations(allocator: std.mem.Allocator, operations: []const FuzzStorageOperation) !void {
     const Memory = @import("../memory/memory.zig");
     const MemoryDatabase = @import("../state/memory_database.zig");
-    const Contract = @import("../frame/contract.zig");
     _ = primitives.Address;
     
     for (operations) |op| {
         var memory = try Memory.init_default(allocator);
-        defer memory.deinit();
+        defer memory.deinit(allocator);
         
         var db = MemoryDatabase.init(allocator);
         defer db.deinit();
         
         var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
         
         // Set up VM with appropriate chain rules
         vm.chain_rules.is_berlin = op.is_berlin;
@@ -167,7 +167,7 @@ pub fn fuzz_storage_operations(allocator: std.mem.Allocator, operations: []const
         defer contract.deinit(allocator, null);
         
         var frame = try Frame.init(allocator, &vm, op.gas_limit, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Set static flag for testing
         frame.is_static = op.is_static;

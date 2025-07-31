@@ -1388,7 +1388,7 @@ test "arithmetic_benchmarks" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const iterations = 100000;
 
@@ -1399,7 +1399,7 @@ test "arithmetic_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x01}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Test ADD operation
         try frame.stack.append(@intCast(i));
@@ -1415,7 +1415,7 @@ test "arithmetic_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x04}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Test DIV with various values including edge cases
         const dividend: u256 = @intCast(if (i == 0) 1 else i);
@@ -1433,7 +1433,7 @@ test "arithmetic_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x08}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Test ADDMOD operation
         try frame.stack.append(@intCast(i * 1000));
@@ -1458,7 +1458,7 @@ test "arithmetic_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x0a}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         try frame.stack.append(exp_case.base);
         try frame.stack.append(exp_case.exp);
@@ -1473,7 +1473,7 @@ test "arithmetic_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x0b}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Test SIGNEXTEND with various byte positions
         const byte_pos: u256 = i % 32; // Valid byte positions 0-31
@@ -1491,7 +1491,7 @@ test "arithmetic_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x05}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Test SDIV with mix of positive and negative values
         const a: u256 = if (i % 2 == 0) @intCast(i + 1) else std.math.maxInt(u256) - @as(u256, @intCast(i)); // Simulate negative

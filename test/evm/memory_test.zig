@@ -11,26 +11,26 @@ pub fn calculate_num_words(len: usize) usize {
 test "Memory initialization and basic operations" {
     // Test init with default capacity
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     try testing.expectEqual(@as(usize, 0), mem.context_size());
 
     // Test custom capacity
     var mem2 = try Memory.init(testing.allocator, 8192, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem2.deinit();
+    defer mem2.deinit(testing.allocator);
 
     try testing.expectEqual(@as(usize, 0), mem2.context_size());
 
     // Test with custom memory limit
     var mem3 = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, 1024);
-    defer mem3.deinit();
+    defer mem3.deinit(testing.allocator);
 
     try testing.expectEqual(@as(u64, 1024), mem3.memory_limit);
 }
 
 test "Memory data operations" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     // Test set_data and get_slice
     const test_data = [_]u8{0xAB};
@@ -46,7 +46,7 @@ test "Memory data operations" {
 
 test "Memory 32-byte data operations" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     // Test 32-byte data using set_data and get_slice
     const word = [32]u8{
@@ -70,7 +70,7 @@ test "Memory 32-byte data operations" {
 
 test "Memory U256 read operations" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     // Test reading from zero-initialized memory
     _ = try mem.ensure_context_capacity(32);
@@ -80,7 +80,7 @@ test "Memory U256 read operations" {
 
 test "Memory slice operations" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     // Test setData and getSlice
     const data = "Hello, EVM Memory!";
@@ -99,7 +99,7 @@ test "Memory slice operations" {
 
 test "Memory setDataBounded" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     const data = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
 
@@ -127,7 +127,7 @@ test "Memory setDataBounded" {
 
 test "Memory expansion and gas calculation" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     // Test word calculation
     const new_words1 = try mem.ensure_context_capacity(100);
@@ -144,7 +144,7 @@ test "Memory expansion and gas calculation" {
 
 test "Memory limit enforcement" {
     var mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, 1024);
-    defer mem.deinit();
+    defer mem.deinit(testing.allocator);
 
     // Should succeed
     _ = try mem.ensure_context_capacity(1024);
@@ -159,7 +159,7 @@ test "Memory limit enforcement" {
 test "Memory child memory sharing" {
     // Test root memory and child memory sharing the same buffer
     var root_mem = try Memory.init(testing.allocator, Memory.INITIAL_CAPACITY, Memory.DEFAULT_MEMORY_LIMIT);
-    defer root_mem.deinit();
+    defer root_mem.deinit(testing.allocator);
 
     // Write some data to root memory
     const test_data = "Hello, shared memory!";
@@ -168,7 +168,7 @@ test "Memory child memory sharing" {
 
     // Create child memory starting at checkpoint 10
     var child_mem = try root_mem.init_child_memory(10);
-    defer child_mem.deinit();
+    defer child_mem.deinit(testing.allocator);
 
     // Child should see shared buffer but from its checkpoint
     try testing.expectEqual(@as(usize, test_data.len - 10), child_mem.context_size());

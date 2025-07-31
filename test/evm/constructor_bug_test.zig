@@ -23,7 +23,7 @@ test "constructor should return runtime code" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set up deployer account
     const deployer = primitives.Address.from_u256(0x1111);
@@ -55,7 +55,7 @@ test "constructor should return runtime code" {
     };
 
     // Deploy contract using CREATE
-    const create_result = try vm.create_contract(deployer, 0, // value
+    const create_result = try vm.create_contract(allocator, deployer, 0, // value
         init_code, 1000000 // gas
     );
     defer if (create_result.output) |output| allocator.free(output);
@@ -85,7 +85,7 @@ test "manual constructor execution to debug" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set up deployer account
     const deployer = primitives.Address.from_u256(0x1111);

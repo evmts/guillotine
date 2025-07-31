@@ -210,7 +210,7 @@ fn benchmark_module_loading(allocator: Allocator) !void {
     
     // Initialize VM
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // The initialization itself is what we're measuring
 }
@@ -223,7 +223,7 @@ fn benchmark_contract_deployment(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Deploy contract
     const caller = Address.ZERO;
@@ -255,7 +255,7 @@ fn benchmark_cross_contract_calls(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Set up caller contract
     const caller_addr: AddressType = [_]u8{0x10} ** 20;
@@ -289,7 +289,7 @@ fn benchmark_error_propagation(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const target = Address.ZERO;
     
@@ -318,7 +318,7 @@ fn benchmark_state_transitions(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const addr = Address.ZERO;
     
@@ -348,7 +348,7 @@ fn benchmark_component_integration(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Execute the complex contract multiple times with different parameters
     const addresses = [_]Address{
@@ -383,7 +383,7 @@ fn benchmark_memory_expansion(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Contract that performs large memory operations
     const memory_test_bytecode = [_]u8{
@@ -477,7 +477,7 @@ fn benchmark_stack_overflow_error(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Bytecode that pushes many values to overflow the stack
     var overflow_bytecode = std.ArrayList(u8).init(allocator);
@@ -516,7 +516,7 @@ fn benchmark_out_of_gas_error(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const target = Address.ZERO;
     try vm.state.set_code(target, &COMPLEX_CONTRACT_BYTECODE);
@@ -543,7 +543,7 @@ fn benchmark_invalid_opcode_error(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Bytecode with invalid opcode
     const invalid_bytecode = [_]u8{
@@ -577,7 +577,7 @@ fn benchmark_memory_bounds_error(allocator: Allocator) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Evm.Evm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Bytecode that tries to access very large memory offset
     const bounds_test_bytecode = [_]u8{

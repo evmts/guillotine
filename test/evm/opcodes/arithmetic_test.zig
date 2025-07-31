@@ -18,7 +18,7 @@ test "Arithmetic: ADD basic operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -34,14 +34,14 @@ test "Arithmetic: ADD basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test 1: Simple addition
     try frame.stack.append(5);
@@ -90,7 +90,7 @@ test "Arithmetic: SUB basic operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -106,14 +106,14 @@ test "Arithmetic: SUB basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -153,7 +153,7 @@ test "Arithmetic: MUL basic operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -169,14 +169,14 @@ test "Arithmetic: MUL basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -218,7 +218,7 @@ test "Arithmetic: DIV basic operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -234,14 +234,14 @@ test "Arithmetic: DIV basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -280,7 +280,7 @@ test "Arithmetic: MOD basic operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -296,14 +296,14 @@ test "Arithmetic: MOD basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -342,7 +342,7 @@ test "Arithmetic: ADDMOD complex operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -358,14 +358,14 @@ test "Arithmetic: ADDMOD complex operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -408,7 +408,7 @@ test "Arithmetic: MULMOD complex operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -424,14 +424,14 @@ test "Arithmetic: MULMOD complex operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -475,7 +475,7 @@ test "Arithmetic: EXP exponential operations" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -491,14 +491,14 @@ test "Arithmetic: EXP exponential operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -548,7 +548,7 @@ test "Arithmetic: Stack underflow errors" {
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try evm_builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -564,14 +564,14 @@ test "Arithmetic: Stack underflow errors" {
     );
     defer contract.deinit(allocator, null);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     var frame = try builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
         .withCaller(.{})
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;

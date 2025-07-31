@@ -46,11 +46,12 @@ test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" 
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Deploy the contract
     const caller = Address.from_u256(0x1000);
     const deploy_result = try vm.create_contract(
+        allocator,
         caller,
         0, // value
         &deployment_bytecode,

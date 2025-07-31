@@ -40,7 +40,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const initial_gas = contract.gas;
     var pc: usize = 0;
 
-    var builder = Frame.builder(self.allocator); // We should consider making all items mandatory and removing frame builder
+    var builder = Frame.builder(); // We should consider making all items mandatory and removing frame builder
     var frame = builder
         .withVm(self)
         .withContract(contract)
@@ -49,12 +49,12 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         .withInput(input)
         .isStatic(self.read_only)
         .withDepth(@as(u32, @intCast(self.depth)))
-        .build() catch |err| switch (err) {
+        .build(self.allocator) catch |err| switch (err) {
         error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
         error.MissingVm => unreachable, // We pass a VM. TODO zig better here.
         error.MissingContract => unreachable, // We pass a contract. TODO zig better here.
     };
-    defer frame.deinit();
+    defer frame.deinit(self.allocator);
 
     const interpreter: Operation.Interpreter = self;
     const state: Operation.State = &frame;

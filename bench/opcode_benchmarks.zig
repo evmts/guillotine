@@ -26,7 +26,7 @@ fn benchmark_bytecode(allocator: Allocator, bytecode: []const u8) !void {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);

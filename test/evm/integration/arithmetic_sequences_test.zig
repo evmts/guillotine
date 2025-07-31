@@ -26,7 +26,7 @@ test "Integration: Complex arithmetic calculation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -50,14 +50,14 @@ test "Integration: Complex arithmetic calculation" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     // Push values and execute: (10 + 20) * 3 - 15
     try frame_ptr.stack.append(20);
@@ -92,7 +92,7 @@ test "Integration: Modular arithmetic with overflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -116,14 +116,14 @@ test "Integration: Modular arithmetic with overflow" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     const max_u256 = std.math.maxInt(u256);
 
@@ -156,7 +156,7 @@ test "Integration: Fibonacci sequence calculation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -180,14 +180,14 @@ test "Integration: Fibonacci sequence calculation" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     // Initialize with 0, 1
     try frame_ptr.stack.append(0); // fib(0)
@@ -233,7 +233,7 @@ test "Integration: Conditional arithmetic based on comparison" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -257,14 +257,14 @@ test "Integration: Conditional arithmetic based on comparison" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     // Setup for opcode execution
     const interpreter: Operation.Interpreter = &evm;
@@ -325,7 +325,7 @@ test "Integration: Calculate average of multiple values" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -349,14 +349,14 @@ test "Integration: Calculate average of multiple values" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     // Setup for opcode execution
     const interpreter: Operation.Interpreter = &evm;
@@ -395,7 +395,7 @@ test "Integration: Complex ADDMOD and MULMOD calculations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -419,14 +419,14 @@ test "Integration: Complex ADDMOD and MULMOD calculations" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     // Setup for opcode execution
     const interpreter: Operation.Interpreter = &evm;
@@ -482,7 +482,7 @@ test "Integration: Exponentiation chain" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -506,14 +506,14 @@ test "Integration: Exponentiation chain" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(50000)
         .withInput(contract.input)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
 
     // Setup for opcode execution
     const interpreter: Operation.Interpreter = &evm;

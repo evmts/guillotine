@@ -33,7 +33,7 @@ test "complex: fibonacci calculation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Calculate fibonacci(10) using loops and conditionals
     // This tests: PUSH, DUP, SWAP, ADD, GT, JUMPI, JUMP, JUMPDEST
@@ -105,13 +105,13 @@ test "complex: fibonacci calculation" {
     try evm.state.set_code(Address.ZERO, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -134,7 +134,7 @@ test "complex: storage-based counter with access patterns" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xc0ffee000000000000000000000000000000cafe);
 
@@ -191,13 +191,13 @@ test "complex: storage-based counter with access patterns" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -219,7 +219,7 @@ test "complex: memory expansion with large offsets" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test memory expansion gas costs
     const bytecode = [_]u8{
@@ -259,13 +259,13 @@ test "complex: memory expansion with large offsets" {
     try evm.state.set_code(Address.ZERO, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -289,7 +289,7 @@ test "complex: nested conditionals with multiple jumps" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Implement: if (a > b) { if (a > c) { result = 1 } else { result = 2 } } else { result = 3 }
     const bytecode = [_]u8{
@@ -355,13 +355,13 @@ test "complex: nested conditionals with multiple jumps" {
     try evm.state.set_code(Address.ZERO, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -385,7 +385,7 @@ test "complex: event emission with multiple topics" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const contract_address = Address.from_u256(0xdeadbeef00000000000000000000000000000000);
 
@@ -433,13 +433,13 @@ test "complex: event emission with multiple topics" {
     try evm.state.set_code(contract_address, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -462,7 +462,7 @@ test "complex: keccak256 hash computation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Compute keccak256 of "Hello, World!"
     const bytecode = [_]u8{
@@ -502,13 +502,13 @@ test "complex: keccak256 hash computation" {
     try evm.state.set_code(Address.ZERO, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -533,7 +533,7 @@ test "complex: call depth limit enforcement" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Note: This test would need proper CALL implementation to work fully
     // For now, it tests that the depth check in CALL works
@@ -591,7 +591,7 @@ test "complex: bit manipulation operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test various bit operations
     const bytecode = [_]u8{
@@ -666,13 +666,13 @@ test "complex: bit manipulation operations" {
     try evm.state.set_code(Address.ZERO, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);
@@ -698,7 +698,7 @@ test "complex: modular arithmetic edge cases" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test ADDMOD and MULMOD with edge cases
     const bytecode = [_]u8{
@@ -818,13 +818,13 @@ test "complex: modular arithmetic edge cases" {
     try evm.state.set_code(Address.ZERO, &bytecode);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute the contract
     const result = try evm.run_frame(&frame, 0);

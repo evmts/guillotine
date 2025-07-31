@@ -10,7 +10,7 @@ test "fuzz_control_pc_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -25,14 +25,14 @@ test "fuzz_control_pc_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test PC operation
     var interpreter = evm.Operation.Interpreter = &vm;
@@ -50,7 +50,7 @@ test "fuzz_control_gas_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -65,14 +65,14 @@ test "fuzz_control_gas_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const initial_gas = frame.gas_remaining;
     
@@ -92,7 +92,7 @@ test "fuzz_control_jumpdest_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -107,14 +107,14 @@ test "fuzz_control_jumpdest_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test JUMPDEST operation (should be a no-op)
     const initial_stack_size = frame.stack.size;

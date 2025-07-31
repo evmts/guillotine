@@ -313,7 +313,7 @@ test "DebugState.capture works correctly" {
     try stack.append(100);
     
     var memory = try Memory.init_default(testing.allocator);
-    defer memory.deinit();
+    defer memory.deinit(testing.allocator);
     
     const debug_state = DebugState.capture(
         10, // pc
@@ -412,7 +412,7 @@ test "serializeMemory works correctly" {
     
     // Test empty memory
     var empty_memory = try Memory.init_default(testing.allocator);
-    defer empty_memory.deinit();
+    defer empty_memory.deinit(testing.allocator);
     
     const empty_result = try serializeMemory(testing.allocator, &empty_memory);
     defer testing.allocator.free(empty_result);
@@ -420,7 +420,7 @@ test "serializeMemory works correctly" {
     
     // Test memory with data
     var memory = try Memory.init_default(testing.allocator);
-    defer memory.deinit();
+    defer memory.deinit(testing.allocator);
     
     const test_data = [_]u8{0x12, 0x34, 0x56, 0x78};
     const memory_write = @import("evm").memory.write;

@@ -45,9 +45,6 @@ const Log = @import("../log.zig");
 /// This includes account data, storage, and transaction artifacts.
 const EvmState = @This();
 
-/// Memory allocator for local allocations (transient storage, logs)
-allocator: std.mem.Allocator,
-
 /// Pluggable database interface for persistent state
 /// Handles accounts, storage, and code persistence
 database: DatabaseInterface,
@@ -69,7 +66,7 @@ selfdestructs: std.AutoHashMap(Address, Address),
 
 /// Initialize a new EVM state instance with database interface
 ///
-/// Creates empty state with the provided allocator and database interface.
+/// Creates empty state with the provided database interface.
 /// Only transient storage and logs are initialized locally.
 ///
 /// ## Parameters
@@ -86,13 +83,12 @@ selfdestructs: std.AutoHashMap(Address, Address),
 /// defer database_factory.destroyDatabase(allocator, db_interface);
 ///
 /// var state = try EvmState.init(allocator, db_interface);
-/// defer state.deinit();
+/// defer state.deinit(allocator);
 /// ```
 pub fn init(allocator: std.mem.Allocator, database: DatabaseInterface) std.mem.Allocator.Error!EvmState {
     Log.debug("EvmState.init: Initializing EVM state with database interface", .{});
 
     var state = EvmState{
-        .allocator = allocator,
         .database = database,
         .transient_storage = std.AutoHashMap(StorageKey, u256).init(allocator),
         .logs = std.ArrayList(EvmLog).init(allocator),
@@ -114,11 +110,14 @@ pub fn init(allocator: std.mem.Allocator, database: DatabaseInterface) std.mem.A
 /// - Transient storage hash map
 /// - Log data (topics and data arrays)
 ///
+/// ## Parameters
+/// - `allocator`: Memory allocator used for log data
+///
 /// ## Important
 /// After calling deinit(), the state instance is invalid and
 /// must not be used. The database interface is NOT cleaned up
 /// as it may be owned by the caller.
-pub fn deinit(self: *EvmState) void {
+pub fn deinit(self: *EvmState, allocator: std.mem.Allocator) void {
     Log.debug("EvmState.deinit: Cleaning up EVM state, logs_count={}", .{self.logs.items.len});
 
     self.transient_storage.deinit();
@@ -126,8 +125,8 @@ pub fn deinit(self: *EvmState) void {
 
     // Clean up logs - free allocated memory for topics and data
     for (self.logs.items) |log| {
-        self.allocator.free(log.topics);
-        self.allocator.free(log.data);
+        allocator.free(log.topics);
+        allocator.free(log.data);
     }
     self.logs.deinit();
 
@@ -522,6 +521,7 @@ pub fn set_transient_storage(self: *EvmState, address: Address, slot: u256, valu
 /// to the transaction's log list.
 ///
 /// ## Parameters
+/// - `allocator`: Memory allocator for log data
 /// - `address`: Contract emitting the log
 /// - `topics`: Indexed topics (0-4 entries)
 /// - `data`: Non-indexed log data
@@ -543,19 +543,19 @@ pub fn set_transient_storage(self: *EvmState, address: Address, slot: u256, valu
 ///     to_addr,   // indexed to
 /// };
 /// const data = encode_u256(amount);
-/// try state.emit_log(contract_addr, &topics, data);
+/// try state.emit_log(allocator, contract_addr, &topics, data);
 /// ```
-pub fn emit_log(self: *EvmState, address: Address, topics: []const u256, data: []const u8) std.mem.Allocator.Error!void {
+pub fn emit_log(self: *EvmState, allocator: std.mem.Allocator, address: Address, topics: []const u256, data: []const u8) std.mem.Allocator.Error!void {
     Log.debug("EvmState.emit_log: addr={x}, topics_len={}, data_len={}", .{ primitives.Address.to_u256(address), topics.len, data.len });
 
     // Clone the data to ensure it persists
-    const data_copy = try self.allocator.alloc(u8, data.len);
-    errdefer self.allocator.free(data_copy);
+    const data_copy = try allocator.alloc(u8, data.len);
+    errdefer allocator.free(data_copy);
     @memcpy(data_copy, data);
 
     // Clone the topics to ensure they persist
-    const topics_copy = try self.allocator.alloc(u256, topics.len);
-    errdefer self.allocator.free(topics_copy);
+    const topics_copy = try allocator.alloc(u256, topics.len);
+    errdefer allocator.free(topics_copy);
     @memcpy(topics_copy, topics);
 
     const log = EvmLog{
@@ -574,12 +574,13 @@ pub fn emit_log(self: *EvmState, address: Address, topics: []const u256, data: [
 /// a log entry that was created during execution.
 ///
 /// ## Parameters
+/// - `allocator`: Memory allocator used for log data
 /// - `log_index`: Index of the log to remove
 ///
 /// ## Returns
 /// - Success: void
 /// - Error: If log_index is invalid
-pub fn remove_log(self: *EvmState, log_index: usize) !void {
+pub fn remove_log(self: *EvmState, allocator: std.mem.Allocator, log_index: usize) !void {
     if (log_index >= self.logs.items.len) {
         @branchHint(.cold);
         unreachable;
@@ -587,8 +588,8 @@ pub fn remove_log(self: *EvmState, log_index: usize) !void {
 
     // Free the memory for the log we're removing
     const log_to_remove = self.logs.items[log_index];
-    self.allocator.free(log_to_remove.topics);
-    self.allocator.free(log_to_remove.data);
+    allocator.free(log_to_remove.topics);
+    allocator.free(log_to_remove.data);
 
     // Remove the log by truncating the array
     // This works because logs are always removed in reverse order during revert
@@ -675,6 +676,9 @@ pub fn clear_transient_storage(self: *EvmState) void {
 /// This should be called at the start of each transaction to prevent
 /// memory accumulation.
 ///
+/// ## Parameters
+/// - `allocator`: Memory allocator used for log data
+///
 /// ## Memory Management
 /// This function properly frees the allocated memory for log topics
 /// and data before clearing the list.
@@ -682,15 +686,15 @@ pub fn clear_transient_storage(self: *EvmState) void {
 /// ## Example
 /// ```zig
 /// // At start of new transaction
-/// state.clear_logs();
+/// state.clear_logs(allocator);
 /// ```
-pub fn clear_logs(self: *EvmState) void {
+pub fn clear_logs(self: *EvmState, allocator: std.mem.Allocator) void {
     Log.debug("EvmState.clear_logs: Clearing {} logs", .{self.logs.items.len});
     
     // Free allocated memory for each log
     for (self.logs.items) |log| {
-        self.allocator.free(log.topics);
-        self.allocator.free(log.data);
+        allocator.free(log.topics);
+        allocator.free(log.data);
     }
     
     // Clear the list while retaining capacity for future use
@@ -717,15 +721,18 @@ pub fn clear_selfdestructs(self: *EvmState) void {
 /// Convenience function that clears transient storage, logs, and
 /// selfdestructs in one call. Use this at transaction boundaries.
 ///
+/// ## Parameters
+/// - `allocator`: Memory allocator used for log data
+///
 /// ## Example
 /// ```zig
 /// // At end of transaction
-/// state.clear_transaction_state();
+/// state.clear_transaction_state(allocator);
 /// ```
-pub fn clear_transaction_state(self: *EvmState) void {
+pub fn clear_transaction_state(self: *EvmState, allocator: std.mem.Allocator) void {
     Log.debug("EvmState.clear_transaction_state: Clearing all transaction state", .{});
     self.clear_transient_storage();
-    self.clear_logs();
+    self.clear_logs(allocator);
     self.clear_selfdestructs();
 }
 
@@ -745,9 +752,9 @@ test "EvmState initialization and deinitialization" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Verify initial state
     try testing.expectEqual(@as(usize, 0), state.logs.items.len);
@@ -761,9 +768,9 @@ test "EvmState account creation and retrieval" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0x1234567890123456789012345678901234567890);
 
@@ -786,9 +793,9 @@ test "EvmState balance operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr1 = testAddress(0x1111);
     const addr2 = testAddress(0x2222);
@@ -823,9 +830,9 @@ test "EvmState storage operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0x3333);
 
@@ -867,9 +874,9 @@ test "EvmState code operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0x4444);
 
@@ -913,9 +920,9 @@ test "EvmState nonce operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0x5555);
 
@@ -959,9 +966,9 @@ test "EvmState transient storage operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr1 = testAddress(0x6666);
     const addr2 = testAddress(0x7777);
@@ -1002,9 +1009,9 @@ test "EvmState log operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0x8888);
 
@@ -1013,7 +1020,7 @@ test "EvmState log operations" {
 
     // Test emit log with no topics
     const data1 = &[_]u8{ 0x01, 0x02, 0x03 };
-    try state.emit_log(addr, &[_]u256{}, data1);
+    try state.emit_log(allocator, addr, &[_]u256{}, data1);
     try testing.expectEqual(@as(usize, 1), state.logs.items.len);
     try testing.expectEqual(addr, state.logs.items[0].address);
     try testing.expectEqual(@as(usize, 0), state.logs.items[0].topics.len);
@@ -1022,7 +1029,7 @@ test "EvmState log operations" {
     // Test emit log with topics
     const topics = &[_]u256{ 100, 200, 300 };
     const data2 = &[_]u8{ 0x04, 0x05, 0x06, 0x07 };
-    try state.emit_log(addr, topics, data2);
+    try state.emit_log(allocator, addr, topics, data2);
     try testing.expectEqual(@as(usize, 2), state.logs.items.len);
     try testing.expectEqual(@as(usize, 3), state.logs.items[1].topics.len);
     try testing.expectEqualSlices(u256, topics, state.logs.items[1].topics);
@@ -1031,18 +1038,18 @@ test "EvmState log operations" {
     // Test emit log with max topics (4)
     const max_topics = &[_]u256{ 1, 2, 3, 4 };
     const data3 = &[_]u8{};
-    try state.emit_log(addr, max_topics, data3);
+    try state.emit_log(allocator, addr, max_topics, data3);
     try testing.expectEqual(@as(usize, 3), state.logs.items.len);
     try testing.expectEqual(@as(usize, 4), state.logs.items[2].topics.len);
     try testing.expectEqual(@as(usize, 0), state.logs.items[2].data.len);
 
     // Test remove log
-    try state.remove_log(2);
+    try state.remove_log(allocator, 2);
     try testing.expectEqual(@as(usize, 2), state.logs.items.len);
 
     // Remove remaining logs in reverse order
-    try state.remove_log(1);
-    try state.remove_log(0);
+    try state.remove_log(allocator, 1);
+    try state.remove_log(allocator, 0);
     try testing.expectEqual(@as(usize, 0), state.logs.items.len);
 }
 
@@ -1052,9 +1059,9 @@ test "EvmState selfdestruct operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const contract = testAddress(0x9999);
     const recipient1 = testAddress(0xAAAA);
@@ -1089,9 +1096,9 @@ test "EvmState combined operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0xDDDD);
 
@@ -1114,7 +1121,7 @@ test "EvmState combined operations" {
     try state.set_transient_storage(addr, 0, 999);
     const topics = &[_]u256{123};
     const data = &[_]u8{0xFF};
-    try state.emit_log(addr, topics, data);
+    try state.emit_log(allocator, addr, topics, data);
 
     // Verify transient data
     try testing.expectEqual(@as(u256, 999), state.get_transient_storage(addr, 0));
@@ -1135,9 +1142,9 @@ test "EvmState edge cases" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Test zero address
     const zero_addr = primitives.Address.ZERO_ADDRESS;
@@ -1153,7 +1160,7 @@ test "EvmState edge cases" {
     try testing.expectEqual(@as(u256, 0), state.get_transient_storage(non_existent, 0));
 
     // Test empty log
-    try state.emit_log(zero_addr, &[_]u256{}, &[_]u8{});
+    try state.emit_log(allocator, zero_addr, &[_]u256{}, &[_]u8{});
     try testing.expectEqual(@as(usize, 1), state.logs.items.len);
     try testing.expectEqual(@as(usize, 0), state.logs.items[0].topics.len);
     try testing.expectEqual(@as(usize, 0), state.logs.items[0].data.len);
@@ -1176,9 +1183,9 @@ test "EvmState fuzz: storage operations with random addresses and slots" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(42);
     const random = prng.random();
@@ -1236,9 +1243,9 @@ test "EvmState fuzz: transient storage lifecycle with random data" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(123);
     const random = prng.random();
@@ -1301,9 +1308,9 @@ test "EvmState fuzz: log operations with random data sizes" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(456);
     const random = prng.random();
@@ -1330,7 +1337,7 @@ test "EvmState fuzz: log operations with random data sizes" {
 
         // Emit log
         const initial_log_count = state.logs.items.len;
-        try state.emit_log(addr, topics, data);
+        try state.emit_log(allocator, addr, topics, data);
 
         // Verify log was added
         try testing.expectEqual(initial_log_count + 1, state.logs.items.len);
@@ -1346,7 +1353,7 @@ test "EvmState fuzz: log operations with random data sizes" {
     // Test log removal in reverse order
     while (state.logs.items.len > 0) {
         const last_index = state.logs.items.len - 1;
-        try state.remove_log(last_index);
+        try state.remove_log(allocator, last_index);
     }
     try testing.expectEqual(@as(usize, 0), state.logs.items.len);
 
@@ -1355,7 +1362,7 @@ test "EvmState fuzz: log operations with random data sizes" {
     defer allocator.free(large_data);
     random.bytes(large_data);
     
-    try state.emit_log(testAddress(0x1234), &[_]u256{}, large_data);
+    try state.emit_log(allocator, testAddress(0x1234), &[_]u256{}, large_data);
     try testing.expectEqual(@as(usize, 1), state.logs.items.len);
     try testing.expectEqual(@as(usize, 100_000), state.logs.items[0].data.len);
 }
@@ -1366,9 +1373,9 @@ test "EvmState fuzz: account state consistency with random operations" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(789);
     const random = prng.random();
@@ -1429,9 +1436,9 @@ test "EvmState fuzz: selfdestruct operations with random contracts" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(999);
     const random = prng.random();
@@ -1481,9 +1488,9 @@ test "EvmState fuzz: memory pressure with many accounts" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(1234);
     const random = prng.random();
@@ -1546,7 +1553,7 @@ test "EvmState fuzz: memory pressure with many accounts" {
         defer allocator.free(data);
         random.bytes(data);
         
-        try state.emit_log(addr, topics_buf[0..num_topics], data);
+        try state.emit_log(allocator, addr, topics_buf[0..num_topics], data);
     }
 
     // Verify state is still functional
@@ -1560,9 +1567,9 @@ test "EvmState fuzz: state transitions with random operation sequences" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(5678);
     const random = prng.random();
@@ -1634,7 +1641,7 @@ test "EvmState fuzz: state transitions with random operation sequences" {
                 defer allocator.free(data);
                 random.bytes(data);
                 const prev_log_count = state.logs.items.len;
-                try state.emit_log(addr, topics_buf[0..num_topics], data);
+                try state.emit_log(allocator, addr, topics_buf[0..num_topics], data);
                 try testing.expectEqual(prev_log_count + 1, state.logs.items.len);
             },
             .mark_for_destruction => {
@@ -1653,9 +1660,9 @@ test "EvmState fuzz: invariant testing - destroyed contracts cannot be modified"
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     var prng = std.Random.DefaultPrng.init(9999);
     const random = prng.random();
@@ -1698,9 +1705,9 @@ test "EvmState fuzz: edge value testing with extreme values" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Test extreme addresses
     const extreme_addresses = [_]Address{
@@ -1751,7 +1758,7 @@ test "EvmState fuzz: edge value testing with extreme values" {
     defer allocator.free(max_data);
     @memset(max_data, 0xFF);
     
-    try state.emit_log(extreme_addresses[0], &max_topics, max_data);
+    try state.emit_log(allocator, extreme_addresses[0], &max_topics, max_data);
     const log = state.logs.items[state.logs.items.len - 1];
     try testing.expectEqualSlices(u256, &max_topics, log.topics);
 }
@@ -1762,9 +1769,9 @@ test "EvmState clear_logs properly frees memory" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr = testAddress(0x1234);
 
@@ -1776,19 +1783,19 @@ test "EvmState clear_logs properly frees memory" {
         defer allocator.free(data);
         @memset(data, @as(u8, @intCast(i)));
 
-        try state.emit_log(addr, &topics, data);
+        try state.emit_log(allocator, addr, &topics, data);
     }
 
     try testing.expectEqual(@as(usize, 10), state.logs.items.len);
 
     // Clear logs should free all memory
-    state.clear_logs();
+    state.clear_logs(allocator);
     try testing.expectEqual(@as(usize, 0), state.logs.items.len);
 
     // Emit more logs to ensure reusability
     const topics = [_]u256{1, 2};
     const data = &[_]u8{ 0xFF, 0xEE };
-    try state.emit_log(addr, &topics, data);
+    try state.emit_log(allocator, addr, &topics, data);
     try testing.expectEqual(@as(usize, 1), state.logs.items.len);
 }
 
@@ -1798,9 +1805,9 @@ test "EvmState clear_selfdestructs" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Mark multiple accounts for selfdestruct
     for (0..100) |i| {
@@ -1828,9 +1835,9 @@ test "EvmState clear_transaction_state clears all transaction data" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     const addr1 = testAddress(0x1111);
     const addr2 = testAddress(0x2222);
@@ -1843,8 +1850,8 @@ test "EvmState clear_transaction_state clears all transaction data" {
     // Emit logs
     const topics = [_]u256{1, 2, 3};
     const data = &[_]u8{ 0xAA, 0xBB, 0xCC };
-    try state.emit_log(addr1, &topics, data);
-    try state.emit_log(addr2, &topics[0..2], data);
+    try state.emit_log(allocator, addr1, &topics, data);
+    try state.emit_log(allocator, addr2, &topics[0..2], data);
 
     // Mark selfdestructs
     try state.mark_for_destruction(addr1, addr2);
@@ -1856,7 +1863,7 @@ test "EvmState clear_transaction_state clears all transaction data" {
     try testing.expect(state.selfdestructs.count() > 0);
 
     // Clear all transaction state
-    state.clear_transaction_state();
+    state.clear_transaction_state(allocator);
 
     // Verify everything is cleared
     try testing.expectEqual(@as(usize, 0), state.transient_storage.count());
@@ -1875,9 +1882,9 @@ test "EvmState memory leak prevention in transaction simulation" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
-    const db_interface = memory_db.to_database_interface();
+    const db_interface = memory_db.to_database_interface(allocator);
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Simulate multiple transactions
     for (0..100) |tx_num| {
@@ -1903,7 +1910,7 @@ test "EvmState memory leak prevention in transaction simulation" {
             defer allocator.free(data);
             @memset(data, @as(u8, @intCast(log_num)));
 
-            try state.emit_log(addr, topics_buf[0..topics_count], data);
+            try state.emit_log(allocator, addr, topics_buf[0..topics_count], data);
         }
 
         // Mark some selfdestructs
@@ -1913,7 +1920,7 @@ test "EvmState memory leak prevention in transaction simulation" {
         }
 
         // Clear transaction state at the end of each transaction
-        state.clear_transaction_state();
+        state.clear_transaction_state(allocator);
     }
 
     // After all transactions, only persistent state should remain

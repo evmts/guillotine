@@ -44,7 +44,7 @@ test "E2E: Basic inheritance - virtual function overrides" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Simulate virtual function override behavior
     // Base implementation returns base value, derived multiplies by factor
@@ -124,7 +124,7 @@ test "E2E: Interface compliance - polymorphic behavior" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Simulate interface compliance - different implementations of same interface
     const interface_test_bytecode = [_]u8{
@@ -221,7 +221,7 @@ test "E2E: Multiple inheritance - diamond pattern resolution" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Simulate diamond inheritance: Diamond inherits from LeftBase and RightBase
     const diamond_test_bytecode = [_]u8{
@@ -296,7 +296,7 @@ test "E2E: Function visibility - access control patterns" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Test internal function access through public wrapper
     const visibility_test_bytecode = [_]u8{

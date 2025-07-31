@@ -28,7 +28,7 @@ test "DELEGATECALL basic functionality" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Setup context
     const context = Context.init_with_values(
@@ -130,7 +130,7 @@ test "DELEGATECALL preserves sender and value" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Setup context
     const context = Context.init();
@@ -216,7 +216,7 @@ test "DELEGATECALL with storage access" {
     const db_interface = memory_db.to_database_interface();
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Setup context
     const context = Context.init();

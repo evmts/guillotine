@@ -507,7 +507,7 @@ fn fuzz_memory_operations(allocator: std.mem.Allocator, operations: []const Fuzz
 
         const db_interface = memory_db.to_database_interface();
         var vm = try Vm.init(allocator, db_interface, null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
 
         var contract = try Contract.init(allocator, op.code, .{
             .address = Address.ZERO,
@@ -515,7 +515,7 @@ fn fuzz_memory_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, op.gas_limit, contract, Address.ZERO, op.calldata);
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Set up return data if needed
         if (op.return_data.len > 0) {

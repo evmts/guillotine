@@ -127,7 +127,7 @@ pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !Da
                 try map.put(memory_db, metadata);
             }
 
-            return memory_db.to_database_interface();
+            return memory_db.to_database_interface(allocator);
         },
 
     }
@@ -150,7 +150,7 @@ pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !Da
 /// ```
 pub fn destroy_database(allocator: std.mem.Allocator, database: DatabaseInterface) void {
     // Call the database's deinit method
-    database.deinit();
+    database.deinit(allocator);
 
     // Look up metadata for proper deallocation
     if (database_metadata_map) |*map| {

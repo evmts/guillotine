@@ -104,7 +104,7 @@ test "Manual VM.init reproduction" {
     // Step 3: EvmState (we know this works individually)
     std.log.debug("Step 3: Setting up EvmState", .{});
     var state = try Evm.EvmState.init(evm_alloc, db_interface);
-    defer state.deinit();
+    defer state.deinit(evm_alloc);
     std.log.debug("Step 3: EvmState setup complete", .{});
     
     // Step 4: Context.init (test this step specifically)

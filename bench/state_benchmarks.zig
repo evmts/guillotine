@@ -88,8 +88,8 @@ pub fn zbench_state_root(allocator: std.mem.Allocator) void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = Evm.EvmState.init(db_interface, allocator) catch unreachable;
-    defer state.deinit();
+    var state = Evm.EvmState.init(allocator, db_interface) catch unreachable;
+    defer state.deinit(allocator);
 
     // Pre-populate state with test data
     const num_accounts = 100;
@@ -139,8 +139,8 @@ pub fn zbench_evm_state_full(allocator: std.mem.Allocator) void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = Evm.EvmState.init(db_interface, allocator) catch unreachable;
-    defer state.deinit();
+    var state = Evm.EvmState.init(allocator, db_interface) catch unreachable;
+    defer state.deinit(allocator);
 
     // Simulate complex transaction processing
     const num_transactions = 50;

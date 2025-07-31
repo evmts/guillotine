@@ -12,19 +12,19 @@ pub fn fuzz_bitwise_operations(allocator: std.mem.Allocator, operations: []const
     
     for (operations) |op| {
         var memory = try @import("evm").Memory.init_default(allocator);
-        defer memory.deinit();
+        defer memory.deinit(allocator);
         
         var db = @import("evm").MemoryDatabase.init(allocator);
         defer db.deinit();
         
         var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
         
         var contract = try @import("evm").Contract.init(allocator, &[_]u8{0x01}, .{});
         defer contract.deinit(allocator, null);
         
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Setup stack with test values based on operation type
         if (op.op_type == BitwiseOpType.not_op) {

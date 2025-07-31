@@ -6,7 +6,7 @@ test "fuzz_memory_basic_operations" {
     const allocator = testing.allocator;
     
     var memory = try evm.Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test basic data setting and getting
     const test_data = "Hello, World!";
@@ -20,7 +20,7 @@ test "fuzz_memory_u256_operations" {
     const allocator = testing.allocator;
     
     var memory = try evm.Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     const test_value: u256 = 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0;
     try memory.set_u256(0, test_value);
@@ -33,7 +33,7 @@ test "fuzz_memory_expansion" {
     const allocator = testing.allocator;
     
     var memory = try evm.Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test memory expansion
     const large_offset = 1000;
@@ -48,7 +48,7 @@ test "fuzz_memory_edge_cases" {
     const allocator = testing.allocator;
     
     var memory = try evm.Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test zero-length operations
     try memory.set_data(0, "");
@@ -66,7 +66,7 @@ test "fuzz_memory_bounds_checking" {
     const allocator = testing.allocator;
     
     var memory = try evm.Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test that memory properly handles bounds
     const test_data = "Boundary test data";

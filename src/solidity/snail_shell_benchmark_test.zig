@@ -45,7 +45,7 @@ test "SnailShellBenchmark EVM execution" {
     std.debug.print("Step 3: Initializing EVM...\n", .{});
     var builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     std.debug.print("Step 3: ✓ EVM initialized\n", .{});
     
     // Use pre-compiled bytecode for a simple benchmark contract

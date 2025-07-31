@@ -20,7 +20,7 @@ test "Invalid Opcodes: 0x21-0x24 should fail" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create test addresses
     const contract_address: Address.Address = [_]u8{0x12} ** 20;
@@ -40,13 +40,13 @@ test "Invalid Opcodes: 0x21-0x24 should fail" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test each invalid opcode from 0x21 to 0x24
     const invalid_opcodes = [_]u8{ 0x21, 0x22, 0x23, 0x24 };
@@ -84,7 +84,7 @@ test "Invalid Opcodes: Full 0x21-0x2F range" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Create test addresses
     const contract_address: Address.Address = [_]u8{0x12} ** 20;
@@ -104,13 +104,13 @@ test "Invalid Opcodes: Full 0x21-0x2F range" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test all opcodes from 0x21 to 0x2F
     var opcode: u8 = 0x21;

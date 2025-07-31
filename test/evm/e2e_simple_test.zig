@@ -48,7 +48,7 @@ test "E2E: Basic EVM operations" {
     const db_interface = memory_db.to_database_interface();
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try evm_builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Set up deployer account with ETH
     try evm_instance.state.set_balance(DEPLOYER_ADDRESS, 1000000);
@@ -123,7 +123,7 @@ test "E2E: Arithmetic operations" {
     const db_interface = memory_db.to_database_interface();
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try evm_builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Create a contract at the specified address
     var test_contract = Contract.init_at_address(
@@ -141,15 +141,15 @@ test "E2E: Arithmetic operations" {
     var frame = try allocator.create(Frame);
     defer allocator.destroy(frame);
 
-    var builder = Frame.builder(allocator);
+    var builder = Frame.builder();
     frame.* = try builder
         .withVm(evm_instance)
         .withContract(&test_contract)
         .withGas(100_000)
         .withCaller(.{})
         .withInput(test_contract.input)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test ADD operation: 25 + 17 = 42
     try frame.stack.append(25);
@@ -210,7 +210,7 @@ test "E2E: Memory operations" {
     const db_interface = memory_db.to_database_interface();
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try evm_builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Create a contract at the specified address
     var test_contract = Contract.init_at_address(
@@ -228,14 +228,14 @@ test "E2E: Memory operations" {
     var frame = try allocator.create(Frame);
     defer allocator.destroy(frame);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame.* = try frame_builder
         .withVm(evm_instance)
         .withContract(&test_contract)
         .withGas(100_000)
         .withInput(test_contract.input)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test MSTORE operation
     try frame.stack.append(0xDEADBEEF);
@@ -295,7 +295,7 @@ test "E2E: Storage operations" {
     const db_interface = memory_db.to_database_interface();
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try evm_builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Create a contract at the specified address
     var test_contract = Contract.init_at_address(
@@ -313,14 +313,14 @@ test "E2E: Storage operations" {
     var frame = try allocator.create(Frame);
     defer allocator.destroy(frame);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame.* = try frame_builder
         .withVm(evm_instance)
         .withContract(&test_contract)
         .withGas(100_000)
         .withInput(test_contract.input)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test SSTORE operation
     try frame.stack.append(0x12345678);
@@ -366,7 +366,7 @@ test "E2E: Stack operations" {
     const db_interface = memory_db.to_database_interface();
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try evm_builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Create a contract at the specified address
     var test_contract = Contract.init_at_address(
@@ -384,14 +384,14 @@ test "E2E: Stack operations" {
     var frame = try allocator.create(Frame);
     defer allocator.destroy(frame);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame.* = try frame_builder
         .withVm(evm_instance)
         .withContract(&test_contract)
         .withGas(100_000)
         .withInput(test_contract.input)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Push some values
     try frame.stack.append(100);
@@ -451,7 +451,7 @@ test "E2E: Gas consumption patterns" {
     const db_interface = memory_db.to_database_interface();
     var evm_builder = Evm.EvmBuilder.init(allocator, db_interface);
     evm_instance.* = try evm_builder.build();
-    defer evm_instance.deinit();
+    defer evm_instance.deinit(allocator);
 
     // Create a contract at the specified address
     var test_contract = Contract.init_at_address(
@@ -469,14 +469,14 @@ test "E2E: Gas consumption patterns" {
     var frame = try allocator.create(Frame);
     defer allocator.destroy(frame);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame.* = try frame_builder
         .withVm(evm_instance)
         .withContract(&test_contract)
         .withGas(100_000)
         .withInput(test_contract.input)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const initial_gas = frame.gas_remaining;
 

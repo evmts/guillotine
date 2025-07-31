@@ -125,7 +125,7 @@ test "crypto_stack_buffer_benchmarks" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const iterations = 10000; // Reduced for crypto operations due to complexity
     
@@ -136,7 +136,7 @@ test "crypto_stack_buffer_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x20}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Set up 32 bytes of data in memory (typical address + padding)
         const test_data = [_]u8{0x42} ** 32;
@@ -157,7 +157,7 @@ test "crypto_stack_buffer_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x20}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Set up 128 bytes of data in memory (event data size)
         const test_data = [_]u8{0x37} ** 128;
@@ -178,7 +178,7 @@ test "crypto_stack_buffer_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x20}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Set up 512 bytes of data in memory
         const test_data = [_]u8{0x73} ** 512;
@@ -199,7 +199,7 @@ test "crypto_stack_buffer_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x20}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Set up 2048 bytes of data in memory
         const test_data = [_]u8{0x99} ** 2048;

@@ -26,7 +26,7 @@ test "Integration: Token balance check pattern" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -49,13 +49,13 @@ test "Integration: Token balance check pattern" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate ERC20 balance mapping: mapping(address => uint256)
     // Storage slot = keccak256(address . uint256(0))
@@ -118,7 +118,7 @@ test "Integration: Packed struct storage" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -141,13 +141,13 @@ test "Integration: Packed struct storage" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate struct { uint128 a; uint128 b; } packed in one slot
     const a: u256 = 12345; // Lower 128 bits
@@ -205,7 +205,7 @@ test "Integration: Dynamic array length update" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -228,13 +228,13 @@ test "Integration: Dynamic array length update" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Dynamic array base slot
     const array_slot: u256 = 10;
@@ -274,7 +274,7 @@ test "Integration: Reentrancy guard pattern" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -297,13 +297,13 @@ test "Integration: Reentrancy guard pattern" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const guard_slot: u256 = 99;
     _ = 1; // NOT_ENTERED constant (not used in this test)
@@ -353,7 +353,7 @@ test "Integration: Bitfield manipulation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -376,13 +376,13 @@ test "Integration: Bitfield manipulation" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &vm;
     const state: Evm.Operation.State = &frame;
@@ -448,7 +448,7 @@ test "Integration: Safe math operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -471,13 +471,13 @@ test "Integration: Safe math operations" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &vm;
     const state: Evm.Operation.State = &frame;
@@ -533,7 +533,7 @@ test "Integration: Signature verification simulation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -556,13 +556,13 @@ test "Integration: Signature verification simulation" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Simulate message hash computation
     const message = "Hello, Ethereum!";
@@ -608,7 +608,7 @@ test "Integration: Multi-sig wallet threshold check" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create addresses
     const contract_address = Evm.primitives.Address.from_u256(0x02);
@@ -631,13 +631,13 @@ test "Integration: Multi-sig wallet threshold check" {
     defer contract.deinit(allocator, null);
 
     // Create frame with gas
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute SSTORE through jump table
     const interpreter: Evm.Operation.Interpreter = &vm;

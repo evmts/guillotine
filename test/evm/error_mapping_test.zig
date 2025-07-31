@@ -37,7 +37,7 @@ test "Error mapping: Memory errors mapped correctly" {
 
     // Create memory with small limit
     var memory = try Memory.init(allocator, 1024, 1024); // 1KB limit
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     // Test memory limit exceeded
     const result = error_mapping.memory_ensure_capacity(&memory, 2048);
@@ -100,7 +100,7 @@ test "Error mapping: Helper functions work correctly" {
 
     // Test memory operations
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
 
     try error_mapping.memory_set_byte(&memory, 0, 0xFF);
     try error_mapping.memory_set_word(&memory, 32, 12345);

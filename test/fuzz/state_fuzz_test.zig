@@ -52,7 +52,7 @@ test "fuzz_state_storage_operations" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Fuzz test with 1000 random storage operations
     const iterations = 1000;
@@ -101,7 +101,7 @@ test "fuzz_state_transient_storage_lifecycle" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Test 1: Basic set/get/clear cycles
     for (0..100) |_| {
@@ -172,7 +172,7 @@ test "fuzz_state_log_operations" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Test with random topic counts and data sizes
     for (0..100) |_| {
@@ -224,7 +224,7 @@ test "fuzz_state_account_consistency" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Track accounts for invariant checking
     var accounts = std.AutoHashMap(Address, struct {
@@ -319,7 +319,7 @@ test "fuzz_state_memory_pressure" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Create many accounts with random data
     const account_count = 100;
@@ -391,7 +391,7 @@ test "fuzz_state_state_transitions" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Test sequences of state modifications
     const addr1 = randomAddress();
@@ -441,7 +441,7 @@ test "fuzz_state_invariant_tests" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Invariant 1: Destroyed contracts cannot be modified (but can be until tx end)
     const contract_addr = randomAddress();
@@ -490,7 +490,7 @@ test "fuzz_state_edge_value_tests" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Test max u256 values for storage/balance
     const max_u256 = std.math.maxInt(u256);
@@ -587,7 +587,7 @@ test "fuzz_state_database_error_simulation" {
     defer db.deinit();
     
     var state = try evm.EvmState.init(allocator, db.to_database_interface());
-    defer state.deinit();
+    defer state.deinit(allocator);
     
     // Normal operations should work
     const addr = randomAddress();

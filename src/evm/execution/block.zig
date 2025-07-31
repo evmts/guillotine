@@ -158,7 +158,7 @@ test "BLOCKHASH: Returns hash for valid recent blocks" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -179,7 +179,7 @@ test "BLOCKHASH: Returns hash for valid recent blocks" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test block within range (999 blocks ago)
     try frame.stack.push(999);
@@ -196,7 +196,7 @@ test "BLOCKHASH: Returns zero for current block" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -217,7 +217,7 @@ test "BLOCKHASH: Returns zero for current block" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test current block
     try frame.stack.push(1000);
@@ -234,7 +234,7 @@ test "BLOCKHASH: Returns zero for future blocks" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -255,7 +255,7 @@ test "BLOCKHASH: Returns zero for future blocks" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test future block
     try frame.stack.push(1001);
@@ -272,7 +272,7 @@ test "BLOCKHASH: Returns zero for blocks beyond 256 limit" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -293,7 +293,7 @@ test "BLOCKHASH: Returns zero for blocks beyond 256 limit" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test block beyond 256 limit
     try frame.stack.push(743); // 1000 - 743 = 257 blocks ago
@@ -310,7 +310,7 @@ test "BLOCKHASH: Returns zero for block number 0" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -331,7 +331,7 @@ test "BLOCKHASH: Returns zero for block number 0" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test block number 0 (genesis block)
     try frame.stack.push(0);
@@ -348,7 +348,7 @@ test "COINBASE: Returns correct coinbase address" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_coinbase = Address.Address{ .bytes = [_]u8{0xCC} ** 20 };
     const context = Context.init_with_values(
@@ -370,7 +370,7 @@ test "COINBASE: Returns correct coinbase address" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_coinbase(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -386,7 +386,7 @@ test "TIMESTAMP: Returns correct timestamp" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_timestamp: u64 = 1234567890;
     const context = Context.init_with_values(
@@ -408,7 +408,7 @@ test "TIMESTAMP: Returns correct timestamp" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_timestamp(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -423,7 +423,7 @@ test "NUMBER: Returns correct block number" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_block_number: u64 = 987654321;
     const context = Context.init_with_values(
@@ -445,7 +445,7 @@ test "NUMBER: Returns correct block number" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_number(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -460,7 +460,7 @@ test "DIFFICULTY: Returns correct difficulty value" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_difficulty: u256 = 0x123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0;
     const context = Context.init_with_values(
@@ -482,7 +482,7 @@ test "DIFFICULTY: Returns correct difficulty value" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_difficulty(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -497,7 +497,7 @@ test "PREVRANDAO: Returns same as difficulty" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_prevrandao: u256 = 0xABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789;
     const context = Context.init_with_values(
@@ -519,7 +519,7 @@ test "PREVRANDAO: Returns same as difficulty" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_prevrandao(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -534,7 +534,7 @@ test "GASLIMIT: Returns correct gas limit" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_gas_limit: u64 = 50_000_000;
     const context = Context.init_with_values(
@@ -556,7 +556,7 @@ test "GASLIMIT: Returns correct gas limit" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_gaslimit(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -571,7 +571,7 @@ test "BASEFEE: Returns correct base fee" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_base_fee: u256 = 25_000_000_000; // 25 gwei
     const context = Context.init_with_values(
@@ -593,7 +593,7 @@ test "BASEFEE: Returns correct base fee" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_basefee(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -608,7 +608,7 @@ test "BLOBHASH: Returns correct blob hash for valid index" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_blob_hashes = [_]u256{
         0x1111111111111111111111111111111111111111111111111111111111111111,
@@ -634,7 +634,7 @@ test "BLOBHASH: Returns correct blob hash for valid index" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test first blob hash
     try frame.stack.push(0);
@@ -657,7 +657,7 @@ test "BLOBHASH: Returns zero for out of bounds index" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_blob_hashes = [_]u256{
         0x1111111111111111111111111111111111111111111111111111111111111111,
@@ -681,7 +681,7 @@ test "BLOBHASH: Returns zero for out of bounds index" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test out of bounds index
     try frame.stack.push(1);
@@ -698,7 +698,7 @@ test "BLOBBASEFEE: Returns correct blob base fee" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_blob_base_fee: u256 = 100_000_000; // 0.1 gwei
     const context = Context.init_with_values(
@@ -720,7 +720,7 @@ test "BLOBBASEFEE: Returns correct blob base fee" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     _ = try op_blobbasefee(0, @ptrCast(&vm), @ptrCast(&frame));
     const result = try frame.stack.pop();
@@ -736,7 +736,7 @@ test "BLOCKHASH: Fuzz with random block numbers" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -757,7 +757,7 @@ test "BLOCKHASH: Fuzz with random block numbers" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     var prng = std.rand.DefaultPrng.init(0);
     const random = prng.random();
@@ -789,7 +789,7 @@ test "Block operations: All values are 256-bit" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const context = Context.init_with_values(
         Address.ZERO, // tx_origin
@@ -810,7 +810,7 @@ test "Block operations: All values are 256-bit" {
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test all operations return valid u256 values
     _ = try op_coinbase(0, @ptrCast(&vm), @ptrCast(&frame));
@@ -850,7 +850,7 @@ test "BLOCKHASH consistency: same block number gives same hash" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     vm.context.block_number = 1000;
 
@@ -858,7 +858,7 @@ test "BLOCKHASH consistency: same block number gives same hash" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -885,7 +885,7 @@ test "BASEFEE edge case: zero base fee" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set zero base fee (pre-EIP-1559 or extreme case)
     vm.context.block_base_fee = 0;
@@ -894,7 +894,7 @@ test "BASEFEE edge case: zero base fee" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -912,7 +912,7 @@ test "BASEFEE edge case: maximum base fee" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set maximum possible base fee
     vm.context.block_base_fee = std.math.maxInt(u256);
@@ -921,7 +921,7 @@ test "BASEFEE edge case: maximum base fee" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -939,7 +939,7 @@ test "BLOBHASH empty blob hashes array" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set empty blob hashes array
     const empty_blob_hashes: []const u256 = &.{};
@@ -949,7 +949,7 @@ test "BLOBHASH empty blob hashes array" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test index 0 (should return 0 for empty array)
     try frame.stack.push(0);
@@ -970,7 +970,7 @@ test "BLOBBASEFEE edge case: zero blob base fee" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set zero blob base fee
     vm.context.blob_base_fee = 0;
@@ -979,7 +979,7 @@ test "BLOBBASEFEE edge case: zero blob base fee" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -997,7 +997,7 @@ test "BLOBBASEFEE edge case: maximum blob base fee" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set maximum possible blob base fee
     vm.context.blob_base_fee = std.math.maxInt(u256);
@@ -1006,7 +1006,7 @@ test "BLOBBASEFEE edge case: maximum blob base fee" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1024,7 +1024,7 @@ test "GASLIMIT edge case: zero gas limit" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set zero gas limit (extreme edge case)
     vm.context.block_gas_limit = 0;
@@ -1033,7 +1033,7 @@ test "GASLIMIT edge case: zero gas limit" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1051,7 +1051,7 @@ test "GASLIMIT edge case: maximum gas limit" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set maximum possible gas limit
     vm.context.block_gas_limit = std.math.maxInt(u64);
@@ -1060,7 +1060,7 @@ test "GASLIMIT edge case: maximum gas limit" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1078,7 +1078,7 @@ test "DIFFICULTY zero difficulty" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set zero difficulty (post-merge scenario)
     vm.context.block_difficulty = 0;
@@ -1087,7 +1087,7 @@ test "DIFFICULTY zero difficulty" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1105,7 +1105,7 @@ test "PREVRANDAO and DIFFICULTY are equivalent" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set post-merge prevrandao value
     const test_value: u256 = 0xABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890;
@@ -1115,7 +1115,7 @@ test "PREVRANDAO and DIFFICULTY are equivalent" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1141,7 +1141,7 @@ test "COINBASE edge case: zero address" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set zero coinbase address
     vm.context.block_coinbase = primitives.Address.ZERO;
@@ -1150,7 +1150,7 @@ test "COINBASE edge case: zero address" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1168,7 +1168,7 @@ test "COINBASE edge case: maximum address" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set maximum coinbase address
     const max_address = primitives.Address.from_u256(std.math.maxInt(u160));
@@ -1178,7 +1178,7 @@ test "COINBASE edge case: maximum address" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1196,7 +1196,7 @@ test "TIMESTAMP edge case: zero timestamp" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set zero timestamp (genesis block or extreme case)
     vm.context.block_timestamp = 0;
@@ -1205,7 +1205,7 @@ test "TIMESTAMP edge case: zero timestamp" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1223,7 +1223,7 @@ test "NUMBER edge case: maximum block number" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set maximum block number
     vm.context.block_number = std.math.maxInt(u64);
@@ -1232,7 +1232,7 @@ test "NUMBER edge case: maximum block number" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1250,7 +1250,7 @@ test "BLOBHASH edge case: maximum valid index" {
 
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set maximum number of blob hashes (6 per EIP-4844)
     const max_blob_hashes = [_]u256{
@@ -1267,7 +1267,7 @@ test "BLOBHASH edge case: maximum valid index" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test last valid index (5)
     try frame.stack.push(5);

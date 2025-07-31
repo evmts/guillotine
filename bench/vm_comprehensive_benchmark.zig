@@ -108,7 +108,7 @@ fn benchmarkVmInit(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 }
 
 /// Benchmark VM initialization with specific hardfork
@@ -119,7 +119,7 @@ fn benchmarkVmInitWithHardfork(allocator: Allocator) !void {
     const dbInterface = memoryDb.to_database_interface();
     const hardfork = Evm.hardforks.Hardfork.CANCUN;
     var vm = try Evm.Evm.init(allocator, dbInterface, hardfork, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 }
 
 /// Benchmark VM initialization and teardown cycle
@@ -133,7 +133,7 @@ fn benchmarkVmLifecycle(allocator: Allocator) !void {
     var i: u32 = 0;
     while (i < 10) : (i += 1) {
         var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-        vm.deinit();
+        vm.deinit(allocator);
     }
 }
 
@@ -197,7 +197,7 @@ fn benchmarkInterpret(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0x1111);
     const contractAddr = Address.from_u256(0x2222);
@@ -230,7 +230,7 @@ fn benchmarkInterpretStatic(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0x1111);
     const contractAddr = Address.from_u256(0x3333);
@@ -263,7 +263,7 @@ fn benchmarkInterpretWithContext(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0x1111);
     const contractAddr = Address.from_u256(0x4444);
@@ -340,7 +340,7 @@ fn benchmarkCreateContract(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const creator = Address.from_u256(0x5555);
     try vm.state.set_balance(creator, 10000000000000000000); // 10 ETH
@@ -368,7 +368,7 @@ fn benchmarkCreate2Contract(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const creator = Address.from_u256(0x6666);
     const salt = primitives.B256.from_u256(0xDEADBEEF);
@@ -398,7 +398,7 @@ fn benchmarkCallContract(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0x7777);
     const target = Address.from_u256(0x8888);
@@ -429,7 +429,7 @@ fn benchmarkDelegatecallContract(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0x9999);
     const target = Address.from_u256(0xAAAA);
@@ -458,7 +458,7 @@ fn benchmarkStaticcallContract(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0xBBBB);
     const target = Address.from_u256(0xCCCC);
@@ -491,7 +491,7 @@ fn benchmarkSetStorageProtected(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const addr = Address.from_u256(0xDDDD);
     
@@ -520,7 +520,7 @@ fn benchmarkSetTransientStorageProtected(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const addr = Address.from_u256(0xEEEE);
     
@@ -549,7 +549,7 @@ fn benchmarkAccountOperations(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const testAddresses = [_]Address{
         Address.from_u256(0x1000),
@@ -595,7 +595,7 @@ fn benchmarkStateJournaling(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const addr = Address.from_u256(0xFFFF);
     
@@ -667,7 +667,7 @@ fn benchmarkGasConsumption(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const caller = Address.from_u256(0x11111);
     const contractAddr = Address.from_u256(0x22222);
@@ -711,7 +711,7 @@ fn benchmarkGasRefunds(allocator: Allocator) !void {
     
     const dbInterface = memoryDb.to_database_interface();
     var vm = try Evm.Evm.init(allocator, dbInterface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const addr = Address.from_u256(0x33333);
     

@@ -36,7 +36,7 @@ fn create_evm_context_with_code(allocator: std.mem.Allocator, code: []const u8) 
 }
 
 fn deinit_evm_context(ctx: anytype, allocator: std.mem.Allocator) void {
-    ctx.frame.deinit();
+    ctx.frame.deinit(allocator);
     ctx.contract.deinit(allocator, null);
     ctx.vm.deinit();
     ctx.db.deinit();

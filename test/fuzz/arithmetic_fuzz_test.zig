@@ -10,7 +10,7 @@ test "fuzz_arithmetic_basic_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -25,14 +25,14 @@ test "fuzz_arithmetic_basic_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test ADD operation
     try frame.stack.append(5);
@@ -53,7 +53,7 @@ test "fuzz_arithmetic_overflow_cases" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -68,14 +68,14 @@ test "fuzz_arithmetic_overflow_cases" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test ADD with max values (should wrap around)
     try frame.stack.append(std.math.maxInt(u256));
@@ -96,7 +96,7 @@ test "fuzz_arithmetic_division_by_zero" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -111,14 +111,14 @@ test "fuzz_arithmetic_division_by_zero" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test DIV by zero
     try frame.stack.append(0);  // divisor
@@ -139,7 +139,7 @@ test "fuzz_arithmetic_modulo_operations" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -154,14 +154,14 @@ test "fuzz_arithmetic_modulo_operations" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test MOD operation: 10 % 3 = 1
     try frame.stack.append(10); // dividend (a)

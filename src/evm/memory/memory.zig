@@ -23,10 +23,6 @@ memory_limit: u64,
 /// Frequently accessed for actual memory operations
 shared_buffer_ref: *std.ArrayList(u8),
 
-/// Memory allocator for dynamic allocations
-/// Less frequently accessed
-allocator: std.mem.Allocator,
-
 /// Whether this Memory instance owns the buffer
 /// Small bool field placed last to minimize padding
 owns_buffer: bool,
@@ -58,7 +54,6 @@ pub fn init(
         .my_checkpoint = 0,
         .memory_limit = memory_limit,
         .shared_buffer_ref = shared_buffer,
-        .allocator = allocator,
         .owns_buffer = true,
     };
 }
@@ -70,7 +65,6 @@ pub fn init_child_memory(self: *Memory, checkpoint: usize) !Memory {
         .my_checkpoint = checkpoint,
         .memory_limit = self.memory_limit,
         .shared_buffer_ref = self.shared_buffer_ref,
-        .allocator = self.allocator,
         .owns_buffer = false,
     };
 }
@@ -80,10 +74,10 @@ pub fn init_default(allocator: std.mem.Allocator) !Memory {
 }
 
 /// Deinitializes the Memory. Only root Memory instances clean up the shared buffer.
-pub fn deinit(self: *Memory) void {
+pub fn deinit(self: *Memory, allocator: std.mem.Allocator) void {
     if (self.owns_buffer) {
         self.shared_buffer_ref.deinit();
-        self.allocator.destroy(self.shared_buffer_ref);
+        allocator.destroy(self.shared_buffer_ref);
     }
 }
 
@@ -177,7 +171,7 @@ test {
 test "memory expansion gas cost lookup table" {
     const allocator = std.testing.allocator;
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test small memory sizes use lookup table
     const test_cases = [_]struct { size: u64, expected_words: u64 }{
@@ -204,7 +198,7 @@ test "memory expansion gas cost lookup table" {
 test "memory expansion gas cost cache behavior" {
     const allocator = std.testing.allocator;
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test large memory sizes use cache
     const large_size: u64 = 8192; // 256 words, beyond lookup table
@@ -231,7 +225,7 @@ test "memory expansion gas cost cache behavior" {
 test "memory expansion gas cost mixed lookup and cache" {
     const allocator = std.testing.allocator;
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Start with small memory (uses lookup table)
     const small_size: u64 = 1024; // 32 words
@@ -261,7 +255,7 @@ test "memory expansion gas cost mixed lookup and cache" {
 test "memory expansion gas cost boundary conditions" {
     const allocator = std.testing.allocator;
     var memory = try Memory.init_default(allocator);
-    defer memory.deinit();
+    defer memory.deinit(allocator);
     
     // Test exactly at lookup table boundary
     const boundary_words = SMALL_MEMORY_LOOKUP_SIZE;
@@ -288,7 +282,7 @@ test "memory expansion gas cost performance benchmark" {
     // Benchmark lookup table performance for small sizes
     {
         var memory = try Memory.init_default(allocator);
-        defer memory.deinit();
+        defer memory.deinit(allocator);
         
         const start_time = std.time.nanoTimestamp();
         

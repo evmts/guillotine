@@ -27,7 +27,7 @@ test "MLOAD (0x51): Basic memory load operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -44,13 +44,13 @@ test "MLOAD (0x51): Basic memory load operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -86,7 +86,7 @@ test "MLOAD: Memory alignment and boundary conditions" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -103,13 +103,13 @@ test "MLOAD: Memory alignment and boundary conditions" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -157,7 +157,7 @@ test "MLOAD: Large offset handling and gas consumption" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -174,13 +174,13 @@ test "MLOAD: Large offset handling and gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -221,7 +221,7 @@ test "MLOAD: Stack underflow protection" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -238,13 +238,13 @@ test "MLOAD: Stack underflow protection" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -268,7 +268,7 @@ test "MSTORE (0x52): Basic memory store operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -285,13 +285,13 @@ test "MSTORE (0x52): Basic memory store operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -335,7 +335,7 @@ test "MSTORE: Overwrite and partial overlap scenarios" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -352,13 +352,13 @@ test "MSTORE: Overwrite and partial overlap scenarios" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -412,7 +412,7 @@ test "MSTORE: Memory expansion and gas costs" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -429,13 +429,13 @@ test "MSTORE: Memory expansion and gas costs" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -488,7 +488,7 @@ test "MSTORE: Stack underflow protection" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -505,13 +505,13 @@ test "MSTORE: Stack underflow protection" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -540,7 +540,7 @@ test "MSTORE8 (0x53): Basic single byte store operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -557,13 +557,13 @@ test "MSTORE8 (0x53): Basic single byte store operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -613,7 +613,7 @@ test "MSTORE8: Precision and non-interference" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -630,13 +630,13 @@ test "MSTORE8: Precision and non-interference" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -714,7 +714,7 @@ test "MSTORE8: Memory expansion and gas costs" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -731,13 +731,13 @@ test "MSTORE8: Memory expansion and gas costs" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -796,7 +796,7 @@ test "MSTORE8: Stack underflow protection" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -813,13 +813,13 @@ test "MSTORE8: Stack underflow protection" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -848,7 +848,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
     const contract_addr: Address.Address = [_]u8{0x33} ** 20;
@@ -865,13 +865,13 @@ test "MSIZE (0x59): Basic memory size tracking" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&evm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -929,7 +929,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //         defer contract.deinit(allocator, null);
 //
 //         var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 10000);
-//         defer test_frame.deinit();
+//         defer test_frame.deinit(allocator);
 //
 //         // Use MSTORE to set memory at the offset (this will expand memory)
 //         try test_frame.pushStack(&[_]u256{ 0x123456, tc.offset }); // value, offset
@@ -958,7 +958,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer contract.deinit(allocator, null);
 
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 50000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 
 //     // Test 1: MSIZE after MSTORE operations
 //     try test_frame.pushStack(&[_]u256{ 0x123456, 0 }); // value, offset
@@ -1032,7 +1032,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer contract.deinit(allocator, null);
 
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 1000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 
 //     // MSIZE should always cost exactly 2 gas (GasQuickStep)
 //     const gas_before = test_frame.frame.gas_remaining;
@@ -1070,7 +1070,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer contract.deinit(allocator, null);
 
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 1000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 
 //     // Fill the stack to capacity
 //     while (test_frame.frame.stack.size < helpers.Stack.CAPACITY) {
@@ -1102,7 +1102,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer contract.deinit(allocator, null);
 
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 100000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 
 //     // Test pattern: MSTORE -> MLOAD -> MSTORE8 -> MLOAD -> MSIZE
 //     const base_offset = 100;
@@ -1150,7 +1150,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer contract.deinit(allocator, null);
 
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 10000000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 
 //     // Test 1: Operations at maximum valid offsets
 //     const large_but_valid_offset = 1000000; // Large but should work with sufficient gas
@@ -1250,7 +1250,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer contract.deinit(allocator, null);
 
 //     var test_frame = try helpers.TestFrame.init_minimal(allocator, &contract, 100000000);
-//     defer test_frame.deinit();
+//     defer test_frame.deinit(allocator);
 
 //     // Test 1: Basic gas costs verification
 

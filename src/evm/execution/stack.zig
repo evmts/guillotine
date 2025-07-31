@@ -449,7 +449,7 @@ test "optimized PUSH1 handles value correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test with PUSH1 0xFF
     const code = [_]u8{ 0x60, 0xFF };
@@ -457,7 +457,7 @@ test "optimized PUSH1 handles value correctly" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -478,7 +478,7 @@ test "optimized PUSH1 handles bytecode boundary" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test with PUSH1 at end of bytecode (no value byte)
     const code = [_]u8{0x60};
@@ -486,7 +486,7 @@ test "optimized PUSH1 handles bytecode boundary" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -507,7 +507,7 @@ test "optimized PUSH2-PUSH8 handle values correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test PUSH2 with 0x1234
     const code2 = [_]u8{ 0x61, 0x12, 0x34 };
@@ -554,7 +554,7 @@ test "optimized PUSH handles partial bytecode correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test PUSH4 with only 2 bytes available
     const code = [_]u8{ 0x63, 0x12, 0x34 };
@@ -562,7 +562,7 @@ test "optimized PUSH handles partial bytecode correctly" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -589,14 +589,14 @@ test "POP removes top stack element" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x50}; // POP opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push some values first
     try frame.stack.append(100);
@@ -625,14 +625,14 @@ test "POP discards value correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x50}; // POP opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push a large value
     const large_value: u256 = std.math.maxInt(u256);
@@ -657,14 +657,14 @@ test "multiple POP operations in sequence" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x50}; // POP opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Fill stack with known values
     var i: usize = 0;
@@ -699,14 +699,14 @@ test "PUSH0 pushes zero value" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x5f}; // PUSH0 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     try std.testing.expectEqual(@as(usize, 0), frame.stack.size);
 
@@ -729,14 +729,14 @@ test "PUSH0 multiple times" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x5f}; // PUSH0 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -765,14 +765,14 @@ test "PUSH0 mixed with other values" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x5f}; // PUSH0 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -803,14 +803,14 @@ test "PUSH0 performance vs manual zero push" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x5f}; // PUSH0 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -859,7 +859,7 @@ test "PUSH operations handle all sizes correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test PUSH1 through PUSH32 with incrementing values
     const test_cases = [_]struct { n: u8, expected: u256, bytes: []const u8 }{
@@ -875,7 +875,7 @@ test "PUSH operations handle all sizes correctly" {
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
         const state_ptr: Operation.State = @ptrCast(&frame);
@@ -904,7 +904,7 @@ test "PUSH32 handles maximum value" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create bytecode for PUSH32 with all 0xFF bytes
     var code: [33]u8 = undefined;
@@ -915,7 +915,7 @@ test "PUSH32 handles maximum value" {
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -937,7 +937,7 @@ test "PUSH operations with insufficient bytecode" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test cases: PUSH operations with missing bytes
     const test_cases = [_]struct {
@@ -957,7 +957,7 @@ test "PUSH operations with insufficient bytecode" {
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
         const state_ptr: Operation.State = @ptrCast(&frame);
@@ -986,7 +986,7 @@ test "PUSH operations comparison small vs general" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test that small and general implementations produce same results for PUSH2-PUSH8
     const test_values = [_]struct { n: u8, bytes: []const u8, expected: u256 }{
@@ -1041,7 +1041,7 @@ test "PUSH extreme values and edge cases" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Test edge values for different PUSH sizes
     const edge_cases = [_]struct { name: []const u8, n: u8, code: []const u8, expected: u256 }{
@@ -1057,7 +1057,7 @@ test "PUSH extreme values and edge cases" {
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
         const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1087,14 +1087,14 @@ test "DUP1 duplicates top stack element" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x80}; // DUP1 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push a value to duplicate
     try frame.stack.append(42);
@@ -1122,14 +1122,14 @@ test "DUP operations all variants" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x80}; // DUP1 opcode (placeholder)
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1169,14 +1169,14 @@ test "DUP16 duplicates 16th element correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x8f}; // DUP16 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push 20 values
     var i: usize = 0;
@@ -1206,14 +1206,14 @@ test "DUP operations with edge values" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x80}; // DUP1 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1255,14 +1255,14 @@ test "SWAP1 swaps top two elements" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x90}; // SWAP1 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     try frame.stack.append(100);
     try frame.stack.append(200);
@@ -1287,14 +1287,14 @@ test "SWAP operations all variants" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x90}; // SWAP1 opcode (placeholder)
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1330,14 +1330,14 @@ test "SWAP16 swaps correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x9f}; // SWAP16 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push 20 values
     var i: usize = 0;
@@ -1371,7 +1371,7 @@ test "runtime push_n handles all PUSH opcodes" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const test_cases = [_]struct { opcode: u8, n: u8, bytes: []const u8, expected: u256 }{
         .{ .opcode = 0x60, .n = 1, .bytes = &[_]u8{ 0x60, 0x42 }, .expected = 0x42 },
@@ -1384,7 +1384,7 @@ test "runtime push_n handles all PUSH opcodes" {
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
         const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1406,7 +1406,7 @@ test "specific dup functions handle all DUP operations" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const test_cases = [_]struct { n: u8, func: fn (usize, Operation.Interpreter, Operation.State) ExecutionError.Error!Operation.ExecutionResult }{
         .{ .n = 1, .func = dup_1 },
@@ -1419,7 +1419,7 @@ test "specific dup functions handle all DUP operations" {
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Push enough values
         var i: usize = 0;
@@ -1449,7 +1449,7 @@ test "specific swap functions handle all SWAP operations" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const test_cases = [_]struct { n: u8, func: fn (usize, Operation.Interpreter, Operation.State) ExecutionError.Error!Operation.ExecutionResult }{
         .{ .n = 1, .func = swap_1 },
@@ -1462,7 +1462,7 @@ test "specific swap functions handle all SWAP operations" {
         defer contract.deinit(allocator, null);
 
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Push enough values
         var i: usize = 0;
@@ -1496,14 +1496,14 @@ test "stack operations handle maximum capacity correctly" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{0x5f}; // PUSH0 opcode
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Fill stack to near capacity
     var i: usize = 0;
@@ -1540,14 +1540,14 @@ test "stack operations maintain consistency under stress" {
 
     const db_interface = memory_db.toDatabaseInterface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const code = [_]u8{ 0x60, 0x42 }; // PUSH1 0x42
     var contract = try Contract.init(allocator, &code, .{ .address = primitives.Address.ZERO });
     defer contract.deinit(allocator, null);
 
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
     const state_ptr: Operation.State = @ptrCast(&frame);
@@ -1610,7 +1610,7 @@ test "stack_operation_benchmarks" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     var vm = try @import("../evm.zig").Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const iterations = 100000;
 
@@ -1622,7 +1622,7 @@ test "stack_operation_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &test_code, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         _ = try op_push1(0, @ptrCast(&vm), @ptrCast(&frame));
     }
@@ -1635,7 +1635,7 @@ test "stack_operation_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x50}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Pre-populate stack
         try frame.stack.append(@intCast(i));
@@ -1651,7 +1651,7 @@ test "stack_operation_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x80}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Pre-populate stack with test values
         var j: usize = 0;
@@ -1672,7 +1672,7 @@ test "stack_operation_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x90}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Pre-populate stack
         var j: usize = 0;
@@ -1695,7 +1695,7 @@ test "stack_operation_benchmarks" {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &test_code, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
         var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
 
         // Realistic pattern: PUSH, PUSH, DUP, SWAP, POP
         _ = try op_push1(0, @ptrCast(&vm), @ptrCast(&frame)); // PUSH 1
@@ -1723,7 +1723,7 @@ test "stack_operation_benchmarks" {
     var contract = try @import("../frame/contract.zig").Contract.init(allocator, &depth_test_code, .{ .address = [_]u8{0} ** 20 });
     defer contract.deinit(allocator, null);
     var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Test performance at different stack depths
     const depth_iterations = 1000;
@@ -1798,13 +1798,13 @@ test "stack_operation_benchmarks" {
 //
 //             const db_interface = memory_db.to_database_interface();
 //             var vm = try Vm.init(allocator, db_interface, null, null);
-//             defer vm.deinit();
+//             defer vm.deinit(allocator);
 //
 //             var contract = try Contract.init(allocator, &[_]u8{0x60, 0x42}, .{ .address = Address.ZERO });
 //             defer contract.deinit(allocator, null);
 //
 //             var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-//             defer frame.deinit();
+//             defer frame.deinit(allocator);
 //
 //             // Extract opcode and data from fuzz input
 //             const opcode_offset = input[0] % 32; // PUSH1 (0x60) to PUSH32 (0x7F)
@@ -1847,13 +1847,13 @@ test "stack_operation_benchmarks" {
 //
 //             const db_interface = memory_db.to_database_interface();
 //             var vm = try Vm.init(allocator, db_interface, null, null);
-//             defer vm.deinit();
+//             defer vm.deinit(allocator);
 //
 //             var contract = try Contract.init(allocator, &[_]u8{0x80}, .{ .address = Address.ZERO });
 //             defer contract.deinit(allocator, null);
 //
 //             var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-//             defer frame.deinit();
+//             defer frame.deinit(allocator);
 //
 //             // Extract DUP operation from fuzz input (DUP1 = 0x80 to DUP16 = 0x8F)
 //             const dup_offset = input[0] % 16; // DUP1 to DUP16
@@ -1891,13 +1891,13 @@ test "stack_operation_benchmarks" {
 //
 //             const db_interface = memory_db.to_database_interface();
 //             var vm = try Vm.init(allocator, db_interface, null, null);
-//             defer vm.deinit();
+//             defer vm.deinit(allocator);
 //
 //             var contract = try Contract.init(allocator, &[_]u8{0x90}, .{ .address = Address.ZERO });
 //             defer contract.deinit(allocator, null);
 //
 //             var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-//             defer frame.deinit();
+//             defer frame.deinit(allocator);
 //
 //             // Extract SWAP operation from fuzz input (SWAP1 = 0x90 to SWAP16 = 0x9F)
 //             const swap_offset = input[0] % 16; // SWAP1 to SWAP16
@@ -1937,13 +1937,13 @@ test "stack_operation_benchmarks" {
 //
 //             const db_interface = memory_db.to_database_interface();
 //             var vm = try Vm.init(allocator, db_interface, null, null);
-//             defer vm.deinit();
+//             defer vm.deinit(allocator);
 //
 //             var contract = try Contract.init(allocator, &[_]u8{0x01}, .{ .address = Address.ZERO });
 //             defer contract.deinit(allocator, null);
 //
 //             var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-//             defer frame.deinit();
+//             defer frame.deinit(allocator);
 //
 //             // Use fuzz input to determine operation sequence
 //             const push_opcode = 0x60 + (input[0] % 32); // PUSH1-PUSH32
@@ -1986,7 +1986,7 @@ test "stack_operation_benchmarks" {
 //
 //             const db_interface = memory_db.to_database_interface();
 //             var vm = try Vm.init(allocator, db_interface, null, null);
-//             defer vm.deinit();
+//             defer vm.deinit(allocator);
 //
 //             // Create potentially malformed bytecode from fuzz input
 //             var malformed_code = std.ArrayList(u8).init(allocator);
@@ -2005,7 +2005,7 @@ test "stack_operation_benchmarks" {
 //             defer contract.deinit(allocator, null);
 //
 //             var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-//             defer frame.deinit();
+//             defer frame.deinit(allocator);
 //
 //             const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
 //             const state_ptr: Operation.State = @ptrCast(&frame);
@@ -2032,13 +2032,13 @@ test "stack_operation_benchmarks" {
 //
 //             const db_interface = memory_db.to_database_interface();
 //             var vm = try Vm.init(allocator, db_interface, null, null);
-//             defer vm.deinit();
+//             defer vm.deinit(allocator);
 //
 //             var contract = try Contract.init(allocator, &[_]u8{0x50}, .{ .address = Address.ZERO }); // POP
 //             defer contract.deinit(allocator, null);
 //
 //             var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-//             defer frame.deinit();
+//             defer frame.deinit(allocator);
 //
 //             const boundary_test = input[0] % 4;
 //

@@ -195,13 +195,13 @@ test "LOG0 emits correct number of topics" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Hello LOG0";
     try frame.memory.set_data(0, log_data);
@@ -226,13 +226,13 @@ test "LOG1 emits correct number of topics" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa1}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Hello LOG1";
     const topic1: u256 = 0x1111111111111111111111111111111111111111111111111111111111111111;
@@ -260,13 +260,13 @@ test "LOG2 emits correct number of topics" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa2}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Hello LOG2";
     const topic1: u256 = 0x1111111111111111111111111111111111111111111111111111111111111111;
@@ -297,13 +297,13 @@ test "LOG3 emits correct number of topics" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa3}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Hello LOG3";
     const topic1: u256 = 0x1111111111111111111111111111111111111111111111111111111111111111;
@@ -337,13 +337,13 @@ test "LOG4 emits correct number of topics" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa4}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Hello LOG4";
     const topic1: u256 = 0x1111111111111111111111111111111111111111111111111111111111111111;
@@ -380,13 +380,13 @@ test "LOG operations with zero-length data" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     try frame.stack.append(0); // offset
     try frame.stack.append(0); // size (zero length)
@@ -408,13 +408,13 @@ test "LOG operations with large data sizes" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Create large data array (1KB)
     const large_data = try allocator.alloc(u8, 1024);
@@ -446,13 +446,13 @@ test "LOG operations fail in static call context" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     frame.is_static = true; // Set static context
     
@@ -476,13 +476,13 @@ test "LOG operations with memory offset beyond bounds" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const large_offset: u256 = std.math.maxInt(usize) + 1;
     try frame.stack.append(large_offset); // Invalid offset
@@ -502,13 +502,13 @@ test "LOG operations trigger memory expansion" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const initial_memory_size = frame.memory.context_size();
     const offset: u256 = 1000;
@@ -537,14 +537,14 @@ test "LOG address is correctly recorded" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_address = Address{ .inner = [_]u8{0x12} ++ [_]u8{0x34} ** 19 };
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = test_address });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Address test";
     try frame.memory.set_data(0, log_data);
@@ -567,13 +567,13 @@ test "Multiple LOG operations in sequence" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // First LOG0
     const log_data1 = "First log";
@@ -609,14 +609,14 @@ test "log_2 runtime dispatch function" {
     
     const db_interface = memory_db.to_database_interface();
     var vm = try Vm.init(allocator, db_interface, null, null);
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     // Test LOG2 using runtime dispatch (opcode 0xa2)
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa2}, .{ .address = Address.ZERO });
     defer contract.deinit(allocator, null);
     
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     const log_data = "Runtime dispatch";
     const topic1: u256 = 0x1111;
@@ -655,14 +655,14 @@ fn fuzz_log_operations(allocator: std.mem.Allocator, operations: []const FuzzLog
         
         const db_interface = memory_db.to_database_interface();
         var vm = try Vm.init(allocator, db_interface, null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
         
         const opcode = 0xa0 + op.num_topics;
         var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{opcode}, .{ .address = Address.ZERO });
         defer contract.deinit(allocator, null);
         
         var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         frame.is_static = op.is_static;
         

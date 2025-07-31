@@ -16,7 +16,7 @@ test "Integration: Arithmetic with conditional jumps" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create a simple contract that:
     // 1. Adds two numbers
@@ -53,13 +53,13 @@ test "Integration: Arithmetic with conditional jumps" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute sequence: PUSH 5, PUSH 10, ADD
     const interpreter: Evm.Operation.Interpreter = &vm;
@@ -110,7 +110,7 @@ test "Integration: Complex arithmetic expression evaluation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -128,13 +128,13 @@ test "Integration: Complex arithmetic expression evaluation" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Calculate: ((10 + 5) * 3) - 7
     // Expected: ((15) * 3) - 7 = 45 - 7 = 38
@@ -169,7 +169,7 @@ test "Integration: Modular arithmetic chain" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -187,13 +187,13 @@ test "Integration: Modular arithmetic chain" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test ADDMOD followed by MULMOD
     // (10 + 15) % 7 = 25 % 7 = 4
@@ -228,7 +228,7 @@ test "Integration: Division by zero handling in expression" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -246,13 +246,13 @@ test "Integration: Division by zero handling in expression" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test: 10 / 0 = 0, then 0 + 5 = 5
     try frame.stack.push(10);
@@ -282,7 +282,7 @@ test "Integration: Bitwise operations with arithmetic" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -300,13 +300,13 @@ test "Integration: Bitwise operations with arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test: ((0xFF AND 0x0F) << 4) + 10
     // Expected: ((0x0F) << 4) + 10 = 0xF0 + 10 = 240 + 10 = 250
@@ -343,7 +343,7 @@ test "Integration: Stack manipulation with arithmetic" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -361,13 +361,13 @@ test "Integration: Stack manipulation with arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test DUP and SWAP with arithmetic
     // Stack: [10, 20]
@@ -414,7 +414,7 @@ test "Integration: Comparison chain for range checking" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -432,13 +432,13 @@ test "Integration: Comparison chain for range checking" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Check if value is in range [10, 20]
     // value >= 10 AND value <= 20
@@ -482,7 +482,7 @@ test "Integration: EXP with modular arithmetic" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -500,13 +500,13 @@ test "Integration: EXP with modular arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Calculate (2^8) % 100 = 256 % 100 = 56
     try frame.stack.push(2);
@@ -536,7 +536,7 @@ test "Integration: Signed arithmetic with comparisons" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
@@ -554,13 +554,13 @@ test "Integration: Signed arithmetic with comparisons" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Test signed operations
     // -5 (two's complement) compared with 10

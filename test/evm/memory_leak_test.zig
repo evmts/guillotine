@@ -18,7 +18,7 @@ test "Memory leak prevention: EvmState transaction clearing" {
 
     const db_interface = memory_db.to_database_interface();
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Simulate 1000 transactions
     for (0..1000) |tx_num| {
@@ -61,7 +61,7 @@ test "Memory leak stress test: logs allocation pattern" {
 
     const db_interface = memory_db.to_database_interface();
     var state = try EvmState.init(allocator, db_interface);
-    defer state.deinit();
+    defer state.deinit(allocator);
 
     // Run many iterations to stress test memory management
     for (0..500) |iter| {

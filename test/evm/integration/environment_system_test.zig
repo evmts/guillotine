@@ -30,7 +30,7 @@ test "Integration: Contract deployment simulation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set up deployer account
     const alice_addr = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
@@ -49,13 +49,13 @@ test "Integration: Contract deployment simulation" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Prepare constructor bytecode in memory
     // Simple constructor that stores a value
@@ -96,7 +96,7 @@ test "Integration: Call with value transfer" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set up accounts
     const alice_addr = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
@@ -121,13 +121,13 @@ test "Integration: Call with value transfer" {
     // Give contract some balance to transfer
     try vm.state.set_balance(contract_addr, 1_000_000_000_000_000_000); // 1 ETH
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Prepare CALL parameters
     // CALL(gas, address, value, argsOffset, argsSize, retOffset, retSize)
@@ -162,7 +162,7 @@ test "Integration: Environment data access" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set up VM environment
     // Create context with test values
@@ -187,13 +187,13 @@ test "Integration: Environment data access" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -242,7 +242,7 @@ test "Integration: Block information access" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Set up block information
     // Create context with test values
@@ -272,13 +272,13 @@ test "Integration: Block information access" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -322,7 +322,7 @@ test "Integration: Log emission with topics" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_addr = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const bob_addr = primitives.Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -346,13 +346,13 @@ test "Integration: Log emission with topics" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Prepare log data in memory
     const log_data = "Transfer successful";
@@ -402,7 +402,7 @@ test "Integration: External code operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_addr = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const bob_addr = primitives.Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -437,13 +437,13 @@ test "Integration: External code operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;
@@ -489,7 +489,7 @@ test "Integration: Calldata operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_addr = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const contract_addr = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -518,13 +518,13 @@ test "Integration: Calldata operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
     frame.input = &calldata;
 
     // Execute opcodes through jump table
@@ -575,7 +575,7 @@ test "Integration: Self balance and code operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_addr = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const contract_addr = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -613,13 +613,13 @@ test "Integration: Self balance and code operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Execute opcodes through jump table
     const interpreter: Operation.Interpreter = &vm;

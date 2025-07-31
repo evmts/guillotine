@@ -16,7 +16,7 @@ test "Integration: stack limit boundary conditions" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -34,13 +34,13 @@ test "Integration: stack limit boundary conditions" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Fill stack to near limit (1024 items)
     var i: usize = 0;
@@ -83,7 +83,7 @@ test "Integration: memory expansion limits" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -101,13 +101,13 @@ test "Integration: memory expansion limits" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(30000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Try moderate memory expansion
     try frame.stack.push(0x1234);
@@ -145,7 +145,7 @@ test "Integration: arithmetic overflow and underflow" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -163,13 +163,13 @@ test "Integration: arithmetic overflow and underflow" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const max_u256 = std.math.maxInt(u256);
 
@@ -219,7 +219,7 @@ test "Integration: signed arithmetic boundaries" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -237,13 +237,13 @@ test "Integration: signed arithmetic boundaries" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Maximum positive signed value (2^255 - 1)
     const max_signed: u256 = (@as(u256, 1) << 255) - 1;
@@ -284,7 +284,7 @@ test "Integration: bitwise operation boundaries" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -302,13 +302,13 @@ test "Integration: bitwise operation boundaries" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &vm;
     const state: Evm.Operation.State = &frame;
@@ -360,7 +360,7 @@ test "Integration: call gas calculation edge cases" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -379,13 +379,13 @@ test "Integration: call gas calculation edge cases" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set up call result expectation
     vm.call_result = .{
@@ -428,7 +428,7 @@ test "Integration: return data boundary conditions" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -446,13 +446,13 @@ test "Integration: return data boundary conditions" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Set return data
     const return_data = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
@@ -509,7 +509,7 @@ test "Integration: exponentiation edge cases" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -527,13 +527,13 @@ test "Integration: exponentiation edge cases" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &vm;
     const state: Evm.Operation.State = &frame;
@@ -581,7 +581,7 @@ test "Integration: jump destination validation" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -607,13 +607,13 @@ test "Integration: jump destination validation" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &vm;
     const state: Evm.Operation.State = &frame;
@@ -647,7 +647,7 @@ test "Integration: storage slot temperature transitions" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -665,13 +665,13 @@ test "Integration: storage slot temperature transitions" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     const interpreter: Evm.Operation.Interpreter = &vm;
     const state: Evm.Operation.State = &frame;
@@ -719,7 +719,7 @@ test "Integration: MCOPY overlap handling" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create test addresses
     const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
@@ -737,13 +737,13 @@ test "Integration: MCOPY overlap handling" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = Evm.Frame.builder();
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame.deinit();
+        .build(allocator);
+    defer frame.deinit(allocator);
 
     // Write pattern to memory
     var i: usize = 0;

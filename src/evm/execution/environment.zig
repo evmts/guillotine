@@ -416,13 +416,13 @@ pub fn fuzz_environment_operations(allocator: std.mem.Allocator, operations: []c
     
     for (operations) |op| {
         var memory = try Memory.init_default(allocator);
-        defer memory.deinit();
+        defer memory.deinit(allocator);
         
         var db = MemoryDatabase.init(allocator);
         defer db.deinit();
         
         var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
-        defer vm.deinit();
+        defer vm.deinit(allocator);
         
         // Set up VM context for testing
         vm.context.tx_origin = op.tx_origin;
@@ -437,7 +437,7 @@ pub fn fuzz_environment_operations(allocator: std.mem.Allocator, operations: []c
         defer contract.deinit(allocator, null);
         
         var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, op.input);
-        defer frame.deinit();
+        defer frame.deinit(allocator);
         
         // Execute the operation based on type
         const result = switch (op.op_type) {

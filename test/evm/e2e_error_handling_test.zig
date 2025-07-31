@@ -30,7 +30,7 @@ test "E2E: Revert conditions - require and revert opcodes" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test REVERT opcode directly
     const revert_bytecode = [_]u8{
@@ -127,7 +127,7 @@ test "E2E: Arithmetic overflow - EVM wraparound behavior" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test MAX_UINT256 + 1 = 0 (wraparound)
     const overflow_test_bytecode = [_]u8{
@@ -264,7 +264,7 @@ test "E2E: Gas limits - controlled consumption and out-of-gas" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Simple gas consumption test - just do some operations
     const gas_test_bytecode = [_]u8{
@@ -359,7 +359,7 @@ test "E2E: Stack underflow - empty stack operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test stack underflow - POP from empty stack
     const underflow_bytecode = [_]u8{
@@ -434,7 +434,7 @@ test "E2E: Division by zero - EVM behavior" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test division by zero (EVM returns 0)
     const div_zero_bytecode = [_]u8{
@@ -536,7 +536,7 @@ test "E2E: Memory expansion - large offset testing" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test memory expansion with reasonable large offset
     const memory_expansion_bytecode = [_]u8{
@@ -609,7 +609,7 @@ test "E2E: Invalid jumps - bad jump destinations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
-    defer evm.deinit();
+    defer evm.deinit(allocator);
 
     // Test jump to invalid destination (not JUMPDEST)
     const invalid_jump_bytecode = [_]u8{

@@ -28,7 +28,7 @@ test "Integration: Conditional jump patterns" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create bytecode with jump destinations
     var code = [_]u8{0} ** 100;
@@ -61,13 +61,13 @@ test "Integration: Conditional jump patterns" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     // Test 1: Jump when condition is true
@@ -119,7 +119,7 @@ test "Integration: Loop implementation with JUMP" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create bytecode for loop
     var code = [_]u8{0} ** 100;
@@ -150,13 +150,13 @@ test "Integration: Loop implementation with JUMP" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(100000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     // Initialize counter to 5
@@ -201,7 +201,7 @@ test "Integration: Return data handling" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_address = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -224,13 +224,13 @@ test "Integration: Return data handling" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     const interpreter: Operation.Interpreter = &vm;
@@ -267,7 +267,7 @@ test "Integration: Revert with reason" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_address = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -290,13 +290,13 @@ test "Integration: Revert with reason" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     const interpreter: Operation.Interpreter = &vm;
@@ -332,7 +332,7 @@ test "Integration: PC tracking through operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_address = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -355,13 +355,13 @@ test "Integration: PC tracking through operations" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     const interpreter: Operation.Interpreter = &vm;
@@ -396,7 +396,7 @@ test "Integration: Invalid opcode handling" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_address = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const contract_address = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
@@ -419,13 +419,13 @@ test "Integration: Invalid opcode handling" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     const interpreter: Operation.Interpreter = &vm;
@@ -453,7 +453,7 @@ test "Integration: Nested conditions with jumps" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     // Create bytecode with multiple jump destinations
     var code = [_]u8{0} ** 100;
@@ -485,13 +485,13 @@ test "Integration: Nested conditions with jumps" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     const interpreter: Operation.Interpreter = &vm;
@@ -543,7 +543,7 @@ test "Integration: Self-destruct with beneficiary" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const alice_address = primitives.Address.from_u256(0x1111111111111111111111111111111111111111);
     const bob_address = primitives.Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -575,13 +575,13 @@ test "Integration: Self-destruct with beneficiary" {
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
 
-    var frame_builder = Frame.builder(allocator);
+    var frame_builder = Frame.builder();
     frame_ptr.* = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
-        .build();
-    defer frame_ptr.deinit();
+        .build(allocator);
+    defer frame_ptr.deinit(allocator);
     frame_ptr.input = contract.input;
 
     const interpreter: Operation.Interpreter = &vm;

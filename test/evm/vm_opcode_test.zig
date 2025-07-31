@@ -55,7 +55,7 @@ fn create_test_evm(allocator: std.mem.Allocator) !struct { evm: *Evm.Evm, memory
 
 // Helper function to clean up test EVM
 fn destroy_test_evm(allocator: std.mem.Allocator, evm: *Evm.Evm, memory_db: *MemoryDatabase) void {
-    evm.deinit();
+    evm.deinit(allocator);
     memory_db.deinit();
     allocator.destroy(evm);
     allocator.destroy(memory_db);

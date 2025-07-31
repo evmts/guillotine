@@ -15,7 +15,7 @@ test "complex Solidity constructor returns full runtime code" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const deployer = primitives.Address.from_u256(0x1111);
     try vm.state.set_balance(deployer, 1000000000000000000);
@@ -55,7 +55,7 @@ test "complex Solidity constructor returns full runtime code" {
         0x60, 0x80, 0x60, 0x40, // 4 bytes of runtime code
     };
 
-    const create_result = try vm.create_contract(deployer, 0, erc20_init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, deployer, 0, erc20_init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     const deployed_code = vm.state.get_code(create_result.address);
@@ -84,7 +84,7 @@ test "gas metering for KECCAK256 operations" {
     var builder = Evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
-    defer vm.deinit();
+    defer vm.deinit(allocator);
 
     const caller = primitives.Address.from_u256(0x1111);
     try vm.state.set_balance(caller, 1000000000000000000);
@@ -110,7 +110,7 @@ test "gas metering for KECCAK256 operations" {
     };
 
     // Deploy the contract
-    const create_result = try vm.create_contract(caller, 0, keccak_init_code, 1000000);
+    const create_result = try vm.create_contract(allocator, caller, 0, keccak_init_code, 1000000);
     defer if (create_result.output) |output| allocator.free(output);
 
     // Check what code was actually deployed

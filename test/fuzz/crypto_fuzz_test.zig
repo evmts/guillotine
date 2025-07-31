@@ -15,7 +15,7 @@ test "fuzz_crypto_keccak256_empty" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -30,14 +30,14 @@ test "fuzz_crypto_keccak256_empty" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test KECCAK256 of empty data: stack order [size, offset] where offset is on top
     try frame.stack.append(0); // size
@@ -60,7 +60,7 @@ test "fuzz_crypto_keccak256_basic" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -75,14 +75,14 @@ test "fuzz_crypto_keccak256_basic" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Set up test data in memory
     const test_data = "Hello, World!";
@@ -113,7 +113,7 @@ test "fuzz_crypto_keccak256_edge_cases" {
     defer db.deinit();
     
     var vm = try evm.Evm.init(allocator, db.to_database_interface());
-    defer vm.deinit();
+    defer vm.deinit(allocator);
     
     const test_code = [_]u8{0x01};
     var contract = evm.Contract.init(
@@ -128,14 +128,14 @@ test "fuzz_crypto_keccak256_edge_cases" {
     );
     defer contract.deinit(allocator, null);
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
         .withGas(1000000)
         .withCaller(.{})
         .build();
-    defer frame.deinit();
+    defer frame.deinit(allocator);
     
     // Test with single byte
     try frame.memory.set_data(0, &[_]u8{0x42});

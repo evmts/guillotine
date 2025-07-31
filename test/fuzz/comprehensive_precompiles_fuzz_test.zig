@@ -26,7 +26,7 @@ fn create_evm_context_for_precompiles(allocator: std.mem.Allocator) !struct {
         false
     );
     
-    var builder = evm.Frame.builder(allocator);
+    var builder = evm.Frame.builder();
     var frame = try builder
         .withVm(&vm)
         .withContract(&contract)
@@ -43,7 +43,7 @@ fn create_evm_context_for_precompiles(allocator: std.mem.Allocator) !struct {
 }
 
 fn deinit_evm_context(ctx: anytype, allocator: std.mem.Allocator) void {
-    ctx.frame.deinit();
+    ctx.frame.deinit(allocator);
     ctx.contract.deinit(allocator, null);
     ctx.vm.deinit();
     ctx.db.deinit();
