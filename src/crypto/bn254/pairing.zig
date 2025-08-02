@@ -169,11 +169,9 @@ pub fn point_double_line_evaluation(p: *const G1, q: *const G2) point_line {
 }
 
 pub fn point_add_line_evaluation(p: *const G1, q: *const G2, r: *const G2) point_line {
-    const q_affine = q.toAffine();
-
-    var t0 = q_affine.x.mul(&r.z.square());
-    var t1 = q_affine.y.add(&r.z).square();
-    t1.subAssign(&q_affine.y.square());
+    var t0 = q.x.mul(&r.z.square());
+    var t1 = q.y.add(&r.z).square();
+    t1.subAssign(&q.y.square());
     t1.subAssign(&r.z.square());
     t1.mulAssign(&r.z.square());
 
@@ -182,7 +180,7 @@ pub fn point_add_line_evaluation(p: *const G1, q: *const G2, r: *const G2) point
     const t4 = t3.mulBySmallInt(4);
     const t5 = t4.mul(&t2);
     var t6 = t1.sub(&r.y.mulBySmallInt(2));
-    var t9 = t6.mul(&q_affine.x);
+    var t9 = t6.mul(&q.x);
     const t7 = r.x.mul(&t4);
 
     const result_x = t6.square().sub(&t5).sub(&t7.mulBySmallInt(2));
@@ -196,7 +194,7 @@ pub fn point_add_line_evaluation(p: *const G1, q: *const G2, r: *const G2) point
     const result_y = t8.sub(&t0);
 
     t10 = t10.square()
-        .sub(&q_affine.y.square())
+        .sub(&q.y.square())
         .sub(&result_z.square());
 
     t9 = t9.mulBySmallInt(2).sub(&t10);
@@ -262,7 +260,7 @@ test "point_add_line_evaluation" {
     const q = G2.GENERATOR.mul_by_int(28769675);
     const q_times_2 = q.add(&q);
     // const q_times_3 = q_times_2.add(&q);
-    const result = point_add_line_evaluation(&p, &q.neg(), &q_times_2);
+    const result = point_add_line_evaluation(&p, &q.neg().toAffine(), &q_times_2);
     try std.testing.expect(result.point.equal(&q));
 }
 
