@@ -311,7 +311,7 @@ pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const
         var contract = try @import("../frame/contract.zig").init(allocator, code.items, .{});
         defer contract.deinit(allocator, null);
 
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
         defer frame.deinit();
 
         // Set initial PC if needed

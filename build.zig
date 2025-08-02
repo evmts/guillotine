@@ -1193,6 +1193,48 @@ pub fn build(b: *std.Build) void {
     const constructor_bug_test_step = b.step("test-constructor-bug", "Run Constructor Bug test");
     constructor_bug_test_step.dependOn(&run_constructor_bug_test.step);
 
+    // Add Threaded Block Validation test
+    const threaded_block_validation_test = b.addTest(.{
+        .name = "threaded-block-validation-test",
+        .root_source_file = b.path("test/evm/threaded_block_validation_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    threaded_block_validation_test.root_module.addImport("primitives", primitives_mod);
+    threaded_block_validation_test.root_module.addImport("evm", evm_mod);
+    const run_threaded_block_validation_test = b.addRunArtifact(threaded_block_validation_test);
+    const threaded_block_validation_test_step = b.step("test-threaded-block-validation", "Run Threaded Block Validation test");
+    threaded_block_validation_test_step.dependOn(&run_threaded_block_validation_test.step);
+
+    // Add Threaded Block Analysis test
+    const threaded_block_analysis_test = b.addTest(.{
+        .name = "threaded-block-analysis-test",
+        .root_source_file = b.path("test/evm/threaded_block_analysis_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    threaded_block_analysis_test.root_module.addImport("primitives", primitives_mod);
+    threaded_block_analysis_test.root_module.addImport("evm", evm_mod);
+    const run_threaded_block_analysis_test = b.addRunArtifact(threaded_block_analysis_test);
+    const threaded_block_analysis_test_step = b.step("test-threaded-block-analysis", "Run Threaded Block Analysis test");
+    threaded_block_analysis_test_step.dependOn(&run_threaded_block_analysis_test.step);
+
+    // Add CODECOPY minimal test
+    const test_codecopy_minimal = b.addTest(.{
+        .name = "test-codecopy-minimal",
+        .root_source_file = b.path("test/evm/test_codecopy_minimal.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    test_codecopy_minimal.root_module.addImport("primitives", primitives_mod);
+    test_codecopy_minimal.root_module.addImport("evm", evm_mod);
+    const run_test_codecopy_minimal = b.addRunArtifact(test_codecopy_minimal);
+    const test_codecopy_minimal_step = b.step("test-codecopy-minimal", "Run CODECOPY minimal test");
+    test_codecopy_minimal_step.dependOn(&run_test_codecopy_minimal.step);
+
     // Add Solidity Constructor test
     const solidity_constructor_test = b.addTest(.{
         .name = "solidity-constructor-test",
@@ -1334,6 +1376,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_e2e_data_test.step);
     test_step.dependOn(&run_e2e_inheritance_test.step);
     test_step.dependOn(&run_constructor_bug_test.step);
+    test_step.dependOn(&run_threaded_block_validation_test.step);
+    test_step.dependOn(&run_threaded_block_analysis_test.step);
+    test_step.dependOn(&run_test_codecopy_minimal.step);
     test_step.dependOn(&run_solidity_constructor_test.step);
     test_step.dependOn(&run_return_opcode_bug_test.step);
     test_step.dependOn(&run_contract_call_test.step);

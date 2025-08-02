@@ -761,6 +761,15 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
     }
     // Analysis is cached globally, so don't free
     
+    // Clean up threaded analysis if present
+    if (self.threaded_analysis) |analysis| {
+        // Cast away const to call deinit
+        var mutable_analysis = @constCast(analysis);
+        mutable_analysis.deinit(allocator);
+        allocator.destroy(mutable_analysis);
+        self.threaded_analysis = null;
+    }
+    
     // Clean up async analysis context if still pending
     if (self.async_analysis_context) |ctx| {
         allocator.destroy(ctx);
