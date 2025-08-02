@@ -59,7 +59,10 @@ test "SUB opcode bug from ERC20 constructor" {
     );
     
     const result = try vm.interpret(&contract, &.{}, false);
-    defer if (result.output) |output| allocator.free(output);
+    defer {
+        contract.deinit(allocator, null);
+        if (result.output) |output| allocator.free(output);
+    }
     
     // Print the trace
     std.debug.print("\nSUB opcode bug trace:\n{s}\n", .{trace_buffer.items});

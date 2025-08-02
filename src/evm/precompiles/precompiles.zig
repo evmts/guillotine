@@ -6,6 +6,7 @@ const addresses = @import("precompile_addresses.zig");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const ChainRules = @import("../hardforks/chain_rules.zig");
+const tracy = @import("../tracy_support.zig");
 
 // Import all precompile modules
 const ecrecover = @import("ecrecover.zig");
@@ -128,6 +129,9 @@ pub fn is_available(address: primitives.Address.Address, chain_rules: ChainRules
 /// @param chain_rules Current chain rules for availability checking
 /// @return PrecompileOutput containing success/failure and gas usage
 pub fn execute_precompile(address: primitives.Address.Address, input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+    const zone = tracy.zone(@src(), "execute_precompile\x00");
+    defer zone.end();
+    
     // When precompiles are disabled, always fail
     if (comptime no_precompiles) {
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);

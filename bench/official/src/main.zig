@@ -52,7 +52,7 @@ pub fn main() !void {
 
     if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
-        const evms = [_][]const u8{ "zig", "revm", "ethereumjs", "geth", "evmone" };
+        const evms = [_][]const u8{ "zig", "revm", "ethereumjs", "geth" };
         
         var all_results = std.ArrayList(Orchestrator.BenchmarkResult).init(allocator);
         defer all_results.deinit();
@@ -122,7 +122,6 @@ pub fn main() !void {
 }
 
 fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orchestrator.BenchmarkResult, num_runs: u32, js_runs: u32) !void {
-    _ = allocator; // unused
     // Create the file in bench/official/results.md relative to current working directory
     const results_path = "bench/official/results.md";
     
@@ -141,49 +140,54 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     } else {
         try file.writer().print("**Test Runs per Case**: {}\n", .{num_runs});
     }
-    try file.writer().print("**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
+    try file.writer().print("**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go)\n", .{});
     try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
     
     // Group results by test case
     try file.writer().print("## Performance Comparison\n\n", .{});
     
-    // Write comparison tables for each test case
-    const test_cases = [_][]const u8{
-        "erc20-approval-transfer",
-        "erc20-mint",
-        "erc20-transfer",
-        "ten-thousand-hashes",
-        "snailtracer",
-        "opcodes-arithmetic",
-        "opcodes-arithmetic-advanced",
-        "opcodes-bitwise",
-        "opcodes-block-1",
-        "opcodes-block-2",
-        "opcodes-comparison",
-        "opcodes-control",
-        "opcodes-crypto",
-        "opcodes-data",
-        "opcodes-dup",
-        "opcodes-environmental-1",
-        "opcodes-environmental-2",
-        "opcodes-jump-basic",
-        "opcodes-memory",
-        "opcodes-push-pop",
-        "opcodes-storage-cold",
-        "opcodes-storage-warm",
-        "opcodes-swap",
-        "precompile-blake2f",
-        "precompile-bn256add",
-        "precompile-bn256mul",
-        "precompile-bn256pairing",
-        "precompile-ecrecover",
-        "precompile-identity",
-        "precompile-modexp",
-        "precompile-ripemd160",
-        "precompile-sha256",
-    };
+    // Collect unique test cases from results
+    var test_cases_map = std.StringHashMap(void).init(allocator);
+    defer test_cases_map.deinit();
     
-    for (test_cases) |test_case| {
+    for (results) |result| {
+        // Extract test case name by removing EVM suffix
+        var test_case_name = result.test_case;
+        if (std.mem.indexOf(u8, test_case_name, " (")) |idx| {
+            test_case_name = test_case_name[0..idx];
+        }
+        try test_cases_map.put(test_case_name, {});
+    }
+    
+    // Create sorted list of test cases
+    var test_cases_list = std.ArrayList([]const u8).init(allocator);
+    defer test_cases_list.deinit();
+    
+    var iter = test_cases_map.iterator();
+    while (iter.next()) |entry| {
+        try test_cases_list.append(entry.key_ptr.*);
+    }
+    
+    // Sort test cases for consistent output
+    std.mem.sort([]const u8, test_cases_list.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.lessThan);
+    
+    // Write comparison tables for each test case that has results
+    for (test_cases_list.items) |test_case| {
+        // Check if this test case has any results
+        var has_results = false;
+        for (results) |result| {
+            if (std.mem.indexOf(u8, result.test_case, test_case) != null) {
+                has_results = true;
+                break;
+            }
+        }
+        
+        if (!has_results) continue;
+        
         try file.writer().print("### {s}\n\n", .{test_case});
         try file.writeAll("| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |\n");
         try file.writeAll("|-----|-----------|-------------|----------|----------|-------------|\n");
@@ -217,10 +221,10 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     
     // Add summary statistics
     try file.writer().print("## Overall Performance Summary\n\n", .{});
-    try file.writeAll("| Test Case | Guillotine (ms) | REVM (ms) | EthereumJS (ms) | Geth (ms) | evmone (ms) |\n");
-    try file.writeAll("|-----------|-----------------|-----------|-----------|-----------|-------------|\n");
+    try file.writeAll("| Test Case | Guillotine (ms) | REVM (ms) | EthereumJS (ms) | Geth (ms) |\n");
+    try file.writeAll("|-----------|-----------------|-----------|-----------|-----------|-------|\n");
     
-    for (test_cases) |test_case| {
+    for (test_cases_list.items) |test_case| {
         var zig_mean: f64 = 0;
         var revm_mean: f64 = 0;
         var ethereumjs_mean: f64 = 0;

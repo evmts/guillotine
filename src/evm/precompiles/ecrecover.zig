@@ -6,6 +6,7 @@ const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const crypto = @import("crypto");
 const secp256k1 = crypto.secp256k1;
+const tracy = @import("../tracy_support.zig");
 
 /// ECRECOVER precompile implementation (address 0x01)
 ///
@@ -109,6 +110,9 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// @param gas_limit Maximum gas available for this operation
 /// @return PrecompileOutput containing success/failure and gas usage
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
+    const zone = tracy.zone(@src(), "ecrecover_execute\x00");
+    defer zone.end();
+    
     const gas_cost = ECRECOVER_GAS_COST;
 
     // Check if we have enough gas - this is always the first check

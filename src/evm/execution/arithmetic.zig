@@ -427,8 +427,9 @@ pub fn op_addmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
 
     std.debug.assert(frame.stack.size() >= 3);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.pop_unsafe();
+    const popped = frame.stack.pop2_unsafe();
+    const a = popped.a;
+    const b = popped.b;
     const n = frame.stack.peek_unsafe().*;
 
     var result: u256 = undefined;
@@ -491,8 +492,9 @@ pub fn op_mulmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
 
     std.debug.assert(frame.stack.size() >= 3);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.pop_unsafe();
+    const popped = frame.stack.pop2_unsafe();
+    const a = popped.a;
+    const b = popped.b;
     const n = frame.stack.peek_unsafe().*;
 
     var result: u256 = undefined;

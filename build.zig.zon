@@ -52,6 +52,10 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.10.0.tar.gz",
             .hash = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0",
         },
+        .ztracy = .{
+            .url = "https://github.com/zig-gamedev/ztracy/archive/367f640f77dc2de45a116cdd7c390770141721d8.tar.gz",
+            .hash = "ztracy-0.14.0-dev-zHJSq38QFwC5XTxIthIwDA3zrksMo6PCDyADiCwo7ZFd",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

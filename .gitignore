@@ -3,6 +3,7 @@
 dist/
 tree/
 revm/
+evmone/
 
 .crush/
 

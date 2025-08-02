@@ -5,6 +5,7 @@ const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const primitives = @import("primitives");
 const crypto = @import("crypto");
 const GasConstants = @import("primitives").GasConstants;
+const tracy = @import("../tracy_support.zig");
 
 /// RIPEMD160 precompile implementation (address 0x03)
 ///

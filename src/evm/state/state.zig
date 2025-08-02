@@ -38,6 +38,7 @@ const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
 const DatabaseError = @import("database_interface.zig").DatabaseError;
 const Account = @import("database_interface.zig").Account;
 const Log = @import("../log.zig");
+const tracy = @import("../tracy_support.zig");
 
 /// EVM state container
 ///
@@ -151,6 +152,9 @@ pub fn deinit(self: *EvmState) void {
 /// ## Gas Cost
 /// In real EVM: 100-2100 gas depending on cold/warm access
 pub fn get_storage(self: *const EvmState, address: Address, slot: u256) u256 {
+    const zone = tracy.zone(@src(), "state_get_storage\x00");
+    defer zone.end();
+    
     // Use database interface to get storage value
     const value = self.database.get_storage(address, slot) catch |err| {
         @branchHint(.cold);
@@ -179,6 +183,9 @@ pub fn get_storage(self: *const EvmState, address: Address, slot: u256) u256 {
 /// ## Gas Cost
 /// In real EVM: 2900-20000 gas depending on current/new value
 pub fn set_storage(self: *EvmState, address: Address, slot: u256, value: u256) DatabaseError!void {
+    const zone = tracy.zone(@src(), "state_set_storage\x00");
+    defer zone.end();
+    
     Log.debug("EvmState.set_storage: addr={x}, slot={}, value={}", .{ primitives.Address.to_u256(address), slot, value });
     try self.database.set_storage(address, slot, value);
 }
@@ -271,6 +278,9 @@ pub fn remove_balance(self: *EvmState, address: Address) DatabaseError!void {
 /// ## Note
 /// The returned slice is owned by the database - do not free
 pub fn get_code(self: *const EvmState, address: Address) []const u8 {
+    const zone = tracy.zone(@src(), "state_get_code\x00");
+    defer zone.end();
+    
     // Get account to find code hash
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
@@ -319,6 +329,9 @@ pub fn get_code(self: *const EvmState, address: Address) []const u8 {
 /// ## Important
 /// The database interface handles code storage and copying
 pub fn set_code(self: *EvmState, address: Address, code: []const u8) DatabaseError!void {
+    const zone = tracy.zone(@src(), "state_set_code\x00");
+    defer zone.end();
+    
     Log.debug("EvmState.set_code: addr={x}, code_len={}", .{ primitives.Address.to_u256(address), code.len });
 
     // Store code in database and get its hash
