@@ -72,7 +72,7 @@ pub const ThreadedAnalysis = struct {
     instructions: []ThreadedInstruction,
     
     /// Storage for large PUSH values (PUSH9-PUSH32)
-    push_values: []const primitives.U256,
+    push_values: []const u256,
     
     /// Jump destination mapping (PC -> instruction index)
     jumpdest_map: std.AutoHashMap(u32, u32),

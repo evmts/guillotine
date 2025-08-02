@@ -111,7 +111,7 @@ return_data: ReturnData,
 instructions: ?[]const ThreadedInstruction = null,
 
 /// Storage for large PUSH values (PUSH9-PUSH32)
-push_values: ?[]const primitives.U256 = null,
+push_values: ?[]const u256 = null,
 
 /// Jump destination mapping for threaded execution
 jumpdest_map: ?*std.AutoHashMap(u32, u32) = null,

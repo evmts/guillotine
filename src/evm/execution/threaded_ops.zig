@@ -16,7 +16,7 @@ pub fn makeThreadedOp(comptime op_fn: fn(*Frame) void) ThreadedExecFunc {
 }
 
 /// Wrapper for operations that can fail
-pub fn makeThreadedOpWithError(comptime op_fn: fn(*Frame) !void) ThreadedExecFunc {
+pub fn makeThreadedOpWithError(comptime op_fn: fn(*Frame) anyerror!void) ThreadedExecFunc {
     return struct {
         fn exec(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
             op_fn(state) catch return null;
@@ -64,7 +64,7 @@ pub const op_div_threaded = makeThreadedOp(struct {
 
 // Stack operations with embedded values
 pub fn op_push_small_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
-    state.stack.push_unsafe(@as(primitives.U256, instr.arg.small_push));
+    state.stack.push_unsafe(@as(u256, instr.arg.small_push));
     return instr + 1;
 }
 
@@ -81,6 +81,7 @@ pub fn op_pop_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*const
 
 // Control flow
 pub fn op_jump_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
+    _ = instr;
     const target = state.stack.pop_unsafe();
     
     // Use pre-validated jump destination
@@ -170,14 +171,14 @@ pub fn op_revert_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*co
 
 // Operations with embedded PC value
 pub fn op_pc_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
-    state.stack.push_unsafe(@as(primitives.U256, instr.arg.pc_value));
+    state.stack.push_unsafe(@as(u256, instr.arg.pc_value));
     return instr + 1;
 }
 
 // Operations with gas correction
 pub fn op_gas_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
     const correction = state.current_block_gas - instr.arg.gas_correction;
-    const gas: primitives.U256 = @intCast(state.gas_remaining + correction);
+    const gas: u256 = @intCast(state.gas_remaining + correction);
     state.stack.push_unsafe(gas);
     return instr + 1;
 }
@@ -193,7 +194,6 @@ pub fn op_invalid_threaded(instr: *const ThreadedInstruction, state: *Frame) ?*c
 pub fn makeDupThreaded(comptime n: u8) ThreadedExecFunc {
     return struct {
         fn exec(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
-            _ = instr;
             const value = state.stack.peek(n - 1) catch return null;
             state.stack.push_unsafe(value);
             return instr + 1;
@@ -205,7 +205,6 @@ pub fn makeDupThreaded(comptime n: u8) ThreadedExecFunc {
 pub fn makeSwapThreaded(comptime n: u8) ThreadedExecFunc {
     return struct {
         fn exec(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
-            _ = instr;
             state.stack.swap(0, n) catch return null;
             return instr + 1;
         }
@@ -216,7 +215,6 @@ pub fn makeSwapThreaded(comptime n: u8) ThreadedExecFunc {
 pub fn makeLogThreaded(comptime topics: u8) ThreadedExecFunc {
     return struct {
         fn exec(instr: *const ThreadedInstruction, state: *Frame) ?*const ThreadedInstruction {
-            _ = instr;
             _ = state;
             _ = topics;
             // TODO: Implement LOG operations

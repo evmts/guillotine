@@ -67,7 +67,7 @@ pub fn analyzeThreaded(
     var instructions = std.ArrayList(ThreadedInstruction).init(allocator);
     defer instructions.deinit();
     
-    var push_values = std.ArrayList(primitives.U256).init(allocator);
+    var push_values = std.ArrayList(u256).init(allocator);
     defer push_values.deinit();
     
     var jumpdest_map = std.AutoHashMap(u32, u32).init(allocator);
@@ -129,7 +129,7 @@ pub fn analyzeThreaded(
                         instr.exec_fn = threaded_ops.op_push_small_threaded;
                     } else {
                         // Large push - store separately
-                        var value: primitives.U256 = 0;
+                        var value: u256 = 0;
                         for (0..push_size) |j| {
                             if (i + 1 + j < code.len) {
                                 value = (value << 8) | code[i + 1 + j];
