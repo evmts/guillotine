@@ -51,6 +51,9 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     // Always use synchronous analysis - required for threaded execution
     if (contract.analysis == null and contract.code_size > 0) {
+        const analysis_zone = tracy.zone(@src(), "code_analysis\x00");
+        defer analysis_zone.end();
+        
         if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
             contract.analysis = analysis;
         } else |err| {
@@ -62,6 +65,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     // Get pc_to_op_entries from cached analysis if available
     var pc_to_op_entry_table = if (contract.analysis) |analysis| analysis.pc_to_op_entries else null;
 
+    const frame_zone = tracy.zone(@src(), "frame_creation\x00");
     var builder = Frame.builder(self.allocator); // We should consider making all items mandatory and removing frame builder
     var frame = builder
         .withVm(self)
@@ -76,6 +80,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         error.MissingVm => unreachable, // We pass a VM. TODO zig better here.
         error.MissingContract => unreachable, // We pass a contract. TODO zig better here.
     };
+    frame_zone.end();
     defer frame.deinit();
 
     // Initialize the stack's top pointer if not already initialized.
@@ -165,6 +170,9 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                         // Validate and consume gas for the entire block
                         if (blocks) |block_array| {
                             if (block_idx < block_array.len) {
+                                const block_validation_zone = tracy.zone(@src(), "block_validation\x00");
+                                defer block_validation_zone.end();
+                                
                                 const block = block_array[block_idx];
                                 Log.debug("Entering block {} at pc={}, gas_cost={}, stack_req={}, stack_max_growth={}, start_pc={}, end_pc={}", .{ block_idx, pc, block.gas_cost, block.stack_req, block.stack_max_growth, block.start_pc, block.end_pc });
                                 
@@ -186,12 +194,15 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                                 }
                                 
                                 // Consume gas for the entire block
+                                const gas_zone = tracy.zone(@src(), "block_gas_consumption\x00");
                                 frame.consume_gas(block.gas_cost) catch {
+                                    gas_zone.end();
                                     Log.debug("Block {} out of gas: cost={}, remaining={}", .{ block_idx, block.gas_cost, frame.gas_remaining });
                                     contract.gas = frame.gas_remaining;
                                     self.return_data = &[_]u8{};
                                     return RunResult.init(initial_gas, frame.gas_remaining, .OutOfGas, ExecutionError.Error.OutOfGas, null);
                                 };
+                                gas_zone.end();
                                 
                                 block_validated = true;
                                 Log.debug("Block {} validated successfully", .{block_idx});
@@ -217,6 +228,9 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             
             // Skip per-instruction validation if block is validated
             if (!block_validated) {
+                const validation_zone = tracy.zone(@src(), "per_instruction_validation\x00");
+                defer validation_zone.end();
+                
                 // Validate stack requirements using pre-computed values
                 if (comptime builtin.mode == .ReleaseFast) {
                     // Fast path for release builds - use pre-computed min/max
@@ -236,8 +250,13 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 // Consume gas (likely path) - use pre-computed constant_gas
                 if (entry.constant_gas > 0) {
                     @branchHint(.likely);
+                    const gas_zone = tracy.zone(@src(), "consume_gas\x00");
                     Log.debug("Consuming {} gas for opcode 0x{x:0>2}", .{ entry.constant_gas, opcode_byte });
-                    frame.consume_gas(entry.constant_gas) catch |err| break :exec_blk err;
+                    frame.consume_gas(entry.constant_gas) catch |err| {
+                        gas_zone.end();
+                        break :exec_blk err;
+                    };
+                    gas_zone.end();
                 }
             }
             
@@ -270,12 +289,15 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             const return_data = frame.output;
             Log.debug("VM.interpret_with_context: Error occurred: {}, output_size={}", .{ err, return_data.len });
             if (return_data.len > 0) {
+                const output_zone = tracy.zone(@src(), "output_duplication\x00");
                 output = self.allocator.dupe(u8, return_data) catch {
+                    output_zone.end();
                     // We are out of memory, which is a critical failure. The safest way to
                     // handle this is to treat it as an OutOfGas error, which consumes
                     // all gas and stops execution.
                     return RunResult.init(initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfMemory, null);
                 };
+                output_zone.end();
                 Log.debug("VM.interpret_with_context: Duplicated output, size={}", .{output.?.len});
             }
 

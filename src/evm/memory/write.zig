@@ -3,6 +3,7 @@ const Log = @import("../log.zig");
 const memory = @import("./memory.zig");
 const errors = @import("errors.zig");
 const context = @import("context.zig");
+const tracy = @import("../tracy_support.zig");
 
 // NOTE: This file has been reviewed for issue #8 optimization opportunities.
 // All manual loops have been replaced with std.mem functions:
@@ -13,6 +14,9 @@ const context = @import("context.zig");
 
 /// Write arbitrary data at context-relative offset.
 pub inline fn set_data(self: *memory.Memory, relative_offset: usize, data: []const u8) errors.MemoryError!void {
+    const zone = tracy.zone(@src(), "memory_set_data\x00");
+    defer zone.end();
+    
     // Debug logging removed for fuzz testing compatibility
     if (data.len == 0) return;
 
@@ -36,6 +40,9 @@ pub fn set_data_bounded(
     data_offset: usize,
     len: usize,
 ) errors.MemoryError!void {
+    const zone = tracy.zone(@src(), "memory_set_data_bounded\x00");
+    defer zone.end();
+    
     if (len == 0) return;
 
     const end = std.math.add(usize, relative_memory_offset, len) catch return errors.MemoryError.InvalidSize;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const tracy = @import("../tracy_support.zig");
 
 /// High-performance EVM stack implementation with fixed capacity.
 ///

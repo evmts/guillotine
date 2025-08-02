@@ -3,6 +3,7 @@ const Log = @import("../log.zig");
 const Memory = @import("./memory.zig").Memory;
 const MemoryError = @import("errors.zig").MemoryError;
 const constants = @import("constants.zig");
+const tracy = @import("../tracy_support.zig");
 
 /// Returns the size of the memory region visible to the current context.
 pub inline fn context_size(self: *const Memory) usize {
@@ -14,6 +15,9 @@ pub inline fn context_size(self: *const Memory) usize {
 /// Returns the number of *new 32-byte words added to the shared_buffer* if it expanded.
 /// This is crucial for EVM gas calculation.
 pub noinline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
+    const zone = tracy.zone(@src(), "memory_ensure_capacity\x00");
+    defer zone.end();
+    
     const required_total_len = self.my_checkpoint + min_context_size;
     Log.debug("Memory.ensure_context_capacity: Ensuring capacity, min_context_size={}, required_total_len={}, memory_limit={}", .{ min_context_size, required_total_len, self.memory_limit });
 
@@ -33,6 +37,7 @@ pub noinline fn ensure_context_capacity(self: *Memory, min_context_size: usize) 
     }
 
     // Resize the buffer
+    const resize_zone = tracy.zone(@src(), "memory_resize\x00");
     const new_total_len = required_total_len;
     Log.debug("Memory.ensure_context_capacity: Expanding buffer from {} to {} bytes", .{ old_total_buffer_len, new_total_len });
 
@@ -59,6 +64,8 @@ pub noinline fn ensure_context_capacity(self: *Memory, min_context_size: usize) 
     shared_buffer.items.len = new_total_len;
     @memset(shared_buffer.items[old_total_buffer_len..new_total_len], 0);
 
+    resize_zone.end();
+    
     const new_total_words = constants.calculate_num_words(new_total_len);
     const words_added = new_total_words -| old_total_words;
     Log.debug("Memory.ensure_context_capacity: Expansion complete, old_words={}, new_words={}, words_added={}", .{ old_total_words, new_total_words, words_added });
