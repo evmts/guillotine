@@ -52,6 +52,10 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.10.0.tar.gz",
             .hash = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0",
         },
+        .zig_tracy = .{
+            .url = "git+https://github.com/cipharius/zig-tracy#main",
+            .hash = "1220000000000000000000000000000000000000000000000000000000000000",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.
