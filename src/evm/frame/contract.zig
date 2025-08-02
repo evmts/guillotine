@@ -50,6 +50,7 @@ const StoragePool = @import("storage_pool.zig");
 const Log = @import("../log.zig");
 const build_options = @import("build_options");
 const block_analysis = @import("block_analysis.zig");
+const ThreadedAnalysis = @import("threaded_instruction.zig").ThreadedAnalysis;
 
 /// Maximum gas refund allowed (EIP-3529)
 const MAX_REFUND_QUOTIENT = 5;
@@ -167,6 +168,10 @@ code_size: u64,
 ///
 /// This is lazily computed on first jump and cached globally.
 analysis: ?*const CodeAnalysis,
+
+/// Threaded analysis for indirect call threading execution.
+/// Contains pre-processed instructions and jump mappings for efficient execution.
+threaded_analysis: ?*const ThreadedAnalysis = null,
 
 // ============================================================================
 // Gas Tracking Fields

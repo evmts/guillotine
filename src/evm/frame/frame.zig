@@ -7,6 +7,7 @@ const ExecutionError = @import("../execution/execution_error.zig");
 const Log = @import("../log.zig");
 const ReturnData = @import("../evm/return_data.zig").ReturnData;
 const Vm = @import("../evm.zig");
+const ThreadedInstruction = @import("threaded_instruction.zig").ThreadedInstruction;
 
 /// EVM execution frame representing a single call context.
 ///
@@ -104,6 +105,22 @@ stack: Stack,
 /// Return data from child calls.
 /// Used by RETURNDATASIZE and RETURNDATACOPY opcodes.
 return_data: ReturnData,
+
+// Threaded execution fields (optional, used when threaded analysis is available)
+/// Array of threaded instructions for indirect call threading
+instructions: ?[]const ThreadedInstruction = null,
+
+/// Storage for large PUSH values (PUSH9-PUSH32)
+push_values: ?[]const primitives.U256 = null,
+
+/// Jump destination mapping for threaded execution
+jumpdest_map: ?*std.AutoHashMap(u32, u32) = null,
+
+/// Current block gas for GAS opcode correction
+current_block_gas: u32 = 0,
+
+/// Return reason for threaded execution
+return_reason: enum { Continue, Stop, Return, Revert, OutOfGas, Invalid } = .Continue,
 
 /// Create a new execution frame with default settings.
 ///
