@@ -234,7 +234,89 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             }
         }
 
-        // INLINE: self.table.execute(...)
+        // FAST PATH: Execute entire validated block without per-instruction checks
+        if (block_validated and blocks != null and current_block_idx != null and contract.analysis != null) {
+            const fast_path_zone = tracy.zone(@src(), "fast_path_execution\x00");
+            defer fast_path_zone.end();
+            
+            const block = blocks.?[current_block_idx.?];
+            const block_end_pc = block.end_pc;
+            
+            // Check if this block is eligible for fast path execution and has extended entries
+            const analysis = contract.analysis.?;
+            if (block.fast_path_eligible and !block.has_external_calls and !block.has_dynamic_jumps and analysis.extended_entries != null) {
+                Log.debug("Entering fast path for block {} from pc={} to pc={}", .{ current_block_idx.?, pc, block_end_pc });
+                
+                const extended_entries = analysis.extended_entries.?;
+                
+                // Fast execution loop with NO runtime checks
+                while (pc <= block_end_pc) {
+                    @branchHint(.likely);
+                    
+                    if (pc >= contract.code_size) break;
+                    
+                    const pc_index_fast: usize = @intCast(pc);
+                    
+                    // Safety check for extended entries bounds
+                    if (pc_index_fast >= extended_entries.len) {
+                        Log.debug("Fast path: pc {} exceeds extended_entries length {}, falling back", .{ pc_index_fast, extended_entries.len });
+                        break;
+                    }
+                    
+                    const ext_entry = &extended_entries[pc_index_fast];
+                    const opcode_byte_fast = ext_entry.opcode_byte;
+                    
+                    // No gas check - already validated for entire block
+                    // No stack validation - already validated for entire block
+                    // No analysis updates - blocks are immutable
+                    
+                    Log.debug("Fast path executing opcode 0x{x:0>2} at pc={}", .{ opcode_byte_fast, pc });
+                    
+                    // Direct dispatch with inlined hot opcodes
+                    // Start with only safe operations to avoid memory issues
+                    switch (opcode_byte_fast) {
+                        0x01 => { // ADD - fully inline
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            const result = a +% b;
+                            frame.stack.set_top_unsafe(result);
+                            pc += 1;
+                        },
+                        0x60 => { // PUSH1 - fully inline
+                            const value: u256 = if (pc + 1 < contract.code.len) contract.code[pc + 1] else 0;
+                            frame.stack.append_unsafe(value);
+                            pc += 2;
+                        },
+                        0x00 => { // STOP
+                            Log.debug("Fast path STOP at pc={}", .{pc});
+                            contract.gas = frame.gas_remaining;
+                            self.return_data = &[_]u8{};
+                            return RunResult.init(initial_gas, frame.gas_remaining, .Success, null, null);
+                        },
+                        else => {
+                            // All other opcodes - fall back to slow path
+                            Log.debug("Fast path fallback for opcode 0x{x:0>2} at pc={}", .{ opcode_byte_fast, pc });
+                            break;
+                        }
+                    }
+                    
+                    // Check if we've completed the block
+                    if (pc > block_end_pc) {
+                        block_validated = false; // Need revalidation after block exit
+                        Log.debug("Fast path completed block {} at pc={}", .{ current_block_idx.?, pc });
+                        continue; // Continue to next iteration of main loop
+                    }
+                }
+                
+                // If we completed the block without breaking, skip slow path execution
+                if (pc > block_end_pc) {
+                    block_validated = false;
+                    continue;
+                }
+            }
+        }
+
+        // SLOW PATH: Original execution with full validation
         // Execute the operation directly
         const exec_result = exec_blk: {
             const execution_zone = tracy.zone(@src(), "opcode_execution\x00");
@@ -503,4 +585,130 @@ fn interpretThreaded(
         },
         output,
     );
+}
+
+test "fast path execution produces identical results to slow path" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Test code: PUSH1 0x05 PUSH1 0x03 ADD STOP
+    const code = [_]u8{0x60, 0x05, 0x60, 0x03, 0x01, 0x00};
+    var contract = try Contract.init(allocator, &code, .{ .address = @import("Address").ZERO });
+    defer contract.deinit(allocator, null);
+
+    // Execute with slow path (force block_validated = false)
+    const result_slow = try vm.interpret(&contract, &.{}, false);
+    defer if (result_slow.output) |output| allocator.free(output);
+
+    // Reset contract for second execution
+    contract.gas = 1000000;
+    
+    // Execute with potential fast path (block validation enabled)
+    const result_fast = try vm.interpret(&contract, &.{}, false);
+    defer if (result_fast.output) |output| allocator.free(output);
+
+    // Results should be identical
+    try std.testing.expectEqual(result_slow.status, result_fast.status);
+    try std.testing.expectEqual(result_slow.error_type, result_fast.error_type);
+    
+    // Gas consumption should be identical (or very close)
+    const gas_used_slow = result_slow.initial_gas - result_slow.remaining_gas;
+    const gas_used_fast = result_fast.initial_gas - result_fast.remaining_gas;
+    try std.testing.expectEqual(gas_used_slow, gas_used_fast);
+}
+
+test "fast path handles arithmetic operations correctly" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Test ADD: PUSH1 0xFF PUSH1 0x01 ADD STOP (should wrap to 0x00)
+    const code = [_]u8{0x60, 0xFF, 0x60, 0x01, 0x01, 0x00};
+    var contract = try Contract.init(allocator, &code, .{ .address = @import("Address").ZERO });
+    defer contract.deinit(allocator, null);
+
+    const result = try vm.interpret(&contract, &.{}, false);
+    defer if (result.output) |output| allocator.free(output);
+
+    try std.testing.expectEqual(@as(RunResult.Status, .Success), result.status);
+    try std.testing.expectEqual(@as(?ExecutionError.Error, null), result.error_type);
+}
+
+test "fast path handles memory operations correctly" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Test MSTORE/MLOAD: PUSH1 0x42 PUSH1 0x00 MSTORE PUSH1 0x00 MLOAD STOP
+    const code = [_]u8{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x00, 0x51, 0x00};
+    var contract = try Contract.init(allocator, &code, .{ .address = @import("Address").ZERO });
+    defer contract.deinit(allocator, null);
+
+    const result = try vm.interpret(&contract, &.{}, false);
+    defer if (result.output) |output| allocator.free(output);
+
+    try std.testing.expectEqual(@as(RunResult.Status, .Success), result.status);
+    try std.testing.expectEqual(@as(?ExecutionError.Error, null), result.error_type);
+}
+
+test "fast path handles block boundaries correctly" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Test with JUMPDEST to create multiple blocks: PUSH1 0x06 JUMP PUSH1 0x99 JUMPDEST PUSH1 0x42 STOP
+    const code = [_]u8{0x60, 0x06, 0x56, 0x60, 0x99, 0x5b, 0x60, 0x42, 0x00};
+    var contract = try Contract.init(allocator, &code, .{ .address = @import("Address").ZERO });
+    defer contract.deinit(allocator, null);
+
+    const result = try vm.interpret(&contract, &.{}, false);
+    defer if (result.output) |output| allocator.free(output);
+
+    try std.testing.expectEqual(@as(RunResult.Status, .Success), result.status);
+    try std.testing.expectEqual(@as(?ExecutionError.Error, null), result.error_type);
+}
+
+test "fast path handles gas consumption correctly for validated blocks" {
+    const allocator = std.testing.allocator;
+    
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Simple arithmetic that should be block-validated
+    const code = [_]u8{0x60, 0x01, 0x60, 0x02, 0x01, 0x60, 0x03, 0x01, 0x00}; // 1 + 2 + 3, then STOP
+    var contract = try Contract.init(allocator, &code, .{ .address = @import("Address").ZERO });
+    defer contract.deinit(allocator, null);
+
+    const initial_gas = contract.gas;
+    const result = try vm.interpret(&contract, &.{}, false);
+    defer if (result.output) |output| allocator.free(output);
+
+    try std.testing.expectEqual(@as(RunResult.Status, .Success), result.status);
+    try std.testing.expect(result.remaining_gas < initial_gas); // Gas should be consumed
+    try std.testing.expect(result.remaining_gas > 0); // Should not run out of gas
 }

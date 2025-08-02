@@ -33,6 +33,18 @@ pub const BlockInfo = struct {
     static_jump_target: ?u32 = null,
     /// Whether static jump (if any) is valid
     static_jump_valid: bool = false,
+    
+    // NEW: Fast path metadata
+    /// Whether this block can use the fast execution path
+    fast_path_eligible: bool = true,
+    /// Whether block contains external calls (CALL, DELEGATECALL, etc.)
+    has_external_calls: bool = false,
+    /// Whether block contains dynamic jumps (runtime computed targets)
+    has_dynamic_jumps: bool = false,
+    /// Pre-calculated memory expansion for the entire block
+    memory_expansion: u64 = 0,
+    /// Whether block contains only hot opcodes that can be inlined
+    only_hot_opcodes: bool = false,
 };
 
 /// Pre-computed operation info including stack validation data
@@ -240,6 +252,7 @@ pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
 
 test "BlockInfo stores block metadata compactly" {
     const expectEqual = std.testing.expectEqual;
+    const expect = std.testing.expect;
     
     const block = BlockInfo{
         .gas_cost = 21000,
@@ -256,6 +269,13 @@ test "BlockInfo stores block metadata compactly" {
     try expectEqual(@as(u32, 0), block.start_pc);
     try expectEqual(@as(u32, 10), block.end_pc);
     try expectEqual(BlockTerminator.stop, block.terminator);
+    
+    // Test default fast path metadata
+    try expect(block.fast_path_eligible);
+    try expect(!block.has_external_calls);
+    try expect(!block.has_dynamic_jumps);
+    try expectEqual(@as(u64, 0), block.memory_expansion);
+    try expect(!block.only_hot_opcodes);
 }
 
 test "BlockInfo handles static jump targets" {
