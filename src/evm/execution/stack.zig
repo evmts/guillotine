@@ -66,7 +66,7 @@ pub fn op_push1(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     return Operation.ExecutionResult{ .bytes_consumed = 2 };
 }
 
-// Optimized PUSH2-PUSH8 implementations using u64 arithmetic
+// Optimized PUSH2-PUSH8 implementations using std.mem.readInt for single big-endian loads
 pub fn make_push_small(comptime n: u8) fn (usize, Operation.Interpreter, Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     return struct {
         pub fn push(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
@@ -79,16 +79,33 @@ pub fn make_push_small(comptime n: u8) fn (usize, Operation.Interpreter, Operati
                 unreachable;
             }
 
-            var value: u64 = 0;
             const code = frame.contract.code;
-
-            for (0..n) |i| {
-                if (pc + 1 + i < code.len) {
-                    @branchHint(.likely);
-                    value = (value << 8) | code[pc + 1 + i];
-                } else {
-                    value = value << 8;
+            const available = @min(n, code.len -| (pc + 1));
+            
+            var value: u64 = 0;
+            
+            if (available == n) {
+                @branchHint(.likely);
+                // Fast path: all bytes available, use direct big-endian load
+                switch (n) {
+                    1 => value = code[pc + 1],
+                    2 => value = std.mem.readInt(u16, code[pc + 1..][0..2], .big),
+                    3 => value = (@as(u64, code[pc + 1]) << 16) | std.mem.readInt(u16, code[pc + 2..][0..2], .big),
+                    4 => value = std.mem.readInt(u32, code[pc + 1..][0..4], .big),
+                    5 => value = (@as(u64, code[pc + 1]) << 32) | std.mem.readInt(u32, code[pc + 2..][0..4], .big),
+                    6 => value = (@as(u64, std.mem.readInt(u16, code[pc + 1..][0..2], .big)) << 32) | std.mem.readInt(u32, code[pc + 3..][0..4], .big),
+                    7 => value = (@as(u64, code[pc + 1]) << 48) | (@as(u64, std.mem.readInt(u16, code[pc + 2..][0..2], .big)) << 32) | std.mem.readInt(u32, code[pc + 4..][0..4], .big),
+                    8 => value = std.mem.readInt(u64, code[pc + 1..][0..8], .big),
+                    else => unreachable,
                 }
+            } else {
+                @branchHint(.cold);
+                // Slow path: partial read with zero padding
+                var bytes: [8]u8 = [_]u8{0} ** 8;
+                if (available > 0) {
+                    @memcpy(bytes[8 - n..][0..available], code[pc + 1..][0..available]);
+                }
+                value = std.mem.readInt(u64, &bytes, .big);
             }
 
             frame.stack.append_unsafe(@as(u256, value));
@@ -98,7 +115,7 @@ pub fn make_push_small(comptime n: u8) fn (usize, Operation.Interpreter, Operati
     }.push;
 }
 
-// Generate push operations for PUSH1 through PUSH32
+// Generate push operations for PUSH9-PUSH32 using std.mem.readInt for single big-endian loads
 pub fn make_push(comptime n: u8) fn (usize, Operation.Interpreter, Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     return struct {
         pub fn push(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
@@ -109,15 +126,34 @@ pub fn make_push(comptime n: u8) fn (usize, Operation.Interpreter, Operation.Sta
             if (frame.stack.size() >= Stack.CAPACITY) {
                 unreachable;
             }
-            var value: u256 = 0;
+            
             const code = frame.contract.code;
-
-            for (0..n) |i| {
-                if (pc + 1 + i < code.len) {
-                    value = (value << 8) | code[pc + 1 + i];
+            const available = @min(n, code.len -| (pc + 1));
+            
+            var value: u256 = 0;
+            
+            if (available == n) {
+                @branchHint(.likely);
+                // Fast path: all bytes available, use direct big-endian load
+                if (n <= 16) {
+                    // For up to 16 bytes, we can use u128
+                    var bytes: [16]u8 = [_]u8{0} ** 16;
+                    @memcpy(bytes[16 - n..], code[pc + 1..][0..n]);
+                    value = std.mem.readInt(u128, &bytes, .big);
                 } else {
-                    value = value << 8;
+                    // For larger values (17-32 bytes), use full u256
+                    var bytes: [32]u8 = [_]u8{0} ** 32;
+                    @memcpy(bytes[32 - n..], code[pc + 1..][0..n]);
+                    value = std.mem.readInt(u256, &bytes, .big);
                 }
+            } else {
+                @branchHint(.cold);
+                // Slow path: partial read with zero padding
+                var bytes: [32]u8 = [_]u8{0} ** 32;
+                if (available > 0) {
+                    @memcpy(bytes[32 - n..][0..available], code[pc + 1..][0..available]);
+                }
+                value = std.mem.readInt(u256, &bytes, .big);
             }
 
             frame.stack.append_unsafe(value);
@@ -1789,6 +1825,147 @@ test "stack_operation_benchmarks" {
     // Optimization verification
     if (avg_push1_ns < 50) { // Expect very fast optimized PUSH1
         std.log.debug("✓ PUSH1 optimization showing expected performance");
+    }
+}
+
+test "PUSH optimization validation - single big-endian loads vs loops" {
+    const allocator = std.testing.allocator;
+    const primitives = @import("primitives");
+
+    var memory_db = MemoryDatabase.MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Test comprehensive PUSH operations with various byte patterns
+    const test_cases = [_]struct {
+        size: u8,
+        pattern: []const u8,
+        expected: u256,
+    }{
+        // PUSH1
+        .{ .size = 1, .pattern = &[_]u8{0xFF}, .expected = 0xFF },
+        .{ .size = 1, .pattern = &[_]u8{0x00}, .expected = 0x00 },
+        .{ .size = 1, .pattern = &[_]u8{0x42}, .expected = 0x42 },
+        
+        // PUSH2
+        .{ .size = 2, .pattern = &[_]u8{0x12, 0x34}, .expected = 0x1234 },
+        .{ .size = 2, .pattern = &[_]u8{0xFF, 0xFF}, .expected = 0xFFFF },
+        .{ .size = 2, .pattern = &[_]u8{0x00, 0x00}, .expected = 0x0000 },
+        
+        // PUSH4
+        .{ .size = 4, .pattern = &[_]u8{0x12, 0x34, 0x56, 0x78}, .expected = 0x12345678 },
+        .{ .size = 4, .pattern = &[_]u8{0xDE, 0xAD, 0xBE, 0xEF}, .expected = 0xDEADBEEF },
+        
+        // PUSH8
+        .{ .size = 8, .pattern = &[_]u8{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, .expected = 0x0102030405060708 },
+        
+        // PUSH16
+        .{ .size = 16, .pattern = &[_]u8{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}, 
+           .expected = 0x0102030405060708090A0B0C0D0E0F10 },
+           
+        // PUSH32 (partial test with smaller pattern)
+        .{ .size = 32, .pattern = &[_]u8{0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00,
+                                         0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF},
+           .expected = 0xFFEEDDCCBBAA99887766554433221100_0011223344556677889900AABBCCDDEEFF },
+    };
+
+    for (test_cases) |case| {
+        // Create bytecode with PUSH operation
+        var code = std.ArrayList(u8).init(allocator);
+        defer code.deinit();
+        
+        try code.append(0x5F + case.size); // PUSH1 = 0x60, PUSH2 = 0x61, etc.
+        try code.appendSlice(case.pattern);
+
+        var contract = try Contract.init(allocator, code.items, .{ .address = primitives.Address.ZERO });
+        defer contract.deinit(allocator, null);
+
+        var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+        defer frame.deinit();
+
+        const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
+        const state_ptr: Operation.State = @ptrCast(&frame);
+
+        // Execute the optimized PUSH operation
+        if (case.size <= 8) {
+            const push_fn = make_push_small(case.size);
+            const result = try push_fn(0, interpreter_ptr, state_ptr);
+            try std.testing.expectEqual(@as(usize, 1 + case.size), result.bytes_consumed);
+        } else {
+            const push_fn = make_push(case.size);
+            const result = try push_fn(0, interpreter_ptr, state_ptr);
+            try std.testing.expectEqual(@as(usize, 1 + case.size), result.bytes_consumed);
+        }
+
+        const value = try frame.stack.pop();
+        try std.testing.expectEqual(case.expected, value);
+    }
+}
+
+test "PUSH optimization handles partial bytecode correctly" {
+    const allocator = std.testing.allocator;
+    const primitives = @import("primitives");
+
+    var memory_db = MemoryDatabase.MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.toDatabaseInterface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    // Test cases where PUSH operation requests more bytes than available
+    const test_cases = [_]struct {
+        push_size: u8,
+        available_bytes: []const u8,
+        expected: u256,
+    }{
+        // PUSH4 with only 2 bytes available
+        .{ .push_size = 4, .available_bytes = &[_]u8{0x12, 0x34}, .expected = 0x12340000 },
+        
+        // PUSH8 with only 3 bytes available  
+        .{ .push_size = 8, .available_bytes = &[_]u8{0xAB, 0xCD, 0xEF}, .expected = 0xABCDEF0000000000 },
+        
+        // PUSH16 with only 5 bytes available
+        .{ .push_size = 16, .available_bytes = &[_]u8{0x01, 0x02, 0x03, 0x04, 0x05}, .expected = 0x01020304050000000000000000000000 },
+        
+        // PUSH32 with only 8 bytes available
+        .{ .push_size = 32, .available_bytes = &[_]u8{0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88}, 
+           .expected = 0xFFEEDDCCBBAA9988_0000000000000000_0000000000000000_0000000000000000 },
+    };
+
+    for (test_cases) |case| {
+        // Create bytecode with PUSH operation and insufficient data
+        var code = std.ArrayList(u8).init(allocator);
+        defer code.deinit();
+        
+        try code.append(0x5F + case.push_size); // PUSH opcode
+        try code.appendSlice(case.available_bytes);
+
+        var contract = try Contract.init(allocator, code.items, .{ .address = primitives.Address.ZERO });
+        defer contract.deinit(allocator, null);
+
+        var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+        defer frame.deinit();
+
+        const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
+        const state_ptr: Operation.State = @ptrCast(&frame);
+
+        // Execute the optimized PUSH operation
+        if (case.push_size <= 8) {
+            const push_fn = make_push_small(case.push_size);
+            const result = try push_fn(0, interpreter_ptr, state_ptr);
+            try std.testing.expectEqual(@as(usize, 1 + case.push_size), result.bytes_consumed);
+        } else {
+            const push_fn = make_push(case.push_size);
+            const result = try push_fn(0, interpreter_ptr, state_ptr);
+            try std.testing.expectEqual(@as(usize, 1 + case.push_size), result.bytes_consumed);
+        }
+
+        const value = try frame.stack.pop();
+        try std.testing.expectEqual(case.expected, value);
     }
 }
 
