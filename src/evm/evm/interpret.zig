@@ -289,7 +289,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         const result_handling_zone = tracy.zone(@src(), "result_handling\x00");
         defer result_handling_zone.end();
         
-        if (exec_result) |result| {
+        if (exec_result) |_| {
             // Success case - update program counter
             const pc_update_zone = tracy.zone(@src(), "pc_update\x00");
             if (frame.pc != pc) {
