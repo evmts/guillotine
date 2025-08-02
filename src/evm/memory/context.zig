@@ -12,6 +12,7 @@ pub inline fn context_size(self: *const Memory) usize {
 }
 
 /// Fast inline wrapper for memory capacity checks.
+/// Optimization for Issue #338: Eliminates function call overhead for 4.6M calls.
 /// Hot path: if buffer is already large enough, returns immediately with zero overhead.
 /// Cold path: calls the noinline expansion function for complex resizing logic.
 pub inline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
