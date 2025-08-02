@@ -46,6 +46,46 @@ pub const PcToOpEntry = struct {
     undefined: bool,
 };
 
+/// Pre-extracted instruction arguments for cache efficiency
+pub const InstructionArg = union(enum) {
+    /// No argument
+    none: void,
+    
+    /// Small push value (PUSH1-PUSH8) - stored directly
+    small_push: u64,
+    
+    /// Large push value (PUSH9-PUSH32) - index into push_values array
+    large_push_idx: u32,
+    
+    /// Block info for block-aware execution
+    block: struct {
+        /// Index into blocks array
+        block_idx: u32,
+        /// Whether this is first instruction in block
+        is_block_start: bool,
+    },
+    
+    /// Static jump destination (pre-validated)
+    static_jump: u32,
+};
+
+/// Extended PC-to-operation entry with pre-extracted arguments
+pub const ExtendedPcToOpEntry = struct {
+    /// Original fields from PcToOpEntry
+    operation: *const Operation.Operation,
+    opcode_byte: u8,
+    min_stack: u32,
+    max_stack: u32,
+    constant_gas: u64,
+    undefined: bool,
+    
+    /// NEW: Pre-extracted argument
+    arg: InstructionArg,
+    
+    /// NEW: Actual instruction size (1-33 bytes)
+    size: u8,
+};
+
 /// Advanced code analysis for EVM bytecode optimization.
 ///
 /// This structure holds pre-computed analysis results for a contract's bytecode,
@@ -136,6 +176,14 @@ has_create: bool,
 /// by providing direct operation pointers and pre-cached validation data for each
 /// program counter position. This significantly improves execution performance.
 pc_to_op_entries: ?[]const PcToOpEntry,
+
+/// NEW: Extended entries with pre-extracted instruction arguments.
+/// When available, provides superior cache efficiency over pc_to_op_entries.
+extended_entries: ?[]const ExtendedPcToOpEntry = null,
+
+/// NEW: Storage for PUSH9-PUSH32 values.
+/// Separate array improves cache locality for common case (no large pushes).
+large_push_values: ?[]const u256 = null,
 
 /// Array of block information for block-level execution.
 ///
