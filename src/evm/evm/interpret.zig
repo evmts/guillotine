@@ -44,30 +44,13 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const initial_gas = contract.gas;
     var pc: usize = 0;
 
-    // Start async analysis eagerly if not already analyzed
+    // Always use synchronous analysis - required for threaded execution
     if (contract.analysis == null and contract.code_size > 0) {
-        // Try to start async analysis on non-WASM platforms
-        if (comptime builtin.target.os.tag != .wasi and builtin.target.cpu.arch != .wasm32 and builtin.target.cpu.arch != .wasm64) {
-            if (Contract.startAsyncAnalysis(self.allocator, contract.code, contract.code_hash, &self.table)) |ctx| {
-                contract.async_analysis_context = ctx;
-                Log.debug("Started async analysis for contract at start of interpret", .{});
-            } else |_| {
-                // Failed to start async analysis, try synchronous
-                if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
-                    contract.analysis = analysis;
-                } else |err| {
-                    Log.debug("Failed to analyze contract code: {}", .{err});
-                    // Continue without analysis - will build entries on the fly
-                }
-            }
-        } else {
-            // WASM platform - use synchronous analysis
-            if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
-                contract.analysis = analysis;
-            } else |err| {
-                Log.debug("Failed to analyze contract code: {}", .{err});
-                // Continue without analysis - will build entries on the fly
-            }
+        if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
+            contract.analysis = analysis;
+        } else |err| {
+            Log.debug("Failed to analyze contract code: {}", .{err});
+            // Continue without analysis - will build entries on the fly
         }
     }
     

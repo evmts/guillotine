@@ -852,8 +852,8 @@ pub fn startAsyncAnalysis(allocator: std.mem.Allocator, code: []const u8, code_h
         .jump_table = jump_table,
     };
     
-    // Only use threading on non-WASM platforms
-    if (comptime !is_wasm) {
+    // Only use threading on non-WASM platforms and when not in single-threaded mode
+    if (comptime !is_wasm and !builtin.single_threaded) {
         const thread = std.Thread.spawn(.{}, analyzeCodeAsync, .{context}) catch {
             // If thread creation fails, do synchronous analysis
             context.result = try analyze_code(allocator, code, code_hash, jump_table);
@@ -862,7 +862,7 @@ pub fn startAsyncAnalysis(allocator: std.mem.Allocator, code: []const u8, code_h
         };
         thread.detach();
     } else {
-        // WASM doesn't support threads, do synchronous analysis
+        // WASM or single-threaded mode doesn't support threads, do synchronous analysis
         context.result = try analyze_code(allocator, code, code_hash, jump_table);
         context.completed.store(true, .release);
     }
@@ -889,6 +889,7 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     // if (comptime builtin.target.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) {
     //     return analyze_code_simd(allocator, code, code_hash);
     // }
+    
     
     if (comptime !is_wasm) {
         cache_mutex.lock();
@@ -930,6 +931,8 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     if (jump_table) |_| {
         const single_pass = @import("single_pass_analysis.zig");
         const analysis = try single_pass.analyzeSinglePass(allocator, code, code_hash, jump_table);
+        
+        
         return analysis;
     }
     

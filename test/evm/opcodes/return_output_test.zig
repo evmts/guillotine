@@ -10,6 +10,7 @@ const Address = primitives.Address;
 
 test "RETURN sets output correctly" {
     const allocator = testing.allocator;
+    defer Evm.Contract.clear_analysis_cache(allocator);
 
     var memory_db = Evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -59,6 +60,7 @@ test "RETURN sets output correctly" {
 
 test "constructor returns runtime code" {
     const allocator = testing.allocator;
+    defer Evm.Contract.clear_analysis_cache(allocator);
 
     var memory_db = Evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
