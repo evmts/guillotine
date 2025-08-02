@@ -49,6 +49,7 @@ const AnalysisCacheConfig = @import("analysis_lru_cache.zig").AnalysisCacheConfi
 const StoragePool = @import("storage_pool.zig");
 const Log = @import("../log.zig");
 const build_options = @import("build_options");
+const block_analysis = @import("block_analysis.zig");
 
 /// Maximum gas refund allowed (EIP-3529)
 const MAX_REFUND_QUOTIENT = 5;
@@ -289,6 +290,40 @@ has_jumpdests: bool,
 /// Enables fast-path for calls to codeless addresses.
 is_empty: bool,
 
+/// Optional async analysis context for background code analysis.
+///
+/// When set, indicates that code analysis is being performed in a background
+/// thread. The interpreter can check this periodically and apply the results
+/// when ready, improving performance for contracts with complex bytecode.
+async_analysis_context: ?*AsyncAnalysisContext = null,
+
+/// Check and apply async analysis result if available
+///
+/// This inline function checks if async analysis has completed and applies
+/// the result to the contract. It's designed to be called from hot paths
+/// (like JUMP/JUMPI) with minimal overhead.
+///
+/// Returns true if analysis was applied, false otherwise.
+pub inline fn checkAndApplyAsyncAnalysis(self: *Contract, allocator: std.mem.Allocator) bool {
+    if (self.async_analysis_context) |ctx| {
+        if (getAsyncAnalysisResult(ctx)) |maybe_result| {
+            if (maybe_result) |analysis| {
+                self.analysis = analysis;
+                // Clear the context as it's no longer needed
+                self.async_analysis_context = null;
+                allocator.destroy(ctx);
+                Log.debug("Applied async analysis result", .{});
+                return true;
+            } else |_| {
+                // Analysis failed with error, clear the context
+                self.async_analysis_context = null;
+                allocator.destroy(ctx);
+            }
+        }
+    }
+    return false;
+}
+
 /// Creates a new Contract for executing existing deployed code.
 ///
 /// This is the standard constructor for CALL, CALLCODE, DELEGATECALL,
@@ -475,13 +510,22 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     // Ensure analysis is performed
     self.ensure_analysis(allocator);
 
-    // Search for JUMPDEST position using linear search (optimized for size)
+    // Search for JUMPDEST position using binary search
     if (self.analysis) |analysis| {
         if (analysis.jumpdest_positions.len > 0) {
-            for (analysis.jumpdest_positions) |jumpdest_pos| {
-                if (jumpdest_pos == pos) return true;
-            }
-            return false;
+            // Binary search requires sorted array (which we ensure during analysis)
+            const S = struct {
+                fn order(key: u32, item: u32) std.math.Order {
+                    return std.math.order(key, item);
+                }
+            };
+            const result = std.sort.binarySearch(
+                u32,
+                analysis.jumpdest_positions,
+                pos,
+                S.order,
+            );
+            return result != null;
         }
     }
     // Fallback: check if position is code and contains JUMPDEST opcode
@@ -711,6 +755,12 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
         }
     }
     // Analysis is cached globally, so don't free
+    
+    // Clean up async analysis context if still pending
+    if (self.async_analysis_context) |ctx| {
+        allocator.destroy(ctx);
+        self.async_analysis_context = null;
+    }
 }
 
 /// Analyzes bytecode and caches the results globally for reuse.
@@ -751,6 +801,88 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
 /// );
 /// // Analysis is now cached for future use
 /// ```
+
+/// Async contract analysis context
+pub const AsyncAnalysisContext = struct {
+    allocator: std.mem.Allocator,
+    code: []const u8,
+    code_hash: [32]u8,
+    jump_table: ?*const @import("../jump_table/jump_table.zig"),
+    result: ?*const CodeAnalysis = null,
+    error_result: ?CodeAnalysisError = null,
+    completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
+/// Perform contract analysis in a separate thread (non-WASM only)
+fn analyzeCodeAsync(context: *AsyncAnalysisContext) void {
+    const result = analyze_code(
+        context.allocator,
+        context.code,
+        context.code_hash,
+        context.jump_table,
+    ) catch |err| {
+        context.error_result = err;
+        context.completed.store(true, .release);
+        return;
+    };
+    
+    context.result = result;
+    context.completed.store(true, .release);
+}
+
+/// Start async contract analysis (returns immediately)
+///
+/// This function starts contract analysis in a separate thread on non-WASM platforms.
+/// On WASM or if threading fails, it falls back to synchronous analysis.
+///
+/// ## Parameters
+/// - `allocator`: Memory allocator for analysis structures
+/// - `code`: Contract bytecode to analyze
+/// - `code_hash`: Keccak256 hash of the bytecode for caching
+/// - `jump_table`: Optional jump table for block analysis
+///
+/// ## Returns
+/// AsyncAnalysisContext that can be checked for completion
+pub fn startAsyncAnalysis(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8, jump_table: ?*const @import("../jump_table/jump_table.zig")) !*AsyncAnalysisContext {
+    const context = try allocator.create(AsyncAnalysisContext);
+    context.* = .{
+        .allocator = allocator,
+        .code = code,
+        .code_hash = code_hash,
+        .jump_table = jump_table,
+    };
+    
+    // Only use threading on non-WASM platforms
+    if (comptime !is_wasm) {
+        const thread = std.Thread.spawn(.{}, analyzeCodeAsync, .{context}) catch {
+            // If thread creation fails, do synchronous analysis
+            context.result = try analyze_code(allocator, code, code_hash, jump_table);
+            context.completed.store(true, .release);
+            return context;
+        };
+        thread.detach();
+    } else {
+        // WASM doesn't support threads, do synchronous analysis
+        context.result = try analyze_code(allocator, code, code_hash, jump_table);
+        context.completed.store(true, .release);
+    }
+    
+    return context;
+}
+
+/// Check if async analysis is complete and get the result
+pub fn getAsyncAnalysisResult(context: *AsyncAnalysisContext) ?CodeAnalysisError!*const CodeAnalysis {
+    if (!context.completed.load(.acquire)) {
+        return null;
+    }
+    
+    if (context.error_result) |err| {
+        return err;
+    }
+    
+    return context.result.?;
+}
+
 pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8, jump_table: ?*const @import("../jump_table/jump_table.zig")) CodeAnalysisError!*const CodeAnalysis {
     // Temporarily disable SIMD optimization to fix signal 4 errors on ARM64
     // TODO: Re-enable when SIMD implementation is fixed for ARM64
@@ -794,6 +926,14 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
         }
     }
 
+    // Use single-pass analysis when jump table is provided
+    if (jump_table) |_| {
+        const single_pass = @import("single_pass_analysis.zig");
+        const analysis = try single_pass.analyzeSinglePass(allocator, code, code_hash, jump_table);
+        return analysis;
+    }
+    
+    // Fallback to basic analysis without jump table
     const analysis = allocator.create(CodeAnalysis) catch |err| {
         Log.debug("Failed to allocate CodeAnalysis: {any}", .{err});
         return err;
@@ -840,33 +980,9 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     analysis.has_static_jumps = false;
     analysis.has_selfdestruct = contains_op(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
-    
-    // Build PC-to-operation mapping if jump table is provided
-    if (jump_table) |table| {
-        const entries = allocator.alloc(CodeAnalysis.PcToOpEntry, code.len) catch |err| {
-            Log.debug("Failed to allocate PC-to-op entries: {any}", .{err});
-            return err;
-        };
-        errdefer allocator.free(entries);
-        
-        // Build the comprehensive mapping with pre-computed data
-        for (0..code.len) |pc| {
-            const opcode_byte = code[pc];
-            const operation = table.table[opcode_byte];
-            entries[pc] = CodeAnalysis.PcToOpEntry{
-                .operation = operation,
-                .opcode_byte = opcode_byte,
-                .min_stack = operation.min_stack,
-                .max_stack = operation.max_stack,
-                .constant_gas = operation.constant_gas,
-                .undefined = operation.undefined,
-            };
-        }
-        
-        analysis.pc_to_op_entries = entries;
-    } else {
-        analysis.pc_to_op_entries = null;
-    }
+    analysis.blocks = null;
+    analysis.pc_to_block = null;
+    analysis.pc_to_op_entries = null;
 
     // Cache the analysis in appropriate cache
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
@@ -944,6 +1060,8 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8, jump_tabl
     analysis.has_static_jumps = false;
     analysis.has_selfdestruct = contains_op(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
+    analysis.blocks = null;
+    analysis.pc_to_block = null;
     
     // Build PC-to-operation mapping if jump table is provided
     if (jump_table) |table| {
@@ -970,6 +1088,20 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8, jump_tabl
         analysis.pc_to_op_entries = entries;
     } else {
         analysis.pc_to_op_entries = null;
+    }
+    
+    // Perform block analysis if jump table is provided
+    if (jump_table) |table| {
+        var block_result = block_analysis.analyzeBlocks(allocator, code, table) catch |err| {
+            Log.debug("Failed to identify blocks: {any}", .{err});
+            analysis.blocks = null;
+            analysis.pc_to_block = null;
+            return analysis;
+        };
+        errdefer block_result.deinit();
+        
+        analysis.blocks = block_result.blocks;
+        analysis.pc_to_block = block_result.pc_to_block;
     }
 
     return analysis;
@@ -1088,6 +1220,8 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
     analysis.has_static_jumps = false;
+    analysis.blocks = null;
+    analysis.pc_to_block = null;
 
     // Cache the analysis in appropriate cache
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
@@ -1192,6 +1326,8 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8, jump
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
     analysis.has_static_jumps = false;
+    analysis.blocks = null;
+    analysis.pc_to_block = null;
 
     return analysis;
 }
