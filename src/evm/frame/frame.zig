@@ -506,6 +506,48 @@ pub inline fn consume_gas(self: *Frame, amount: u64) ConsumeGasError!void {
     subtract_zone.end();
 }
 
+/// Unified memory operation that combines gas calculation, memory expansion, and bounds checking.
+/// This is the optimized version that reduces API overhead compared to separate function calls.
+///
+/// @param self The frame performing the memory operation
+/// @param offset Memory offset in bytes
+/// @param size Number of bytes to access
+/// @throws OutOfGas if insufficient gas for memory expansion
+/// @throws OutOfMemory if memory allocation fails
+/// @throws MemoryLimitExceeded if operation exceeds memory limits
+pub inline fn check_memory_and_expand(
+    self: *Frame,
+    offset: usize,
+    size: usize,
+) (ConsumeGasError || Memory.MemoryError)!void {
+    const zone = tracy.zone(@src(), "frame_check_memory_and_expand\x00");
+    defer zone.end();
+    
+    const new_size = offset + size;
+    const current_size = self.memory.context_size();
+    
+    if (new_size > current_size) {
+        // Calculate gas for expansion using the memory's optimized gas calculation
+        const gas_cost = self.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+        
+        // Consume gas first - if this fails, we haven't modified memory
+        try self.consume_gas(gas_cost);
+        
+        // Expand memory - align to word boundary to match gas calculation
+        const aligned_size = std.mem.alignForward(usize, new_size, 32);
+        _ = try self.memory.ensure_context_capacity(aligned_size);
+    }
+}
+
+/// Get direct mutable access to memory slice for performance-critical operations.
+/// Use this after check_memory_and_expand to avoid redundant bounds checking.
+///
+/// @param self The frame to get memory slice from
+/// @return Mutable slice to the frame's memory
+pub inline fn get_memory_slice(self: *Frame) []u8 {
+    return self.memory.slice();
+}
+
 // ============================================================================
 // COMPREHENSIVE TESTS FOR FRAME MODULE
 // ============================================================================

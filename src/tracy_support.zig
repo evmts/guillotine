@@ -76,7 +76,7 @@ pub fn TrackedAllocator(comptime T: type) type {
         tracy_allocator: if (enabled) ztracy.TrackedAllocator else void,
 
         const Self = @This();
-
+        
         pub fn init(child: T, name: [*:0]const u8) Self {
             if (comptime enabled) {
                 return .{

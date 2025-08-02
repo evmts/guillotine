@@ -43,19 +43,13 @@ pub fn op_mload(pc: usize, interpreter: Operation.Interpreter, state: Operation.
         return ExecutionError.Error.OutOfOffset;
     }
     const offset_usize = @as(usize, @intCast(offset));
-    const new_size = offset_usize + 32;
 
-    // Calculate memory expansion gas cost
-    const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
+    // Unified memory check and expansion - combines gas calculation, consumption, and expansion
+    try frame.check_memory_and_expand(offset_usize, 32);
 
-    // Ensure memory is available - expand to word boundary to match gas calculation
-    const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
-
-    // Read 32 bytes from memory
-    const value = try frame.memory.get_u256(offset_usize);
+    // Direct memory read for better performance
+    const mem_slice = frame.get_memory_slice();
+    const value = std.mem.readInt(u256, mem_slice[offset_usize..][0..32], .big);
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
     frame.stack.set_top_unsafe(value);
@@ -86,21 +80,13 @@ pub fn op_mstore(pc: usize, interpreter: Operation.Interpreter, state: Operation
         return ExecutionError.Error.OutOfOffset;
     }
     const offset_usize = @as(usize, @intCast(offset));
-    const new_size = offset_usize + 32; // MSTORE writes 32 bytes
 
-    // Calculate memory expansion gas cost
-    const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
+    // Unified memory check and expansion - combines gas calculation, consumption, and expansion
+    try frame.check_memory_and_expand(offset_usize, 32);
 
-    // Ensure memory is available - expand to word boundary to match gas calculation
-    const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
-
-    // Write 32 bytes to memory (big-endian)
-    var bytes: [32]u8 = undefined;
-    std.mem.writeInt(u256, &bytes, value, .big);
-    try frame.memory.set_data(offset_usize, &bytes);
+    // Direct memory write for better performance
+    const mem_slice = frame.get_memory_slice();
+    std.mem.writeInt(u256, mem_slice[offset_usize..][0..32], value, .big);
 
     return Operation.ExecutionResult{};
 }
@@ -128,21 +114,14 @@ pub fn op_mstore8(pc: usize, interpreter: Operation.Interpreter, state: Operatio
         return ExecutionError.Error.OutOfOffset;
     }
     const offset_usize = @as(usize, @intCast(offset));
-    const new_size = offset_usize + 1;
 
-    // Calculate memory expansion gas cost
-    const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
+    // Unified memory check and expansion - combines gas calculation, consumption, and expansion
+    try frame.check_memory_and_expand(offset_usize, 1);
 
-    // Ensure memory is available - expand to word boundary to match gas calculation
-    const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
-
-    // Write single byte to memory
+    // Direct memory write for better performance
+    const mem_slice = frame.get_memory_slice();
     const byte_value = @as(u8, @truncate(value));
-    const bytes = [_]u8{byte_value};
-    try frame.memory.set_data(offset_usize, &bytes);
+    mem_slice[offset_usize] = byte_value;
 
     return Operation.ExecutionResult{};
 }
@@ -837,4 +816,67 @@ test "fuzz_memory_random_operations" {
     }
 
     try fuzz_memory_operations(allocator, operations.items);
+}
+
+test "optimized_memory_operations_basic" {
+    const allocator = std.testing.allocator;
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    var contract = try Contract.init(allocator, &[_]u8{0x01}, .{ .address = Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
+    defer frame.deinit();
+
+    // Test optimized MSTORE operation
+    try frame.stack.append(0); // offset
+    try frame.stack.append(0x123456789abcdef0); // value
+    
+    const interpreter_ptr: *Operation.Interpreter = @ptrCast(&vm);
+    const state_ptr: *Operation.State = @ptrCast(&frame);
+    _ = try vm.table.execute(0, interpreter_ptr, state_ptr, 0x52); // MSTORE opcode
+
+    // Test optimized MLOAD operation
+    try frame.stack.append(0); // offset
+    _ = try vm.table.execute(0, interpreter_ptr, state_ptr, 0x51); // MLOAD opcode
+
+    const result = try frame.stack.pop();
+    try std.testing.expectEqual(@as(u256, 0x123456789abcdef0), result);
+}
+
+test "unified_memory_check_function" {
+    const allocator = std.testing.allocator;
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    var contract = try Contract.init(allocator, &[_]u8{}, .{ .address = Address.ZERO });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
+    defer frame.deinit();
+
+    // Test unified memory check with no expansion needed
+    const initial_gas = frame.gas_remaining;
+    try frame.check_memory_and_expand(0, 0);
+    try std.testing.expectEqual(initial_gas, frame.gas_remaining); // No gas consumed
+
+    // Test unified memory check with expansion
+    try frame.check_memory_and_expand(0, 32);
+    try std.testing.expect(frame.gas_remaining < initial_gas); // Gas was consumed for expansion
+    try std.testing.expectEqual(@as(usize, 32), frame.memory.context_size());
+
+    // Test getting direct memory slice
+    const mem_slice = frame.get_memory_slice();
+    try std.testing.expectEqual(@as(usize, 32), mem_slice.len);
 }
