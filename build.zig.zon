@@ -52,9 +52,10 @@
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.10.0.tar.gz",
             .hash = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0",
         },
-        .zig_tracy = .{
-            .url = "git+https://github.com/cipharius/zig-tracy#main",
-            .hash = "1220000000000000000000000000000000000000000000000000000000000000",
+        .ztracy = .{
+            .url = "git+https://github.com/zig-gamedev/zig-gamedev#775e5fccd06ed079e242ba2a3c642c8c4e3cdbe1",
+            .hash = "12206ee27e9606804b5de3bd1d09bc67f1a0f92cc0b4987dbf9fb666e7ac009f2f96",
+            .lazy = true,
         },
     },
 
