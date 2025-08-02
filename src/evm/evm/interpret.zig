@@ -10,7 +10,7 @@ const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 const opcode = @import("../opcodes/opcode.zig");
 const CodeAnalysis = @import("../frame/code_analysis.zig");
-const tracy = @import("tracy_support");
+const tracy = @import("../root.zig").tracy_support;
 
 
 /// Execute contract bytecode and return the result.
@@ -31,10 +31,11 @@ const tracy = @import("tracy_support");
 /// defer if (result.output) |output| vm.allocator.free(output);
 /// ```
 pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
-    const zone = tracy.zone(@src(), "VM.interpret");
+    @branchHint(.likely);
+    
+    const zone = tracy.zone(@src(), "VM.interpret\x00");
     defer zone.end();
     
-    @branchHint(.likely);
     Log.debug("VM.interpret: Starting execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
     self.depth += 1;
@@ -94,10 +95,10 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     // Main execution loop - the heart of the EVM
     while (pc < contract.code_size) {
-        const opcode_zone = tracy.zone(@src(), "execute_opcode");
-        defer opcode_zone.end();
-        
         @branchHint(.likely);
+        
+        const opcode_zone = tracy.zone(@src(), "execute_opcode\x00");
+        defer opcode_zone.end();
         
         // Check if analysis was updated by JUMP/JUMPI
         if (contract.analysis != null and pc_to_op_entry_table == null) {
@@ -148,12 +149,6 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         
         const operation = entry.operation;
         const opcode_byte = entry.opcode_byte;
-        
-        // Set Tracy zone name to opcode name for better profiling
-        if (tracy.enabled) {
-            const op_name = opcode.name_from_byte(opcode_byte);
-            opcode_zone.setName(op_name);
-        }
         
         frame.pc = pc;
         

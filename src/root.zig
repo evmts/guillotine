@@ -421,6 +421,7 @@ test "C interface compilation" {
 pub const Evm = evm_root.Evm;
 pub const Primitives = primitives;
 pub const Provider = provider;
+pub const tracy_support = @import("tracy_support.zig");
 
 test "Evm module" {
     std.testing.refAllDecls(Evm);
