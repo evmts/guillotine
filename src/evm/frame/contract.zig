@@ -541,16 +541,27 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     return false;
 }
 
-/// Ensure code analysis is performed
+/// Ensure code analysis is performed with MANDATORY extended entries (Issue #341)
 fn ensure_analysis(self: *Contract, allocator: std.mem.Allocator) void {
     const zone = tracy.zone(@src(), "ensure_analysis\x00");
     defer zone.end();
     
     if (self.analysis == null and self.code.len > 0) {
-        self.analysis = analyze_code(allocator, self.code, self.code_hash, null) catch |err| {
+        // MANDATORY: Use single-pass analysis with jump table for extended entries
+        const JumpTable = @import("../jump_table/jump_table.zig");
+        var jump_table = JumpTable.init(.CANCUN); // Use latest hardfork for maximum optimization
+        
+        self.analysis = analyze_code(allocator, self.code, self.code_hash, &jump_table) catch |err| {
             logError("Contract.ensure_analysis: analyze_code failed", err);
             return;
         };
+        
+        // Verify that extended entries were created (mandatory for Issue #341)
+        if (self.analysis) |analysis| {
+            if (analysis.extended_entries == null) {
+                @panic("Extended entries are mandatory for performance optimization (Issue #341)");
+            }
+        }
     }
 }
 
@@ -999,8 +1010,8 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     analysis.pc_to_block = null;
     analysis.pc_to_op_entries = null;
     
-    // Only build extended entries if we don't have a jump table
-    // (When we have a jump table, single_pass_analysis will build them)
+    // For direct analysis (without jump table), we cannot build extended entries
+    // The ensure_analysis function will ALWAYS provide a jump table for extended entries
     analysis.extended_entries = null;
     analysis.large_push_values = null;
 

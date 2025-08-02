@@ -128,46 +128,22 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
         const entry_lookup_zone = tracy.zone(@src(), "entry_lookup\x00");
         
-        // OPTIMIZED: Direct access to extended entries (ALWAYS present)
-        const extended_entry = if (contract.analysis) |analysis| blk: {
-            if (analysis.extended_entries) |extended| {
-                if (pc_index < extended.len) {
-                    break :blk &extended[pc_index];
-                }
-            }
-            break :blk null;
-        } else null;
-
-        // Use extended entry directly or fall back to old method
-        const entry = if (extended_entry) |ext_entry|
-            // Convert extended to basic format for now (during transition)
-            CodeAnalysis.PcToOpEntry{
-                .operation = ext_entry.operation,
-                .opcode_byte = ext_entry.opcode_byte,
-                .min_stack = ext_entry.min_stack,
-                .max_stack = ext_entry.max_stack,
-                .constant_gas = ext_entry.constant_gas,
-                .undefined = ext_entry.undefined,
-            }
-        else if (pc_to_op_entry_table) |table|
-            table[pc_index]
-        else blk: {
-            // Fallback: build entry on the fly
-            const opcode_byte = contract.code[pc_index];
-            const operation = self.table.table[opcode_byte];
-            break :blk CodeAnalysis.PcToOpEntry{
-                .operation = operation,
-                .opcode_byte = opcode_byte,
-                .min_stack = operation.min_stack,
-                .max_stack = operation.max_stack,
-                .constant_gas = operation.constant_gas,
-                .undefined = operation.undefined,
-            };
+        // MANDATORY ANALYSIS: Direct array access without conditionals (Issue #341)
+        // All contracts MUST have analysis with extended entries pre-computed
+        const analysis = contract.analysis orelse {
+            @panic("Contract analysis is mandatory for performance optimization (Issue #341)");
         };
+        const extended_entries = analysis.extended_entries orelse {
+            @panic("Extended entries are mandatory for direct dispatch (Issue #341)");
+        };
+        
+        // DIRECT ARRAY ACCESS: No conditionals, maximum performance
+        const extended_entry = &extended_entries[pc_index];
         entry_lookup_zone.end();
 
-        const operation = entry.operation;
-        const opcode_byte = entry.opcode_byte;
+        // Use extended entry data directly (no conversion needed)
+        const operation = extended_entry.operation;
+        const opcode_byte = extended_entry.opcode_byte;
 
         frame.pc = pc;
 
@@ -245,7 +221,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             Log.debug("Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode_byte, pc, frame.gas_remaining, frame.stack.size() });
 
             // Check if opcode is undefined (cold path) - use pre-computed flag
-            if (entry.undefined) {
+            if (extended_entry.undefined) {
                 @branchHint(.cold);
                 const invalid_zone = tracy.zone(@src(), "invalid_opcode\x00");
                 defer invalid_zone.end();
@@ -267,8 +243,8 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                     stack_height_changes.validate_stack_requirements_fast(
                         @intCast(frame.stack.size()),
                         opcode_byte,
-                        entry.min_stack,
-                        entry.max_stack,
+                        extended_entry.min_stack,
+                        extended_entry.max_stack,
                     ) catch |err| {
                         stack_check_zone.end();
                         break :exec_blk err;
@@ -284,13 +260,13 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 stack_check_zone.end();
 
                 // Consume gas (likely path) - use pre-computed constant_gas
-                if (entry.constant_gas > 0) {
+                if (extended_entry.constant_gas > 0) {
                     @branchHint(.likely);
                     const gas_zone = tracy.zone(@src(), "consume_gas\x00");
                     const gas_check_zone = tracy.zone(@src(), "gas_check\x00");
                     gas_check_zone.end();
-                    Log.debug("Consuming {} gas for opcode 0x{x:0>2}", .{ entry.constant_gas, opcode_byte });
-                    frame.consume_gas(entry.constant_gas) catch |err| {
+                    Log.debug("Consuming {} gas for opcode 0x{x:0>2}", .{ extended_entry.constant_gas, opcode_byte });
+                    frame.consume_gas(extended_entry.constant_gas) catch |err| {
                         gas_zone.end();
                         break :exec_blk err;
                     };
