@@ -21,11 +21,14 @@ pub fn op_stop(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 
 pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
     _ = pc;
-    _ = interpreter;
 
     const frame = state;
+    const vm = interpreter;
 
     std.debug.assert(frame.stack.size() >= 1);
+
+    // Check if async analysis has completed
+    _ = frame.contract.checkAndApplyAsyncAnalysis(vm.allocator);
 
     // Use unsafe pop since bounds checking is done by jump_table
     const dest = frame.stack.pop_unsafe();
@@ -48,11 +51,13 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 }
 
 pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = interpreter;
-
     const frame = state;
+    const vm = interpreter;
 
     std.debug.assert(frame.stack.size() >= 2);
+
+    // Check if async analysis has completed
+    _ = frame.contract.checkAndApplyAsyncAnalysis(vm.allocator);
 
     // Log the stack before popping
     Log.debug("JUMPI: Stack before pop (size={}): ", .{frame.stack.size()});

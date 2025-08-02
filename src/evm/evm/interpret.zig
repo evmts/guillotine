@@ -44,18 +44,35 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const initial_gas = contract.gas;
     var pc: usize = 0;
 
-    // Ensure contract analysis is performed with jump table for PC-to-op mapping
+    // Start async analysis eagerly if not already analyzed
     if (contract.analysis == null and contract.code_size > 0) {
-        if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
-            contract.analysis = analysis;
-        } else |err| {
-            Log.debug("Failed to analyze contract code: {}", .{err});
-            // Continue without analysis - will build entries on the fly
+        // Try to start async analysis on non-WASM platforms
+        if (comptime builtin.target.os.tag != .wasi and builtin.target.cpu.arch != .wasm32 and builtin.target.cpu.arch != .wasm64) {
+            if (Contract.startAsyncAnalysis(self.allocator, contract.code, contract.code_hash, &self.table)) |ctx| {
+                contract.async_analysis_context = ctx;
+                Log.debug("Started async analysis for contract at start of interpret", .{});
+            } else |_| {
+                // Failed to start async analysis, try synchronous
+                if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
+                    contract.analysis = analysis;
+                } else |err| {
+                    Log.debug("Failed to analyze contract code: {}", .{err});
+                    // Continue without analysis - will build entries on the fly
+                }
+            }
+        } else {
+            // WASM platform - use synchronous analysis
+            if (Contract.analyze_code(self.allocator, contract.code, contract.code_hash, &self.table)) |analysis| {
+                contract.analysis = analysis;
+            } else |err| {
+                Log.debug("Failed to analyze contract code: {}", .{err});
+                // Continue without analysis - will build entries on the fly
+            }
         }
     }
     
     // Get pc_to_op_entries from cached analysis if available
-    const pc_to_op_entry_table = if (contract.analysis) |analysis| analysis.pc_to_op_entries else null;
+    var pc_to_op_entry_table = if (contract.analysis) |analysis| analysis.pc_to_op_entries else null;
 
     var builder = Frame.builder(self.allocator); // We should consider making all items mandatory and removing frame builder
     var frame = builder
@@ -80,10 +97,25 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     const interpreter: Operation.Interpreter = self;
     const state: Operation.State = &frame;
+    
+    // Block-level execution state
+    var blocks = if (contract.analysis) |analysis| analysis.blocks else null;
+    var pc_to_block_map = if (contract.analysis) |analysis| analysis.pc_to_block else null;
+    var current_block_idx: ?u32 = null;
+    var block_validated = false;
+
 
     // Main execution loop - the heart of the EVM
     while (pc < contract.code_size) {
         @branchHint(.likely);
+        
+        // Check if analysis was updated by JUMP/JUMPI
+        if (contract.analysis != null and pc_to_op_entry_table == null) {
+            // Analysis was just applied, update our local variables
+            pc_to_op_entry_table = contract.analysis.?.pc_to_op_entries;
+            blocks = contract.analysis.?.blocks;
+            pc_to_block_map = contract.analysis.?.pc_to_block;
+        }
         
         // Use pre-computed entry table if available for maximum performance
         const pc_index: usize = @intCast(pc);
@@ -108,9 +140,59 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         
         frame.pc = pc;
         
+        // Block-level validation and gas consumption
+        if (pc_to_block_map) |map| {
+            if (pc_index < map.len) {
+                const block_idx = map[pc_index];
+                if (block_idx != std.math.maxInt(u32)) {
+                    // Check if we're entering a new block
+                    if (current_block_idx == null or current_block_idx.? != block_idx) {
+                        current_block_idx = block_idx;
+                        block_validated = false;
+                        
+                        // Validate and consume gas for the entire block
+                        if (blocks) |block_array| {
+                            if (block_idx < block_array.len) {
+                                const block = block_array[block_idx];
+                                Log.debug("Entering block {} at pc={}, gas_cost={}, stack_req={}, stack_max_growth={}, start_pc={}, end_pc={}", .{ block_idx, pc, block.gas_cost, block.stack_req, block.stack_max_growth, block.start_pc, block.end_pc });
+                                
+                                // Validate stack requirements for the block
+                                const stack_size = @as(i32, @intCast(frame.stack.size()));
+                                if (stack_size < block.stack_req) {
+                                    Log.debug("Block {} stack underflow: size={}, required={}, start_pc={}, end_pc={}", .{ block_idx, stack_size, block.stack_req, block.start_pc, block.end_pc });
+                                    contract.gas = frame.gas_remaining;
+                                    self.return_data = &[_]u8{};
+                                    return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.StackUnderflow, null);
+                                }
+                                
+                                const max_stack_after = stack_size + @as(i32, @intCast(block.stack_max_growth));
+                                if (max_stack_after > @import("../stack/stack.zig").CAPACITY) {
+                                    Log.debug("Block {} would overflow stack: current={}, max_growth={}", .{ block_idx, stack_size, block.stack_max_growth });
+                                    contract.gas = frame.gas_remaining;
+                                    self.return_data = &[_]u8{};
+                                    return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.StackOverflow, null);
+                                }
+                                
+                                // Consume gas for the entire block
+                                frame.consume_gas(block.gas_cost) catch {
+                                    Log.debug("Block {} out of gas: cost={}, remaining={}", .{ block_idx, block.gas_cost, frame.gas_remaining });
+                                    contract.gas = frame.gas_remaining;
+                                    self.return_data = &[_]u8{};
+                                    return RunResult.init(initial_gas, frame.gas_remaining, .OutOfGas, ExecutionError.Error.OutOfGas, null);
+                                };
+                                
+                                block_validated = true;
+                                Log.debug("Block {} validated successfully", .{block_idx});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         // INLINE: self.table.execute(...)
         // Execute the operation directly
-        const exec_result = blk: {
+        const exec_result = exec_blk: {
             Log.debug("Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode_byte, pc, frame.gas_remaining, frame.stack.size() });
             
             // Check if opcode is undefined (cold path) - use pre-computed flag
@@ -118,36 +200,39 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 @branchHint(.cold);
                 Log.debug("Invalid opcode 0x{x:0>2}", .{opcode_byte});
                 frame.gas_remaining = 0;
-                break :blk ExecutionError.Error.InvalidOpcode;
+                break :exec_blk ExecutionError.Error.InvalidOpcode;
             }
             
-            // Validate stack requirements using pre-computed values
-            if (comptime builtin.mode == .ReleaseFast) {
-                // Fast path for release builds - use pre-computed min/max
-                const stack_height_changes = @import("../opcodes/stack_height_changes.zig");
-                stack_height_changes.validate_stack_requirements_fast(
-                    @intCast(frame.stack.size()),
-                    opcode_byte,
-                    entry.min_stack,
-                    entry.max_stack,
-                ) catch |err| break :blk err;
-            } else {
-                // Full validation for debug builds
-                const stack_validation = @import("../stack/stack_validation.zig");
-                stack_validation.validate_stack_requirements(&frame.stack, operation) catch |err| break :blk err;
-            }
-            
-            // Consume gas (likely path) - use pre-computed constant_gas
-            if (entry.constant_gas > 0) {
-                @branchHint(.likely);
-                Log.debug("Consuming {} gas for opcode 0x{x:0>2}", .{ entry.constant_gas, opcode_byte });
-                frame.consume_gas(entry.constant_gas) catch |err| break :blk err;
+            // Skip per-instruction validation if block is validated
+            if (!block_validated) {
+                // Validate stack requirements using pre-computed values
+                if (comptime builtin.mode == .ReleaseFast) {
+                    // Fast path for release builds - use pre-computed min/max
+                    const stack_height_changes = @import("../opcodes/stack_height_changes.zig");
+                    stack_height_changes.validate_stack_requirements_fast(
+                        @intCast(frame.stack.size()),
+                        opcode_byte,
+                        entry.min_stack,
+                        entry.max_stack,
+                    ) catch |err| break :exec_blk err;
+                } else {
+                    // Full validation for debug builds
+                    const stack_validation = @import("../stack/stack_validation.zig");
+                    stack_validation.validate_stack_requirements(&frame.stack, operation) catch |err| break :exec_blk err;
+                }
+                
+                // Consume gas (likely path) - use pre-computed constant_gas
+                if (entry.constant_gas > 0) {
+                    @branchHint(.likely);
+                    Log.debug("Consuming {} gas for opcode 0x{x:0>2}", .{ entry.constant_gas, opcode_byte });
+                    frame.consume_gas(entry.constant_gas) catch |err| break :exec_blk err;
+                }
             }
             
             // Execute the operation
-            const res = operation.execute(pc, interpreter, state) catch |err| break :blk err;
+            const res = operation.execute(pc, interpreter, state) catch |err| break :exec_blk err;
             Log.debug("Opcode 0x{x:0>2} completed, gas_remaining={}", .{ opcode_byte, frame.gas_remaining });
-            break :blk res;
+            break :exec_blk res;
         };
         
         // Handle execution result
