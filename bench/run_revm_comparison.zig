@@ -54,7 +54,7 @@ fn compareSimpleContract(allocator: std.mem.Allocator) !void {
         defer memory_db.deinit();
         
         const db_interface = memory_db.to_database_interface();
-        var vm = try Vm.init(allocator, db_interface, null, null, null, null, 0, false, null);
+        var vm = try Vm.init(allocator, db_interface, null, null, null, null, 0, false);
         defer vm.deinit();
         
         try vm.state.set_balance(caller, 1000000);
@@ -141,7 +141,7 @@ fn compareArithmeticOps(allocator: std.mem.Allocator) !void {
             defer memory_db.deinit();
             
             const db_interface = memory_db.to_database_interface();
-            var vm = try Vm.init(allocator, db_interface, null, null, null, null, 0, false, null);
+            var vm = try Vm.init(allocator, db_interface, null, null, null, null, 0, false);
             defer vm.deinit();
             
             const caller = Address.from_u256(0x1000);
@@ -232,7 +232,7 @@ fn compareMemoryOps(allocator: std.mem.Allocator) !void {
             defer memory_db.deinit();
             
             const db_interface = memory_db.to_database_interface();
-            var vm = try Vm.init(allocator, db_interface, null, null, null, null, 0, false, null);
+            var vm = try Vm.init(allocator, db_interface, null, null, null, null, 0, false);
             defer vm.deinit();
             
             const caller = Address.from_u256(0x1000);
