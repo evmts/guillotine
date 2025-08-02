@@ -141,7 +141,7 @@ pub fn append_unsafe(self: *Stack, value: u256) void {
     
     std.debug.assert(self.size() < CAPACITY); // Help compiler know we won't overflow
     self.top.?[0] = value;
-    self.top.? += 1;
+    self.top = @ptrFromInt(@intFromPtr(self.top.?) + @sizeOf(u256));
 }
 
 /// Pop a value from the stack (safe version).
@@ -188,7 +188,7 @@ pub fn pop_unsafe(self: *Stack) u256 {
     defer zone.end();
     
     std.debug.assert(self.size() > 0); // Help compiler know we won't underflow
-    self.top.? -= 1;
+    self.top = @ptrFromInt(@intFromPtr(self.top.?) - @sizeOf(u256));
     const value = self.top.?[0];
     self.top.?[0] = 0;
     return value;
