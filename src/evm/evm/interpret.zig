@@ -244,7 +244,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             
             // Check if this block is eligible for fast path execution and has extended entries
             const analysis = contract.analysis.?;
-            if (block.fast_path_eligible and !block.has_external_calls and !block.has_dynamic_jumps and analysis.extended_entries != null) {
+            if (block.only_hot_opcodes and !block.has_external_calls and !block.has_dynamic_jumps and analysis.extended_entries != null) {
                 Log.debug("Entering fast path for block {} from pc={} to pc={}", .{ current_block_idx.?, pc, block_end_pc });
                 
                 const extended_entries = analysis.extended_entries.?;
@@ -273,31 +273,97 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                     Log.debug("Fast path executing opcode 0x{x:0>2} at pc={}", .{ opcode_byte_fast, pc });
                     
                     // Direct dispatch with inlined hot opcodes
-                    // Start with only safe operations to avoid memory issues
+                    // No fallback - only blocks with ONLY these opcodes use fast path
                     switch (opcode_byte_fast) {
-                        0x01 => { // ADD - fully inline
+                        0x01 => { // ADD
                             const b = frame.stack.pop_unsafe();
                             const a = frame.stack.peek_unsafe().*;
-                            const result = a +% b;
-                            frame.stack.set_top_unsafe(result);
+                            frame.stack.set_top_unsafe(a +% b);
                             pc += 1;
                         },
-                        0x60 => { // PUSH1 - fully inline
+                        0x03 => { // SUB  
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(a -% b);
+                            pc += 1;
+                        },
+                        0x02 => { // MUL
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(a *% b);
+                            pc += 1;
+                        },
+                        0x16 => { // AND
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(a & b);
+                            pc += 1;
+                        },
+                        0x17 => { // OR
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(a | b);
+                            pc += 1;
+                        },
+                        0x18 => { // XOR
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(a ^ b);
+                            pc += 1;
+                        },
+                        0x10 => { // LT
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(if (a < b) 1 else 0);
+                            pc += 1;
+                        },
+                        0x11 => { // GT
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(if (a > b) 1 else 0);
+                            pc += 1;
+                        },
+                        0x14 => { // EQ
+                            const b = frame.stack.pop_unsafe();
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(if (a == b) 1 else 0);
+                            pc += 1;
+                        },
+                        0x15 => { // ISZERO
+                            const a = frame.stack.peek_unsafe().*;
+                            frame.stack.set_top_unsafe(if (a == 0) 1 else 0);
+                            pc += 1;
+                        },
+                        0x60 => { // PUSH1
                             const value: u256 = if (pc + 1 < contract.code.len) contract.code[pc + 1] else 0;
                             frame.stack.append_unsafe(value);
                             pc += 2;
                         },
+                        0x61 => { // PUSH2
+                            var value: u256 = 0;
+                            if (pc + 1 < contract.code.len) value |= @as(u256, contract.code[pc + 1]) << 8;
+                            if (pc + 2 < contract.code.len) value |= contract.code[pc + 2];
+                            frame.stack.append_unsafe(value);
+                            pc += 3;
+                        },
+                        0x80 => { // DUP1
+                            const value = frame.stack.peek_unsafe().*;
+                            frame.stack.append_unsafe(value);
+                            pc += 1;
+                        },
+                        0x90 => { // SWAP1
+                            const top = frame.stack.data[frame.stack.size() - 1];
+                            const second = frame.stack.data[frame.stack.size() - 2];
+                            frame.stack.data[frame.stack.size() - 1] = second;
+                            frame.stack.data[frame.stack.size() - 2] = top;
+                            pc += 1;
+                        },
                         0x00 => { // STOP
-                            Log.debug("Fast path STOP at pc={}", .{pc});
                             contract.gas = frame.gas_remaining;
                             self.return_data = &[_]u8{};
                             return RunResult.init(initial_gas, frame.gas_remaining, .Success, null, null);
                         },
-                        else => {
-                            // All other opcodes - fall back to slow path
-                            Log.debug("Fast path fallback for opcode 0x{x:0>2} at pc={}", .{ opcode_byte_fast, pc });
-                            break;
-                        }
+                        else => unreachable, // Block analysis ensures only compatible opcodes
                     }
                     
                     // Check if we've completed the block
@@ -308,11 +374,9 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                     }
                 }
                 
-                // If we completed the block without breaking, skip slow path execution
-                if (pc > block_end_pc) {
-                    block_validated = false;
-                    continue;
-                }
+                // Fast path completed the entire block
+                block_validated = false;
+                continue; // Skip slow path entirely
             }
         }
 
