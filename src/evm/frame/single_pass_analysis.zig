@@ -233,6 +233,12 @@ const BlockAnalysis = struct {
             .terminator = self.terminator,
             .static_jump_target = self.static_jump_target,
             .static_jump_valid = self.static_jump_valid,
+            // NEW: Set fast path metadata - for now, conservatively enable for simple blocks
+            .fast_path_eligible = true,
+            .has_external_calls = false, // TODO: Detect during analysis
+            .has_dynamic_jumps = false,  // TODO: Detect during analysis  
+            .memory_expansion = 0,       // TODO: Calculate during analysis
+            .only_hot_opcodes = false,   // DISABLED: Need proper opcode analysis first
         };
     }
 };

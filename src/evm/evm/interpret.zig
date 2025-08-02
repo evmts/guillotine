@@ -102,6 +102,13 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     var pc_to_block_map = if (contract.analysis) |analysis| analysis.pc_to_block else null;
     var current_block_idx: ?u32 = null;
     var block_validated = false;
+    
+    // DEBUG: Log block analysis status
+    if (blocks) |block_array| {
+        Log.debug("CODE ANALYSIS: Found {} blocks for contract", .{block_array.len});
+    } else {
+        Log.debug("CODE ANALYSIS: No blocks found for contract");
+    }
 
     // Main execution loop - the heart of the EVM
     const execution_loop_zone = tracy.zone(@src(), "execution_loop\x00");
@@ -190,7 +197,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                         if (blocks) |block_array| {
                             if (block_idx < block_array.len) {
                                 const block = block_array[block_idx];
-                                Log.debug("Entering block {} at pc={}, gas_cost={}, stack_req={}, stack_max_growth={}, start_pc={}, end_pc={}", .{ block_idx, pc, block.gas_cost, block.stack_req, block.stack_max_growth, block.start_pc, block.end_pc });
+                                Log.debug("BLOCK VALIDATION: Entering block {} at pc={}, gas_cost={}, stack_req={}, stack_max_growth={}, start_pc={}, end_pc={}, only_hot_opcodes={}", .{ block_idx, pc, block.gas_cost, block.stack_req, block.stack_max_growth, block.start_pc, block.end_pc, block.only_hot_opcodes });
 
                                 // Validate stack requirements for the block
                                 const stack_validation_zone = tracy.zone(@src(), "block_stack_validation\x00");
