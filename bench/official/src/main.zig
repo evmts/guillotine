@@ -52,7 +52,7 @@ pub fn main() !void {
 
     if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
-        const evms = [_][]const u8{ "zig", "revm", "ethereumjs", "geth", "evmone" };
+        const evms = [_][]const u8{ "zig", "revm", "ethereumjs", "geth" };
         
         var all_results = std.ArrayList(Orchestrator.BenchmarkResult).init(allocator);
         defer all_results.deinit();
@@ -140,7 +140,7 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     } else {
         try file.writer().print("**Test Runs per Case**: {}\n", .{num_runs});
     }
-    try file.writer().print("**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
+    try file.writer().print("**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go)\n", .{});
     try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
     
     // Group results by test case
@@ -221,8 +221,8 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     
     // Add summary statistics
     try file.writer().print("## Overall Performance Summary\n\n", .{});
-    try file.writeAll("| Test Case | Guillotine (ms) | REVM (ms) | EthereumJS (ms) | Geth (ms) | evmone (ms) |\n");
-    try file.writeAll("|-----------|-----------------|-----------|-----------|-----------|-------------|\n");
+    try file.writeAll("| Test Case | Guillotine (ms) | REVM (ms) | EthereumJS (ms) | Geth (ms) |\n");
+    try file.writeAll("|-----------|-----------------|-----------|-----------|-----------|-------|\n");
     
     for (test_cases_list.items) |test_case| {
         var zig_mean: f64 = 0;
