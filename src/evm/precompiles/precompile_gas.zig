@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const gas_constants = primitives.GasConstants;
+const tracy = @import("../tracy_support.zig");
 
 /// Gas calculation utilities for precompiles
 ///
@@ -127,6 +128,9 @@ pub inline fn executeHashPrecompile(
     output: []u8,
     gas_limit: u64,
 ) @import("precompile_result.zig").PrecompileOutput {
+    const zone = tracy.zone(@src(), "hash_precompile_execute\x00");
+    defer zone.end();
+    
     const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
     const PrecompileError = @import("precompile_result.zig").PrecompileError;
 

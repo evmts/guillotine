@@ -3,6 +3,7 @@ const PrecompileResult = @import("precompile_result.zig").PrecompileResult;
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const gas_utils = @import("precompile_gas.zig");
+const tracy = @import("../tracy_support.zig");
 
 /// IDENTITY precompile implementation (address 0x04)
 ///
@@ -81,6 +82,9 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// @param gas_limit Maximum gas available for this operation
 /// @return PrecompileOutput containing success/failure and gas usage
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput {
+    const zone = tracy.zone(@src(), "identity_execute\x00");
+    defer zone.end();
+    
     // Calculate gas cost for this input size
     const gas_cost = calculate_gas_checked(input.len) catch {
         @branchHint(.cold);

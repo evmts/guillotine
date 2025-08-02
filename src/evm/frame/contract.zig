@@ -48,6 +48,7 @@ const AnalysisLRUCache = @import("analysis_lru_cache.zig").AnalysisLRUCache;
 const AnalysisCacheConfig = @import("analysis_lru_cache.zig").AnalysisCacheConfig;
 const StoragePool = @import("storage_pool.zig");
 const Log = @import("../log.zig");
+const tracy = @import("../tracy_support.zig");
 const build_options = @import("build_options");
 const block_analysis = @import("block_analysis.zig");
 const ThreadedAnalysis = @import("threaded_instruction.zig").ThreadedAnalysis;
@@ -542,6 +543,9 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
 
 /// Ensure code analysis is performed
 fn ensure_analysis(self: *Contract, allocator: std.mem.Allocator) void {
+    const zone = tracy.zone(@src(), "ensure_analysis\x00");
+    defer zone.end();
+    
     if (self.analysis == null and self.code.len > 0) {
         self.analysis = analyze_code(allocator, self.code, self.code_hash, null) catch |err| {
             logError("Contract.ensure_analysis: analyze_code failed", err);
@@ -889,6 +893,9 @@ pub fn getAsyncAnalysisResult(context: *AsyncAnalysisContext) ?CodeAnalysisError
 }
 
 pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8, jump_table: ?*const @import("../jump_table/jump_table.zig")) CodeAnalysisError!*const CodeAnalysis {
+    const zone = tracy.zone(@src(), "analyze_code\x00");
+    defer zone.end();
+    
     // Temporarily disable SIMD optimization to fix signal 4 errors on ARM64
     // TODO: Re-enable when SIMD implementation is fixed for ARM64
     // if (comptime builtin.target.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) {
@@ -1409,6 +1416,9 @@ pub fn clear_analysis_cache(allocator: std.mem.Allocator) void {
 
 /// Analyze jump destinations - public wrapper for ensure_analysis
 pub fn analyze_jumpdests(self: *Contract, allocator: std.mem.Allocator) void {
+    const zone = tracy.zone(@src(), "analyze_jumpdests\x00");
+    defer zone.end();
+    
     self.ensure_analysis(allocator);
 }
 

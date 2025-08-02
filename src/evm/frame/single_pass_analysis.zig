@@ -8,6 +8,7 @@ const BlockTerminator = CodeAnalysis.BlockTerminator;
 const bitvec = @import("bitvec.zig");
 const JumpTable = @import("../jump_table/jump_table.zig");
 const Log = @import("../log.zig");
+const tracy = @import("../tracy_support.zig");
 
 /// Single-pass code analysis that builds all analysis data in one scan.
 /// This approach improves cache efficiency and reduces overhead compared to multi-pass analysis.
@@ -17,6 +18,9 @@ pub fn analyzeSinglePass(
     _: [32]u8,
     jt: ?*const JumpTable.JumpTable,
 ) !*CodeAnalysis {
+    const zone = tracy.zone(@src(), "analyze_single_pass\x00");
+    defer zone.end();
+    
     const analysis = try allocator.create(CodeAnalysis);
     errdefer allocator.destroy(analysis);
 

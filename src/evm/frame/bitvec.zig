@@ -1,5 +1,6 @@
 const std = @import("std");
 const opcode = @import("../opcodes/opcode.zig");
+const tracy = @import("../tracy_support.zig");
 
 // Default BitVec type using u64 for optimal performance on 64-bit systems
 pub const BitVec64 = BitVec(u64);
@@ -129,6 +130,9 @@ pub fn BitVec(comptime T: type) type {
 
         /// Analyze bytecode to identify valid JUMPDEST locations and code segments
         pub fn codeBitmap(allocator: std.mem.Allocator, code: []const u8) CodeBitmapError!Self {
+            const zone = tracy.zone(@src(), "code_bitmap\x00");
+            defer zone.end();
+            
             var bitmap = try Self.init(allocator, code.len);
             errdefer bitmap.deinit(allocator);
 
