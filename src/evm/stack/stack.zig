@@ -134,6 +134,7 @@ pub fn append(self: *Stack, value: u256) Error!void {
 /// @param value The 256-bit value to push
 pub fn append_unsafe(self: *Stack, value: u256) void {
     @branchHint(.likely);
+    @setRuntimeSafety(false);
     
     const zone = tracy.zone(@src(), "stack_append_unsafe\x00");
     defer zone.end();
@@ -181,6 +182,7 @@ pub fn pop(self: *Stack) Error!u256 {
 /// @return The popped value
 pub fn pop_unsafe(self: *Stack) u256 {
     @branchHint(.likely);
+    @setRuntimeSafety(false);
     
     const zone = tracy.zone(@src(), "stack_pop_unsafe\x00");
     defer zone.end();
@@ -200,6 +202,7 @@ pub fn pop_unsafe(self: *Stack) u256 {
 /// @return Pointer to the top value
 pub fn peek_unsafe(self: *const Stack) *const u256 {
     @branchHint(.likely);
+    @setRuntimeSafety(false);
     std.debug.assert(self.size() > 0); // Help compiler know bounds are valid
     return &(self.top.? - 1)[0];
 }
@@ -254,6 +257,7 @@ pub fn pop3_unsafe(self: *Stack) Pop3Result {
 
 pub fn set_top_unsafe(self: *Stack, value: u256) void {
     @branchHint(.likely);
+    @setRuntimeSafety(false);
     // Assumes stack is not empty; this should be guaranteed by jump_table validation
     // for opcodes that use this pattern (e.g., after a pop and peek on a stack with >= 2 items).
     std.debug.assert(self.size() > 0); // Stack must not be empty
@@ -270,6 +274,7 @@ pub fn set_top_unsafe(self: *Stack, value: u256) void {
 /// @param n Position below top to swap with (1-16)
 pub fn swap_unsafe(self: *Stack, n: usize) void {
     @branchHint(.likely);
+    @setRuntimeSafety(false);
     std.debug.assert(self.size() > n); // We have enough items to swap
     std.mem.swap(u256, &(self.top.? - 1)[0], &(self.top.? - 1 - @as(usize, @intCast(n)))[0]);
 }
