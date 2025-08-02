@@ -10,6 +10,18 @@ const JumpTable = @import("../jump_table/jump_table.zig");
 const Log = @import("../log.zig");
 const tracy = @import("../tracy_support.zig");
 
+/// Calculate the size of an instruction at a given PC position
+fn calculateInstructionSize(opcode_byte: u8, pc: usize, code: []const u8) u8 {
+    if (opcode.is_push(opcode_byte)) {
+        const push_size = opcode.get_push_size(opcode_byte);
+        // Ensure we don't read past code boundary
+        const available_bytes = code.len - pc;
+        const actual_size = @min(push_size + 1, available_bytes);
+        return @intCast(actual_size);
+    }
+    return 1;
+}
+
 /// Single-pass code analysis that builds all analysis data in one scan.
 /// This approach improves cache efficiency and reduces overhead compared to multi-pass analysis.
 pub fn analyzeSinglePass(
@@ -41,11 +53,21 @@ pub fn analyzeSinglePass(
         .start_block_idx = 0,
     };
 
-    // Build PC-to-operation table if jump table provided
+    // ALWAYS build extended entries table for maximum performance
+    var extended_entries: []CodeAnalysis.ExtendedPcToOpEntry = undefined;
     var pc_to_op_entries: ?[]CodeAnalysis.PcToOpEntry = null;
-    if (jt != null) {
+    
+    if (jt) |_| {
+        extended_entries = try allocator.alloc(CodeAnalysis.ExtendedPcToOpEntry, code.len);
+        errdefer allocator.free(extended_entries);
+        
+        // Also build legacy entries for compatibility during transition
         pc_to_op_entries = try allocator.alloc(CodeAnalysis.PcToOpEntry, code.len);
         errdefer allocator.free(pc_to_op_entries.?);
+    } else {
+        // Even without jump table, allocate extended entries with default values
+        extended_entries = try allocator.alloc(CodeAnalysis.ExtendedPcToOpEntry, code.len);
+        errdefer allocator.free(extended_entries);
     }
 
     // Single pass through bytecode
@@ -53,10 +75,28 @@ pub fn analyzeSinglePass(
     while (i < code.len) {
         const op = code[i];
         
-        // Store operation entry if building table
-        if (pc_to_op_entries) |entries| {
-            if (jt) |table| {
-                const operation = table.table[op];
+        // ALWAYS populate extended entries for maximum performance
+        if (jt) |table| {
+            const operation = table.table[op];
+            const instruction_size = calculateInstructionSize(op, i, code);
+            
+            extended_entries[i] = CodeAnalysis.ExtendedPcToOpEntry{
+                .operation = operation,
+                .opcode_byte = op,
+                .min_stack = operation.min_stack,
+                .max_stack = operation.max_stack,
+                .constant_gas = operation.constant_gas,
+                .undefined = operation.undefined,
+                .arg = .none, // TODO: Extract arguments if needed
+                .size = instruction_size,
+                .is_jump = (op == 0x56 or op == 0x57), // JUMP or JUMPI
+                .is_push = (op >= 0x60 and op <= 0x7f), // PUSH1-PUSH32
+                .push_size = if (op >= 0x60 and op <= 0x7f) op - 0x5f else 0,
+                .stack_delta = @intCast(getStackChange(op)),
+            };
+            
+            // Also populate legacy entries for compatibility
+            if (pc_to_op_entries) |entries| {
                 entries[i] = CodeAnalysis.PcToOpEntry{
                     .operation = operation,
                     .opcode_byte = op,
@@ -66,6 +106,22 @@ pub fn analyzeSinglePass(
                     .undefined = operation.undefined,
                 };
             }
+        } else {
+            // Fallback: create entries with minimal operation info (for size-optimized builds)
+            extended_entries[i] = CodeAnalysis.ExtendedPcToOpEntry{
+                .operation = undefined, // Will not be used without jump table
+                .opcode_byte = op,
+                .min_stack = 0,
+                .max_stack = 0,
+                .constant_gas = 0,
+                .undefined = true,
+                .arg = .none,
+                .size = calculateInstructionSize(op, i, code),
+                .is_jump = (op == 0x56 or op == 0x57),
+                .is_push = (op >= 0x60 and op <= 0x7f),
+                .push_size = if (op >= 0x60 and op <= 0x7f) op - 0x5f else 0,
+                .stack_delta = @intCast(getStackChange(op)),
+            };
         }
 
         // Handle JUMPDEST opcodes
@@ -203,6 +259,8 @@ pub fn analyzeSinglePass(
     analysis.blocks = try blocks.toOwnedSlice();
     analysis.pc_to_block = pc_to_block;
     analysis.pc_to_op_entries = pc_to_op_entries;
+    analysis.extended_entries = extended_entries; // ALWAYS present for performance
+    analysis.large_push_values = null; // TODO: Extract large PUSH values if needed
     analysis.max_stack_depth = 0; // TODO: Calculate during pass
     analysis.block_gas_costs = null; // TODO: Extract if needed
     analysis.has_static_jumps = false; // TODO: Track during pass

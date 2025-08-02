@@ -127,7 +127,8 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         const pc_index: usize = @intCast(pc);
 
         const entry_lookup_zone = tracy.zone(@src(), "entry_lookup\x00");
-        // Try extended entries first (best performance)
+        
+        // OPTIMIZED: Direct access to extended entries (ALWAYS present)
         const extended_entry = if (contract.analysis) |analysis| blk: {
             if (analysis.extended_entries) |extended| {
                 if (pc_index < extended.len) {
@@ -137,8 +138,9 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             break :blk null;
         } else null;
 
+        // Use extended entry directly or fall back to old method
         const entry = if (extended_entry) |ext_entry|
-            // Convert extended to basic format
+            // Convert extended to basic format for now (during transition)
             CodeAnalysis.PcToOpEntry{
                 .operation = ext_entry.operation,
                 .opcode_byte = ext_entry.opcode_byte,

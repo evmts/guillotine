@@ -379,7 +379,7 @@ pub fn init(
         .code_size = code.len,
         .input = input,
         .is_static = is_static,
-        .analysis = null,
+        .analysis = null, // Analysis will be triggered on first access
         .storage_access = null,
         .original_storage = null,
         .is_cold = true,
@@ -998,6 +998,11 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     analysis.blocks = null;
     analysis.pc_to_block = null;
     analysis.pc_to_op_entries = null;
+    
+    // Only build extended entries if we don't have a jump table
+    // (When we have a jump table, single_pass_analysis will build them)
+    analysis.extended_entries = null;
+    analysis.large_push_values = null;
 
     // Cache the analysis in appropriate cache
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {

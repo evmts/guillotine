@@ -84,6 +84,15 @@ pub const ExtendedPcToOpEntry = struct {
     
     /// NEW: Actual instruction size (1-33 bytes)
     size: u8,
+    
+    /// NEW: Pre-computed fields for fast execution
+    is_jump: bool,
+    is_push: bool,
+    push_size: u8,
+    stack_delta: i8,
+    
+    /// Padding to optimize cache line usage
+    _padding: [3]u8 = undefined,
 };
 
 /// Advanced code analysis for EVM bytecode optimization.
@@ -198,6 +207,19 @@ blocks: ?[]const BlockInfo,
 /// containing that instruction. Enables O(1) block lookup during execution.
 pc_to_block: ?[]const u32,
 
+/// Calculate the size of an instruction at a given PC position
+fn calculateInstructionSize(opcode_byte: u8, pc: usize, code: []const u8) u8 {
+    const opcode_module = @import("../opcodes/opcode.zig");
+    if (opcode_module.is_push(opcode_byte)) {
+        const push_size = opcode_module.get_push_size(opcode_byte);
+        // Ensure we don't read past code boundary
+        const available_bytes = code.len - pc;
+        const actual_size = @min(push_size + 1, available_bytes);
+        return @intCast(actual_size);
+    }
+    return 1;
+}
+
 /// Releases all memory allocated by this code analysis.
 ///
 /// This method must be called when the analysis is no longer needed to prevent
@@ -229,6 +251,12 @@ pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
     }
     if (self.pc_to_op_entries) |entries| {
         allocator.free(entries);
+    }
+    if (self.extended_entries) |entries| {
+        allocator.free(entries);
+    }
+    if (self.large_push_values) |values| {
+        allocator.free(values);
     }
     if (self.blocks) |blocks| {
         allocator.free(blocks);
@@ -331,4 +359,161 @@ test "PC-to-block mapping" {
     try expectEqual(@as(u32, 1), analysis.pc_to_block.?[3]); // PUSH1
     try expectEqual(@as(u32, 1), analysis.pc_to_block.?[4]); // 0x03
     try expectEqual(@as(u32, 1), analysis.pc_to_block.?[5]); // STOP
+}
+
+test "mandatory extended entries for empty code" {
+    const allocator = std.testing.allocator;
+    const expect = std.testing.expect;
+    const expectEqual = std.testing.expectEqual;
+    const Contract = @import("contract.zig");
+    
+    const code = [_]u8{};
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&code, &hash);
+    
+    var jump_table = @import("../jump_table/jump_table.zig").init(.CANCUN);
+    const analysis = try Contract.analyze_code(allocator, &code, hash, &jump_table);
+    defer {
+        var mut_analysis = @constCast(analysis);
+        mut_analysis.deinit(allocator);
+        allocator.destroy(mut_analysis);
+    }
+    
+    // Even empty code should have extended entries array
+    try expect(analysis.extended_entries != null);
+    try expectEqual(@as(usize, 0), analysis.extended_entries.?.len);
+}
+
+test "mandatory extended entries for simple code" {
+    const allocator = std.testing.allocator;
+    const expect = std.testing.expect;
+    const expectEqual = std.testing.expectEqual;
+    const Contract = @import("contract.zig");
+    
+    // PUSH1 0x42 PUSH1 0x33 ADD STOP
+    const code = [_]u8{0x60, 0x42, 0x60, 0x33, 0x01, 0x00};
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&code, &hash);
+    
+    var jump_table = @import("../jump_table/jump_table.zig").init(.CANCUN);
+    const analysis = try Contract.analyze_code(allocator, &code, hash, &jump_table);
+    defer {
+        var mut_analysis = @constCast(analysis);
+        mut_analysis.deinit(allocator);
+        allocator.destroy(mut_analysis);
+    }
+    
+    // Extended entries must always be present
+    try expect(analysis.extended_entries != null);
+    try expectEqual(@as(usize, 6), analysis.extended_entries.?.len);
+    
+    // Check specific entries
+    const entries = analysis.extended_entries.?;
+    
+    // PUSH1 at PC 0
+    try expectEqual(@as(u8, 0x60), entries[0].opcode_byte);
+    try expectEqual(@as(u8, 2), entries[0].size); // PUSH1 is 2 bytes total
+    try expect(entries[0].is_push);
+    try expectEqual(@as(u8, 1), entries[0].push_size);
+    try expect(!entries[0].is_jump);
+    
+    // Data byte at PC 1 (0x42)
+    try expectEqual(@as(u8, 0x42), entries[1].opcode_byte);
+    try expectEqual(@as(u8, 1), entries[1].size);
+    try expect(!entries[1].is_push);
+    try expect(!entries[1].is_jump);
+    
+    // PUSH1 at PC 2
+    try expectEqual(@as(u8, 0x60), entries[2].opcode_byte);
+    try expectEqual(@as(u8, 2), entries[2].size);
+    try expect(entries[2].is_push);
+    try expectEqual(@as(u8, 1), entries[2].push_size);
+    
+    // Data byte at PC 3 (0x33)
+    try expectEqual(@as(u8, 0x33), entries[3].opcode_byte);
+    try expectEqual(@as(u8, 1), entries[3].size);
+    
+    // ADD at PC 4
+    try expectEqual(@as(u8, 0x01), entries[4].opcode_byte);
+    try expectEqual(@as(u8, 1), entries[4].size);
+    try expect(!entries[4].is_push);
+    try expect(!entries[4].is_jump);
+    
+    // STOP at PC 5
+    try expectEqual(@as(u8, 0x00), entries[5].opcode_byte);
+    try expectEqual(@as(u8, 1), entries[5].size);
+    try expect(!entries[5].is_push);
+    try expect(!entries[5].is_jump);
+}
+
+test "mandatory extended entries with jumps" {
+    const allocator = std.testing.allocator;
+    const expect = std.testing.expect;
+    const expectEqual = std.testing.expectEqual;
+    const Contract = @import("contract.zig");
+    
+    // PUSH1 0x05 JUMP INVALID JUMPDEST STOP
+    const code = [_]u8{0x60, 0x05, 0x56, 0xfe, 0x5b, 0x00};
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&code, &hash);
+    
+    var jump_table = @import("../jump_table/jump_table.zig").init(.CANCUN);
+    const analysis = try Contract.analyze_code(allocator, &code, hash, &jump_table);
+    defer {
+        var mut_analysis = @constCast(analysis);
+        mut_analysis.deinit(allocator);
+        allocator.destroy(mut_analysis);
+    }
+    
+    // Extended entries must always be present
+    try expect(analysis.extended_entries != null);
+    try expectEqual(@as(usize, 6), analysis.extended_entries.?.len);
+    
+    const entries = analysis.extended_entries.?;
+    
+    // PUSH1 at PC 0
+    try expectEqual(@as(u8, 0x60), entries[0].opcode_byte);
+    try expect(entries[0].is_push);
+    try expect(!entries[0].is_jump);
+    
+    // JUMP at PC 2
+    try expectEqual(@as(u8, 0x56), entries[2].opcode_byte);
+    try expect(!entries[2].is_push);
+    try expect(entries[2].is_jump);
+    
+    // JUMPDEST at PC 4
+    try expectEqual(@as(u8, 0x5b), entries[4].opcode_byte);
+    try expect(!entries[4].is_push);
+    try expect(!entries[4].is_jump);
+}
+
+test "extended entries have complete operation data" {
+    const allocator = std.testing.allocator;
+    const expect = std.testing.expect;
+    const expectEqual = std.testing.expectEqual;
+    const Contract = @import("contract.zig");
+    
+    // Simple ADD operation
+    const code = [_]u8{0x01}; // ADD
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(&code, &hash);
+    
+    var jump_table = @import("../jump_table/jump_table.zig").init(.CANCUN);
+    const analysis = try Contract.analyze_code(allocator, &code, hash, &jump_table);
+    defer {
+        var mut_analysis = @constCast(analysis);
+        mut_analysis.deinit(allocator);
+        allocator.destroy(mut_analysis);
+    }
+    
+    try expect(analysis.extended_entries != null);
+    try expectEqual(@as(usize, 1), analysis.extended_entries.?.len);
+    
+    const entry = analysis.extended_entries.?[0];
+    try expectEqual(@as(u8, 0x01), entry.opcode_byte);
+    try expect(entry.operation != null);
+    try expectEqual(@as(u32, 2), entry.min_stack); // ADD requires 2 stack items
+    try expectEqual(@as(u32, 1), entry.max_stack); // ADD produces 1 stack item
+    try expectEqual(@as(u64, 3), entry.constant_gas); // ADD costs 3 gas
+    try expect(!entry.undefined);
 }
