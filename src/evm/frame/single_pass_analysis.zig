@@ -238,7 +238,7 @@ const BlockAnalysis = struct {
             .has_external_calls = false, // TODO: Detect during analysis
             .has_dynamic_jumps = false,  // TODO: Detect during analysis  
             .memory_expansion = 0,       // TODO: Calculate during analysis
-            .only_hot_opcodes = false,   // DISABLED: Need proper opcode analysis first
+            .only_hot_opcodes = true,    // TEMPORARILY ENABLED for testing - TODO: proper analysis
         };
     }
 };
