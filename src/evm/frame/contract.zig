@@ -549,7 +549,7 @@ fn ensure_analysis(self: *Contract, allocator: std.mem.Allocator) void {
     if (self.analysis == null and self.code.len > 0) {
         // MANDATORY: Use single-pass analysis with jump table for extended entries
         const JumpTable = @import("../jump_table/jump_table.zig");
-        var jump_table = JumpTable.init(.CANCUN); // Use latest hardfork for maximum optimization
+        var jump_table = JumpTable.init(); // Use jump table for complete operation metadata
         
         self.analysis = analyze_code(allocator, self.code, self.code_hash, &jump_table) catch |err| {
             logError("Contract.ensure_analysis: analyze_code failed", err);

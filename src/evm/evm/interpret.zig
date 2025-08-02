@@ -296,8 +296,8 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 Log.debug("PC changed by opcode - old_pc={}, frame.pc={}, jumping to frame.pc", .{ pc, frame.pc });
                 pc = frame.pc;
             } else {
-                // Use extended entry size if available (more accurate for PUSH)
-                const bytes_to_consume = if (extended_entry) |ext_entry| ext_entry.size else result.bytes_consumed;
+                // Use extended entry size (always available with mandatory analysis)
+                const bytes_to_consume = extended_entry.size;
                 Log.debug("PC unchanged by opcode - pc={}, frame.pc={}, advancing by {} bytes", .{ pc, frame.pc, bytes_to_consume });
                 pc += bytes_to_consume;
             }
