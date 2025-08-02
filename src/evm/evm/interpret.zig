@@ -102,7 +102,24 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         
         // Use pre-computed entry table if available for maximum performance
         const pc_index: usize = @intCast(pc);
-        const entry = if (pc_to_op_entry_table) |table| 
+        
+        // Try extended entries first (best performance)
+        const extended_entry = if (contract.analysis) |analysis| 
+            if (analysis.extended_entries) |extended| &extended[pc_index] else null
+        else 
+            null;
+        
+        const entry = if (extended_entry) |ext_entry|
+            // Convert extended to basic format
+            CodeAnalysis.PcToOpEntry{
+                .operation = ext_entry.operation,
+                .opcode_byte = ext_entry.opcode_byte,
+                .min_stack = ext_entry.min_stack,
+                .max_stack = ext_entry.max_stack,
+                .constant_gas = ext_entry.constant_gas,
+                .undefined = ext_entry.undefined,
+            }
+        else if (pc_to_op_entry_table) |table| 
             table[pc_index]
         else blk: {
             // Fallback: build entry on the fly
@@ -225,8 +242,10 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 Log.debug("PC changed by opcode - old_pc={}, frame.pc={}, jumping to frame.pc", .{ pc, frame.pc });
                 pc = frame.pc;
             } else {
-                Log.debug("PC unchanged by opcode - pc={}, frame.pc={}, advancing by {} bytes", .{ pc, frame.pc, result.bytes_consumed });
-                pc += result.bytes_consumed;
+                // Use extended entry size if available (more accurate for PUSH)
+                const bytes_to_consume = if (extended_entry) |ext_entry| ext_entry.size else result.bytes_consumed;
+                Log.debug("PC unchanged by opcode - pc={}, frame.pc={}, advancing by {} bytes", .{ pc, frame.pc, bytes_to_consume });
+                pc += bytes_to_consume;
             }
         } else |err| {
             // Error case - handle various error conditions
