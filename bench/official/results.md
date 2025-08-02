@@ -2,9 +2,9 @@
 
 ## Summary
 
-**Test Runs per Case**: 4 (EthereumJS: 1)
-**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)
-**Timestamp**: 1754120910 (Unix epoch)
+**Test Runs per Case**: 8
+**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go)
+**Timestamp**: 1754152141 (Unix epoch)
 
 ## Performance Comparison
 
@@ -12,228 +12,66 @@
 
 | EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
 |-----|-----------|-------------|----------|----------|-------------|
-| Guillotine  |     31.30 |       30.99 |    30.89 |    32.33 |        0.69 |
-| REVM        |     26.07 |       26.09 |    25.80 |    26.31 |        0.21 |
-| EthereumJS  |   1647.73 |     1645.37 |  1632.40 |  1667.78 |       15.73 |
-| Geth        |     53.22 |       53.17 |    52.80 |    53.74 |        0.39 |
-| evmone      |      2.00 |        2.00 |     1.92 |     2.07 |        0.07 |
+| Guillotine  |     59.36 |       59.29 |    58.87 |    59.77 |        0.34 |
+| REVM        |     50.80 |       50.91 |    49.55 |    51.38 |        0.55 |
+| EthereumJS  |   3217.83 |     3214.70 |  3193.05 |  3263.66 |       22.03 |
+| Geth        |    102.67 |      102.67 |   101.92 |   104.14 |        0.69 |
 
 ### erc20-mint
 
 | EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
 |-----|-----------|-------------|----------|----------|-------------|
-| Guillotine  |     24.09 |       23.97 |    23.59 |    24.83 |        0.54 |
-| REVM        |     20.78 |       20.82 |    20.55 |    20.93 |        0.17 |
-| EthereumJS  |   1753.68 |     1754.35 |  1726.85 |  1779.17 |       22.29 |
-| Geth        |     47.31 |       47.15 |    46.82 |    48.11 |        0.56 |
-| evmone      |      1.85 |        1.85 |     1.81 |     1.91 |        0.04 |
+| Guillotine  |     44.05 |       44.05 |    43.86 |    44.30 |        0.16 |
+| REVM        |     39.52 |       39.47 |    38.30 |    40.73 |        0.89 |
+| EthereumJS  |   3403.26 |     3405.15 |  3375.83 |  3435.71 |       18.86 |
+| Geth        |     91.12 |       91.06 |    89.98 |    92.21 |        0.84 |
 
 ### erc20-transfer
 
 | EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
 |-----|-----------|-------------|----------|----------|-------------|
-| Guillotine  |     36.62 |       36.67 |    36.06 |    37.07 |        0.42 |
-| REVM        |     32.75 |       32.75 |    32.39 |    33.12 |        0.40 |
-| EthereumJS  |   2371.69 |     2366.71 |  2344.64 |  2408.68 |       26.86 |
-| Geth        |     68.29 |       68.13 |    67.38 |    69.51 |        1.01 |
-| evmone      |      1.92 |        1.91 |     1.83 |     2.02 |        0.08 |
-
-### ten-thousand-hashes
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-| Guillotine  |     15.71 |       15.61 |    15.44 |    16.16 |        0.33 |
-| REVM        |      9.70 |        9.68 |     9.52 |     9.92 |        0.17 |
-| EthereumJS  |   1111.31 |     1110.76 |  1105.13 |  1118.61 |        5.83 |
-| Geth        |     29.13 |       29.11 |    28.91 |    29.37 |        0.19 |
-| evmone      |      2.18 |        1.99 |     1.90 |     2.86 |        0.46 |
-
-### snailtracer
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-| Guillotine  |    859.25 |      859.36 |   851.93 |   866.36 |        6.05 |
-| REVM        |    285.24 |      286.30 |   281.59 |   286.79 |        2.45 |
-| EthereumJS  |  16007.24 |    16007.24 | 16007.24 | 16007.24 |        0.00 |
-| Geth        |      0.00 |        0.00 |     0.00 |     0.00 |        0.00 |
-| evmone      |      2.33 |        2.30 |     2.19 |     2.51 |        0.14 |
-
-### opcodes-arithmetic
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-arithmetic-advanced
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-bitwise
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-block-1
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-block-2
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-comparison
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-control
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-crypto
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-data
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-dup
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-environmental-1
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-environmental-2
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-jump-basic
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-memory
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
+| Guillotine  |     70.06 |       70.05 |    69.27 |    70.77 |        0.44 |
+| REVM        |     63.90 |       63.81 |    62.73 |    65.92 |        0.99 |
+| EthereumJS  |   4683.99 |     4695.59 |  4589.67 |  4744.25 |       53.72 |
+| Geth        |    138.16 |      138.34 |   136.48 |   140.39 |        1.50 |
 
 ### opcodes-push-pop
 
 | EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
 |-----|-----------|-------------|----------|----------|-------------|
-| Guillotine  |      2.58 |        2.60 |     2.39 |     2.73 |        0.16 |
-| REVM        |      1.75 |        1.76 |     1.70 |     1.78 |        0.04 |
+| Guillotine  |      2.45 |        2.40 |     2.35 |     2.66 |        0.10 |
+| REVM        |      1.84 |        1.74 |     1.65 |     2.22 |        0.23 |
 | EthereumJS  |      0.00 |        0.00 |     0.00 |     0.00 |        0.00 |
 | Geth        |      0.00 |        0.00 |     0.00 |     0.00 |        0.00 |
-| evmone      |      1.94 |        1.93 |     1.92 |     1.97 |        0.02 |
 
-### opcodes-storage-cold
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### opcodes-storage-warm
+### snailtracer
 
 | EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
 |-----|-----------|-------------|----------|----------|-------------|
+| Guillotine  |   1375.22 |     1375.34 |  1367.63 |  1380.36 |        4.90 |
+| REVM        |    658.39 |      656.84 |   654.88 |   669.42 |        4.75 |
+| EthereumJS  |  44445.04 |    44278.67 | 43975.84 | 45597.03 |      566.15 |
+| Geth        |      0.00 |        0.00 |     0.00 |     0.00 |        0.00 |
 
-### opcodes-swap
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-blake2f
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-bn256add
+### ten-thousand-hashes
 
 | EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
 |-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-bn256mul
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-bn256pairing
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-ecrecover
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-identity
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-modexp
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-ripemd160
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
-
-### precompile-sha256
-
-| EVM | Mean (ms) | Median (ms) | Min (ms) | Max (ms) | Std Dev (ms) |
-|-----|-----------|-------------|----------|----------|-------------|
+| Guillotine  |     35.70 |       35.70 |    35.08 |    36.25 |        0.33 |
+| REVM        |     17.57 |       17.65 |    17.09 |    18.06 |        0.33 |
+| EthereumJS  |   2122.01 |     2121.76 |  2098.98 |  2149.31 |       16.04 |
+| Geth        |     54.62 |       54.79 |    53.43 |    55.39 |        0.81 |
 
 ## Overall Performance Summary
 
-| Test Case | Guillotine (ms) | REVM (ms) | EthereumJS (ms) | Geth (ms) | evmone (ms) |
-|-----------|-----------------|-----------|-----------|-----------|-------------|
-| erc20-approval-transfer   |           31.30 |     26.07 |   1647.73 |     53.22 |        2.00 |
-| erc20-mint                |           24.09 |     20.78 |   1753.68 |     47.31 |        1.85 |
-| erc20-transfer            |           36.62 |     32.75 |   2371.69 |     68.29 |        1.92 |
-| ten-thousand-hashes       |           15.71 |      9.70 |   1111.31 |     29.13 |        2.18 |
-| snailtracer               |          859.25 |    285.24 |  16007.24 |      0.00 |        2.33 |
-| opcodes-arithmetic        |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-arithmetic-advanced |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-bitwise           |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-block-1           |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-block-2           |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-comparison        |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-control           |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-crypto            |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-data              |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-dup               |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-environmental-1   |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-environmental-2   |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-jump-basic        |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-memory            |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-push-pop          |            2.58 |      1.75 |      0.00 |      0.00 |        1.94 |
-| opcodes-storage-cold      |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-storage-warm      |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| opcodes-swap              |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-blake2f        |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-bn256add       |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-bn256mul       |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-bn256pairing   |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-ecrecover      |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-identity       |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-modexp         |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-ripemd160      |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
-| precompile-sha256         |            0.00 |      0.00 |      0.00 |      0.00 |        0.00 |
+| Test Case | Guillotine (ms) | REVM (ms) | EthereumJS (ms) | Geth (ms) |
+|-----------|-----------------|-----------|-----------|-----------|-------|
+| erc20-approval-transfer   |           59.36 |     50.80 |   3217.83 |    102.67 |        0.00 |
+| erc20-mint                |           44.05 |     39.52 |   3403.26 |     91.12 |        0.00 |
+| erc20-transfer            |           70.06 |     63.90 |   4683.99 |    138.16 |        0.00 |
+| opcodes-push-pop          |            2.45 |      1.84 |      0.00 |      0.00 |        0.00 |
+| snailtracer               |         1375.22 |    658.39 |  44445.04 |      0.00 |        0.00 |
+| ten-thousand-hashes       |           35.70 |     17.57 |   2122.01 |     54.62 |        0.00 |
 
 ## Notes
 

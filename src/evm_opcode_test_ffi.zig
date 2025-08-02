@@ -182,7 +182,7 @@ export fn zigStackPop(frame_ptr: ?*anyopaque) CU256 {
 export fn zigStackSize(frame_ptr: ?*anyopaque) usize {
     if (frame_ptr) |ptr| {
         const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        return wrapper.frame.stack.size;
+        return wrapper.frame.stack.size();
     }
     return 0;
 }
