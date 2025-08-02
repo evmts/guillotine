@@ -104,10 +104,14 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         const pc_index: usize = @intCast(pc);
         
         // Try extended entries first (best performance)
-        const extended_entry = if (contract.analysis) |analysis| 
-            if (analysis.extended_entries) |extended| &extended[pc_index] else null
-        else 
-            null;
+        const extended_entry = if (contract.analysis) |analysis| blk: {
+            if (analysis.extended_entries) |extended| {
+                if (pc_index < extended.len) {
+                    break :blk &extended[pc_index];
+                }
+            }
+            break :blk null;
+        } else null;
         
         const entry = if (extended_entry) |ext_entry|
             // Convert extended to basic format
