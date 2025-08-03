@@ -24,11 +24,9 @@ const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 /// Set via build options: -Dno_precompiles=true
 const no_precompiles = if (@hasDecl(build_options, "no_precompiles")) build_options.no_precompiles else false;
 
-/// Function type for precompiles that don't require chain rules
-const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput;
-
-/// Function type for precompiles that require chain rules (EC operations)
-const PrecompileFnWithChainRules = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
+/// Unified function type for all precompiles - all take chain_rules parameter
+/// Even precompiles that don't use chain_rules accept it for uniform interface
+const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
 
 /// Wrapper functions for precompiles that originally didn't take chain_rules
 /// These wrappers provide a uniform interface while ignoring the chain_rules parameter
@@ -82,34 +80,20 @@ const WrappedKzgPointEvaluation = struct {
     }
 };
 
-/// Unified precompile handler that wraps both function types
-const PrecompileHandler = union(enum) {
-    standard: PrecompileFn,
-    with_chain_rules: PrecompileFnWithChainRules,
-};
-
-/// Compile-time function table for O(1) precompile dispatch
+/// Direct function pointer table for O(1) precompile dispatch
 /// Index is (precompile_id - 1) since precompile IDs start at 1
-const PRECOMPILE_TABLE = blk: {
-    var table: [10]?PrecompileHandler = .{null} ** 10;
-    
-    // Standard precompiles (no chain rules)
-    table[0] = PrecompileHandler{ .standard = &ecrecover.execute }; // ID 1: ECRECOVER
-    table[1] = PrecompileHandler{ .standard = &sha256.execute }; // ID 2: SHA256
-    table[2] = PrecompileHandler{ .standard = &ripemd160.execute }; // ID 3: RIPEMD160
-    table[3] = PrecompileHandler{ .standard = &identity.execute }; // ID 4: IDENTITY
-    table[4] = PrecompileHandler{ .standard = &modexp.execute }; // ID 5: MODEXP
-    
-    // EC precompiles (require chain rules)
-    table[5] = PrecompileHandler{ .with_chain_rules = &ecadd.execute }; // ID 6: ECADD
-    table[6] = PrecompileHandler{ .with_chain_rules = &ecmul.execute }; // ID 7: ECMUL
-    table[7] = PrecompileHandler{ .with_chain_rules = &ecpairing.execute }; // ID 8: ECPAIRING
-    
-    // Standard precompiles
-    table[8] = PrecompileHandler{ .standard = &blake2f.execute }; // ID 9: BLAKE2F
-    table[9] = PrecompileHandler{ .standard = &kzg_point_evaluation.execute }; // ID 10: POINT_EVALUATION
-    
-    break :blk table;
+/// All functions have uniform signature - no union needed!
+const PRECOMPILE_TABLE = [_]?PrecompileFn{
+    &WrappedEcrecover.execute,           // ID 1: ECRECOVER
+    &WrappedSha256.execute,              // ID 2: SHA256
+    &WrappedRipemd160.execute,           // ID 3: RIPEMD160
+    &WrappedIdentity.execute,            // ID 4: IDENTITY
+    &WrappedModexp.execute,              // ID 5: MODEXP
+    &ecadd.execute,                      // ID 6: ECADD (already has correct signature)
+    &ecmul.execute,                      // ID 7: ECMUL (already has correct signature)
+    &ecpairing.execute,                  // ID 8: ECPAIRING (already has correct signature)
+    &WrappedBlake2f.execute,             // ID 9: BLAKE2F
+    &WrappedKzgPointEvaluation.execute,  // ID 10: POINT_EVALUATION
 };
 
 /// Main precompile dispatcher module
@@ -202,22 +186,19 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
 
         const precompile_id = addresses.get_precompile_id(address);
 
-        // Use table lookup for O(1) dispatch
+        // Use table lookup for O(1) dispatch - no union switch needed!
         if (precompile_id < 1 or precompile_id > 10) {
             @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         }
 
-        const handler = PRECOMPILE_TABLE[precompile_id - 1] orelse {
+        const fn_ptr = PRECOMPILE_TABLE[precompile_id - 1] orelse {
             @branchHint(.cold);
             return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
         };
 
-        // Dispatch based on handler type
-        return switch (handler) {
-            .standard => |fn_ptr| fn_ptr(input, output, gas_limit),
-            .with_chain_rules => |fn_ptr| fn_ptr(input, output, gas_limit, chain_rules),
-        };
+        // Direct dispatch - no switch statement needed!
+        return fn_ptr(input, output, gas_limit, chain_rules);
     }
 }
 
