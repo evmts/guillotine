@@ -87,44 +87,40 @@ func main() {
 		TerminalTotalDifficulty:       big.NewInt(0),
 	}
 	
-	// Create state database
-	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
-	
-	// Set up caller account with balance
-	statedb.CreateAccount(callerAddress)
-	statedb.SetBalance(callerAddress, uint256.MustFromBig(new(big.Int).Lsh(big.NewInt(1), 256-1)), 0) // Max balance
-	
-	// Deploy contract configuration with higher gas limit
-	cfg := runtime.Config{
-		ChainConfig: chainConfig,
-		Origin:      callerAddress,
-		GasLimit:    1_000_000_000, // Use high gas limit for deployment too
-		GasPrice:    big.NewInt(0),
-		Value:       big.NewInt(0),
-		Difficulty:  big.NewInt(0),
-		Time:        1, // Time must be > 0 for Shanghai
-		Coinbase:    common.Address{},
-		BlockNumber: big.NewInt(1),
-		State:       statedb,
-	}
-
-	// Deploy the contract first
-	deployedCode, contractAddr, _, err := runtime.Create(contractCode, &cfg)
-	if err != nil {
-		panic(fmt.Sprintf("Contract creation failed: %v", err))
-	}
-	
-	// The deployed code is automatically set by runtime.Create
-	// but we need to ensure the state is committed
-	_ = deployedCode
+	// Note: We deploy fresh for each run to avoid state accumulation issues
 
 	// Run the benchmark num_runs times
 	for i := 0; i < numRuns; i++ {
+		// Create fresh state for each run to avoid state accumulation issues
+		freshStatedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
+		freshStatedb.CreateAccount(callerAddress)
+		freshStatedb.SetBalance(callerAddress, uint256.MustFromBig(new(big.Int).Lsh(big.NewInt(1), 256-1)), 0) // Max balance
+		
+		// Create fresh config with the fresh state
+		freshCfg := runtime.Config{
+			ChainConfig: chainConfig,
+			Origin:      callerAddress,
+			GasLimit:    1_000_000_000,
+			GasPrice:    big.NewInt(0),
+			Value:       big.NewInt(0),
+			Difficulty:  big.NewInt(0),
+			Time:        1,
+			Coinbase:    common.Address{},
+			BlockNumber: big.NewInt(1),
+			State:       freshStatedb,
+		}
+		
+		// Deploy contract in fresh state
+		_, freshContractAddr, _, err := runtime.Create(contractCode, &freshCfg)
+		if err != nil {
+			panic(fmt.Sprintf("Contract creation failed in run %d: %v", i, err))
+		}
+		
 		// Start timing
 		start := time.Now()
 		
 		// Call the deployed contract
-		ret, _, err := runtime.Call(contractAddr, calldata, &cfg)
+		ret, _, err := runtime.Call(freshContractAddr, calldata, &freshCfg)
 
 		// End timing
 		duration := time.Since(start)
