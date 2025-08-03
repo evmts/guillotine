@@ -86,60 +86,10 @@ int main(int argc, char* argv[]) {
     // Create host for deployment
     evmc::MockedHost host;
     
-    // Create constructor that deploys the runtime code
-    // Constructor format: init_code + runtime_code
-    // init_code: PUSH runtime_size, PUSH (init_code_length), CODECOPY, PUSH runtime_size, PUSH 0, RETURN
+    // Deploy contract using bytecode directly as init code (like Guillotine does)
     
-    const size_t runtime_size = contract_code.size();
-    evmc::bytes constructor_code;
     
-    // PUSH runtime_size (for CODECOPY size)
-    if (runtime_size <= 0xFF) {
-        constructor_code.push_back(0x60); // PUSH1
-        constructor_code.push_back(static_cast<uint8_t>(runtime_size));
-    } else if (runtime_size <= 0xFFFF) {
-        constructor_code.push_back(0x61); // PUSH2
-        constructor_code.push_back(static_cast<uint8_t>(runtime_size >> 8));
-        constructor_code.push_back(static_cast<uint8_t>(runtime_size & 0xFF));
-    } else {
-        std::cerr << "Runtime code too large" << std::endl;
-        return 1;
-    }
     
-    // Calculate where runtime code will be (after complete constructor)
-    size_t constructor_size = constructor_code.size() + 10; // +10 for remaining bytes
-    if (runtime_size > 0xFF) constructor_size += 2; // Extra bytes for PUSH2
-    
-    // PUSH offset (where runtime code starts)
-    constructor_code.push_back(0x60); // PUSH1
-    constructor_code.push_back(static_cast<uint8_t>(constructor_size));
-    
-    // PUSH1 0 (destination in memory)
-    constructor_code.push_back(0x60); // PUSH1
-    constructor_code.push_back(0x00); // 0
-    
-    // CODECOPY (copy runtime code to memory)
-    constructor_code.push_back(0x39); // CODECOPY
-    
-    // PUSH runtime_size (for RETURN size)
-    if (runtime_size <= 0xFF) {
-        constructor_code.push_back(0x60); // PUSH1
-        constructor_code.push_back(static_cast<uint8_t>(runtime_size));
-    } else {
-        constructor_code.push_back(0x61); // PUSH2
-        constructor_code.push_back(static_cast<uint8_t>(runtime_size >> 8));
-        constructor_code.push_back(static_cast<uint8_t>(runtime_size & 0xFF));
-    }
-    
-    // PUSH1 0 (offset in memory)
-    constructor_code.push_back(0x60); // PUSH1
-    constructor_code.push_back(0x00); // 0
-    
-    // RETURN
-    constructor_code.push_back(0xf3); // RETURN
-    
-    // Append the runtime code
-    constructor_code.insert(constructor_code.end(), contract_code.begin(), contract_code.end());
     
     // Deploy contract using CREATE
     evmc_message create_msg{};
@@ -150,7 +100,7 @@ int main(int argc, char* argv[]) {
     auto create_result = evmc_execute(vm, &host.get_interface(), 
                                      (evmc_host_context*)&host,
                                      EVMC_SHANGHAI, &create_msg, 
-                                     constructor_code.data(), constructor_code.size());
+                                     contract_code.data(), contract_code.size());
     
     check_status(create_result);
     
@@ -159,12 +109,6 @@ int main(int argc, char* argv[]) {
     
     if (exec_code.empty()) {
         std::cerr << "Contract deployment failed: no runtime code returned" << std::endl;
-        return 1;
-    }
-    
-    // Verify the deployed code matches our original runtime code
-    if (exec_code.size() != runtime_size) {
-        std::cerr << "Deployed code size mismatch: expected " << runtime_size << ", got " << exec_code.size() << std::endl;
         return 1;
     }
     

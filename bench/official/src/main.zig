@@ -18,6 +18,7 @@ pub fn main() !void {
         \\--js-snailtracer-internal-runs <NUM>   Number of internal runs for JavaScript snailtracer (defaults to --js-internal-runs value)
         \\--export <FORMAT>          Export results (json, markdown)
         \\--compare                  Compare all available EVM implementations
+        \\--all                      Include all test cases (by default only working benchmarks are included)
         \\
     );
 
@@ -51,6 +52,7 @@ pub fn main() !void {
     const js_snailtracer_internal_runs = res.args.@"js-snailtracer-internal-runs" orelse js_internal_runs;
     const export_format = res.args.@"export";
     const compare_mode = res.args.compare != 0;
+    const include_all_cases = res.args.all != 0;
 
     if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
@@ -62,7 +64,7 @@ pub fn main() !void {
         for (evms) |evm| {
             std.debug.print("\n=== Running benchmarks for {s} ===\n", .{evm});
 
-            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs);
+            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases);
             defer orchestrator.deinit();
 
             try orchestrator.discoverTestCases();
@@ -86,7 +88,7 @@ pub fn main() !void {
         // Export comparison results
         if (export_format) |format| {
             if (std.mem.eql(u8, format, "markdown")) {
-                try exportComparisonMarkdown(allocator, all_results.items, num_runs, js_runs);
+                try exportComparisonMarkdown(allocator, all_results.items, num_runs, js_runs, include_all_cases);
             }
         }
 
@@ -96,7 +98,7 @@ pub fn main() !void {
         }
     } else {
         // Single EVM mode
-        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs);
+        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases);
         defer orchestrator.deinit();
 
         // Discover test cases
@@ -153,7 +155,7 @@ fn formatTimeWithUnit(time_ms: f64) FormattedTime {
     return selectOptimalUnit(time_ms);
 }
 
-fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orchestrator.BenchmarkResult, num_runs: u32, js_runs: u32) !void {
+fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orchestrator.BenchmarkResult, num_runs: u32, js_runs: u32, include_all_cases: bool) !void {
     // Create the file in bench/official/results.md
     var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const exe_path = try std.fs.selfExeDirPath(&exe_dir_buf);
@@ -182,11 +184,16 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     try file.writer().print("**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
     try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
 
-    // Group results by test case
-    try file.writer().print("## Performance Comparison\n\n", .{});
-
-    // Write comparison tables for each test case
-    const test_cases = [_][]const u8{
+    // Determine which test cases to include
+    const working_test_cases = [_][]const u8{
+        "erc20-approval-transfer",
+        "erc20-mint", 
+        "erc20-transfer",
+        "ten-thousand-hashes",
+        "snailtracer"
+    };
+    
+    const all_test_cases = [_][]const u8{
         "erc20-approval-transfer",
         "erc20-mint",
         "erc20-transfer",
@@ -220,52 +227,10 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
         "precompile-ripemd160",
         "precompile-sha256",
     };
+    
+    const test_cases = if (include_all_cases) all_test_cases[0..] else working_test_cases[0..];
 
-    for (test_cases) |test_case| {
-        try file.writer().print("### {s}\n\n", .{test_case});
-        try file.writeAll("| EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |\n");
-        try file.writeAll("|-----|----------------|------------------|---------------|---------------|-------------------|---------------|\n");
-
-        // Find results for this test case (exact match to avoid duplicates)
-        for (results) |result| {
-            // Check if result starts with test_case followed by " ("
-            if (std.mem.startsWith(u8, result.test_case, test_case) and
-                result.test_case.len > test_case.len and
-                std.mem.eql(u8, result.test_case[test_case.len .. test_case.len + 2], " ("))
-            {
-                const evm_name = if (std.mem.indexOf(u8, result.test_case, "(zig)") != null)
-                    "Guillotine"
-                else if (std.mem.indexOf(u8, result.test_case, "(revm)") != null)
-                    "REVM"
-                else if (std.mem.indexOf(u8, result.test_case, "(ethereumjs)") != null)
-                    "EthereumJS"
-                else if (std.mem.indexOf(u8, result.test_case, "(geth)") != null)
-                    "Geth"
-                else
-                    "evmone";
-
-                const mean_formatted = formatTimeWithUnit(result.mean_ms);
-                const median_formatted = formatTimeWithUnit(result.median_ms);
-                const min_formatted = formatTimeWithUnit(result.min_ms);
-                const max_formatted = formatTimeWithUnit(result.max_ms);
-                const stddev_formatted = formatTimeWithUnit(result.std_dev_ms);
-
-                try file.writer().print("| {s:<11} | {s:>14} | {s:>16} | {s:>13} | {s:>13} | {s:>17} | {d:>13} |\n", .{
-                    evm_name,
-                    mean_formatted,
-                    median_formatted,
-                    min_formatted,
-                    max_formatted,
-                    stddev_formatted,
-                    result.internal_runs,
-                });
-            }
-        }
-
-        try file.writer().print("\n", .{});
-    }
-
-    // Add summary statistics
+    // Add summary statistics first
     try file.writer().print("## Overall Performance Summary (Per Run)\n\n", .{});
     try file.writeAll("| Test Case | Guillotine | REVM | EthereumJS | Geth | evmone |\n");
     try file.writeAll("|-----------|------------|------|------------|------|--------|\n");
@@ -311,6 +276,55 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
             geth_formatted,
             evmone_formatted,
         });
+    }
+
+    // Group results by test case
+    try file.writer().print("\n## Detailed Performance Comparison\n\n", .{});
+
+    // Write comparison tables for each test case
+
+    for (test_cases) |test_case| {
+        try file.writer().print("### {s}\n\n", .{test_case});
+        try file.writeAll("| EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |\n");
+        try file.writeAll("|-----|----------------|------------------|---------------|---------------|-------------------|---------------|\n");
+
+        // Find results for this test case (exact match to avoid duplicates)
+        for (results) |result| {
+            // Check if result starts with test_case followed by " ("
+            if (std.mem.startsWith(u8, result.test_case, test_case) and
+                result.test_case.len > test_case.len and
+                std.mem.eql(u8, result.test_case[test_case.len .. test_case.len + 2], " ("))
+            {
+                const evm_name = if (std.mem.indexOf(u8, result.test_case, "(zig)") != null)
+                    "Guillotine"
+                else if (std.mem.indexOf(u8, result.test_case, "(revm)") != null)
+                    "REVM"
+                else if (std.mem.indexOf(u8, result.test_case, "(ethereumjs)") != null)
+                    "EthereumJS"
+                else if (std.mem.indexOf(u8, result.test_case, "(geth)") != null)
+                    "Geth"
+                else
+                    "evmone";
+
+                const mean_formatted = formatTimeWithUnit(result.mean_ms);
+                const median_formatted = formatTimeWithUnit(result.median_ms);
+                const min_formatted = formatTimeWithUnit(result.min_ms);
+                const max_formatted = formatTimeWithUnit(result.max_ms);
+                const stddev_formatted = formatTimeWithUnit(result.std_dev_ms);
+
+                try file.writer().print("| {s:<11} | {s:>14} | {s:>16} | {s:>13} | {s:>13} | {s:>17} | {d:>13} |\n", .{
+                    evm_name,
+                    mean_formatted,
+                    median_formatted,
+                    min_formatted,
+                    max_formatted,
+                    stddev_formatted,
+                    result.internal_runs,
+                });
+            }
+        }
+
+        try file.writer().print("\n", .{});
     }
 
     // Add notes

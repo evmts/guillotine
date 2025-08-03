@@ -28,6 +28,7 @@ js_runs: u32,
 js_internal_runs: u32,
 snailtracer_internal_runs: u32,
 js_snailtracer_internal_runs: u32,
+include_all_cases: bool,
 test_cases: []TestCase,
 results: std.ArrayList(BenchmarkResult),
 
@@ -48,7 +49,7 @@ pub const BenchmarkResult = struct {
     internal_runs: u32,
 };
 
-pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32, snailtracer_internal_runs: u32, js_snailtracer_internal_runs: u32) !Orchestrator {
+pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32, snailtracer_internal_runs: u32, js_snailtracer_internal_runs: u32, include_all_cases: bool) !Orchestrator {
     return Orchestrator{
         .allocator = allocator,
         .evm_name = evm_name,
@@ -58,6 +59,7 @@ pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, i
         .js_internal_runs = js_internal_runs,
         .snailtracer_internal_runs = snailtracer_internal_runs,
         .js_snailtracer_internal_runs = js_snailtracer_internal_runs,
+        .include_all_cases = include_all_cases,
         .test_cases = &[_]TestCase{},
         .results = std.ArrayList(BenchmarkResult).init(allocator),
     };
@@ -115,6 +117,31 @@ pub fn discoverTestCases(self: *Orchestrator) !void {
             self.allocator.free(bytecode_path);
             self.allocator.free(calldata_path);
             continue;
+        }
+
+        // Filter to only working benchmarks unless --all flag is used
+        if (!self.include_all_cases) {
+            const working_benchmarks = [_][]const u8{
+                "erc20-approval-transfer",
+                "erc20-mint", 
+                "erc20-transfer",
+                "ten-thousand-hashes",
+                "snailtracer"
+            };
+            
+            var is_working = false;
+            for (working_benchmarks) |working_name| {
+                if (std.mem.eql(u8, entry.name, working_name)) {
+                    is_working = true;
+                    break;
+                }
+            }
+            
+            if (!is_working) {
+                self.allocator.free(bytecode_path);
+                self.allocator.free(calldata_path);
+                continue;
+            }
         }
 
         try test_cases.append(.{
