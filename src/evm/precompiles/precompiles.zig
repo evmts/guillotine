@@ -30,6 +30,58 @@ const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64)
 /// Function type for precompiles that require chain rules (EC operations)
 const PrecompileFnWithChainRules = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
 
+/// Wrapper functions for precompiles that originally didn't take chain_rules
+/// These wrappers provide a uniform interface while ignoring the chain_rules parameter
+
+const WrappedEcrecover = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return ecrecover.execute(input, output, gas_limit);
+    }
+};
+
+const WrappedSha256 = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return sha256.execute(input, output, gas_limit);
+    }
+};
+
+const WrappedRipemd160 = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return ripemd160.execute(input, output, gas_limit);
+    }
+};
+
+const WrappedIdentity = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return identity.execute(input, output, gas_limit);
+    }
+};
+
+const WrappedModexp = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return modexp.execute(input, output, gas_limit);
+    }
+};
+
+const WrappedBlake2f = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return blake2f.execute(input, output, gas_limit);
+    }
+};
+
+const WrappedKzgPointEvaluation = struct {
+    pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+        _ = chain_rules; // Ignore chain_rules parameter
+        return kzg_point_evaluation.execute(input, output, gas_limit);
+    }
+};
+
 /// Unified precompile handler that wraps both function types
 const PrecompileHandler = union(enum) {
     standard: PrecompileFn,
