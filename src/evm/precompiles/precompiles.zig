@@ -312,3 +312,135 @@ pub fn validate_call(address: primitives.Address.Address, input_size: usize, gas
     };
     return gas_cost <= gas_limit;
 }
+
+// Tests for precompile dispatch mechanism
+test "precompile dispatch correctness" {
+    const testing = std.testing;
+    
+    // Create chain rules for testing
+    const frontier_rules = ChainRules{
+        .is_byzantium = false,
+        .is_istanbul = false,
+        .is_cancun = false,
+    };
+    
+    const byzantium_rules = ChainRules{
+        .is_byzantium = true,
+        .is_istanbul = false,
+        .is_cancun = false,
+    };
+    
+    const istanbul_rules = ChainRules{
+        .is_byzantium = true,
+        .is_istanbul = true,
+        .is_cancun = false,
+    };
+    
+    const cancun_rules = ChainRules{
+        .is_byzantium = true,
+        .is_istanbul = true,
+        .is_cancun = true,
+    };
+    
+    // Test precompile availability by hardfork
+    try testing.expect(is_available(addresses.ECRECOVER_ADDRESS, frontier_rules));
+    try testing.expect(is_available(addresses.SHA256_ADDRESS, frontier_rules));
+    try testing.expect(is_available(addresses.RIPEMD160_ADDRESS, frontier_rules));
+    try testing.expect(is_available(addresses.IDENTITY_ADDRESS, frontier_rules));
+    
+    try testing.expect(!is_available(addresses.MODEXP_ADDRESS, frontier_rules));
+    try testing.expect(is_available(addresses.MODEXP_ADDRESS, byzantium_rules));
+    
+    try testing.expect(!is_available(addresses.ECADD_ADDRESS, frontier_rules));
+    try testing.expect(is_available(addresses.ECADD_ADDRESS, byzantium_rules));
+    
+    try testing.expect(!is_available(addresses.BLAKE2F_ADDRESS, byzantium_rules));
+    try testing.expect(is_available(addresses.BLAKE2F_ADDRESS, istanbul_rules));
+    
+    try testing.expect(!is_available(addresses.POINT_EVALUATION_ADDRESS, istanbul_rules));
+    try testing.expect(is_available(addresses.POINT_EVALUATION_ADDRESS, cancun_rules));
+    
+    // Test precompile execution for each precompile
+    var output_buffer: [1024]u8 = undefined;
+    
+    // Test IDENTITY precompile (simplest case)
+    const identity_input = "hello world";
+    const identity_result = execute_precompile(
+        addresses.IDENTITY_ADDRESS,
+        identity_input,
+        &output_buffer,
+        1000,
+        frontier_rules
+    );
+    try testing.expect(identity_result.success);
+    try testing.expectEqualSlices(u8, identity_input, output_buffer[0..identity_input.len]);
+    
+    // Test ECRECOVER precompile with valid input
+    const ecrecover_input = [_]u8{0} ** 128; // Zero input for simplicity
+    const ecrecover_result = execute_precompile(
+        addresses.ECRECOVER_ADDRESS,
+        &ecrecover_input,
+        &output_buffer,
+        3000,
+        frontier_rules
+    );
+    try testing.expect(ecrecover_result.success);
+    
+    // Test SHA256 precompile
+    const sha256_input = "test";
+    const sha256_result = execute_precompile(
+        addresses.SHA256_ADDRESS,
+        sha256_input,
+        &output_buffer,
+        1000,
+        frontier_rules
+    );
+    try testing.expect(sha256_result.success);
+    try testing.expectEqual(@as(usize, 32), sha256_result.output_len);
+    
+    // Test non-precompile address
+    const non_precompile = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const non_precompile_result = execute_precompile(
+        non_precompile,
+        "test",
+        &output_buffer,
+        1000,
+        frontier_rules
+    );
+    try testing.expect(!non_precompile_result.success);
+    
+    // Test unavailable precompile (MODEXP on Frontier)
+    const unavailable_result = execute_precompile(
+        addresses.MODEXP_ADDRESS,
+        "test",
+        &output_buffer,
+        1000,
+        frontier_rules
+    );
+    try testing.expect(!unavailable_result.success);
+}
+
+test "precompile gas estimation" {
+    const testing = std.testing;
+    
+    const byzantium_rules = ChainRules{
+        .is_byzantium = true,
+        .is_istanbul = true,
+        .is_cancun = true,
+    };
+    
+    // Test gas estimation for each precompile
+    const identity_gas = estimate_gas(addresses.IDENTITY_ADDRESS, 32, byzantium_rules) catch unreachable;
+    try testing.expect(identity_gas > 0);
+    
+    const sha256_gas = estimate_gas(addresses.SHA256_ADDRESS, 32, byzantium_rules) catch unreachable;
+    try testing.expect(sha256_gas > 0);
+    
+    const ecrecover_gas = estimate_gas(addresses.ECRECOVER_ADDRESS, 128, byzantium_rules) catch unreachable;
+    try testing.expect(ecrecover_gas > 0);
+    
+    // Test invalid precompile
+    const non_precompile = [_]u8{0x01} ++ [_]u8{0} ** 19;
+    const invalid_gas = estimate_gas(non_precompile, 32, byzantium_rules);
+    try testing.expectError(error.InvalidPrecompile, invalid_gas);
+}
