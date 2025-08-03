@@ -110,8 +110,64 @@ func main() {
 			State:       freshStatedb,
 		}
 		
-		// Deploy contract in fresh state
-		_, freshContractAddr, _, err := runtime.Create(contractCode, &freshCfg)
+		// Create constructor that deploys the runtime code
+		// Constructor format: init_code + runtime_code
+		// init_code: PUSH runtime_size, PUSH (init_code_length), CODECOPY, PUSH runtime_size, PUSH 0, RETURN
+		
+		runtimeSize := len(contractCode)
+		var constructorCode []byte
+		
+		// PUSH runtime_size (for CODECOPY size)
+		if runtimeSize <= 0xFF {
+			constructorCode = append(constructorCode, 0x60) // PUSH1
+			constructorCode = append(constructorCode, byte(runtimeSize))
+		} else if runtimeSize <= 0xFFFF {
+			constructorCode = append(constructorCode, 0x61) // PUSH2
+			constructorCode = append(constructorCode, byte(runtimeSize>>8))
+			constructorCode = append(constructorCode, byte(runtimeSize&0xFF))
+		} else {
+			panic(fmt.Sprintf("Runtime code too large: %d bytes", runtimeSize))
+		}
+		
+		// Calculate where runtime code will be (after complete constructor)
+		constructorSize := len(constructorCode) + 10 // +10 for remaining bytes
+		if runtimeSize > 0xFF {
+			constructorSize += 2 // Extra bytes for PUSH2
+		}
+		
+		// PUSH offset (where runtime code starts)
+		constructorCode = append(constructorCode, 0x60) // PUSH1
+		constructorCode = append(constructorCode, byte(constructorSize))
+		
+		// PUSH1 0 (destination in memory)
+		constructorCode = append(constructorCode, 0x60) // PUSH1
+		constructorCode = append(constructorCode, 0x00) // 0
+		
+		// CODECOPY (copy runtime code to memory)
+		constructorCode = append(constructorCode, 0x39) // CODECOPY
+		
+		// PUSH runtime_size (for RETURN size)
+		if runtimeSize <= 0xFF {
+			constructorCode = append(constructorCode, 0x60) // PUSH1
+			constructorCode = append(constructorCode, byte(runtimeSize))
+		} else {
+			constructorCode = append(constructorCode, 0x61) // PUSH2
+			constructorCode = append(constructorCode, byte(runtimeSize>>8))
+			constructorCode = append(constructorCode, byte(runtimeSize&0xFF))
+		}
+		
+		// PUSH1 0 (offset in memory)
+		constructorCode = append(constructorCode, 0x60) // PUSH1
+		constructorCode = append(constructorCode, 0x00) // 0
+		
+		// RETURN
+		constructorCode = append(constructorCode, 0xf3) // RETURN
+		
+		// Create deployment bytecode: constructor + runtime code
+		deploymentCode := append(constructorCode, contractCode...)
+		
+		// Deploy contract with constructor code
+		_, freshContractAddr, _, err := runtime.Create(deploymentCode, &freshCfg)
 		if err != nil {
 			panic(fmt.Sprintf("Contract creation failed in run %d: %v", i, err))
 		}
