@@ -149,6 +149,7 @@ async function main() {
         if (deployResult.execResult.returnValue.length !== runtimeSize) {
             console.error(`Warning: Deployed code size mismatch: expected ${runtimeSize}, got ${deployResult.execResult.returnValue.length}`);
         }
+        
     } else {
         throw new Error('Contract deployment failed: no runtime code returned');
     }
@@ -168,8 +169,6 @@ async function main() {
         
         // Check for errors
         if (result.execResult.exceptionError) {
-            console.error('Exception error:', result.execResult.exceptionError);
-            console.error('Gas used:', result.execResult.executionGasUsed);
             throw new Error(`Call failed: ${result.execResult.exceptionError.error || result.execResult.exceptionError}`);
         }
         

@@ -1,0 +1,164 @@
+{
+  "benchmarks": [
+    {
+      "name": "opcodes-control",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-data",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-ripemd160",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-bn256mul",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-environmental-2",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-sha256",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-bitwise",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "erc20-approval-transfer",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-arithmetic-advanced",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-block-1",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "erc20-mint",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-memory",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "ten-thousand-hashes",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-crypto",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-bn256pairing",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-push-pop",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-comparison",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "snailtracer",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-bn256add",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-identity",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-dup",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-ecrecover",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-swap",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-environmental-1",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-block-2",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-blake2f",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-storage-warm",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "precompile-modexp",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "erc20-transfer",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-storage-cold",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-arithmetic",
+      "evm": "geth",
+      "runs": 1
+    },
+    {
+      "name": "opcodes-jump-basic",
+      "evm": "geth",
+      "runs": 1
+    }
+  ]
+}

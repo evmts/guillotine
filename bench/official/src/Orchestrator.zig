@@ -26,6 +26,8 @@ num_runs: u32,
 internal_runs: u32,
 js_runs: u32,
 js_internal_runs: u32,
+snailtracer_internal_runs: u32,
+js_snailtracer_internal_runs: u32,
 test_cases: []TestCase,
 results: std.ArrayList(BenchmarkResult),
 
@@ -46,7 +48,7 @@ pub const BenchmarkResult = struct {
     internal_runs: u32,
 };
 
-pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32) !Orchestrator {
+pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32, snailtracer_internal_runs: u32, js_snailtracer_internal_runs: u32) !Orchestrator {
     return Orchestrator{
         .allocator = allocator,
         .evm_name = evm_name,
@@ -54,6 +56,8 @@ pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, i
         .internal_runs = internal_runs,
         .js_runs = js_runs,
         .js_internal_runs = js_internal_runs,
+        .snailtracer_internal_runs = snailtracer_internal_runs,
+        .js_snailtracer_internal_runs = js_snailtracer_internal_runs,
         .test_cases = &[_]TestCase{},
         .results = std.ArrayList(BenchmarkResult).init(allocator),
     };
@@ -131,10 +135,26 @@ pub fn runBenchmarks(self: *Orchestrator) !void {
 }
 
 fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
-    // Check if this is JavaScript running snailtracer - use reduced runs if so
-    const is_js_snailtracer = std.mem.eql(u8, self.evm_name, "ethereumjs") and std.mem.eql(u8, test_case.name, "snailtracer");
+    // Determine runs and internal runs based on EVM type and test case
+    const is_js = std.mem.eql(u8, self.evm_name, "ethereumjs");
+    const is_snailtracer = std.mem.eql(u8, test_case.name, "snailtracer");
+    const is_js_snailtracer = is_js and is_snailtracer;
+    
     const runs_to_use = if (is_js_snailtracer) self.js_runs else self.num_runs;
-    const internal_runs_to_use = if (is_js_snailtracer) self.js_internal_runs else self.internal_runs;
+    
+    // Apply internal runs logic:
+    // 1. If JS snailtracer -> use js_snailtracer_internal_runs
+    // 2. If snailtracer (any EVM) -> use snailtracer_internal_runs  
+    // 3. If JS (any test) -> use js_internal_runs
+    // 4. Otherwise -> use internal_runs
+    const internal_runs_to_use = if (is_js_snailtracer) 
+        self.js_snailtracer_internal_runs
+    else if (is_snailtracer)
+        self.snailtracer_internal_runs
+    else if (is_js)
+        self.js_internal_runs
+    else
+        self.internal_runs;
     // Read calldata
     const calldata_file = try std.fs.cwd().openFile(test_case.calldata_path, .{});
     defer calldata_file.close();
