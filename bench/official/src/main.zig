@@ -222,9 +222,12 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
         try file.writeAll("| EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |\n");
         try file.writeAll("|-----|----------------|------------------|---------------|---------------|-------------------|---------------|\n");
         
-        // Find results for this test case
+        // Find results for this test case (exact match to avoid duplicates)
         for (results) |result| {
-            if (std.mem.indexOf(u8, result.test_case, test_case) != null) {
+            // Check if result starts with test_case followed by " ("
+            if (std.mem.startsWith(u8, result.test_case, test_case) and 
+                result.test_case.len > test_case.len and
+                std.mem.eql(u8, result.test_case[test_case.len..test_case.len+2], " (")) {
                 const evm_name = if (std.mem.indexOf(u8, result.test_case, "(zig)") != null) 
                     "Guillotine" 
                 else if (std.mem.indexOf(u8, result.test_case, "(revm)") != null) 
@@ -270,7 +273,10 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
         var evmone_mean: f64 = 0;
         
         for (results) |result| {
-            if (std.mem.indexOf(u8, result.test_case, test_case) != null) {
+            // Check if result starts with test_case followed by " (" (exact match)
+            if (std.mem.startsWith(u8, result.test_case, test_case) and 
+                result.test_case.len > test_case.len and
+                std.mem.eql(u8, result.test_case[test_case.len..test_case.len+2], " (")) {
                 if (std.mem.indexOf(u8, result.test_case, "(zig)") != null) {
                     zig_mean = result.mean_ms;
                 } else if (std.mem.indexOf(u8, result.test_case, "(revm)") != null) {
