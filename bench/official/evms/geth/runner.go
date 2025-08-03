@@ -94,11 +94,11 @@ func main() {
 	statedb.CreateAccount(callerAddress)
 	statedb.SetBalance(callerAddress, uint256.MustFromBig(new(big.Int).Lsh(big.NewInt(1), 256-1)), 0) // Max balance
 	
-	// Deploy contract configuration
+	// Deploy contract configuration with higher gas limit
 	cfg := runtime.Config{
 		ChainConfig: chainConfig,
 		Origin:      callerAddress,
-		GasLimit:    10_000_000,
+		GasLimit:    1_000_000_000, // Use high gas limit for deployment too
 		GasPrice:    big.NewInt(0),
 		Value:       big.NewInt(0),
 		Difficulty:  big.NewInt(0),
@@ -122,9 +122,6 @@ func main() {
 	for i := 0; i < numRuns; i++ {
 		// Start timing
 		start := time.Now()
-
-		// Update gas limit for the call
-		cfg.GasLimit = 1_000_000_000
 		
 		// Call the deployed contract
 		ret, _, err := runtime.Call(contractAddr, calldata, &cfg)
