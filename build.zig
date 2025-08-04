@@ -657,6 +657,22 @@ pub fn build(b: *std.Build) void {
 
     const bn254_zig_bench_step = b.step("bench-bn254-zig", "Run BN254 Zig native benchmarks");
     bn254_zig_bench_step.dependOn(&run_bn254_zig_bench_cmd.step);
+    
+    // Add inline ops benchmark executable
+    const inline_ops_bench_exe = b.addExecutable(.{
+        .name = "inline-ops-bench",
+        .root_source_file = b.path("bench/inline_ops_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    inline_ops_bench_exe.root_module.addImport("evm", evm_mod);
+    inline_ops_bench_exe.root_module.addImport("primitives", primitives_mod);
+    b.installArtifact(inline_ops_bench_exe);
+    
+    const run_inline_ops_bench_cmd = b.addRunArtifact(inline_ops_bench_exe);
+    run_inline_ops_bench_cmd.step.dependOn(b.getInstallStep());
+    const inline_ops_bench_step = b.step("bench-inline-ops", "Run inline hot operations benchmarks");
+    inline_ops_bench_step.dependOn(&run_inline_ops_bench_cmd.step);
 
     // Add minimal jump table benchmark executable
     // Create a minimal EVM module without Rust dependencies for jump table benchmark
@@ -1653,6 +1669,23 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_jump_table_test.step);
     test_step.dependOn(&run_opcodes_test.step);
     test_step.dependOn(&run_vm_opcode_test.step);
+    
+    // Add inline ops test
+    const inline_ops_test = b.addTest(.{
+        .name = "inline-ops-test",
+        .root_source_file = b.path("test/evm/inline_ops_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    inline_ops_test.root_module.stack_check = false;
+    inline_ops_test.root_module.addImport("primitives", primitives_mod);
+    inline_ops_test.root_module.addImport("evm", evm_mod);
+    const run_inline_ops_test = b.addRunArtifact(inline_ops_test);
+    const inline_ops_test_step = b.step("test-inline-ops", "Run inline ops performance tests");
+    inline_ops_test_step.dependOn(&run_inline_ops_test.step);
+    test_step.dependOn(&run_inline_ops_test.step);
+    
     test_step.dependOn(&run_integration_test.step);
     test_step.dependOn(&run_gas_test.step);
     test_step.dependOn(&run_static_protection_test.step);

@@ -11,6 +11,9 @@ const Contract = @import("../frame/contract.zig");
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
 
+// Export inline hot ops optimization
+pub const execute_with_inline_hot_ops = @import("inline_hot_ops.zig").execute_with_inline_hot_ops;
+
 const execution = @import("../execution/package.zig");
 const stack_ops = execution.stack;
 const log = execution.log;
