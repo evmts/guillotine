@@ -194,7 +194,7 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     
     // Build the runner path
     const runner_path = if (std.mem.eql(u8, self.evm_name, "zig")) 
-        "/Users/williamcory/Guillotine/zig-out/bin/evm-runner"
+        "/Users/williamcory/Guillotine/bench/official/evms/zig/evm-runner"
     else if (std.mem.eql(u8, self.evm_name, "ethereumjs"))
         "/Users/williamcory/Guillotine/bench/official/evms/ethereumjs/runner.js"
     else if (std.mem.eql(u8, self.evm_name, "geth"))

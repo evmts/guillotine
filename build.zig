@@ -749,12 +749,12 @@ pub fn build(b: *std.Build) void {
     // EVM Benchmark Runner executable (always optimized for benchmarks)
     const evm_runner_exe = b.addExecutable(.{
         .name = "evm-runner",
-        .root_source_file = b.path("bench/evm/runner.zig"),
+        .root_source_file = b.path("bench/official/evms/zig/src/main.zig"),
         .target = target,
         .optimize = .ReleaseFast, // Always use ReleaseFast for benchmarks
     });
     evm_runner_exe.root_module.addImport("evm", evm_mod);
-    evm_runner_exe.root_module.addImport("Address", primitives_mod);
+    evm_runner_exe.root_module.addImport("primitives", primitives_mod);
 
     b.installArtifact(evm_runner_exe);
 
