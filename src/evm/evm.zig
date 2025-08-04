@@ -48,8 +48,6 @@ chain_rules: ChainRules,
 context: Context,
 
 // Data fields (moderate access frequency)
-/// Return data from the most recent operation
-return_data: []u8 = &[_]u8{},
 /// Optional tracer for capturing execution traces
 tracer: ?std.io.AnyWriter = null,
 
@@ -73,7 +71,6 @@ comptime {
 ///
 /// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
-/// @param return_data Return data buffer (optional, defaults to empty slice)
 /// @param table Opcode dispatch table (optional, defaults to JumpTable.DEFAULT)
 /// @param chain_rules Protocol rules (optional, defaults to ChainRules.DEFAULT)
 /// @param context Execution context (optional, defaults to Context.init())
@@ -91,13 +88,12 @@ comptime {
 ///
 /// Example using direct initialization:
 /// ```zig
-/// var evm = try Evm.init(allocator, database, null, null, null, null, 0, false, null);
+/// var evm = try Evm.init(allocator, database, null, null, null, 0, false, null);
 /// defer evm.deinit();
 /// ```
 pub fn init(
     allocator: std.mem.Allocator,
     database: @import("state/database_interface.zig").DatabaseInterface,
-    return_data: ?[]u8,
     table: ?JumpTable,
     chain_rules: ?ChainRules,
     context: ?Context,
@@ -117,7 +113,6 @@ pub fn init(
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
         .allocator = allocator,
-        .return_data = return_data orelse &[_]u8{},
         .table = table orelse JumpTable.DEFAULT,
         .chain_rules = chain_rules orelse ChainRules.DEFAULT,
         .state = state,
@@ -146,7 +141,6 @@ pub fn reset(self: *Evm) void {
     // Reset execution state
     self.depth = 0;
     self.read_only = false;
-    self.return_data = &[_]u8{};
 }
 
 pub usingnamespace @import("evm/set_context.zig");

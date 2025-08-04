@@ -23,7 +23,6 @@ const Tracer = @import("tracer.zig").Tracer;
 pub const EvmBuilder = struct {
     allocator: std.mem.Allocator,
     database: DatabaseInterface,
-    return_data: ?[]u8 = null,
     table: ?JumpTable = null,
     chain_rules: ?ChainRules = null,
     context: ?Context = null,
@@ -37,12 +36,6 @@ pub const EvmBuilder = struct {
             .allocator = allocator,
             .database = database,
         };
-    }
-
-    /// Set the return data for the EVM.
-    pub fn with_return_data(self: *EvmBuilder, data: []u8) *EvmBuilder {
-        self.return_data = data;
-        return self;
     }
 
     /// Set a custom jump table.
@@ -93,7 +86,6 @@ pub const EvmBuilder = struct {
         return try Evm.init(
             self.allocator,
             self.database,
-            self.return_data,
             self.table,
             self.chain_rules,
             self.context,
@@ -130,11 +122,9 @@ test "EvmBuilder with all options" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    const test_data = &[_]u8{ 0x01, 0x02, 0x03, 0x04 };
 
     var builder = EvmBuilder.init(allocator, db_interface);
     var evm = try builder
-        .with_return_data(@constCast(test_data))
         .with_hardfork(.LONDON)
         .with_depth(10)
         .with_read_only(true)
@@ -143,7 +133,6 @@ test "EvmBuilder with all options" {
 
     try testing.expectEqual(@as(u16, 10), evm.depth);
     try testing.expectEqual(true, evm.read_only);
-    try testing.expectEqualSlices(u8, test_data, evm.return_data);
 }
 
 test "EvmBuilder fluent API" {

@@ -138,11 +138,8 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
 
         // For REVERT, we return partial gas
         if (err == ExecutionError.Error.REVERT) {
-            const output = if (self.return_data.len > 0)
-                try self.allocator.dupe(u8, self.return_data)
-            else
-                null;
-            return CallResult{ .success = false, .gas_left = contract.gas, .output = output };
+            // REVERT returns partial gas but no output data in error case
+            return CallResult{ .success = false, .gas_left = contract.gas, .output = null };
         }
 
         // Other errors consume all gas
