@@ -11,6 +11,7 @@ const simple_eip4844_benchmark = @import("simple_eip4844_benchmark.zig");
 const memory_benchmark = @import("memory_benchmark.zig");
 const hardfork_benchmark = @import("hardfork_benchmark.zig");
 const uint_benchmark = @import("uint_benchmark.zig");
+const jump_table_benchmarks = @import("jump_table_benchmarks.zig");
 
 pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     var benchmark = zbench.Benchmark.init(allocator, .{});
@@ -199,6 +200,15 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     try benchmark.add("Native Bitwise AND", uint_benchmark.zbench_native_bitwise_and, .{});
     try benchmark.add("Custom Comparison", uint_benchmark.zbench_custom_comparison, .{});
     try benchmark.add("Native Comparison", uint_benchmark.zbench_native_comparison, .{});
+
+    // Jump Table Benchmarks - AoS vs SoA Performance Comparison
+    try benchmark.add("Jump Table AoS Full", jump_table_benchmarks.zbench_aos_full_access, .{});
+    try benchmark.add("Jump Table SoA Hot Fields", jump_table_benchmarks.zbench_soa_hot_fields, .{});
+    try benchmark.add("Jump Table SoA Full", jump_table_benchmarks.zbench_soa_full_access, .{});
+    try benchmark.add("Jump Table AoS Sequential", jump_table_benchmarks.zbench_aos_sequential, .{});
+    try benchmark.add("Jump Table SoA Sequential", jump_table_benchmarks.zbench_soa_sequential, .{});
+    try benchmark.add("Jump Table AoS Random", jump_table_benchmarks.zbench_aos_random, .{});
+    try benchmark.add("Jump Table SoA Random", jump_table_benchmarks.zbench_soa_random, .{});
 
     // Run all benchmarks
     const stdout = std.io.getStdOut().writer();
