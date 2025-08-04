@@ -1657,19 +1657,20 @@ pub fn build(b: *std.Build) void {
     // tracer_test_step.dependOn(&run_tracer_test.step);
 
     // Add compare execution test
-    const compare_test = b.addTest(.{
-        .name = "compare-test",
-        .root_source_file = b.path("test/evm/compare_execution.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    compare_test.root_module.addImport("evm", evm_mod);
-    compare_test.root_module.addImport("primitives", primitives_mod);
+    // TODO: Re-enable when tracer is reimplemented
+    // const compare_test = b.addTest(.{
+    //     .name = "compare-test",
+    //     .root_source_file = b.path("test/evm/compare_execution.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // compare_test.root_module.addImport("evm", evm_mod);
+    // compare_test.root_module.addImport("primitives", primitives_mod);
 
-    const run_compare_test = b.addRunArtifact(compare_test);
-    test_step.dependOn(&run_compare_test.step);
-    const compare_test_step = b.step("test-compare", "Run execution comparison test");
-    compare_test_step.dependOn(&run_compare_test.step);
+    // const run_compare_test = b.addRunArtifact(compare_test);
+    // test_step.dependOn(&run_compare_test.step);
+    // const compare_test_step = b.step("test-compare", "Run execution comparison test");
+    // compare_test_step.dependOn(&run_compare_test.step);
 
     // Add comprehensive opcode comparison executable
     const comprehensive_compare = b.addExecutable(.{

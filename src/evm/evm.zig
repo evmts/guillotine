@@ -149,7 +149,6 @@ pub fn reset(self: *Evm) void {
     self.return_data = &[_]u8{};
 }
 
-
 pub usingnamespace @import("evm/set_context.zig");
 pub usingnamespace @import("evm/interpret.zig");
 pub usingnamespace @import("evm/create_contract_internal.zig");

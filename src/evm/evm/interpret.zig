@@ -40,7 +40,6 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     self.read_only = self.read_only or is_static;
 
     const initial_gas = contract.gas;
-    var pc: usize = 0;
 
     var frame = Frame{
         .gas_remaining = contract.gas,
@@ -64,15 +63,12 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const interpreter: Operation.Interpreter = self;
     const state: Operation.State = &frame;
 
-    while (pc < contract.code_size) {
+    while (frame.pc < contract.code_size) {
         @branchHint(.likely);
-        const opcode = contract.get_op(pc);
-        frame.pc = pc;
+        const opcode = contract.get_op(frame.pc);
 
-        const result = self.table.execute(pc, interpreter, state, opcode) catch |err| {
+        const result = self.table.execute(frame.pc, interpreter, state, opcode) catch |err| {
             contract.gas = frame.gas_remaining;
-            // Don't store frame's return data in EVM - it will be freed when frame deinits
-            self.return_data = &[_]u8{};
 
             var output: ?[]const u8 = null;
             // Use frame.output for RETURN/REVERT data
@@ -124,19 +120,16 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             };
         };
 
-        if (frame.pc != pc) {
-            Log.debug("interpret: PC changed by opcode - old_pc={}, frame.pc={}, jumping to frame.pc", .{ pc, frame.pc });
-            pc = frame.pc;
+        const old_pc = frame.pc;
+        if (frame.pc == old_pc) {
+            Log.debug("interpret: PC unchanged by opcode - pc={}, frame.pc={}, advancing by {} bytes", .{ old_pc, frame.pc, result.bytes_consumed });
+            frame.pc += result.bytes_consumed;
         } else {
-            Log.debug("interpret: PC unchanged by opcode - pc={}, frame.pc={}, advancing by {} bytes", .{ pc, frame.pc, result.bytes_consumed });
-            pc += result.bytes_consumed;
+            Log.debug("interpret: PC changed by opcode - old_pc={}, frame.pc={}, jumping to frame.pc", .{ old_pc, frame.pc });
         }
     }
 
     contract.gas = frame.gas_remaining;
-    // Don't store frame's return data in EVM - it will be freed when frame deinits
-    self.return_data = &[_]u8{};
-
     // Use frame.output for normal completion (no RETURN/REVERT was called)
     const output_data = frame.output;
     Log.debug("VM.interpret_with_context: Normal completion, output_size={}", .{output_data.len});
