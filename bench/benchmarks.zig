@@ -11,6 +11,7 @@ const frame_benchmarks = @import("frame_benchmarks.zig");
 const code_analysis_benchmarks = @import("code_analysis_benchmarks.zig");
 const comprehensive_frame_benchmarks = @import("comprehensive_frame_benchmarks.zig");
 const revm_comparison_benchmark = @import("revm_comparison_benchmark.zig");
+const uint_benchmark = @import("uint_benchmark.zig");
 
 pub fn run_all_benchmarks(allocator: Allocator) !void {
     std.debug.print("=== Running All Guillotine Benchmarks ===\n", .{});
@@ -91,6 +92,11 @@ pub fn run_all_benchmarks(allocator: Allocator) !void {
     std.debug.print("\n=== Running Guillotine vs revm Comparison Benchmarks ===\n", .{});
     try revm_comparison_benchmark.runRevmComparisonBenchmarks(allocator);
     std.debug.print("=== Comparison Benchmarks Complete ===\n\n", .{});
+    
+    // Run uint library benchmarks
+    std.debug.print("\n=== Running Uint Library vs Native u256 Benchmarks ===\n", .{});
+    try uint_benchmark.run_uint_benchmarks_simple(allocator);
+    std.debug.print("=== Uint Benchmarks Complete ===\n\n", .{});
     
     std.debug.print("\n=== All Benchmarks Completed ===\n", .{});
 }
