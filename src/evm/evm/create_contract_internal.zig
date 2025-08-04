@@ -48,9 +48,6 @@ pub fn create_contract_internal(self: *Vm, creator: primitives.Address.Address, 
     init_contract.address = new_address; // Set the computed address
     defer init_contract.deinit(self.allocator, null);
 
-    // Analyze jump destinations before execution
-    init_contract.analyze_jumpdests(self.allocator);
-
     // Execute the init code - this should return the deployment bytecode
     Log.debug("create_contract_internal: Executing init code, size: {}", .{init_code.len});
     const init_result = self.interpret(&init_contract, &[_]u8{}, false) catch |err| {

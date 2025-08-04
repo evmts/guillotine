@@ -82,9 +82,6 @@ pub fn delegatecall_contract(self: *Vm, current: primitives.Address.Address, cod
     );
     defer contract.deinit(self.allocator, null);
 
-    // Analyze jump destinations before execution
-    contract.analyze_jumpdests(self.allocator);
-
     // Execute the contract in the current context
     Log.debug("VM.delegatecall_contract: About to execute contract with gas={}", .{execution_gas});
     const result = self.interpret(&contract, input, is_static) catch |err| {

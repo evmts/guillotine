@@ -120,9 +120,6 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     );
     defer contract.deinit(self.allocator, null);
 
-    // Analyze jump destinations before execution
-    contract.analyze_jumpdests(self.allocator);
-
     // Execute the contract
     Log.debug("VM.call_contract: About to execute contract with gas={}", .{execution_gas});
     const result = self.interpret(&contract, input, is_static) catch |err| {
