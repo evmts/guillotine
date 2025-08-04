@@ -476,28 +476,8 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
 
     const analysis = self.analysis orelse return false;
 
-    // IMPORTANT: We only do binary search in analysis (expensive on u256 in terms of bundle size) not in ReleaseSmall
-    // TODO we should make this it's own comptime variable called DID_BINARY_SEARCH = builtin.mode != .ReleaseSmall
-    if (comptime builtin.mode != .ReleaseSmall) {
-        for (analysis.jumpdest_positions) |jumpdest_pos| {
-            if (jumpdest_pos == pos) return true;
-        }
-        return false;
-    } else {
-        const items = analysis.jumpdest_positions;
-        var low: usize = 0;
-        var high: usize = items.len;
-        while (low < high) {
-            // Avoid overflowing in the midpoint calculation
-            const mid = low + (high - low) / 2;
-            switch (std.sort.asc(u32)({}, items[mid])) {
-                .eq => return true,
-                .gt => low = mid + 1,
-                .lt => high = mid,
-            }
-        }
-        return null;
-    }
+    // O(1) lookup in the JUMPDEST bitmap
+    return analysis.jumpdest_bitmap.isSetUnchecked(pos);
 }
 
 /// Check if position is code (not data)
@@ -801,18 +781,17 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     analysis.code_segments = try bitvec.BitVec64.codeBitmap(allocator, code);
     errdefer analysis.code_segments.deinit(allocator);
 
-    var jumpdests = std.ArrayList(u32).init(allocator);
-    defer jumpdests.deinit();
+    // Initialize the jumpdest bitmap
+    analysis.jumpdest_bitmap = try bitvec.BitVec64.init(allocator, code.len);
+    errdefer analysis.jumpdest_bitmap.deinit(allocator);
 
     var i: usize = 0;
     while (i < code.len) {
         const op = code[i];
 
         if (op == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
-            jumpdests.append(@as(u32, @intCast(i))) catch |err| {
-                Log.debug("Failed to append jumpdest position {d}: {any}", .{ i, err });
-                return err;
-            };
+            // Set the bit in the bitmap for this JUMPDEST position
+            analysis.jumpdest_bitmap.setUnchecked(i);
         }
 
         if (opcode.is_push(op)) {
@@ -822,15 +801,6 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
             i += 1;
         }
     }
-
-    // Sort for binary search (skip in ReleaseSmall mode to save ~49KB)
-    if (comptime builtin.mode != .ReleaseSmall) {
-        std.mem.sort(u32, jumpdests.items, {}, comptime std.sort.asc(u32));
-    }
-    analysis.jumpdest_positions = jumpdests.toOwnedSlice() catch |err| {
-        Log.debug("Failed to convert jumpdests to owned slice: {any}", .{err});
-        return err;
-    };
 
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
@@ -878,18 +848,17 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
     analysis.code_segments = try bitvec.BitVec64.codeBitmap(allocator, code);
     errdefer analysis.code_segments.deinit(allocator);
 
-    var jumpdests = std.ArrayList(u32).init(allocator);
-    defer jumpdests.deinit();
+    // Create bitmap for JUMPDEST positions
+    analysis.jumpdest_bitmap = try bitvec.BitVec64.init(allocator, code.len);
+    errdefer analysis.jumpdest_bitmap.deinit(allocator);
 
     var i: usize = 0;
     while (i < code.len) {
         const op = code[i];
 
         if (op == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
-            jumpdests.append(@as(u32, @intCast(i))) catch |err| {
-                Log.debug("Failed to append jumpdest position {d}: {any}", .{ i, err });
-                return err;
-            };
+            // Mark this position as a valid JUMPDEST
+            analysis.jumpdest_bitmap.setUnchecked(i);
         }
 
         if (opcode.is_push(op)) {
@@ -899,15 +868,6 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
             i += 1;
         }
     }
-
-    // Sort for binary search (skip in ReleaseSmall mode to save ~49KB)
-    if (comptime builtin.mode != .ReleaseSmall) {
-        std.mem.sort(u32, jumpdests.items, {}, comptime std.sort.asc(u32));
-    }
-    analysis.jumpdest_positions = jumpdests.toOwnedSlice() catch |err| {
-        Log.debug("Failed to convert jumpdests to owned slice: {any}", .{err});
-        return err;
-    };
 
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
@@ -965,8 +925,9 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
     analysis.code_segments = try bitvec.BitVec64.codeBitmap(allocator, code);
     errdefer analysis.code_segments.deinit(allocator);
 
-    var jumpdests = std.ArrayList(u32).init(allocator);
-    defer jumpdests.deinit();
+    // Create bitmap for JUMPDEST positions
+    analysis.jumpdest_bitmap = try bitvec.BitVec64.init(allocator, code.len);
+    errdefer analysis.jumpdest_bitmap.deinit(allocator);
 
     // SIMD optimization: Process 16 bytes at a time
     const vec_size = 16;
@@ -988,10 +949,8 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
                 const pos = i + j;
                 // Check if this position is code (not data)
                 if (analysis.code_segments.isSetUnchecked(pos)) {
-                    jumpdests.append(@as(u32, @intCast(pos))) catch |err| {
-                        Log.debug("Failed to append jumpdest position {d}: {any}", .{ pos, err });
-                        return err;
-                    };
+                    // Mark this position as a valid JUMPDEST
+                    analysis.jumpdest_bitmap.setUnchecked(pos);
                 }
             }
         }
@@ -1002,22 +961,11 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
     // Handle remaining bytes
     while (i < code.len) {
         if (code[i] == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
-            jumpdests.append(@as(u32, @intCast(i))) catch |err| {
-                Log.debug("Failed to append jumpdest position {d}: {any}", .{ i, err });
-                return err;
-            };
+            // Mark this position as a valid JUMPDEST
+            analysis.jumpdest_bitmap.setUnchecked(i);
         }
         i += 1;
     }
-
-    // Sort for binary search (skip in ReleaseSmall mode to save ~49KB)
-    if (comptime builtin.mode != .ReleaseSmall) {
-        std.mem.sort(u32, jumpdests.items, {}, comptime std.sort.asc(u32));
-    }
-    analysis.jumpdest_positions = jumpdests.toOwnedSlice() catch |err| {
-        Log.debug("Failed to convert jumpdests to owned slice: {any}", .{err});
-        return err;
-    };
 
     // Use SIMD for finding special opcodes
     analysis.has_dynamic_jumps = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.JUMP), @intFromEnum(opcode.Enum.JUMPI) });
@@ -1069,8 +1017,9 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
     analysis.code_segments = try bitvec.BitVec64.codeBitmap(allocator, code);
     errdefer analysis.code_segments.deinit(allocator);
 
-    var jumpdests = std.ArrayList(u32).init(allocator);
-    defer jumpdests.deinit();
+    // Create bitmap for JUMPDEST positions
+    analysis.jumpdest_bitmap = try bitvec.BitVec64.init(allocator, code.len);
+    errdefer analysis.jumpdest_bitmap.deinit(allocator);
 
     // SIMD optimization: Process 16 bytes at a time
     const vec_size = 16;
@@ -1092,10 +1041,8 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
                 const pos = i + j;
                 // Check if this position is code (not data)
                 if (analysis.code_segments.isSetUnchecked(pos)) {
-                    jumpdests.append(@as(u32, @intCast(pos))) catch |err| {
-                        Log.debug("Failed to append jumpdest position {d}: {any}", .{ pos, err });
-                        return err;
-                    };
+                    // Mark this position as a valid JUMPDEST
+                    analysis.jumpdest_bitmap.setUnchecked(pos);
                 }
             }
         }
@@ -1106,22 +1053,11 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
     // Handle remaining bytes
     while (i < code.len) {
         if (code[i] == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
-            jumpdests.append(@as(u32, @intCast(i))) catch |err| {
-                Log.debug("Failed to append jumpdest position {d}: {any}", .{ i, err });
-                return err;
-            };
+            // Mark this position as a valid JUMPDEST
+            analysis.jumpdest_bitmap.setUnchecked(i);
         }
         i += 1;
     }
-
-    // Sort for binary search (skip in ReleaseSmall mode to save ~49KB)
-    if (comptime builtin.mode != .ReleaseSmall) {
-        std.mem.sort(u32, jumpdests.items, {}, comptime std.sort.asc(u32));
-    }
-    analysis.jumpdest_positions = jumpdests.toOwnedSlice() catch |err| {
-        Log.debug("Failed to convert jumpdests to owned slice: {any}", .{err});
-        return err;
-    };
 
     // Use SIMD for finding special opcodes
     analysis.has_dynamic_jumps = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.JUMP), @intFromEnum(opcode.Enum.JUMPI) });

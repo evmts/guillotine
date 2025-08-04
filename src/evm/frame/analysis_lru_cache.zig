@@ -251,8 +251,8 @@ test "AnalysisLRUCache basic functionality" {
     // Create mock analysis
     const analysis1 = try allocator.create(CodeAnalysis);
     analysis1.* = CodeAnalysis{
-        .code_segments = @import("bitvec.zig").BitVec64.init(allocator),
-        .jumpdest_positions = &[_]u32{},
+        .code_segments = try @import("bitvec.zig").BitVec64.init(allocator, 0),
+        .jumpdest_bitmap = try @import("bitvec.zig").BitVec64.init(allocator, 0),
         .block_gas_costs = null,
         .max_stack_depth = 10,
         .has_dynamic_jumps = false,
@@ -279,8 +279,8 @@ test "AnalysisLRUCache LRU eviction" {
     // Create mock analyses
     const analysis1 = try allocator.create(CodeAnalysis);
     analysis1.* = CodeAnalysis{
-        .code_segments = @import("bitvec.zig").BitVec64.init(allocator),
-        .jumpdest_positions = &[_]u32{},
+        .code_segments = try @import("bitvec.zig").BitVec64.init(allocator, 0),
+        .jumpdest_bitmap = try @import("bitvec.zig").BitVec64.init(allocator, 0),
         .block_gas_costs = null,
         .max_stack_depth = 1,
         .has_dynamic_jumps = false,
@@ -291,8 +291,8 @@ test "AnalysisLRUCache LRU eviction" {
     
     const analysis2 = try allocator.create(CodeAnalysis);
     analysis2.* = CodeAnalysis{
-        .code_segments = @import("bitvec.zig").BitVec64.init(allocator),
-        .jumpdest_positions = &[_]u32{},
+        .code_segments = try @import("bitvec.zig").BitVec64.init(allocator, 0),
+        .jumpdest_bitmap = try @import("bitvec.zig").BitVec64.init(allocator, 0),
         .block_gas_costs = null,
         .max_stack_depth = 2,
         .has_dynamic_jumps = false,
@@ -303,8 +303,8 @@ test "AnalysisLRUCache LRU eviction" {
     
     const analysis3 = try allocator.create(CodeAnalysis);
     analysis3.* = CodeAnalysis{
-        .code_segments = @import("bitvec.zig").BitVec64.init(allocator),
-        .jumpdest_positions = &[_]u32{},
+        .code_segments = try @import("bitvec.zig").BitVec64.init(allocator, 0),
+        .jumpdest_bitmap = try @import("bitvec.zig").BitVec64.init(allocator, 0),
         .block_gas_costs = null,
         .max_stack_depth = 3,
         .has_dynamic_jumps = false,

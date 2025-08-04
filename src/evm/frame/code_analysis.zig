@@ -14,7 +14,7 @@ const BitVec64 = bitvec.BitVec64;
 ///
 /// ## Fields
 /// - `code_segments`: Bit vector marking which bytes are executable code vs data
-/// - `jumpdest_positions`: Sorted array of valid JUMPDEST positions for O(log n) validation
+/// - `jumpdest_bitmap`: Bitmap of valid JUMPDEST positions for O(1) validation
 /// - `block_gas_costs`: Optional pre-computed gas costs for basic blocks
 /// - `max_stack_depth`: Maximum stack depth required by the contract
 /// - `has_dynamic_jumps`: Whether the code contains JUMP/JUMPI with dynamic targets
@@ -23,7 +23,7 @@ const BitVec64 = bitvec.BitVec64;
 /// - `has_create`: Whether the code contains CREATE/CREATE2 opcodes
 ///
 /// ## Performance
-/// - Jump destination validation: O(log n) using binary search
+/// - Jump destination validation: O(1) using bitmap lookup
 /// - Code segment checking: O(1) using bit vector
 /// - Enables dead code elimination and other optimizations
 ///
@@ -42,12 +42,14 @@ const CodeAnalysis = @This();
 /// must point to actual code, not data bytes within PUSH instructions.
 code_segments: BitVec64,
 
-/// Sorted array of all valid JUMPDEST positions in the bytecode.
+/// Bitmap marking all valid JUMPDEST positions in the bytecode.
 ///
-/// Pre-sorted to enable O(log n) binary search validation of jump targets.
-/// Only positions marked as code (not data) and containing the JUMPDEST
-/// opcode (0x5B) are included.
-jumpdest_positions: []const u32,
+/// Each bit corresponds to a byte position in the code:
+/// - 1 = valid JUMPDEST at this position
+/// - 0 = not a valid JUMPDEST
+///
+/// This enables O(1) jump destination validation instead of O(log n) binary search.
+jumpdest_bitmap: BitVec64,
 
 /// Optional pre-computed gas costs for each basic block.
 ///
@@ -91,7 +93,7 @@ has_create: bool,
 /// This method must be called when the analysis is no longer needed to prevent
 /// memory leaks. It safely handles all owned resources including:
 /// - The code segments bit vector
-/// - The jumpdest positions array
+/// - The jumpdest bitmap
 /// - The optional block gas costs array
 ///
 /// ## Parameters
@@ -109,9 +111,7 @@ has_create: bool,
 /// ```
 pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
     self.code_segments.deinit(allocator);
-    if (self.jumpdest_positions.len > 0) {
-        allocator.free(self.jumpdest_positions);
-    }
+    self.jumpdest_bitmap.deinit(allocator);
     if (self.block_gas_costs) |costs| {
         allocator.free(costs);
     }
