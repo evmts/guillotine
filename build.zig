@@ -562,6 +562,22 @@ pub fn build(b: *std.Build) void {
     const bn254_zig_bench_step = b.step("bench-bn254-zig", "Run BN254 Zig native benchmarks");
     bn254_zig_bench_step.dependOn(&run_bn254_zig_bench_cmd.step);
 
+    // Add pre-populated operation lookup benchmark
+    const pre_populated_bench_exe = b.addExecutable(.{
+        .name = "pre-populated-bench",
+        .root_source_file = b.path("bench/pre_populated_benchmark.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    pre_populated_bench_exe.root_module.addImport("evm", bench_evm_mod);
+    b.installArtifact(pre_populated_bench_exe);
+
+    const run_pre_populated_bench_cmd = b.addRunArtifact(pre_populated_bench_exe);
+    run_pre_populated_bench_cmd.step.dependOn(b.getInstallStep());
+
+    const pre_populated_bench_step = b.step("bench-pre-populated", "Run pre-populated operation lookup benchmarks");
+    pre_populated_bench_step.dependOn(&run_pre_populated_bench_cmd.step);
+
     // Flamegraph profiling support
     const flamegraph_step = b.step("flamegraph", "Run benchmarks with flamegraph profiling");
 

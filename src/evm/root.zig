@@ -84,6 +84,8 @@ pub const Hardfork = @import("hardforks/hardfork.zig");
 
 /// Opcode to implementation mapping
 pub const JumpTable = @import("jump_table/jump_table.zig");
+/// Pre-populated operation lookup tables
+pub const pre_populated_tables = @import("jump_table/pre_populated_tables.zig");
 
 /// Byte-addressable memory implementation
 pub const Memory = @import("memory/memory.zig");

@@ -15,6 +15,7 @@ const execution = @import("../execution/package.zig");
 const stack_ops = execution.stack;
 const log = execution.log;
 const operation_config = @import("operation_config.zig");
+const pre_populated_tables = @import("pre_populated_tables.zig");
 
 /// EVM jump table for efficient opcode dispatch.
 ///
@@ -58,9 +59,9 @@ const CACHE_LINE_SIZE = 64;
 /// Null entries are treated as undefined opcodes.
 table: [256]?*const Operation align(CACHE_LINE_SIZE),
 
-/// CANCUN jump table, pre-generated at compile time.
+/// CANCUN jump table, using pre-populated table for performance.
 /// This is the latest hardfork configuration.
-pub const CANCUN = init_from_hardfork(.CANCUN);
+pub const CANCUN = init_from_pre_populated(.CANCUN);
 
 /// Default jump table for the latest hardfork.
 /// References CANCUN to avoid generating the same table twice.
@@ -243,6 +244,25 @@ pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
 /// const table = JumpTable.init_from_hardfork(.CANCUN);
 /// // Table includes all opcodes through Cancun
 /// ```
+/// Create a jump table from pre-populated tables for optimal performance.
+///
+/// This is the preferred method for creating jump tables in production as it:
+/// - Eliminates runtime operation generation
+/// - Uses compile-time computed tables
+/// - Improves startup performance
+/// - Reduces memory allocations
+///
+/// @param hardfork The target hardfork configuration  
+/// @return A fully configured jump table
+pub fn init_from_pre_populated(hardfork: Hardfork) JumpTable {
+    const table = pre_populated_tables.getTable(hardfork);
+    var jt = JumpTable{
+        .table = table,
+    };
+    jt.validate();
+    return jt;
+}
+
 pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     @setEvalBranchQuota(10000);
     var jt = JumpTable.init();
