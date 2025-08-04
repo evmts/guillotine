@@ -473,24 +473,31 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     if (self.analysis == null) {
         self.analysis = analyze_code(allocator, self.code, self.code_hash) catch return false;
     }
-    
+
     const analysis = self.analysis orelse return false;
 
     // IMPORTANT: We only do binary search in analysis (expensive on u256 in terms of bundle size) not in ReleaseSmall
     // TODO we should make this it's own comptime variable called DID_BINARY_SEARCH = builtin.mode != .ReleaseSmall
     if (comptime builtin.mode != .ReleaseSmall) {
-        if (analysis.jumpdest_positions.len > 0) {
-            for (analysis.jumpdest_positions) |jumpdest_pos| {
-                if (jumpdest_pos == pos) return true;
-            }
-            return false;
+        for (analysis.jumpdest_positions) |jumpdest_pos| {
+            if (jumpdest_pos == pos) return true;
         }
+        return false;
     } else {
-        const bin_search_result = std.sort.binarySearch(u32, analysis.jumpdest_positions, pos, {}, std.sort.asc(u32));
-        return bin_search_result != null;
+        const items = analysis.jumpdest_positions;
+        var low: usize = 0;
+        var high: usize = items.len;
+        while (low < high) {
+            // Avoid overflowing in the midpoint calculation
+            const mid = low + (high - low) / 2;
+            switch (std.sort.asc(u32)({}, items[mid])) {
+                .eq => return true,
+                .gt => low = mid + 1,
+                .lt => high = mid,
+            }
+        }
+        return null;
     }
-    // This should never be reached since we handle the no-analysis case above
-    return false;
 }
 
 /// Check if position is code (not data)
