@@ -43,7 +43,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     var pc: usize = 0;
 
     var frame = Frame{
-        .gas_remaining = self.gas,
+        .gas_remaining = contract.gas,
         .pc = 0,
         .contract = contract,
         .allocator = self.allocator,
@@ -68,28 +68,6 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         @branchHint(.likely);
         const opcode = contract.get_op(pc);
         frame.pc = pc;
-
-        // Log stack state before operation
-        if (frame.stack.size > 0) {
-            Log.debug("Stack before pc={}: size={}, top 5 values:", .{ pc, frame.stack.size });
-            var i: usize = 0;
-            while (i < @min(5, frame.stack.size)) : (i += 1) {
-                Log.debug("  [{}] = {}", .{ frame.stack.size - 1 - i, frame.stack.data[frame.stack.size - 1 - i] });
-            }
-        }
-
-        // Trace execution if tracer is available
-        if (self.tracer) |writer| {
-            var tracer = @import("../tracer.zig").Tracer.init(writer);
-            // Get stack slice
-            const stack_slice = frame.stack.data[0..frame.stack.size];
-            // Calculate gas cost for this operation
-            const op_meta = self.table.get_operation(opcode);
-            const gas_cost = op_meta.constant_gas;
-            tracer.trace(pc, opcode, stack_slice, frame.gas_remaining, gas_cost, frame.memory.size(), @intCast(self.depth)) catch |trace_err| {
-                Log.debug("Failed to write trace: {}", .{trace_err});
-            };
-        }
 
         const result = self.table.execute(pc, interpreter, state, opcode) catch |err| {
             contract.gas = frame.gas_remaining;
