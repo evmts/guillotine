@@ -108,19 +108,21 @@ export fn zigFrameCreate(evm_ptr: ?*anyopaque) ?*anyopaque {
             false,
         );
 
-        var builder = Evm.Frame.builder(allocator);
         const frame = allocator.create(Evm.Frame) catch {
             contract.deinit(allocator, null);
             allocator.destroy(contract);
             return null;
         };
 
-        frame.* = builder
-            .withVm(evm_wrapper.evm)
-            .withContract(contract)
-            .withGas(1000)
-            .withCaller(primitives.Address.ZERO_ADDRESS)
-            .build() catch {
+        frame.* = Evm.Frame.init(
+            allocator,
+            evm_wrapper.evm,
+            1000, // gas limit
+            contract,
+            primitives.Address.ZERO_ADDRESS, // caller
+            &[_]u8{}, // input
+            evm_wrapper.evm.context,
+        ) catch {
             contract.deinit(allocator, null);
             allocator.destroy(contract);
             allocator.destroy(frame);
@@ -160,7 +162,7 @@ export fn zigStackPush(frame_ptr: ?*anyopaque, value: CU256) void {
     if (frame_ptr) |ptr| {
         const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
         const zig_value = cU256ToZig(value);
-        wrapper.frame.stack.append(zig_value) catch {
+        wrapper.frame.stack_push(zig_value) catch {
             // In real code, we'd handle this error properly
             std.debug.panic("Stack push failed\n", .{});
         };
@@ -170,7 +172,7 @@ export fn zigStackPush(frame_ptr: ?*anyopaque, value: CU256) void {
 export fn zigStackPop(frame_ptr: ?*anyopaque) CU256 {
     if (frame_ptr) |ptr| {
         const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        const value = wrapper.frame.stack.pop() catch {
+        const value = wrapper.frame.stack_pop() catch {
             // Return 0 on error
             return zigU256ToC(0);
         };
@@ -182,7 +184,7 @@ export fn zigStackPop(frame_ptr: ?*anyopaque) CU256 {
 export fn zigStackSize(frame_ptr: ?*anyopaque) usize {
     if (frame_ptr) |ptr| {
         const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        return wrapper.frame.stack.size;
+        return wrapper.frame.stack_size;
     }
     return 0;
 }
@@ -196,7 +198,7 @@ export fn zigExecuteOpcode(evm_ptr: ?*anyopaque, frame_ptr: ?*anyopaque, opcode:
             const interpreter: Evm.Operation.Interpreter = evm_wrapper.evm;
             const state: Evm.Operation.State = frame_wrapper.frame;
 
-            _ = evm_wrapper.evm.table.execute(0, interpreter, state, opcode) catch |err| {
+            _ = evm_wrapper.evm.table.execute(interpreter, state, opcode) catch |err| {
                 // Return error code based on error type
                 switch (err) {
                     error.StackUnderflow => return -1,

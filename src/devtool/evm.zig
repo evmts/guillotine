@@ -277,7 +277,7 @@ pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
     // Execute single instruction using existing EVM table
     const interpreter_ptr: *Evm.Evm = &self.evm;
     const state_ptr: *Evm.Frame = frame;
-    const result = self.evm.table.execute(pc_before, interpreter_ptr, state_ptr, opcode) catch |err| {
+    const result = self.evm.table.execute(interpreter_ptr, state_ptr, opcode) catch |err| {
         return DebugStepResult{
             .opcode = opcode,
             .opcode_name = debug_state.opcodeToString(opcode),

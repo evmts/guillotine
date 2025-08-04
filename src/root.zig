@@ -374,9 +374,8 @@ export fn guillotine_vm_execute(
     var contract = evm_root.Contract.init(from_addr, to_addr, value_u256, gas_limit, &[_]u8{}, code_hash, input_slice, false);
     defer contract.deinit(state.allocator, null);
     
-    // Create frame
-    var frame = evm_root.Frame.init(state.allocator, &contract) catch return result;
-    defer frame.deinit();
+    // Note: Frame creation is now handled internally by the VM during execution
+    // The interpret function will create its own frame with the proper context
     
     // Execute
     const exec_result = state.vm.interpret(&contract, input_slice, false) catch |err| {
