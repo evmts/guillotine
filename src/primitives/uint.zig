@@ -167,6 +167,14 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
         pub fn eq(self: Self, other: Self) bool {
             if (bits == 0) return true;
+
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const other_u256 = other.to_u256() orelse unreachable;
+                return self_u256 == other_u256;
+            }
+
             for (0..limbs) |i| {
                 if (self.limbs[i] != other.limbs[i]) return false;
             }
@@ -251,6 +259,14 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
         pub fn lt(self: Self, other: Self) bool {
             if (bits == 0) return false;
+
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const other_u256 = other.to_u256() orelse unreachable;
+                return self_u256 < other_u256;
+            }
+
             var i = limbs;
             while (i > 0) {
                 i -= 1;
@@ -261,6 +277,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         }
 
         pub fn gt(self: Self, other: Self) bool {
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const other_u256 = other.to_u256() orelse unreachable;
+                return self_u256 > other_u256;
+            }
+
             return other.lt(self);
         }
 
@@ -561,7 +584,14 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (bits == 0 or shift >= bits) return ZERO;
             if (shift == 0) return self;
 
-            // Optimized path for 256-bit numbers
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const shifted = if (shift >= 256) 0 else self_u256 << @intCast(shift);
+                return Self.from_u256(shifted);
+            }
+
+            // Optimized path for 256-bit numbers (fallback for larger types)
             if (comptime bits == 256 and limbs == 4) {
                 return self.shl256Optimized(shift);
             }
@@ -633,6 +663,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (bits == 0 or shift >= bits) return ZERO;
             if (shift == 0) return self;
 
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const shifted = if (shift >= 256) 0 else self_u256 >> @intCast(shift);
+                return Self.from_u256(shifted);
+            }
+
             var result = ZERO;
             const word_shift = shift / 64;
             const bit_shift = shift % 64;
@@ -687,6 +724,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         }
 
         pub fn bit_and(self: Self, rhs: Self) Self {
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const rhs_u256 = rhs.to_u256() orelse unreachable;
+                return Self.from_u256(self_u256 & rhs_u256);
+            }
+
             var result = ZERO;
             for (0..limbs) |i| {
                 result.limbs[i] = self.limbs[i] & rhs.limbs[i];
@@ -695,6 +739,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         }
 
         pub fn bit_or(self: Self, rhs: Self) Self {
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const rhs_u256 = rhs.to_u256() orelse unreachable;
+                return Self.from_u256(self_u256 | rhs_u256);
+            }
+
             var result = ZERO;
             for (0..limbs) |i| {
                 result.limbs[i] = self.limbs[i] | rhs.limbs[i];
@@ -703,6 +754,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         }
 
         pub fn bit_xor(self: Self, rhs: Self) Self {
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const rhs_u256 = rhs.to_u256() orelse unreachable;
+                return Self.from_u256(self_u256 ^ rhs_u256);
+            }
+
             var result = ZERO;
             for (0..limbs) |i| {
                 result.limbs[i] = self.limbs[i] ^ rhs.limbs[i];
@@ -938,6 +996,13 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
         pub fn trailing_zeros(self: Self) u32 {
             if (bits == 0) return 0;
+
+            // For 256-bit or smaller, use native u256 operations for better performance
+            if (comptime bits <= 256) {
+                const self_u256 = self.to_u256() orelse unreachable;
+                const result = @ctz(self_u256);
+                return @min(result, @as(u32, @intCast(bits)));
+            }
 
             var zeros: u32 = 0;
             for (0..limbs) |i| {
