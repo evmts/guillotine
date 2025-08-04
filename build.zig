@@ -64,7 +64,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-
     // Create the trie module
     const trie_mod = b.createModule(.{
         .root_source_file = b.path("src/trie/root.zig"),
@@ -105,7 +104,7 @@ pub fn build(b: *std.Build) void {
     // Single workspace build command that builds all Rust crates at once
     const workspace_build_step = if (rust_target != null) blk: {
         const rust_cmd = b.addSystemCommand(&[_][]const u8{
-            "cargo", "build",
+            "cargo",     "build",
             "--profile", if (optimize == .Debug) "dev" else "release",
         });
         if (rust_target) |target_triple| {
@@ -121,22 +120,22 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
         });
-        
+
         const profile_dir = if (optimize == .Debug) "debug" else "release";
         const lib_path = if (rust_target) |target_triple|
             b.fmt("target/{s}/{s}/libbn254_wrapper.a", .{ target_triple, profile_dir })
         else
-            b.fmt("target/{s}/libbn254_wrapper.a", .{ profile_dir });
-        
+            b.fmt("target/{s}/libbn254_wrapper.a", .{profile_dir});
+
         lib.addObjectFile(b.path(lib_path));
         lib.linkLibC();
         lib.addIncludePath(b.path("src/bn254_wrapper"));
-        
+
         // Make sure workspace builds first
         if (workspace_build_step) |build_step| {
             lib.step.dependOn(&build_step.step);
         }
-        
+
         break :blk lib;
     } else null;
 
@@ -488,6 +487,24 @@ pub fn build(b: *std.Build) void {
 
     const revm_bench_step = b.step("bench-revm", "Run revm comparison benchmarks");
     revm_bench_step.dependOn(&run_revm_bench_cmd.step);
+
+    // Add uint library benchmark executable
+    const uint_bench_exe = b.addExecutable(.{
+        .name = "uint-benchmark",
+        .root_source_file = b.path("bench/uint_benchmark_runner.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    uint_bench_exe.root_module.addImport("primitives", primitives_mod);
+    uint_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+
+    b.installArtifact(uint_bench_exe);
+
+    const run_uint_bench_cmd = b.addRunArtifact(uint_bench_exe);
+    run_uint_bench_cmd.step.dependOn(b.getInstallStep());
+
+    const uint_bench_step = b.step("bench-uint", "Run uint library vs native u256 benchmarks");
+    uint_bench_step.dependOn(&run_uint_bench_cmd.step);
 
     // Add BN254 Rust wrapper benchmark executable
     const bn254_rust_bench_exe = b.addExecutable(.{

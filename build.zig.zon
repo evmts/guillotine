@@ -45,8 +45,8 @@
             .hash = "c_kzg_4844-0.0.0-UbJ7acpiHQBNlbFymCuO9OTLut3UtdHz4OiDZBc5pCAd",
         },
         .zbench = .{
-            .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/master.tar.gz",
-            .hash = "zbench-0.11.0-YTdc75klAQDX2m3fa_EHmQA_wJDgBIGiWXXX091e3qUQ",
+            .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/zig-0.14.0.tar.gz",
+            .hash = "zbench-0.9.2-YTdc79DoAADA2YNklaPqRzZxd3JwgRATsHi1cfqEOd_P",
         },
         .clap = .{
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.10.0.tar.gz",
