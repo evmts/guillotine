@@ -2,7 +2,7 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const Contract = @import("../frame/contract.zig");
 const primitives = @import("primitives");
@@ -200,8 +200,13 @@ fn get_call_args(frame: *Frame, args_offset: u256, args_size: u256) ExecutionErr
     const args_offset_usize = @as(usize, @intCast(args_offset));
     const args_size_usize = @as(usize, @intCast(args_size));
 
-    _ = try frame.memory.ensure_context_capacity(args_offset_usize + args_size_usize);
-    return try frame.memory.get_slice(args_offset_usize, args_size_usize);
+    frame.memory_ensure_capacity(@intCast(args_offset_usize + args_size_usize)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    return frame.memory_get_slice(args_offset_usize, args_size_usize);
 }
 
 /// Ensure return memory is available for writing results
@@ -214,7 +219,12 @@ fn ensure_return_memory(frame: *Frame, ret_offset: u256, ret_size: u256) Executi
     const ret_offset_usize = @as(usize, @intCast(ret_offset));
     const ret_size_usize = @as(usize, @intCast(ret_size));
 
-    _ = try frame.memory.ensure_context_capacity(ret_offset_usize + ret_size_usize);
+    frame.memory_ensure_capacity(@intCast(ret_offset_usize + ret_size_usize)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 }
 
 /// Handle address conversion and EIP-2929 access cost
@@ -258,7 +268,7 @@ fn handle_call_result(frame: *Frame, result: anytype, ret_offset: u256, ret_size
         const output = result.output.?;
 
         const copy_size = @min(ret_size_usize, output.len);
-        const memory_slice = frame.memory.slice();
+        const memory_slice = frame.memory_slice();
         std.mem.copyForwards(u8, memory_slice[ret_offset_usize .. ret_offset_usize + copy_size], output[0..copy_size]);
 
         // Zero out remaining bytes if output was smaller than requested
@@ -269,10 +279,10 @@ fn handle_call_result(frame: *Frame, result: anytype, ret_offset: u256, ret_size
     }
 
     // Set return data
-    try frame.return_data.set(result.output orelse &[_]u8{});
+    try frame.return_data_set(result.output orelse &[_]u8{});
 
     // Push success status (bounds checking already done by jump table)
-    frame.stack.append_unsafe(if (result.success) 1 else 0);
+    frame.stack_push_unsafe(if (result.success) 1 else 0);
 }
 
 // ============================================================================
@@ -306,12 +316,17 @@ fn get_initcode_from_memory(frame: *Frame, vm: *Vm, offset: u256, size: u256) Ex
 
     // Calculate memory expansion gas cost
     const new_size = offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(new_size)));
     try frame.consume_gas(memory_gas);
 
     // Ensure memory is available and get the slice
-    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
-    return try frame.memory.get_slice(offset_usize, size_usize);
+    frame.memory_ensure_capacity(@intCast(offset_usize + size_usize)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    return frame.memory_get_slice(offset_usize, size_usize);
 }
 
 /// Calculate and consume gas for CREATE operations
@@ -349,20 +364,20 @@ fn handle_create_result(frame: *Frame, vm: *Vm, result: anytype, gas_for_call: u
 
     if (!result.success) {
         @branchHint(.unlikely);
-        try frame.stack.append(0);
-        try frame.return_data.set(result.output orelse &[_]u8{});
+        try frame.stack_push(0);
+        try frame.return_data_set(result.output orelse &[_]u8{});
         return;
     }
 
     // EIP-2929: Mark the newly created address as warm
     _ = try vm.access_list.access_address(result.address);
-    try frame.stack.append(to_u256(result.address));
+    try frame.stack_push(to_u256(result.address));
 
     // Clear old return data before setting new data to reduce memory pressure
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Set return data
-    try frame.return_data.set(result.output orelse &[_]u8{});
+    try frame.return_data_set(result.output orelse &[_]u8{});
 }
 
 /// Calculate complete gas cost for call operations
@@ -436,13 +451,10 @@ pub fn calculate_call_gas(
 // ============================================================================
 
 // Gas opcode handler
-pub fn gas_op(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn gas_op(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    try frame.stack.append(@as(u256, @intCast(frame.gas_remaining)));
+    try frame.stack_push(@as(u256, @intCast(frame.gas_remaining)));
 
     return Operation.ExecutionResult{};
 }
@@ -503,23 +515,19 @@ pub fn revert_to_snapshot(vm: *Vm, snapshot_id: usize) !void {
     try vm.revert_to_snapshot(snapshot_id);
 }
 
-pub fn op_create(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_create(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
     // Check static call restrictions
     try validate_create_static_context(frame);
 
-    const value = try frame.stack.pop();
-    const offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const value = try frame.stack_pop();
+    const offset = try frame.stack_pop();
+    const size = try frame.stack_pop();
 
     // Check depth
     if (validate_call_depth(frame)) {
         @branchHint(.cold);
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -533,10 +541,10 @@ pub fn op_create(pc: usize, interpreter: Operation.Interpreter, state: Operation
 
     // Clear return data before making new call to reduce memory pressure
     // Previous return data is no longer needed once we make a new call
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Create the contract
-    const result = try vm.create_contract(frame.contract.address, value, init_code, gas_for_call);
+    const result = try vm.create_contract(frame.address, value, init_code, gas_for_call);
 
     // Handle result
     try handle_create_result(frame, vm, result, gas_for_call);
@@ -545,23 +553,19 @@ pub fn op_create(pc: usize, interpreter: Operation.Interpreter, state: Operation
 }
 
 /// CREATE2 opcode - Create contract with deterministic address
-pub fn op_create2(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_create2(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
     // Check static call restrictions
     try validate_create_static_context(frame);
 
-    const value = try frame.stack.pop();
-    const offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
-    const salt = try frame.stack.pop();
+    const value = try frame.stack_pop();
+    const offset = try frame.stack_pop();
+    const size = try frame.stack_pop();
+    const salt = try frame.stack_pop();
 
     // Check depth
     if (validate_call_depth(frame)) {
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -575,10 +579,10 @@ pub fn op_create2(pc: usize, interpreter: Operation.Interpreter, state: Operatio
 
     // Clear return data before making new call to reduce memory pressure
     // Previous return data is no longer needed once we make a new call
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Create the contract with CREATE2
-    const result = try vm.create2_contract(frame.contract.address, value, init_code, salt, gas_for_call);
+    const result = try vm.create2_contract(frame.address, value, init_code, salt, gas_for_call);
 
     // Handle result
     try handle_create_result(frame, vm, result, gas_for_call);
@@ -586,19 +590,15 @@ pub fn op_create2(pc: usize, interpreter: Operation.Interpreter, state: Operatio
     return Operation.ExecutionResult{};
 }
 
-pub fn op_call(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_call(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const gas = try frame.stack.pop();
-    const to = try frame.stack.pop();
-    const value = try frame.stack.pop();
-    const args_offset = try frame.stack.pop();
-    const args_size = try frame.stack.pop();
-    const ret_offset = try frame.stack.pop();
-    const ret_size = try frame.stack.pop();
+    const gas = try frame.stack_pop();
+    const to = try frame.stack_pop();
+    const value = try frame.stack_pop();
+    const args_offset = try frame.stack_pop();
+    const args_size = try frame.stack_pop();
+    const ret_offset = try frame.stack_pop();
+    const ret_size = try frame.stack_pop();
 
     // Check static call restrictions
     if (frame.is_static and value != 0) {
@@ -609,7 +609,7 @@ pub fn op_call(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     // Check depth
     if (validate_call_depth(frame)) {
         @branchHint(.cold);
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -625,10 +625,10 @@ pub fn op_call(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 
     // Clear return data before making new call to reduce memory pressure
     // Previous return data is no longer needed once we make a new call
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Execute the call
-    const result = try vm.call_contract(frame.contract.address, to_address, value, args, gas_for_call, frame.is_static);
+    const result = try vm.call_contract(frame.address, to_address, value, args, gas_for_call, frame.is_static);
     defer if (result.output) |output| vm.allocator.free(output);
 
     // Handle result and update state
@@ -637,24 +637,20 @@ pub fn op_call(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     return Operation.ExecutionResult{};
 }
 
-pub fn op_callcode(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_callcode(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const gas = try frame.stack.pop();
-    const to = try frame.stack.pop();
-    const value = try frame.stack.pop();
-    const args_offset = try frame.stack.pop();
-    const args_size = try frame.stack.pop();
-    const ret_offset = try frame.stack.pop();
-    const ret_size = try frame.stack.pop();
+    const gas = try frame.stack_pop();
+    const to = try frame.stack_pop();
+    const value = try frame.stack_pop();
+    const args_offset = try frame.stack_pop();
+    const args_size = try frame.stack_pop();
+    const ret_offset = try frame.stack_pop();
+    const ret_size = try frame.stack_pop();
 
     // Check depth
     if (validate_call_depth(frame)) {
         @branchHint(.cold);
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -670,11 +666,11 @@ pub fn op_callcode(pc: usize, interpreter: Operation.Interpreter, state: Operati
 
     // Clear return data before making new call to reduce memory pressure
     // Previous return data is no longer needed once we make a new call
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Execute the callcode (execute target's code with current storage context)
     // For callcode, we use the current contract's address as the execution context
-    const result = try vm.callcode_contract(frame.contract.address, to_address, value, args, gas_for_call, frame.is_static);
+    const result = try vm.callcode_contract(frame.address, to_address, value, args, gas_for_call, frame.is_static);
     defer if (result.output) |output| vm.allocator.free(output);
 
     // Handle result and update state
@@ -683,24 +679,20 @@ pub fn op_callcode(pc: usize, interpreter: Operation.Interpreter, state: Operati
     return Operation.ExecutionResult{};
 }
 
-pub fn op_delegatecall(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_delegatecall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
     // DELEGATECALL takes 6 parameters (no value parameter)
-    const gas = try frame.stack.pop();
-    const to = try frame.stack.pop();
-    const args_offset = try frame.stack.pop();
-    const args_size = try frame.stack.pop();
-    const ret_offset = try frame.stack.pop();
-    const ret_size = try frame.stack.pop();
+    const gas = try frame.stack_pop();
+    const to = try frame.stack_pop();
+    const args_offset = try frame.stack_pop();
+    const args_size = try frame.stack_pop();
+    const ret_offset = try frame.stack_pop();
+    const ret_size = try frame.stack_pop();
 
     // Check call depth limit
     if (validate_call_depth(frame)) {
         @branchHint(.cold);
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -722,13 +714,13 @@ pub fn op_delegatecall(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
     // Clear return data before making new call to reduce memory pressure
     // Previous return data is no longer needed once we make a new call
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Execute the delegatecall (execute target's code with current context)
-    const result = try vm.delegatecall_contract(frame.contract.address, // current contract's address
+    const result = try vm.delegatecall_contract(frame.address, // current contract's address
         to_address, // target code address
-        frame.contract.caller, // preserve caller from current frame
-        frame.contract.value, // preserve value from current frame
+        frame.caller, // preserve caller from current frame
+        frame.value, // preserve value from current frame
         args, // input data
         gas_for_call, // gas limit
         frame.is_static // static flag
@@ -741,24 +733,20 @@ pub fn op_delegatecall(pc: usize, interpreter: Operation.Interpreter, state: Ope
     return Operation.ExecutionResult{};
 }
 
-pub fn op_staticcall(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_staticcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
     // STATICCALL takes 6 parameters (no value parameter)
-    const gas = try frame.stack.pop();
-    const to = try frame.stack.pop();
-    const args_offset = try frame.stack.pop();
-    const args_size = try frame.stack.pop();
-    const ret_offset = try frame.stack.pop();
-    const ret_size = try frame.stack.pop();
+    const gas = try frame.stack_pop();
+    const to = try frame.stack_pop();
+    const args_offset = try frame.stack_pop();
+    const args_size = try frame.stack_pop();
+    const ret_offset = try frame.stack_pop();
+    const ret_size = try frame.stack_pop();
 
     // Check call depth limit
     if (validate_call_depth(frame)) {
         @branchHint(.cold);
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -780,10 +768,10 @@ pub fn op_staticcall(pc: usize, interpreter: Operation.Interpreter, state: Opera
 
     // Clear return data before making new call to reduce memory pressure
     // Previous return data is no longer needed once we make a new call
-    frame.return_data.clear();
+    frame.return_data_clear();
 
     // Execute the staticcall (read-only call with static restrictions)
-    const result = try vm.staticcall_contract(frame.contract.address, to_address, args, gas_for_call);
+    const result = try vm.staticcall_contract(frame.address, to_address, args, gas_for_call);
     defer if (result.output) |output| vm.allocator.free(output);
 
     // Handle result and update state
@@ -821,7 +809,7 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
     }
 
     // Pop recipient address from stack (bounds checking already done by jump table)
-    const recipient_u256 = frame.stack.pop_unsafe();
+    const recipient_u256 = frame.stack_pop_unsafe();
     const recipient_address = from_u256(recipient_u256);
 
     // Get hardfork rules for gas calculation
@@ -865,7 +853,7 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
     frame.gas_remaining -= gas_cost;
 
     // Mark contract for destruction with recipient
-    vm.state.mark_for_destruction(frame.contract.address, recipient_address);
+    vm.state.mark_for_destruction(frame.address, recipient_address);
 
     // SELFDESTRUCT halts execution immediately
     return ExecutionError.Error.STOP;
@@ -873,10 +861,9 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
 /// EXTCALL opcode (0xF8): External call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extcall(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_extcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
+    _ = frame;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
     return ExecutionError.Error.EOFNotSupported;
@@ -884,10 +871,9 @@ pub fn op_extcall(pc: usize, interpreter: Operation.Interpreter, state: Operatio
 
 /// EXTDELEGATECALL opcode (0xF9): External delegate call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extdelegatecall(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_extdelegatecall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
+    _ = frame;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
     return ExecutionError.Error.EOFNotSupported;
@@ -895,10 +881,9 @@ pub fn op_extdelegatecall(pc: usize, interpreter: Operation.Interpreter, state: 
 
 /// EXTSTATICCALL opcode (0xFB): External static call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extstaticcall(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_extstaticcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
+    _ = frame;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
     return ExecutionError.Error.EOFNotSupported;
@@ -907,7 +892,6 @@ pub fn op_extstaticcall(pc: usize, interpreter: Operation.Interpreter, state: Op
 // Testing imports and definitions
 const testing = std.testing;
 const MemoryDatabase = @import("../state/memory_database.zig");
-const ReturnData = @import("../evm/return_data.zig");
 const ArrayList = std.ArrayList;
 
 const FuzzSystemOperation = struct {
@@ -984,8 +968,18 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         // Pre-populate memory if needed for init code or call data
         if (op.init_code.len > 0 and op.init_size > 0) {
             const init_offset_usize = @as(usize, @intCast(op.init_offset));
-            _ = try frame.memory.ensure_context_capacity(init_offset_usize + op.init_code.len);
-            try frame.memory.set_data(init_offset_usize, op.init_code);
+            frame.memory_ensure_capacity(@intCast(init_offset_usize + op.init_code.len)) catch |err| switch (err) {
+                error.OutOfGas => return error.OutOfGas,
+                error.AllocationError => return error.OutOfMemory,
+                error.Overflow => return error.OutOfMemory,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            frame.memory_set_data(@intCast(init_offset_usize), @intCast(op.init_code.len), op.init_code) catch |err| switch (err) {
+                error.OutOfGas => return error.OutOfGas,
+                error.AllocationError => return error.OutOfMemory,
+                error.Overflow => return error.OutOfMemory,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
         }
 
         // Execute the operation based on type
@@ -994,58 +988,58 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
                 break :blk gas_op(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .create => blk: {
-                try frame.stack.append(op.value);
-                try frame.stack.append(op.init_offset);
-                try frame.stack.append(op.init_size);
+                try frame.stack_push(op.value);
+                try frame.stack_push(op.init_offset);
+                try frame.stack_push(op.init_size);
                 break :blk op_create(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .create2 => blk: {
-                try frame.stack.append(op.value);
-                try frame.stack.append(op.init_offset);
-                try frame.stack.append(op.init_size);
-                try frame.stack.append(op.salt);
+                try frame.stack_push(op.value);
+                try frame.stack_push(op.init_offset);
+                try frame.stack_push(op.init_size);
+                try frame.stack_push(op.salt);
                 break :blk op_create2(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .call => blk: {
-                try frame.stack.append(op.gas);
-                try frame.stack.append(op.to);
-                try frame.stack.append(op.value);
-                try frame.stack.append(op.args_offset);
-                try frame.stack.append(op.args_size);
-                try frame.stack.append(op.ret_offset);
-                try frame.stack.append(op.ret_size);
+                try frame.stack_push(op.gas);
+                try frame.stack_push(op.to);
+                try frame.stack_push(op.value);
+                try frame.stack_push(op.args_offset);
+                try frame.stack_push(op.args_size);
+                try frame.stack_push(op.ret_offset);
+                try frame.stack_push(op.ret_size);
                 break :blk op_call(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .callcode => blk: {
-                try frame.stack.append(op.gas);
-                try frame.stack.append(op.to);
-                try frame.stack.append(op.value);
-                try frame.stack.append(op.args_offset);
-                try frame.stack.append(op.args_size);
-                try frame.stack.append(op.ret_offset);
-                try frame.stack.append(op.ret_size);
+                try frame.stack_push(op.gas);
+                try frame.stack_push(op.to);
+                try frame.stack_push(op.value);
+                try frame.stack_push(op.args_offset);
+                try frame.stack_push(op.args_size);
+                try frame.stack_push(op.ret_offset);
+                try frame.stack_push(op.ret_size);
                 break :blk op_callcode(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .delegatecall => blk: {
-                try frame.stack.append(op.gas);
-                try frame.stack.append(op.to);
-                try frame.stack.append(op.args_offset);
-                try frame.stack.append(op.args_size);
-                try frame.stack.append(op.ret_offset);
-                try frame.stack.append(op.ret_size);
+                try frame.stack_push(op.gas);
+                try frame.stack_push(op.to);
+                try frame.stack_push(op.args_offset);
+                try frame.stack_push(op.args_size);
+                try frame.stack_push(op.ret_offset);
+                try frame.stack_push(op.ret_size);
                 break :blk op_delegatecall(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .staticcall => blk: {
-                try frame.stack.append(op.gas);
-                try frame.stack.append(op.to);
-                try frame.stack.append(op.args_offset);
-                try frame.stack.append(op.args_size);
-                try frame.stack.append(op.ret_offset);
-                try frame.stack.append(op.ret_size);
+                try frame.stack_push(op.gas);
+                try frame.stack_push(op.to);
+                try frame.stack_push(op.args_offset);
+                try frame.stack_push(op.args_size);
+                try frame.stack_push(op.ret_offset);
+                try frame.stack_push(op.ret_size);
                 break :blk op_staticcall(0, @ptrCast(&vm), @ptrCast(&frame));
             },
             .selfdestruct => blk: {
-                try frame.stack.append(op.to);
+                try frame.stack_push(op.to);
                 break :blk op_selfdestruct(0, @ptrCast(&vm), @ptrCast(&frame));
             },
         };
@@ -1072,23 +1066,23 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
     // Validate stack results for operations
     switch (op.op_type) {
         .gas => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack_size);
             // Gas value should be less than or equal to initial gas limit
-            const gas_value = frame.stack.data[0];
+            const gas_value = frame.stack_data[0];
             try testing.expect(gas_value <= op.gas_limit);
         },
         .create, .create2 => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack_size);
             // Result is either 0 (failure) or an address
-            const result_value = frame.stack.data[0];
+            const result_value = frame.stack_data[0];
             if (!op.expect_success) {
                 try testing.expectEqual(@as(u256, 0), result_value);
             }
         },
         .call, .callcode, .delegatecall, .staticcall => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack_size);
             // Result is 1 (success) or 0 (failure)
-            const result_value = frame.stack.data[0];
+            const result_value = frame.stack_data[0];
             if (op.expect_success) {
                 try testing.expectEqual(@as(u256, 1), result_value);
             } else {
@@ -1097,7 +1091,7 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
         },
         .selfdestruct => {
             // SELFDESTRUCT doesn't push to stack
-            try testing.expectEqual(@as(usize, 0), frame.stack.size);
+            try testing.expectEqual(@as(usize, 0), frame.stack_size);
         },
     }
 }
