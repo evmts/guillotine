@@ -3,7 +3,7 @@ use std::{env, fs, str::FromStr, time::Instant};
 use revm::{
     primitives::{Address, Bytes, ExecutionResult, TxKind, U256},
     db::{CacheDB, EmptyDB},
-    Evm, DatabaseCommit,
+    Evm,
 };
 
 const CALLER_ADDRESS: &str = "0x1000000000000000000000000000000000000001";
@@ -86,9 +86,9 @@ fn main() {
             tx.caller = caller_address;
             tx.transact_to = TxKind::Call(contract_address);
             tx.value = U256::ZERO;
-            tx.data = calldata.clone();
+            tx.data = calldata;
             tx.gas_limit = 1_000_000_000; // 1B gas
-            tx.gas_price = U256::from(0u64);
+            tx.gas_price = U256::from(1u64);
         })
         .build();
     
@@ -97,11 +97,10 @@ fn main() {
         let timer = Instant::now();
         
         // Execute without error handling for performance
-        let result = evm.transact().unwrap();
+        let _result = evm.transact().unwrap();
         let dur = timer.elapsed();
         
-        // Commit the state changes (similar to how Zig's vm.call_contract works)
-        evm.context.evm.db.commit(result.state);
+        // Don't commit state changes - just measure execution time
         
         println!("{}", dur.as_micros() as f64 / 1e3);
     }
