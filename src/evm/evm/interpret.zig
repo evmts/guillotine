@@ -1,11 +1,10 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Contract = @import("../frame/contract.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Operation = @import("../opcodes/operation.zig");
 const RunResult = @import("run_result.zig").RunResult;
 const Memory = @import("../memory/memory.zig");
-const ReturnData = @import("return_data.zig").ReturnData;
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
@@ -43,36 +42,28 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     self.read_only = self.read_only or is_static;
 
-    const initial_gas = contract.gas;
-
-    var frame = Frame{
-        .gas_remaining = contract.gas,
-        .pc = 0,
-        .contract = contract,
-        .allocator = self.allocator,
-        .stop = false,
-        .is_static = self.read_only,
-        .depth = @as(u32, @intCast(self.depth)),
-        .cost = 0,
-        .err = null,
-        .input = input,
-        .output = &[_]u8{},
-        .op = &.{},
-        .memory = try Memory.init_default(self.allocator),
-        .stack = .{},
-        .return_data = ReturnData.init(self.allocator),
-    };
+    var frame = try Frame.init(
+        self.allocator,
+        self,
+        contract.gas,
+        contract,
+        contract.caller,
+        input,
+        self.context,
+    );
     defer frame.deinit();
+
+    const initial_gas = frame.gas_remaining;
 
     const interpreter: Operation.Interpreter = self;
     const state: Operation.State = &frame;
 
     var instruction_count: u64 = 0;
 
-    while (frame.pc < contract.code_size) {
+    while (frame.pc < frame.code_size) {
         @branchHint(.likely);
 
-        const opcode = contract.get_op(frame.pc);
+        const opcode = frame.get_op(frame.pc);
 
         // Capture the current PC value before it can be modified
         const current_pc = frame.pc;
@@ -124,7 +115,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             };
         }
 
-        const result = self.table.execute(frame.pc, interpreter, state, opcode) catch |err| {
+        const result = self.table.execute(interpreter, state, opcode) catch |err| {
             contract.gas = frame.gas_remaining;
 
             var output: ?[]const u8 = null;
