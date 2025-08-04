@@ -64,6 +64,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Create uint module
+    const uint_mod = b.createModule(.{
+        .root_source_file = b.path("src/uint/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Create the trie module
     const trie_mod = b.createModule(.{
         .root_source_file = b.path("src/trie/root.zig"),
@@ -278,6 +285,7 @@ pub fn build(b: *std.Build) void {
     lib_mod.addImport("provider", provider_mod);
     lib_mod.addImport("compilers", compilers_mod);
     lib_mod.addImport("trie", trie_mod);
+    lib_mod.addImport("uint", uint_mod);
     if (revm_lib != null) {
         lib_mod.addImport("revm", revm_mod);
     }
