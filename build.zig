@@ -561,22 +561,6 @@ pub fn build(b: *std.Build) void {
 
     const bn254_zig_bench_step = b.step("bench-bn254-zig", "Run BN254 Zig native benchmarks");
     bn254_zig_bench_step.dependOn(&run_bn254_zig_bench_cmd.step);
-    
-    // Add jump table benchmark executable  
-    const jump_table_bench_exe = b.addExecutable(.{
-        .name = "jump-table-bench",
-        .root_source_file = b.path("bench/jump_table_benchmark.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    jump_table_bench_exe.root_module.addImport("evm", evm_mod);
-    jump_table_bench_exe.root_module.addImport("primitives", primitives_mod);
-    b.installArtifact(jump_table_bench_exe);
-    
-    const run_jump_table_bench_cmd = b.addRunArtifact(jump_table_bench_exe);
-    run_jump_table_bench_cmd.step.dependOn(b.getInstallStep());
-    const jump_table_bench_step = b.step("bench-jump-table", "Run jump table AoS vs SoA benchmarks");
-    jump_table_bench_step.dependOn(&run_jump_table_bench_cmd.step);
 
     // Flamegraph profiling support
     const flamegraph_step = b.step("flamegraph", "Run benchmarks with flamegraph profiling");
