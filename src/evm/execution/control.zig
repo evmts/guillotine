@@ -4,34 +4,30 @@ const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const ExecutionResult = @import("execution_result.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
 const AccessList = @import("../access_list/access_list.zig").AccessList;
 const primitives = @import("primitives");
 const from_u256 = primitives.Address.from_u256;
 
-pub fn op_stop(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_stop(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
+    _ = frame;
 
     return ExecutionError.Error.STOP;
 }
 
-pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_jump(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 1);
+    std.debug.assert(frame.stack_size >= 1);
 
     // Use unsafe pop since bounds checking is done by jump_table
-    const dest = frame.stack.pop_unsafe();
+    const dest = frame.stack_pop_unsafe();
 
     // Check if destination is a valid JUMPDEST (pass u256 directly)
-    if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
+    if (!frame.valid_jumpdest(frame.allocator, dest)) {
         @branchHint(.unlikely);
         return ExecutionError.Error.InvalidJump;
     }
@@ -44,26 +40,24 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     return ExecutionResult{};
 }
 
-pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = interpreter;
+pub fn op_jumpi(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [destination, condition]
-    const values = frame.stack.pop2_unsafe();
+    const values = frame.stack_pop2_unsafe();
     const destination = values.b; // Top
     const condition = values.a; // Second from top
 
-    Log.debug("JUMPI: condition={}, destination={}, current_pc={}", .{ condition, destination, pc });
+    Log.debug("JUMPI: condition={}, destination={}, current_pc={}", .{ condition, destination, frame.pc });
 
     if (condition != 0) {
         Log.debug("JUMPI: condition is non-zero, checking jump destination", .{});
 
         // Check if destination is a valid JUMPDEST (pass u256 directly)
-        if (!frame.contract.valid_jumpdest(frame.allocator, destination)) {
+        if (!frame.valid_jumpdest(frame.allocator, destination)) {
             @branchHint(.unlikely);
             Log.debug("JUMPI: Invalid jump destination {}", .{destination});
             return ExecutionError.Error.InvalidJump;
@@ -78,39 +72,33 @@ pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     return ExecutionResult{};
 }
 
-pub fn op_pc(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = interpreter;
+pub fn op_pc(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size < Stack.CAPACITY);
+    std.debug.assert(frame.stack_size < 1024);
 
     // Use unsafe push since bounds checking is done by jump_table
-    frame.stack.append_unsafe(@as(u256, @intCast(pc)));
+    frame.stack_push_unsafe(@as(u256, @intCast(frame.pc)));
 
     return ExecutionResult{};
 }
 
-pub fn op_jumpdest(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_jumpdest(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
+    _ = frame;
 
     // No-op, just marks valid jump destination
     return ExecutionResult{};
 }
 
-pub fn op_return(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_return(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
-    const values = frame.stack.pop2_unsafe();
+    const values = frame.stack_pop2_unsafe();
     const offset = values.b; // Top
     const size = values.a; // Second from top
 
@@ -131,14 +119,19 @@ pub fn op_return(pc: usize, interpreter: Operation.Interpreter, state: Operation
         // Calculate memory expansion gas cost
         const end = offset_usize + size_usize;
         if (end > offset_usize) { // Check for overflow
-            const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(end)));
+            const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(end)));
             try frame.consume_gas(memory_gas);
 
-            _ = try frame.memory.ensure_context_capacity(end);
+            frame.memory_ensure_capacity(end) catch |err| switch (err) {
+                error.OutOfGas => return error.OutOfGas,
+                error.AllocationError => return error.OutOfMemory,
+                error.Overflow => return error.OutOfMemory,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
         }
 
         // Get data from memory
-        const data = try frame.memory.get_slice(offset_usize, size_usize);
+        const data = frame.memory_get_slice(@intCast(offset_usize), @intCast(size_usize));
 
         Log.debug("RETURN reading {} bytes from memory[{}..{}]", .{ size_usize, offset_usize, offset_usize + size_usize });
         if (size_usize <= 32) {
@@ -158,17 +151,14 @@ pub fn op_return(pc: usize, interpreter: Operation.Interpreter, state: Operation
     return ExecutionError.Error.STOP; // RETURN ends execution normally
 }
 
-pub fn op_revert(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_revert(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
-    const values = frame.stack.pop2_unsafe();
+    const values = frame.stack_pop2_unsafe();
     const offset = values.b; // Top
     const size = values.a; // Second from top
 
@@ -187,14 +177,19 @@ pub fn op_revert(pc: usize, interpreter: Operation.Interpreter, state: Operation
         // Calculate memory expansion gas cost
         const end = offset_usize + size_usize;
         if (end > offset_usize) { // Check for overflow
-            const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(end)));
+            const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(end)));
             try frame.consume_gas(memory_gas);
 
-            _ = try frame.memory.ensure_context_capacity(end);
+            frame.memory_ensure_capacity(end) catch |err| switch (err) {
+                error.OutOfGas => return error.OutOfGas,
+                error.AllocationError => return error.OutOfMemory,
+                error.Overflow => return error.OutOfMemory,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
         }
 
         // Get data from memory
-        const data = try frame.memory.get_slice(offset_usize, size_usize);
+        const data = frame.memory_get_slice(@intCast(offset_usize), @intCast(size_usize));
 
         // Note: The memory gas cost already protects against excessive memory use.
         // Set the output data that will be returned to the caller
@@ -204,11 +199,8 @@ pub fn op_revert(pc: usize, interpreter: Operation.Interpreter, state: Operation
     return ExecutionError.Error.REVERT;
 }
 
-pub fn op_invalid(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_invalid(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
 
     // Debug: op_invalid entered
     // INVALID opcode consumes all remaining gas
@@ -218,11 +210,7 @@ pub fn op_invalid(pc: usize, interpreter: Operation.Interpreter, state: Operatio
     return ExecutionError.Error.InvalidOpcode;
 }
 
-pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_selfdestruct(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
 
     // Check if we're in a static call
     if (frame.is_static) {
@@ -230,10 +218,10 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
         return ExecutionError.Error.WriteProtection;
     }
 
-    std.debug.assert(frame.stack.size >= 1);
+    std.debug.assert(frame.stack_size >= 1);
 
     // Use unsafe pop since bounds checking is done by jump_table
-    const recipient_u256 = frame.stack.pop_unsafe();
+    const recipient_u256 = frame.stack_pop_unsafe();
     const recipient = from_u256(recipient_u256);
 
     // EIP-2929: Check if recipient address is cold and consume appropriate gas
@@ -249,7 +237,7 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
     }
 
     // Mark contract for destruction at end of transaction
-    vm.state.mark_for_destruction(frame.contract.address, recipient) catch |err| switch (err) {
+    vm.state.mark_for_destruction(frame.address, recipient) catch |err| switch (err) {
         error.OutOfMemory => return ExecutionError.Error.OutOfGas,
     };
 
@@ -301,21 +289,21 @@ pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const
                 // No stack setup needed
             },
             .jump => {
-                try frame.stack.append(op.destination);
+                try frame.stack_push(op.destination);
             },
             .jumpi => {
-                try frame.stack.append(op.condition);
-                try frame.stack.append(op.destination);
+                try frame.stack_push(op.condition);
+                try frame.stack_push(op.destination);
             },
             .pc => {
                 // No stack setup needed
             },
             .return_op, .revert => {
-                try frame.stack.append(op.size);
-                try frame.stack.append(op.offset);
+                try frame.stack_push(op.size);
+                try frame.stack_push(op.offset);
             },
             .selfdestruct => {
-                try frame.stack.append(op.recipient);
+                try frame.stack_push(op.recipient);
             },
         }
 
@@ -362,16 +350,17 @@ const ControlOpType = enum {
 };
 
 fn execute_control_operation(op_type: ControlOpType, pc: usize, vm: *Vm, frame: *Frame) ExecutionError.Error!ExecutionResult {
+    _ = pc; // Unused parameter, kept for compatibility with existing tests
     switch (op_type) {
-        .stop => return op_stop(pc, @ptrCast(vm), @ptrCast(frame)),
-        .jump => return op_jump(pc, @ptrCast(vm), @ptrCast(frame)),
-        .jumpi => return op_jumpi(pc, @ptrCast(vm), @ptrCast(frame)),
-        .pc => return op_pc(pc, @ptrCast(vm), @ptrCast(frame)),
-        .jumpdest => return op_jumpdest(pc, @ptrCast(vm), @ptrCast(frame)),
-        .return_op => return op_return(pc, @ptrCast(vm), @ptrCast(frame)),
-        .revert => return op_revert(pc, @ptrCast(vm), @ptrCast(frame)),
-        .invalid => return op_invalid(pc, @ptrCast(vm), @ptrCast(frame)),
-        .selfdestruct => return op_selfdestruct(pc, @ptrCast(vm), @ptrCast(frame)),
+        .stop => return op_stop(@ptrCast(vm), @ptrCast(frame)),
+        .jump => return op_jump(@ptrCast(vm), @ptrCast(frame)),
+        .jumpi => return op_jumpi(@ptrCast(vm), @ptrCast(frame)),
+        .pc => return op_pc(@ptrCast(vm), @ptrCast(frame)),
+        .jumpdest => return op_jumpdest(@ptrCast(vm), @ptrCast(frame)),
+        .return_op => return op_return(@ptrCast(vm), @ptrCast(frame)),
+        .revert => return op_revert(@ptrCast(vm), @ptrCast(frame)),
+        .invalid => return op_invalid(@ptrCast(vm), @ptrCast(frame)),
+        .selfdestruct => return op_selfdestruct(@ptrCast(vm), @ptrCast(frame)),
     }
 }
 
@@ -411,9 +400,9 @@ fn validate_control_result(frame: *const Frame, op: FuzzControlOperation, result
         .pc => {
             // PC should succeed and push current PC to stack
             _ = try result; // Should not error
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack_size);
             // Stack should contain the PC value
-            try testing.expect(frame.stack.data[0] >= 0);
+            try testing.expect(frame.stack_data[0] >= 0);
         },
         .jumpdest => {
             // JUMPDEST should always succeed (no-op)

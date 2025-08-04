@@ -2,7 +2,7 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
@@ -10,26 +10,19 @@ const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
 const AccessList = @import("../access_list/access_list.zig").AccessList;
 
-pub fn op_address(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_address(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push contract address as u256
-    const addr = to_u256(frame.contract.address);
-    try frame.stack.append(addr);
+    const addr = to_u256(frame.address);
+    try frame.stack_push(addr);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_balance(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_balance(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const address_u256 = try frame.stack.pop();
+    const address_u256 = try frame.stack_pop();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -38,68 +31,52 @@ pub fn op_balance(pc: usize, interpreter: Operation.Interpreter, state: Operatio
 
     // Get balance from VM state
     const balance = vm.state.get_balance(address);
-    try frame.stack.append(balance);
+    try frame.stack_push(balance);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_origin(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_origin(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push transaction origin address
-    const origin = to_u256(vm.context.tx_origin);
-    try frame.stack.append(origin);
+    const origin = to_u256(frame.block_context.tx_origin);
+    try frame.stack_push(origin);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_caller(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_caller(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push caller address
-    const caller = to_u256(frame.contract.caller);
-    try frame.stack.append(caller);
+    const caller = to_u256(frame.caller);
+    try frame.stack_push(caller);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_callvalue(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_callvalue(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push call value
-    try frame.stack.append(frame.contract.value);
+    try frame.stack_push(frame.value);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_gasprice(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_gasprice(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push gas price from transaction context
-    try frame.stack.append(vm.context.gas_price);
+    try frame.stack_push(frame.block_context.gas_price);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_extcodesize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_extcodesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const address_u256 = try frame.stack.pop();
+    const address_u256 = try frame.stack_pop();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -108,21 +85,17 @@ pub fn op_extcodesize(pc: usize, interpreter: Operation.Interpreter, state: Oper
 
     // Get code size from VM state
     const code = vm.state.get_code(address);
-    try frame.stack.append(@as(u256, @intCast(code.len)));
+    try frame.stack_push(@as(u256, @intCast(code.len)));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_extcodecopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_extcodecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const address_u256 = try frame.stack.pop();
-    const mem_offset = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const address_u256 = try frame.stack_pop();
+    const mem_offset = try frame.stack_pop();
+    const code_offset = try frame.stack_pop();
+    const size = try frame.stack_pop();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -145,7 +118,7 @@ pub fn op_extcodecopy(pc: usize, interpreter: Operation.Interpreter, state: Oper
 
     // Calculate memory expansion gas cost
     const new_size = mem_offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(new_size)));
     try frame.consume_gas(memory_gas);
 
     // Dynamic gas for copy operation
@@ -157,18 +130,19 @@ pub fn op_extcodecopy(pc: usize, interpreter: Operation.Interpreter, state: Oper
 
     // Use set_data_bounded to copy the code to memory
     // This handles partial copies and zero-padding automatically
-    try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
+    frame.memory_set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_extcodehash(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_extcodehash(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const address_u256 = try frame.stack.pop();
+    const address_u256 = try frame.stack_pop();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -180,7 +154,7 @@ pub fn op_extcodehash(pc: usize, interpreter: Operation.Interpreter, state: Oper
     if (code.len == 0) {
         @branchHint(.unlikely);
         // Empty account - return zero
-        try frame.stack.append(0);
+        try frame.stack_push(0);
     } else {
         // Compute keccak256 hash of the code
         var hash: [32]u8 = undefined;
@@ -188,76 +162,60 @@ pub fn op_extcodehash(pc: usize, interpreter: Operation.Interpreter, state: Oper
 
         // Convert hash to u256 using std.mem for efficiency
         const hash_u256 = std.mem.readInt(u256, &hash, .big);
-        try frame.stack.append(hash_u256);
+        try frame.stack_push(hash_u256);
     }
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_selfbalance(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_selfbalance(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
     // Get balance of current executing contract
-    const self_address = frame.contract.address;
+    const self_address = frame.address;
     const balance = vm.state.get_balance(self_address);
-    try frame.stack.append(balance);
+    try frame.stack_push(balance);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_chainid(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_chainid(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push chain ID from VM context
-    try frame.stack.append(vm.context.chain_id);
+    try frame.stack_push(frame.block_context.chain_id);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_calldatasize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push size of calldata - use frame.input which is set by the VM
     // The frame.input is the actual calldata for this execution context
-    try frame.stack.append(@as(u256, @intCast(frame.input.len)));
+    try frame.stack_push(@as(u256, @intCast(frame.input.len)));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codesize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_codesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Push size of current contract's code
-    try frame.stack.append(@as(u256, @intCast(frame.contract.code.len)));
+    try frame.stack_push(@as(u256, @intCast(frame.code.len)));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_calldataload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop offset from stack
-    const offset = try frame.stack.pop();
+    const offset = try frame.stack_pop();
 
     if (offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
         // Offset too large, push zero
-        try frame.stack.append(0);
+        try frame.stack_push(0);
         return Operation.ExecutionResult{};
     }
 
@@ -276,21 +234,18 @@ pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Ope
         }
     }
 
-    try frame.stack.append(value);
+    try frame.stack_push(value);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_calldatacopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop memory offset, data offset, and size
-    const mem_offset = try frame.stack.pop();
-    const data_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const mem_offset = try frame.stack_pop();
+    const data_offset = try frame.stack_pop();
+    const size = try frame.stack_pop();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -305,7 +260,7 @@ pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
     // Calculate memory expansion gas cost
     const new_size = mem_offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(new_size)));
     try frame.consume_gas(memory_gas);
 
     // Dynamic gas for copy operation (VERYLOW * word_count)
@@ -317,21 +272,18 @@ pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
     // Use set_data_bounded to copy the calldata to memory
     // This handles partial copies and zero-padding automatically
-    try frame.memory.set_data_bounded(mem_offset_usize, calldata, data_offset_usize, size_usize);
+    frame.memory_set_data_bounded(mem_offset_usize, calldata, data_offset_usize, size_usize);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_codecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop memory offset, code offset, and size
-    const mem_offset = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const mem_offset = try frame.stack_pop();
+    const code_offset = try frame.stack_pop();
+    const size = try frame.stack_pop();
 
     // Debug logging removed for fuzz testing compatibility
 
@@ -351,7 +303,7 @@ pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operati
 
     // Calculate memory expansion gas cost
     const new_size = mem_offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(new_size)));
     try frame.consume_gas(memory_gas);
 
     // Dynamic gas for copy operation
@@ -359,11 +311,16 @@ pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operati
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
     // Get current contract code
-    const code = frame.contract.code;
+    const code = frame.code;
 
     // Use set_data_bounded to copy the code to memory
     // This handles partial copies and zero-padding automatically
-    try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
+    frame.memory_set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     // Debug logging removed for fuzz testing compatibility
 
@@ -371,14 +328,11 @@ pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operati
 }
 /// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data
 /// This is an EOF opcode that allows reading from the return data buffer
-pub fn op_returndataload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_returndataload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop offset from stack
-    const offset = try frame.stack.pop();
+    const offset = try frame.stack_pop();
 
     // Check if offset is within bounds
     if (offset > std.math.maxInt(usize)) {
@@ -387,7 +341,7 @@ pub fn op_returndataload(pc: usize, interpreter: Operation.Interpreter, state: O
     }
 
     const offset_usize = @as(usize, @intCast(offset));
-    const return_data = frame.return_data.get();
+    const return_data = frame.return_data_get();
 
     // If offset + 32 > return_data.len, this is an error (unlike CALLDATALOAD which pads with zeros)
     if (offset_usize + 32 > return_data.len) {
@@ -402,7 +356,7 @@ pub fn op_returndataload(pc: usize, interpreter: Operation.Interpreter, state: O
         value = (value << 8) | return_data[offset_usize + i];
     }
 
-    try frame.stack.append(value);
+    try frame.stack_push(value);
 
     return Operation.ExecutionResult{};
 }
@@ -441,36 +395,36 @@ pub fn fuzz_environment_operations(allocator: std.mem.Allocator, operations: []c
         
         // Execute the operation based on type
         const result = switch (op.op_type) {
-            .address => op_address(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .address => op_address(@ptrCast(&vm), @ptrCast(&frame)),
             .balance => blk: {
-                try frame.stack.append(primitives.Address.to_u256(op.target_address));
-                break :blk op_balance(0, @ptrCast(&vm), @ptrCast(&frame));
+                try frame.stack_push(primitives.Address.to_u256(op.target_address));
+                break :blk op_balance(@ptrCast(&vm), @ptrCast(&frame));
             },
-            .origin => op_origin(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .caller => op_caller(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .callvalue => op_callvalue(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .gasprice => op_gasprice(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .origin => op_origin(@ptrCast(&vm), @ptrCast(&frame)),
+            .caller => op_caller(@ptrCast(&vm), @ptrCast(&frame)),
+            .callvalue => op_callvalue(@ptrCast(&vm), @ptrCast(&frame)),
+            .gasprice => op_gasprice(@ptrCast(&vm), @ptrCast(&frame)),
             .extcodesize => blk: {
-                try frame.stack.append(primitives.Address.to_u256(op.target_address));
-                break :blk op_extcodesize(0, @ptrCast(&vm), @ptrCast(&frame));
+                try frame.stack_push(primitives.Address.to_u256(op.target_address));
+                break :blk op_extcodesize(@ptrCast(&vm), @ptrCast(&frame));
             },
             .extcodehash => blk: {
-                try frame.stack.append(primitives.Address.to_u256(op.target_address));
-                break :blk op_extcodehash(0, @ptrCast(&vm), @ptrCast(&frame));
+                try frame.stack_push(primitives.Address.to_u256(op.target_address));
+                break :blk op_extcodehash(@ptrCast(&vm), @ptrCast(&frame));
             },
-            .selfbalance => op_selfbalance(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .chainid => op_chainid(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .calldatasize => op_calldatasize(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .codesize => op_codesize(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .selfbalance => op_selfbalance(@ptrCast(&vm), @ptrCast(&frame)),
+            .chainid => op_chainid(@ptrCast(&vm), @ptrCast(&frame)),
+            .calldatasize => op_calldatasize(@ptrCast(&vm), @ptrCast(&frame)),
+            .codesize => op_codesize(@ptrCast(&vm), @ptrCast(&frame)),
             .calldataload => blk: {
-                try frame.stack.append(op.offset);
-                break :blk op_calldataload(0, @ptrCast(&vm), @ptrCast(&frame));
+                try frame.stack_push(op.offset);
+                break :blk op_calldataload(@ptrCast(&vm), @ptrCast(&frame));
             },
             .returndataload => blk: {
                 // Set up return data for testing
-                try frame.return_data.set(op.return_data);
-                try frame.stack.append(op.offset);
-                break :blk op_returndataload(0, @ptrCast(&vm), @ptrCast(&frame));
+                frame.return_data_set(op.return_data);
+                try frame.stack_push(op.offset);
+                break :blk op_returndataload(@ptrCast(&vm), @ptrCast(&frame));
             },
         };
         
@@ -537,9 +491,9 @@ fn validate_environment_result(frame: *const Frame, vm: *const Vm, op: FuzzEnvir
     }
     
     // Verify stack has the expected result
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack_size);
     
-    const stack_result = frame.stack.data[0];
+    const stack_result = frame.stack_data[0];
     
     // Validate specific operation results
     switch (op.op_type) {
@@ -568,7 +522,7 @@ fn validate_environment_result(frame: *const Frame, vm: *const Vm, op: FuzzEnvir
             try testing.expectEqual(@as(u256, @intCast(op.input.len)), stack_result);
         },
         .codesize => {
-            try testing.expectEqual(@as(u256, @intCast(frame.contract.code.len)), stack_result);
+            try testing.expectEqual(@as(u256, @intCast(frame.code.len)), stack_result);
         },
         .balance, .selfbalance => {
             // Balance should be 0 for new accounts in our test setup
