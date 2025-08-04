@@ -2,7 +2,7 @@ const std = @import("std");
 const Opcode = @import("opcode.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Memory = @import("../memory/memory.zig");
 
 /// Operation metadata and execution functions for EVM opcodes.
@@ -47,21 +47,21 @@ pub const Interpreter = *@import("../evm.zig");
 
 /// Direct pointer to the frame context with transaction and execution environment.
 /// Simplified from a single-variant union to a direct pointer type.
-pub const State = *@import("../frame/frame.zig");
+pub const State = *@import("../frame/frame_fat.zig");
 
 /// Function signature for opcode execution.
 ///
 /// Each opcode implements this signature to perform its operation.
-/// The function has access to:
-/// - Program counter for reading immediate values
-/// - Interpreter for stack/memory manipulation
-/// - State for account and storage access
+/// The function has direct access to:
+/// - VM instance for state operations and context
+/// - Frame containing all execution state including PC
 ///
-/// @param pc Current program counter position
-/// @param interpreter VM interpreter context
-/// @param state Execution state and environment
+/// The pc parameter has been removed as it's redundant with frame.pc.
+///
+/// @param vm VM instance for state access
+/// @param frame Execution frame with all state
 /// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = *const fn (pc: usize, interpreter: Interpreter, state: State) ExecutionError.Error!ExecutionResult;
+pub const ExecutionFunc = *const fn (vm: Interpreter, frame: State) ExecutionError.Error!ExecutionResult;
 
 /// Function signature for dynamic gas calculation.
 ///
@@ -162,9 +162,8 @@ pub const NULL_OPERATION = Operation{
 ///
 /// Consumes all remaining gas and returns InvalidOpcode error.
 /// This ensures undefined opcodes cannot be used for computation.
-fn undefined_execute(pc: usize, interpreter: Interpreter, state: State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+fn undefined_execute(vm: Interpreter, frame: State) ExecutionError.Error!ExecutionResult {
+    _ = vm;
+    _ = frame;
     return ExecutionError.Error.InvalidOpcode;
 }
