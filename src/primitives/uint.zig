@@ -445,7 +445,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
         pub fn div_rem(self: Self, divisor: Self) DivRemResult {
             if (bits == 0) return .{ .quotient = ZERO, .remainder = ZERO };
-            if (divisor.is_zero()) @panic("division by zero");
+            if (divisor.is_zero()) return .{ .quotient = ZERO, .remainder = ZERO };
 
             // Fast path: divisor is power of 2
             if (divisor.count_ones() == 1) {
@@ -534,7 +534,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
         // Optimized division by a single u64
         fn divRemBy64(self: Self, divisor: u64) DivRemResult {
-            if (divisor == 0) @panic("division by zero");
+            if (divisor == 0) return .{ .quotient = Self.from_u64(0), .remainder = Self.from_u64(0) };
 
             var quotient = ZERO;
             var remainder: u64 = 0;
@@ -1779,7 +1779,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
         pub fn from_u256(value: u256) Self {
             if (bits == 0) return Self.ZERO;
             if (bits < 256 and value >= (@as(u256, 1) << bits)) {
-                @panic("Value too large for this Uint");
+                unreachable; // Value too large for this Uint
             }
 
             var result = Self.ZERO;
@@ -1791,6 +1791,29 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                 result.limbs[i] = @truncate(value >> @intCast(i * 64));
             }
 
+            return result.masked();
+        }
+
+        pub fn from_u256_unsafe(value: u256) Self {
+            // Debug-only assertion to catch misuse
+            if (comptime bits < 256) {
+                std.debug.assert(value < (@as(u256, 1) << bits));
+            }
+            
+            var result = Self.ZERO;
+            const u256_limbs = 4; // u256 has 4 64-bit limbs
+            const copy_limbs = @min(limbs, u256_limbs);
+
+            var i: usize = 0;
+            while (i < copy_limbs) : (i += 1) {
+                result.limbs[i] = @truncate(value >> @intCast(i * 64));
+            }
+
+            // For 256-bit types, masking is unnecessary since all bits are valid
+            if (comptime bits == 256) {
+                return result;
+            }
+            
             return result.masked();
         }
 
@@ -1806,6 +1829,27 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                 }
             }
 
+            var result: u256 = 0;
+            const u256_limbs = @min(limbs, 4);
+
+            var i: usize = 0;
+            while (i < u256_limbs) : (i += 1) {
+                result |= @as(u256, self.limbs[i]) << @intCast(i * 64);
+            }
+
+            return result;
+        }
+
+        pub fn to_u256_unsafe(self: Self) u256 {
+            // Debug-only assertion for larger types
+            if (comptime bits > 256) {
+                // Check that high limbs are zero
+                var i: usize = 4;
+                while (i < limbs) : (i += 1) {
+                    std.debug.assert(self.limbs[i] == 0);
+                }
+            }
+            
             var result: u256 = 0;
             const u256_limbs = @min(limbs, 4);
 

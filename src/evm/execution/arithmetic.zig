@@ -58,6 +58,8 @@ const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
 const Vm = @import("../evm.zig");
 const StackValidation = @import("../stack/stack_validation.zig");
+const primitives = @import("primitives");
+const U256 = primitives.Uint(256, 4);
 
 /// ADD opcode (0x01) - Addition with wrapping overflow
 pub fn op_add(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
@@ -108,7 +110,12 @@ pub fn op_mul(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
-    const product = a *% b;
+
+    // Use optimized U256 multiplication
+    const a_u256 = U256.from_u256_unsafe(a);
+    const b_u256 = U256.from_u256_unsafe(b);
+    const product_u256 = a_u256.wrapping_mul(b_u256);
+    const product = product_u256.to_u256_unsafe();
 
     frame.stack.set_top_unsafe(product);
 
@@ -198,9 +205,11 @@ pub fn op_div(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const a = frame.stack.peek_unsafe().*;
 
     const result = if (a == 0) blk: {
-        @branchHint(.unlikely);
         break :blk 0;
-    } else b / a;
+    } else blk: {
+        const result_u256 = U256.from_u256_unsafe(b).wrapping_div(U256.from_u256_unsafe(a));
+        break :blk result_u256.to_u256_unsafe();
+    };
 
     frame.stack.set_top_unsafe(result);
 
@@ -319,7 +328,13 @@ pub fn op_mod(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const result = if (a == 0) blk: {
         @branchHint(.unlikely);
         break :blk 0;
-    } else b % a;
+    } else blk: {
+        // Use optimized U256 modulo
+        const a_u256 = U256.from_u256_unsafe(a);
+        const b_u256 = U256.from_u256_unsafe(b);
+        const div_rem_result = b_u256.div_rem(a_u256);
+        break :blk div_rem_result.remainder.to_u256_unsafe();
+    };
 
     frame.stack.set_top_unsafe(result);
 
@@ -499,27 +514,12 @@ pub fn op_mulmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
     if (n == 0) {
         result = 0;
     } else {
-        // For MULMOD, we need to compute (a * b) % n where a * b might overflow
-        // We can't just do (a *% b) % n because that would give us ((a * b) % 2^256) % n
-        // which is not the same as (a * b) % n when a * b >= 2^256
-
-        // We'll use the Russian peasant multiplication algorithm with modular reduction
-        // This allows us to compute (a * b) % n without needing the full 512-bit product
-        result = 0;
-        var x = a % n;
-        var y = b % n;
-
-        while (y > 0) {
-            // If y is odd, add x to result (mod n)
-            if ((y & 1) == 1) {
-                const sum = result +% x;
-                result = sum % n;
-            }
-
-            x = (x +% x) % n;
-
-            y >>= 1;
-        }
+        // Use optimized U256 mulmod
+        const a_u256 = U256.from_u256_unsafe(a);
+        const b_u256 = U256.from_u256_unsafe(b);
+        const n_u256 = U256.from_u256_unsafe(n);
+        const result_u256 = a_u256.mul_mod(b_u256, n_u256);
+        result = result_u256.to_u256_unsafe();
     }
 
     frame.stack.set_top_unsafe(result);
