@@ -104,6 +104,7 @@ pub const AbiEncoding = @import("abi_encoding.zig");
 // Utilities
 pub const Numeric = @import("numeric.zig");
 pub const GasConstants = @import("gas_constants.zig");
+pub const Uint = @import("uint.zig").Uint;
 
 // State management
 pub const State = @import("state.zig");
