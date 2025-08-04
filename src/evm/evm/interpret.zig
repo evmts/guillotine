@@ -4,6 +4,8 @@ const Contract = @import("../frame/contract.zig");
 const Frame = @import("../frame/frame.zig");
 const Operation = @import("../opcodes/operation.zig");
 const RunResult = @import("run_result.zig").RunResult;
+const Memory = @import("../memory/memory.zig");
+const ReturnData = @import("return_data.zig").ReturnData;
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
@@ -40,19 +42,22 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const initial_gas = contract.gas;
     var pc: usize = 0;
 
-    var builder = Frame.builder(self.allocator); // We should consider making all items mandatory and removing frame builder
-    var frame = builder
-        .withVm(self)
-        .withContract(contract)
-        .withGas(contract.gas)
-        .withCaller(contract.caller)
-        .withInput(input)
-        .isStatic(self.read_only)
-        .withDepth(@as(u32, @intCast(self.depth)))
-        .build() catch |err| switch (err) {
-        error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
-        error.MissingVm => unreachable, // We pass a VM. TODO zig better here.
-        error.MissingContract => unreachable, // We pass a contract. TODO zig better here.
+    var frame = Frame{
+        .gas_remaining = self.gas,
+        .pc = 0,
+        .contract = contract,
+        .allocator = self.allocator,
+        .stop = false,
+        .is_static = self.read_only,
+        .depth = @as(u32, @intCast(self.depth)),
+        .cost = 0,
+        .err = null,
+        .input = input,
+        .output = &[_]u8{},
+        .op = &.{},
+        .memory = try Memory.init_default(self.allocator),
+        .stack = .{},
+        .return_data = ReturnData.init(self.allocator),
     };
     defer frame.deinit();
 
@@ -72,7 +77,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 Log.debug("  [{}] = {}", .{ frame.stack.size - 1 - i, frame.stack.data[frame.stack.size - 1 - i] });
             }
         }
-        
+
         // Trace execution if tracer is available
         if (self.tracer) |writer| {
             var tracer = @import("../tracer.zig").Tracer.init(writer);
@@ -81,19 +86,11 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             // Calculate gas cost for this operation
             const op_meta = self.table.get_operation(opcode);
             const gas_cost = op_meta.constant_gas;
-            tracer.trace(
-                pc,
-                opcode,
-                stack_slice,
-                frame.gas_remaining,
-                gas_cost,
-                frame.memory.size(),
-                @intCast(self.depth)
-            ) catch |trace_err| {
+            tracer.trace(pc, opcode, stack_slice, frame.gas_remaining, gas_cost, frame.memory.size(), @intCast(self.depth)) catch |trace_err| {
                 Log.debug("Failed to write trace: {}", .{trace_err});
             };
         }
-        
+
         const result = self.table.execute(pc, interpreter, state, opcode) catch |err| {
             contract.gas = frame.gas_remaining;
             // Don't store frame's return data in EVM - it will be freed when frame deinits
