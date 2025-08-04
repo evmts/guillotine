@@ -70,13 +70,13 @@ test "GASLIMIT (0x45): Get block gas limit" {
             .build();
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
+        const interpreter = &evm;
+        const state = &frame;
 
         // Execute GASLIMIT
         _ = try evm.table.execute(0, interpreter, state, 0x45);
 
-        const result = try frame.stack.pop();
+        const result = try frame.pop();
         try testing.expectEqual(@as(u256, gas_limit), result);
     }
 }
@@ -142,13 +142,13 @@ test "CHAINID (0x46): Get chain ID" {
             .build();
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
+        const interpreter = &evm;
+        const state = &frame;
 
         // Execute CHAINID
         _ = try evm.table.execute(0, interpreter, state, 0x46);
 
-        const result = try frame.stack.pop();
+        const result = try frame.pop();
         try testing.expectEqual(chain_id, result);
     }
 }
@@ -199,13 +199,13 @@ test "SELFBALANCE (0x47): Get contract's own balance" {
             .build();
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
+        const interpreter = &evm;
+        const state = &frame;
 
         // Execute SELFBALANCE
         _ = try evm.table.execute(0, interpreter, state, 0x47);
 
-        const result = try frame.stack.pop();
+        const result = try frame.pop();
         try testing.expectEqual(balance, result);
     }
 }
@@ -269,13 +269,13 @@ test "BASEFEE (0x48): Get block base fee" {
             .build();
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
+        const interpreter = &evm;
+        const state = &frame;
 
         // Execute BASEFEE
         _ = try evm.table.execute(0, interpreter, state, 0x48);
 
-        const result = try frame.stack.pop();
+        const result = try frame.pop();
         try testing.expectEqual(base_fee, result);
     }
 }
@@ -339,33 +339,33 @@ test "BLOBHASH (0x49): Get blob versioned hash" {
     const state: Evm.Operation.State = &frame;
 
     // Test 1: Get first blob hash
-    try frame.stack.append(0);
+    try frame.push(0);
     _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result1 = try frame.stack.pop();
+    const result1 = try frame.pop();
     try testing.expectEqual(blob_hashes[0], result1);
 
     // Test 2: Get second blob hash
-    try frame.stack.append(1);
+    try frame.push(1);
     _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result2 = try frame.stack.pop();
+    const result2 = try frame.pop();
     try testing.expectEqual(blob_hashes[1], result2);
 
     // Test 3: Get third blob hash
-    try frame.stack.append(2);
+    try frame.push(2);
     _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result3 = try frame.stack.pop();
+    const result3 = try frame.pop();
     try testing.expectEqual(blob_hashes[2], result3);
 
     // Test 4: Index out of bounds (should return 0)
-    try frame.stack.append(3);
+    try frame.push(3);
     _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result4 = try frame.stack.pop();
+    const result4 = try frame.pop();
     try testing.expectEqual(@as(u256, 0), result4);
 
     // Test 5: Large index (should return 0)
-    try frame.stack.append(1000);
+    try frame.push(1000);
     _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result5 = try frame.stack.pop();
+    const result5 = try frame.pop();
     try testing.expectEqual(@as(u256, 0), result5);
 }
 
@@ -428,13 +428,13 @@ test "BLOBBASEFEE (0x4A): Get blob base fee" {
             .build();
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
+        const interpreter = &evm;
+        const state = &frame;
 
         // Execute BLOBBASEFEE
         _ = try evm.table.execute(0, interpreter, state, 0x4A);
 
-        const result = try frame.stack.pop();
+        const result = try frame.pop();
         try testing.expectEqual(blob_base_fee, result);
     }
 }
@@ -512,9 +512,9 @@ test "Block info opcodes: Gas consumption" {
     };
 
     for (opcodes) |op| {
-        frame.stack.clear();
+        frame.stack_clear();
         if (op.needs_stack) {
-            try frame.stack.append(0); // Index for BLOBHASH
+            try frame.push(0); // Index for BLOBHASH
         }
 
         const gas_before = 1000;
@@ -631,7 +631,7 @@ test "SELFBALANCE: Balance changes during execution" {
 
     // Check initial balance
     _ = try evm.table.execute(0, interpreter, state, 0x47);
-    const result1 = try frame.stack.pop();
+    const result1 = try frame.pop();
     try testing.expectEqual(@as(u256, 1000), result1);
 
     // Simulate balance change (e.g., from a transfer) - set directly in the state
@@ -639,7 +639,7 @@ test "SELFBALANCE: Balance changes during execution" {
 
     // Check updated balance
     _ = try evm.table.execute(0, interpreter, state, 0x47);
-    const result2 = try frame.stack.pop();
+    const result2 = try frame.pop();
     try testing.expectEqual(@as(u256, 2500), result2);
 }
 
@@ -697,9 +697,9 @@ test "BLOBHASH: Empty blob list" {
     const state: Evm.Operation.State = &frame;
 
     // Any index should return 0 when no blobs
-    try frame.stack.append(0);
+    try frame.push(0);
     _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result = try frame.stack.pop();
+    const result = try frame.pop();
     try testing.expectEqual(@as(u256, 0), result);
 }
 
@@ -759,7 +759,7 @@ test "CHAINID: EIP-1344 behavior" {
     // Execute CHAINID multiple times - should always return same value
     for (0..3) |_| {
         _ = try evm.table.execute(0, interpreter, state, 0x46);
-        const result = try frame.stack.pop();
+        const result = try frame.pop();
         try testing.expectEqual(@as(u256, 1337), result);
     }
 }
@@ -832,13 +832,13 @@ test "Stack operations: All opcodes push exactly one value" {
 
     for (opcodes) |op| {
         // Clear stack for clean test
-        frame.stack.clear();
+        frame.stack_clear();
 
         if (op.needs_input) {
-            try frame.stack.append(0); // Input for BLOBHASH
+            try frame.push(0); // Input for BLOBHASH
         }
 
-        const initial_stack_len = frame.stack.size;
+        const initial_stack_len = frame.stack_size;
 
         _ = try evm.table.execute(0, interpreter, state, op.opcode);
 
@@ -847,6 +847,6 @@ test "Stack operations: All opcodes push exactly one value" {
             initial_stack_len // BLOBHASH: pop 1, push 1 = net 0
         else
             initial_stack_len + 1; // Others: just push 1 = net +1
-        try testing.expectEqual(expected_len, frame.stack.size);
+        try testing.expectEqual(expected_len, frame.stack_size);
     }
 }

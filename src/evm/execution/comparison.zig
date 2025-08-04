@@ -2,23 +2,20 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 
 // Helper to convert Stack errors to ExecutionError
 // These are redundant and can be removed.
 // The op_* functions below use unsafe stack operations,
 // so these helpers are unused anyway.
 
-pub fn op_lt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_lt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = frame.stack_pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = frame.stack_peek_unsafe().*;
 
     // EVM LT computes: b < a (where b was top, a was second from top)
     const result: u256 = switch (std.math.order(b, a)) {
@@ -27,21 +24,18 @@ pub fn op_lt(pc: usize, interpreter: Operation.Interpreter, state: Operation.Sta
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_gt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_gt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = frame.stack_pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = frame.stack_peek_unsafe().*;
 
     // EVM GT computes: b > a (where b was top, a was second from top)
     const result: u256 = switch (std.math.order(b, a)) {
@@ -50,21 +44,18 @@ pub fn op_gt(pc: usize, interpreter: Operation.Interpreter, state: Operation.Sta
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_slt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_slt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = frame.stack_pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = frame.stack_peek_unsafe().*;
 
     // Signed less than: b < a (where b was popped first, a is remaining top)
     const a_i256 = @as(i256, @bitCast(a));
@@ -76,21 +67,18 @@ pub fn op_slt(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_sgt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_sgt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = frame.stack_pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = frame.stack_peek_unsafe().*;
 
     // Signed greater than: b > a (where b was popped first, a is remaining top)
     const a_i256 = @as(i256, @bitCast(a));
@@ -99,45 +87,39 @@ pub fn op_sgt(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const result: u256 = if (b_i256 > a_i256) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_eq(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_eq(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = frame.stack_pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = frame.stack_peek_unsafe().*;
 
     const result: u256 = if (a == b) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_iszero(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_iszero(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
     // Peek the operand unsafely
-    const value = frame.stack.peek_unsafe().*;
+    const value = frame.stack_peek_unsafe().*;
 
     // Optimized: Use @intFromBool for direct bool to int conversion
     // This should compile to more efficient assembly than if/else
     const result: u256 = @intFromBool(value == 0);
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -160,17 +142,17 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         defer contract.deinit(allocator, null);
 
         const primitives = @import("primitives");
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, primitives.Address.ZERO, &.{}, vm.context);
         defer frame.deinit();
 
         // Setup stack with test values
         switch (op.op_type) {
             .lt, .gt, .slt, .sgt, .eq => {
-                try frame.stack.append(op.a);
-                try frame.stack.append(op.b);
+                try frame.stack_push(op.a);
+                try frame.stack_push(op.b);
             },
             .iszero => {
-                try frame.stack.append(op.a);
+                try frame.stack_push(op.a);
             },
         }
 
@@ -186,7 +168,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         }
 
         // Verify the result makes sense
-        try validate_comparison_result(&frame.stack, op);
+        try validate_comparison_result(frame, op);
     }
 }
 
@@ -205,13 +187,13 @@ const ComparisonOpType = enum {
     iszero,
 };
 
-fn validate_comparison_result(stack: *const Stack, op: FuzzComparisonOperation) !void {
+fn validate_comparison_result(frame: Frame, op: FuzzComparisonOperation) !void {
     const testing = std.testing;
 
     // Stack should have exactly one result
-    try testing.expectEqual(@as(usize, 1), stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack_size);
 
-    const result = stack.data[0];
+    const result = frame.stack_data[0];
 
     // All comparison operations return 0 or 1
     try testing.expect(result == 0 or result == 1);
