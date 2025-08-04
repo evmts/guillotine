@@ -6,7 +6,7 @@ const Operation = operation_module.Operation;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Contract = @import("../frame/contract.zig");
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
@@ -45,7 +45,7 @@ const operation_config = @import("operation_config.zig");
 /// const table = JumpTable.init_from_hardfork(.CANCUN);
 /// const opcode = bytecode[pc];
 /// const operation = table.get_operation(opcode);
-/// const result = try table.execute(pc, interpreter, state, opcode);
+/// const result = try table.execute(interpreter, state, opcode);
 /// ```
 pub const JumpTable = @This();
 
@@ -107,7 +107,7 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) *const Operation
 ///
 /// ## SIZE OPTIMIZATION SAFETY GUARANTEE
 ///
-/// The `validate_stack_requirements()` call at line 139 provides comprehensive
+/// The `validate_stack_requirements()` call provides comprehensive
 /// stack validation for ALL operations using the min_stack/max_stack metadata
 /// from operation_config.zig. This validation ensures:
 ///
@@ -125,9 +125,8 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) *const Operation
 /// while maintaining EVM correctness and safety.
 ///
 /// @param self The jump table
-/// @param pc Current program counter
-/// @param interpreter VM interpreter context
-/// @param state Execution state (cast to Frame internally)
+/// @param vm VM instance for state access
+/// @param frame Execution frame with all state including PC
 /// @param opcode The opcode to execute
 /// @return Execution result with gas consumed
 /// @throws InvalidOpcode if opcode is undefined
@@ -136,13 +135,13 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) *const Operation
 ///
 /// Example:
 /// ```zig
-/// const result = try table.execute(pc, &interpreter, &state, bytecode[pc]);
+/// const result = try table.execute(&vm, &frame, bytecode[frame.pc]);
 /// ```
-pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_module.Interpreter, frame: operation_module.State, opcode: u8) ExecutionError.Error!operation_module.ExecutionResult {
+pub inline fn execute(self: *const JumpTable, vm: operation_module.Interpreter, frame: operation_module.State, opcode: u8) ExecutionError.Error!operation_module.ExecutionResult {
     @branchHint(.likely);
     const operation = self.get_operation(opcode);
 
-    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size });
+    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, frame.pc, frame.gas_remaining, frame.stack_size });
 
     // Handle undefined opcodes (cold path)
     if (operation.undefined) {
@@ -156,14 +155,14 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
     if (comptime builtin.mode == .ReleaseFast) {
         const stack_height_changes = @import("../opcodes/stack_height_changes.zig");
         try stack_height_changes.validate_stack_requirements_fast(
-            @intCast(frame.stack.size),
+            @intCast(frame.stack_size),
             opcode,
             operation.min_stack,
             operation.max_stack,
         );
     } else {
         const stack_validation = @import("../stack/stack_validation.zig");
-        try stack_validation.validate_stack_requirements(&frame.stack, operation);
+        try stack_validation.validate_stack_requirements_fat(frame, operation);
     }
 
     // Gas consumption (likely path)
@@ -173,7 +172,7 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
         try frame.consume_gas(operation.constant_gas);
     }
 
-    const res = try operation.execute(pc, interpreter, frame);
+    const res = try operation.execute(vm, frame);
     Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed, gas_remaining={}", .{ opcode, frame.gas_remaining });
     return res;
 }
