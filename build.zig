@@ -562,6 +562,22 @@ pub fn build(b: *std.Build) void {
     const bn254_zig_bench_step = b.step("bench-bn254-zig", "Run BN254 Zig native benchmarks");
     bn254_zig_bench_step.dependOn(&run_bn254_zig_bench_cmd.step);
 
+    // Add stack pointer benchmark
+    const stack_pointer_bench_exe = b.addExecutable(.{
+        .name = "stack-pointer-bench",
+        .root_source_file = b.path("bench/stack_pointer_benchmark.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    stack_pointer_bench_exe.root_module.addImport("evm", bench_evm_mod);
+    b.installArtifact(stack_pointer_bench_exe);
+
+    const run_stack_pointer_bench_cmd = b.addRunArtifact(stack_pointer_bench_exe);
+    run_stack_pointer_bench_cmd.step.dependOn(b.getInstallStep());
+
+    const stack_pointer_bench_step = b.step("bench-stack-pointer", "Run stack pointer implementation benchmarks");
+    stack_pointer_bench_step.dependOn(&run_stack_pointer_bench_cmd.step);
+
     // Flamegraph profiling support
     const flamegraph_step = b.step("flamegraph", "Run benchmarks with flamegraph profiling");
 

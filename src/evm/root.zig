@@ -98,6 +98,8 @@ pub const OperationModule = Operation;
 
 /// 256-bit word stack implementation
 pub const Stack = @import("stack/stack.zig");
+/// Pointer-based stack implementation for performance testing
+pub const PointerStack = @import("stack/pointer_stack.zig").PointerStack;
 
 /// Stack depth validation utilities
 pub const stack_validation = @import("stack/stack_validation.zig");
