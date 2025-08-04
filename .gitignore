@@ -2,8 +2,8 @@
 .vercel
 dist/
 tree/
-intx
-uint
+intx/
+uint/
 
 revm/
 evmone/
