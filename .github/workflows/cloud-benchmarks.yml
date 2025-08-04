@@ -1,0 +1,359 @@
+name: Cloud EVM Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: 'Target architecture for benchmarks'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - x86
+          - arm64
+          - both
+      use_spot_instances:
+        description: 'Use spot instances for cost savings'
+        required: true
+        default: true
+        type: boolean
+      num_runs:
+        description: 'Number of benchmark runs per test'
+        required: true
+        default: '20'
+        type: string
+      rebuild_amis:
+        description: 'Rebuild AMIs before benchmarking'
+        required: true
+        default: false
+        type: boolean
+  schedule:
+    # Run weekly benchmarks on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+  
+env:
+  AWS_REGION: us-east-1
+  PACKER_VERSION: 1.10.0
+  TERRAFORM_VERSION: 1.6.0
+
+jobs:
+  # Build AMIs with Packer
+  build-amis:
+    name: Build AMIs
+    runs-on: ubuntu-latest
+    if: github.event.inputs.rebuild_amis == 'true' || github.event_name == 'schedule'
+    outputs:
+      ami_id_x86: ${{ steps.build-x86.outputs.ami_id }}
+      ami_id_arm64: ${{ steps.build-arm64.outputs.ami_id }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: ${{ env.PACKER_VERSION }}
+      
+      - name: Generate SSH key pair
+        run: |
+          mkdir -p infrastructure/packer/keys
+          ssh-keygen -t rsa -b 2048 -f infrastructure/packer/keys/benchmark_key -N ""
+          echo "SSH key pair generated"
+      
+      - name: Initialize Packer
+        run: |
+          cd infrastructure/packer
+          packer init image.pkr.hcl
+      
+      - name: Build x86_64 AMI
+        id: build-x86
+        if: github.event.inputs.architecture == 'x86' || github.event.inputs.architecture == 'both' || github.event_name == 'schedule'
+        run: |
+          cd infrastructure/packer
+          echo "Building x86_64 AMI..."
+          packer build -only="x86-build" \
+            -var "aws_region=${{ env.AWS_REGION }}" \
+            -var "ssh_public_key_path=./keys/benchmark_key.pub" \
+            image.pkr.hcl
+          
+          # Extract AMI ID from manifest
+          AMI_ID=$(jq -r '.builds[0].artifact_id' manifest-x86.json | cut -d':' -f2)
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Built x86_64 AMI: $AMI_ID"
+      
+      - name: Build ARM64 AMI
+        id: build-arm64
+        if: github.event.inputs.architecture == 'arm64' || github.event.inputs.architecture == 'both' || github.event_name == 'schedule'
+        run: |
+          cd infrastructure/packer
+          echo "Building ARM64 AMI..."
+          packer build -only="arm-build" \
+            -var "aws_region=${{ env.AWS_REGION }}" \
+            -var "ssh_public_key_path=./keys/benchmark_key.pub" \
+            image.pkr.hcl
+          
+          # Extract AMI ID from manifest
+          AMI_ID=$(jq -r '.builds[0].artifact_id' manifest-arm.json | cut -d':' -f2)
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Built ARM64 AMI: $AMI_ID"
+      
+      - name: Upload AMI manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: ami-manifests
+          path: |
+            infrastructure/packer/manifest-*.json
+          retention-days: 7
+
+  # Run benchmarks on x86_64
+  benchmark-x86:
+    name: Benchmark x86_64
+    runs-on: ubuntu-latest
+    needs: build-amis
+    if: always() && (github.event.inputs.architecture == 'x86' || github.event.inputs.architecture == 'both' || github.event_name == 'schedule')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Set AMI ID for x86
+        id: set-ami
+        run: |
+          if [ "${{ needs.build-amis.result }}" == "success" ]; then
+            AMI_ID="${{ needs.build-amis.outputs.ami_id_x86 }}"
+          else
+            # Use fallback AMI or lookup latest
+            AMI_ID="${{ secrets.FALLBACK_AMI_X86 }}"
+          fi
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Using x86_64 AMI: $AMI_ID"
+      
+      - name: Initialize Terraform
+        run: |
+          cd infrastructure/terraform
+          terraform init
+      
+      - name: Run x86_64 benchmarks
+        run: |
+          cd infrastructure/terraform
+          terraform apply -auto-approve \
+            -var "architecture=x86" \
+            -var "ami_id_x86=${{ steps.set-ami.outputs.ami_id }}" \
+            -var "use_spot_instances=${{ github.event.inputs.use_spot_instances || 'true' }}" \
+            -var "num_benchmark_runs=${{ github.event.inputs.num_runs || '20' }}" \
+            -var "aws_region=${{ env.AWS_REGION }}"
+      
+      - name: Upload x86_64 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-x86
+          path: infrastructure/terraform/results-x86/
+          retention-days: 30
+      
+      - name: Cleanup x86_64 infrastructure
+        if: always()
+        run: |
+          cd infrastructure/terraform
+          terraform destroy -auto-approve \
+            -var "architecture=x86" \
+            -var "ami_id_x86=${{ steps.set-ami.outputs.ami_id }}" \
+            -var "use_spot_instances=${{ github.event.inputs.use_spot_instances || 'true' }}" \
+            -var "num_benchmark_runs=${{ github.event.inputs.num_runs || '20' }}" \
+            -var "aws_region=${{ env.AWS_REGION }}"
+
+  # Run benchmarks on ARM64
+  benchmark-arm64:
+    name: Benchmark ARM64
+    runs-on: ubuntu-latest
+    needs: build-amis
+    if: always() && (github.event.inputs.architecture == 'arm64' || github.event.inputs.architecture == 'both' || github.event_name == 'schedule')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Set AMI ID for ARM64
+        id: set-ami
+        run: |
+          if [ "${{ needs.build-amis.result }}" == "success" ]; then
+            AMI_ID="${{ needs.build-amis.outputs.ami_id_arm64 }}"
+          else
+            # Use fallback AMI or lookup latest
+            AMI_ID="${{ secrets.FALLBACK_AMI_ARM64 }}"
+          fi
+          echo "ami_id=$AMI_ID" >> $GITHUB_OUTPUT
+          echo "Using ARM64 AMI: $AMI_ID"
+      
+      - name: Initialize Terraform
+        run: |
+          cd infrastructure/terraform
+          terraform init
+      
+      - name: Run ARM64 benchmarks
+        run: |
+          cd infrastructure/terraform
+          terraform apply -auto-approve \
+            -var "architecture=arm64" \
+            -var "ami_id_arm64=${{ steps.set-ami.outputs.ami_id }}" \
+            -var "use_spot_instances=${{ github.event.inputs.use_spot_instances || 'true' }}" \
+            -var "num_benchmark_runs=${{ github.event.inputs.num_runs || '20' }}" \
+            -var "aws_region=${{ env.AWS_REGION }}"
+      
+      - name: Upload ARM64 results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-arm64
+          path: infrastructure/terraform/results-arm64/
+          retention-days: 30
+      
+      - name: Cleanup ARM64 infrastructure
+        if: always()
+        run: |
+          cd infrastructure/terraform
+          terraform destroy -auto-approve \
+            -var "architecture=arm64" \
+            -var "ami_id_arm64=${{ steps.set-ami.outputs.ami_id }}" \
+            -var "use_spot_instances=${{ github.event.inputs.use_spot_instances || 'true' }}" \
+            -var "num_benchmark_runs=${{ github.event.inputs.num_runs || '20' }}" \
+            -var "aws_region=${{ env.AWS_REGION }}"
+
+  # Generate consolidated report
+  generate-report:
+    name: Generate Benchmark Report
+    runs-on: ubuntu-latest
+    needs: [benchmark-x86, benchmark-arm64]
+    if: always() && (needs.benchmark-x86.result == 'success' || needs.benchmark-arm64.result == 'success')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download x86_64 results
+        if: needs.benchmark-x86.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-x86
+          path: results/x86/
+      
+      - name: Download ARM64 results
+        if: needs.benchmark-arm64.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-arm64
+          path: results/arm64/
+      
+      - name: Generate consolidated report
+        run: |
+          mkdir -p final-report
+          echo "# Guillotine EVM Cloud Benchmark Results" > final-report/README.md
+          echo "" >> final-report/README.md
+          echo "Generated on: $(date)" >> final-report/README.md
+          echo "Architecture(s): ${{ github.event.inputs.architecture || 'both' }}" >> final-report/README.md
+          echo "Benchmark runs: ${{ github.event.inputs.num_runs || '20' }}" >> final-report/README.md
+          echo "Spot instances: ${{ github.event.inputs.use_spot_instances || 'true' }}" >> final-report/README.md
+          echo "" >> final-report/README.md
+          
+          if [ -f results/x86/results.md ]; then
+            echo "## x86_64 Results" >> final-report/README.md
+            echo "" >> final-report/README.md
+            cat results/x86/results.md >> final-report/README.md
+            echo "" >> final-report/README.md
+          fi
+          
+          if [ -f results/arm64/results.md ]; then
+            echo "## ARM64 Results" >> final-report/README.md
+            echo "" >> final-report/README.md
+            cat results/arm64/results.md >> final-report/README.md
+            echo "" >> final-report/README.md
+          fi
+          
+          # Copy all result files
+          cp -r results/* final-report/ 2>/dev/null || true
+      
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-${{ github.run_number }}
+          path: final-report/
+          retention-days: 90
+      
+      - name: Comment on PR (if applicable)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = './final-report/README.md';
+            
+            if (fs.existsSync(path)) {
+              const report = fs.readFileSync(path, 'utf8');
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `## 🚀 Cloud Benchmark Results\n\n${report}\n\n*View full results in the [workflow artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`
+              });
+            }
+
+  # Cleanup old AMIs (run monthly)
+  cleanup-amis:
+    name: Cleanup Old AMIs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Cleanup old benchmark AMIs
+        run: |
+          echo "Cleaning up AMIs older than 30 days..."
+          
+          # Get AMIs older than 30 days
+          CUTOFF_DATE=$(date -d '30 days ago' +%Y-%m-%d)
+          
+          aws ec2 describe-images \
+            --owners self \
+            --filters "Name=name,Values=guillotine-bench-*" \
+            --query "Images[?CreationDate<='${CUTOFF_DATE}T23:59:59.000Z'].[ImageId,Name,CreationDate]" \
+            --output table
+          
+          # Delete old AMIs (add actual deletion logic if needed)
+          echo "Note: AMI cleanup logic can be implemented here"
