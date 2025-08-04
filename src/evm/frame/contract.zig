@@ -63,7 +63,7 @@ fn createHashMap(comptime K: type, comptime V: type, allocator: std.mem.Allocato
 
 /// Helper function to log errors consistently
 fn logError(comptime context: []const u8, err: anyerror) void {
-    Log.debug("{s}: {any}", .{context, err});
+    Log.debug("{s}: {any}", .{ context, err });
 }
 
 /// Error types for Contract operations
@@ -81,13 +81,10 @@ const is_wasm = builtin.target.cpu.arch == .wasm32;
 var analysis_cache: ?AnalysisLRUCache = null;
 var simple_cache: ?std.AutoHashMap([32]u8, *CodeAnalysis) = null;
 
-// Only include mutex for non-WASM builds
-var cache_mutex = if (!is_wasm) std.Thread.Mutex{} else {};
-
 /// Initialize the global analysis cache with default size based on build mode
 fn initAnalysisCache(allocator: std.mem.Allocator) !void {
     if (analysis_cache != null) return;
-    
+
     const cache_size = AnalysisCacheConfig.DEFAULT_CACHE_SIZE;
     analysis_cache = AnalysisLRUCache.init(allocator, cache_size, null);
 }
@@ -472,33 +469,28 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     if (!self.has_jumpdests) return false;
     const pos: u32 = @intCast(@min(dest, std.math.maxInt(u32)));
 
-    // Ensure analysis is performed
-    self.ensure_analysis(allocator);
+    // Perform analysis if not already done
+    if (self.analysis == null) {
+        self.analysis = analyze_code(allocator, self.code, self.code_hash) catch return false;
+    }
+    
+    const analysis = self.analysis orelse return false;
 
-    // Search for JUMPDEST position using linear search (optimized for size)
-    if (self.analysis) |analysis| {
+    // IMPORTANT: We only do binary search in analysis (expensive on u256 in terms of bundle size) not in ReleaseSmall
+    // TODO we should make this it's own comptime variable called DID_BINARY_SEARCH = builtin.mode != .ReleaseSmall
+    if (comptime builtin.mode != .ReleaseSmall) {
         if (analysis.jumpdest_positions.len > 0) {
             for (analysis.jumpdest_positions) |jumpdest_pos| {
                 if (jumpdest_pos == pos) return true;
             }
             return false;
         }
+    } else {
+        const bin_search_result = std.sort.binarySearch(u32, analysis.jumpdest_positions, pos, {}, std.sort.asc(u32));
+        return bin_search_result != null;
     }
-    // Fallback: check if position is code and contains JUMPDEST opcode
-    if (self.is_code(pos) and pos < self.code_size) {
-        return self.code[@intCast(pos)] == @intFromEnum(opcode.Enum.JUMPDEST);
-    }
+    // This should never be reached since we handle the no-analysis case above
     return false;
-}
-
-/// Ensure code analysis is performed
-fn ensure_analysis(self: *Contract, allocator: std.mem.Allocator) void {
-    if (self.analysis == null and self.code.len > 0) {
-        self.analysis = analyze_code(allocator, self.code, self.code_hash) catch |err| {
-            logError("Contract.ensure_analysis: analyze_code failed", err);
-            return;
-        };
-    }
 }
 
 /// Check if position is code (not data)
@@ -748,26 +740,31 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
 /// );
 /// // Analysis is now cached for future use
 /// ```
-pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8) CodeAnalysisError!*const CodeAnalysis {
+pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8) CodeAnalysisError!?*const CodeAnalysis {
+    if (code.len == 0) {
+        return null;
+    }
     // Temporarily disable SIMD optimization to fix signal 4 errors on ARM64
     // TODO: Re-enable when SIMD implementation is fixed for ARM64
     // if (comptime builtin.target.cpu.arch == .x86_64 and std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) {
     //     return analyze_code_simd(allocator, code, code_hash);
     // }
-    
-    if (comptime !is_wasm) {
-        cache_mutex.lock();
-        defer cache_mutex.unlock();
-    }
 
     // Use simple cache when LRU cache is disabled for size optimization
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
         if (simple_cache == null) {
             simple_cache = std.AutoHashMap([32]u8, *CodeAnalysis).init(allocator);
         }
-        
+
         if (simple_cache.?.get(code_hash)) |cached| {
             return cached;
+        }
+        if (simple_cache) |cache| {
+            if (cache.get(code_hash)) |cached| {
+                return cached;
+            }
+        } else {
+            unreachable;
         }
     } else {
         if (analysis_cache == null) {
@@ -778,15 +775,12 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
                     simple_cache = std.AutoHashMap([32]u8, *CodeAnalysis).init(allocator);
                 }
             };
-        }
-
-        if (analysis_cache) |*cache| {
-            if (cache.get(code_hash)) |cached| {
-                return cached;
-            }
-        } else if (simple_cache) |cache| {
-            if (cache.get(code_hash)) |cached| {
-                return cached;
+            if (analysis_cache) |*cache| {
+                if (cache.get(code_hash)) |cached| {
+                    return cached;
+                }
+            } else {
+                unreachable;
             }
         }
     }
@@ -924,17 +918,12 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
         // Fallback to standard implementation on non-x86_64 architectures
         return analyze_code(allocator, code, code_hash);
     }
-    if (comptime !is_wasm) {
-        cache_mutex.lock();
-        defer cache_mutex.unlock();
-    }
-
     // Use simple cache when LRU cache is disabled for size optimization
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
         if (simple_cache == null) {
             simple_cache = std.AutoHashMap([32]u8, *CodeAnalysis).init(allocator);
         }
-        
+
         if (simple_cache.?.get(code_hash)) |cached| {
             return cached;
         }
@@ -975,17 +964,17 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
     // SIMD optimization: Process 16 bytes at a time
     const vec_size = 16;
     const jumpdest_vec = @as(@Vector(vec_size, u8), @splat(@intFromEnum(opcode.Enum.JUMPDEST)));
-    
+
     var i: usize = 0;
-    
+
     // Process aligned chunks with SIMD
     while (i + vec_size <= code.len) {
         // Load 16 bytes from code
         const code_vec: @Vector(vec_size, u8) = code[i..][0..vec_size].*;
-        
+
         // Compare with JUMPDEST
         const cmp_result = code_vec == jumpdest_vec;
-        
+
         // Check each element of the comparison result
         inline for (0..vec_size) |j| {
             if (cmp_result[j]) {
@@ -999,10 +988,10 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
                 }
             }
         }
-        
+
         i += vec_size;
     }
-    
+
     // Handle remaining bytes
     while (i < code.len) {
         if (code[i] == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
@@ -1027,7 +1016,7 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
     analysis.has_dynamic_jumps = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.JUMP), @intFromEnum(opcode.Enum.JUMPI) });
     analysis.has_selfdestruct = contains_op_simd(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
-    
+
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
     analysis.has_static_jumps = false;
@@ -1079,17 +1068,17 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
     // SIMD optimization: Process 16 bytes at a time
     const vec_size = 16;
     const jumpdest_vec = @as(@Vector(vec_size, u8), @splat(@intFromEnum(opcode.Enum.JUMPDEST)));
-    
+
     var i: usize = 0;
-    
+
     // Process aligned chunks with SIMD
     while (i + vec_size <= code.len) {
         // Load 16 bytes from code
         const code_vec: @Vector(vec_size, u8) = code[i..][0..vec_size].*;
-        
+
         // Compare with JUMPDEST
         const cmp_result = code_vec == jumpdest_vec;
-        
+
         // Check each element of the comparison result
         inline for (0..vec_size) |j| {
             if (cmp_result[j]) {
@@ -1103,10 +1092,10 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
                 }
             }
         }
-        
+
         i += vec_size;
     }
-    
+
     // Handle remaining bytes
     while (i < code.len) {
         if (code[i] == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
@@ -1131,7 +1120,7 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
     analysis.has_dynamic_jumps = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.JUMP), @intFromEnum(opcode.Enum.JUMPI) });
     analysis.has_selfdestruct = contains_op_simd(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
-    
+
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
     analysis.has_static_jumps = false;
@@ -1146,30 +1135,30 @@ fn contains_op_simd(code: []const u8, opcodes: []const u8) bool {
         return contains_op(code, opcodes);
     }
     const vec_size = 16;
-    
+
     for (opcodes) |target_op| {
         const target_vec = @as(@Vector(vec_size, u8), @splat(target_op));
-        
+
         var i: usize = 0;
         while (i + vec_size <= code.len) {
             const code_vec: @Vector(vec_size, u8) = code[i..][0..vec_size].*;
             const cmp_result = code_vec == target_vec;
-            
+
             // Check if any element matches
             inline for (0..vec_size) |j| {
                 if (cmp_result[j]) return true;
             }
-            
+
             i += vec_size;
         }
-        
+
         // Check remaining bytes
         while (i < code.len) {
             if (code[i] == target_op) return true;
             i += 1;
         }
     }
-    
+
     return false;
 }
 
@@ -1185,16 +1174,11 @@ pub fn contains_op(code: []const u8, opcodes: []const u8) bool {
 
 /// Clear the global analysis cache
 pub fn clear_analysis_cache(allocator: std.mem.Allocator) void {
-    if (comptime !is_wasm) {
-        cache_mutex.lock();
-        defer cache_mutex.unlock();
-    }
-
     if (analysis_cache) |*cache| {
         cache.deinit();
         analysis_cache = null;
     }
-    
+
     if (simple_cache) |*cache| {
         var iter = cache.iterator();
         while (iter.next()) |entry| {
@@ -1204,11 +1188,6 @@ pub fn clear_analysis_cache(allocator: std.mem.Allocator) void {
         cache.deinit();
         simple_cache = null;
     }
-}
-
-/// Analyze jump destinations - public wrapper for ensure_analysis
-pub fn analyze_jumpdests(self: *Contract, allocator: std.mem.Allocator) void {
-    self.ensure_analysis(allocator);
 }
 
 /// Create a contract to execute bytecode at a specific address
