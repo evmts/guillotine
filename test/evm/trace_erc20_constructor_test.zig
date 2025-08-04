@@ -36,7 +36,6 @@ test "trace ERC20 constructor execution step by step" {
     std.log.debug("First 40 bytes: {x}", .{bytecode[0..40]});
     
     // Analyze jump destinations
-    contract.analyze_jumpdests(allocator);
     
     // Find the REVERT at pc=134 mentioned in debug output
     if (bytecode.len > 134) {

@@ -55,7 +55,6 @@ test "Integration: Conditional jump patterns" {
     );
 
     // Pre-analyze jump destinations
-    contract.analyze_jumpdests(allocator);
 
     // Create frame
     const frame_ptr = try allocator.create(Frame);
@@ -145,7 +144,6 @@ test "Integration: Loop implementation with JUMP" {
         false,
     );
 
-    contract.analyze_jumpdests(allocator);
 
     // Create frame
     const frame_ptr = try allocator.create(Frame);
@@ -486,7 +484,6 @@ test "Integration: Nested conditions with jumps" {
         false,
     );
 
-    contract.analyze_jumpdests(allocator);
 
     // Create frame
     const frame_ptr = try allocator.create(Frame);

@@ -1450,7 +1450,6 @@ test "Security: Valid jump destination validation" {
         defer frame.deinit();
 
         // Manually ensure analysis is performed for the contract
-        contract.analyze_jumpdests(allocator);
 
         try frame.stack.append(0); // Valid JUMPDEST position
 

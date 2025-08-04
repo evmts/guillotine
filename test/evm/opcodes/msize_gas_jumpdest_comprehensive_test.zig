@@ -453,7 +453,6 @@ test "JUMPDEST: Code analysis integration" {
     defer contract.deinit(allocator, null);
 
     // Force code analysis
-    contract.analyze_jumpdests(allocator);
 
     // The JUMPDEST at position 5 SHOULD be valid (it's standalone, not PUSH data)
     try testing.expect(contract.valid_jumpdest(allocator, 5));

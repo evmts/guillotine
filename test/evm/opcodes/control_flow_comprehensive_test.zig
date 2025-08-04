@@ -54,7 +54,6 @@ test "JUMP (0x56): Basic unconditional jump" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests in the contract
-    contract.analyze_jumpdests(allocator);
 
     var frame_builder = Frame.builder(allocator);
     var frame = try frame_builder
@@ -102,7 +101,6 @@ test "JUMP: Simple JUMPDEST validation" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests
-    contract.analyze_jumpdests(allocator);
 
     // Test that position 0 is valid
     const is_valid = contract.valid_jumpdest(allocator, 0);
@@ -157,7 +155,6 @@ test "JUMP: Jump to various valid destinations" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests in the contract
-    contract.analyze_jumpdests(allocator);
 
     // Test jumping to each valid JUMPDEST (check positions carefully!)
     // Position 0: 0x5B, Position 3: 0x5B, Position 6: 0x5B, Position 9: 0x5B, Position 12: 0x5B, Position 16: 0x5B
@@ -213,7 +210,6 @@ test "JUMP: Invalid jump destinations" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests in the contract
-    contract.analyze_jumpdests(allocator);
 
     // Test jumping to invalid destinations
     const invalid_destinations = [_]u256{ 1, 2, 3, 5, 100, std.math.maxInt(usize) };
@@ -263,7 +259,6 @@ test "JUMP: Stack underflow" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests in the contract
-    contract.analyze_jumpdests(allocator);
 
     var frame_builder = Frame.builder(allocator);
     var frame = try frame_builder
@@ -322,7 +317,6 @@ test "JUMPI (0x57): Conditional jump with true condition" {
     defer contract.deinit(allocator, null);
 
     // Force analysis to identify JUMPDEST positions
-    contract.analyze_jumpdests(allocator);
 
     var frame_builder = Frame.builder(allocator);
     var frame = try frame_builder
@@ -1025,7 +1019,6 @@ test "JUMPDEST: Jump destination validation" {
     defer contract.deinit(allocator, null);
 
     // Force analysis to ensure JUMPDEST positions are identified
-    contract.analyze_jumpdests(allocator);
 
     // Verify JUMPDEST positions are valid
     try testing.expect(contract.valid_jumpdest(allocator, 0)); // Position 0
@@ -1091,7 +1084,6 @@ test "JUMPDEST: Code analysis edge cases" {
     defer contract.deinit(allocator, null);
 
     // Force analysis
-    contract.analyze_jumpdests(allocator);
 
     // The 0x5B at position 1 should NOT be a valid jump destination (it's data)
     try testing.expect(!contract.valid_jumpdest(allocator, 1));
@@ -1372,7 +1364,6 @@ test "Control Flow: Simple JUMPDEST validation" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests
-    contract.analyze_jumpdests(allocator);
 
     // This should return true for position 0
     const is_valid = contract.valid_jumpdest(allocator, 0);
@@ -1501,7 +1492,6 @@ test "Control Flow: Program counter tracking" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests in the contract
-    contract.analyze_jumpdests(allocator);
 
     var frame_builder = Frame.builder(allocator);
     var frame = try frame_builder
@@ -1638,7 +1628,6 @@ test "Control Flow: Stack operations edge cases" {
     defer contract.deinit(allocator, null);
 
     // Analyze jumpdests in the contract
-    contract.analyze_jumpdests(allocator);
 
     var frame_builder = Frame.builder(allocator);
     var frame = try frame_builder
