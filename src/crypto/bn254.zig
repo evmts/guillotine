@@ -1,13 +1,14 @@
 const std = @import("std");
+const curve_parameters = @import("bn254/curve_parameters.zig");
 
-pub const Fp = @import("bn254/Fp.zig").Fp;
-pub const Fp2 = @import("bn254/Fp2.zig").Fp2;
-pub const Fp6 = @import("bn254/Fp6.zig").Fp6;
-pub const Fp12 = @import("bn254/Fp12.zig").Fp12;
+pub const FpMont = @import("bn254/FpMont.zig");
+pub const Fp2Mont = @import("bn254/Fp2Mont.zig");
+pub const Fp6Mont = @import("bn254/Fp6Mont.zig");
+pub const Fp12Mont = @import("bn254/Fp12Mont.zig");
 pub const Fr = @import("bn254/Fr.zig").Fr;
 
-pub const FP_MOD = Fp.FP_MOD;
-pub const FR_MOD = Fr.FR_MOD;
-pub const G1 = @import("bn254/g1.zig").G1;
-pub const G2 = @import("bn254/g2.zig").G2;
+pub const FP_MOD = curve_parameters.FP_MOD;
+pub const FR_MOD = curve_parameters.FR_MOD;
+pub const G1 = @import("bn254/G1.zig");
+pub const G2 = @import("bn254/G2.zig");
 pub const pairing = @import("bn254/pairing.zig").pairing;

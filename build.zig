@@ -1548,7 +1548,7 @@ pub fn build(b: *std.Build) void {
     // Add BN254 individual test targets
     const bn254_fp_test = b.addTest(.{
         .name = "bn254-fp-test",
-        .root_source_file = b.path("src/crypto/bn254/Fp.zig"),
+        .root_source_file = b.path("src/crypto/bn254/FpMont.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1570,7 +1570,7 @@ pub fn build(b: *std.Build) void {
 
     const bn254_fp2_test = b.addTest(.{
         .name = "bn254-fp2-test",
-        .root_source_file = b.path("src/crypto/bn254/Fp2.zig"),
+        .root_source_file = b.path("src/crypto/bn254/Fp2Mont.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1581,7 +1581,7 @@ pub fn build(b: *std.Build) void {
 
     const bn254_fp6_test = b.addTest(.{
         .name = "bn254-fp6-test",
-        .root_source_file = b.path("src/crypto/bn254/Fp6.zig"),
+        .root_source_file = b.path("src/crypto/bn254/Fp6Mont.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1592,7 +1592,7 @@ pub fn build(b: *std.Build) void {
 
     const bn254_fp12_test = b.addTest(.{
         .name = "bn254-fp12-test",
-        .root_source_file = b.path("src/crypto/bn254/Fp12.zig"),
+        .root_source_file = b.path("src/crypto/bn254/Fp12Mont.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1603,7 +1603,7 @@ pub fn build(b: *std.Build) void {
 
     const bn254_g1_test = b.addTest(.{
         .name = "bn254-g1-test",
-        .root_source_file = b.path("src/crypto/bn254/g1.zig"),
+        .root_source_file = b.path("src/crypto/bn254/G1.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1614,7 +1614,7 @@ pub fn build(b: *std.Build) void {
 
     const bn254_g2_test = b.addTest(.{
         .name = "bn254-g2-test",
-        .root_source_file = b.path("src/crypto/bn254/g2.zig"),
+        .root_source_file = b.path("src/crypto/bn254/G2.zig"),
         .target = target,
         .optimize = optimize,
     });

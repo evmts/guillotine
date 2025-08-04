@@ -1,14 +1,13 @@
-const Fp = @import("Fp.zig");
+const FpMont = @import("FpMont.zig");
 const Fr = @import("Fr.zig");
-const std = @import("std");
 const curve_parameters = @import("curve_parameters.zig");
 
 //G1 is the group of points on the elliptic curve y^2 = x^3 + 3
 // We use the Jacobian projective coordinates to represent the points
 pub const G1 = @This();
-x: Fp,
-y: Fp,
-z: Fp,
+x: FpMont,
+y: FpMont,
+z: FpMont,
 
 pub const INFINITY = curve_parameters.G1_INFINITY;
 pub const GENERATOR = curve_parameters.G1_GENERATOR;
@@ -18,12 +17,12 @@ pub fn isInfinity(self: *const G1) bool {
 }
 
 // Unchecked constructor
-pub fn initUnchecked(x: *const Fp, y: *const Fp, z: *const Fp) G1 {
+pub fn initUnchecked(x: *const FpMont, y: *const FpMont, z: *const FpMont) G1 {
     return G1{ .x = x.*, .y = y.*, .z = z.* };
 }
 
 // Checked constructor - validates point is on curve
-pub fn init(x: *const Fp, y: *const Fp, z: *const Fp) !G1 {
+pub fn init(x: *const FpMont, y: *const FpMont, z: *const FpMont) !G1 {
     const point = G1{ .x = x.*, .y = y.*, .z = z.* };
     if (!point.isOnCurve()) {
         return error.InvalidPoint;
@@ -35,14 +34,14 @@ pub fn toAffine(self: *const G1) G1 {
     if (self.isInfinity()) {
         return INFINITY;
     }
-    const z_inv = self.z.inv();
+    const z_inv = self.z.inv() catch unreachable;
     const z_inv_sq = z_inv.mul(&z_inv);
     const z_inv_cubed = z_inv_sq.mul(&z_inv);
 
     return G1{
         .x = self.x.mul(&z_inv_sq),
         .y = self.y.mul(&z_inv_cubed),
-        .z = Fp.ONE,
+        .z = FpMont.ONE,
     };
 }
 
@@ -54,8 +53,7 @@ pub fn isOnCurve(self: *const G1) bool {
     const x_cubed = self.x.mul(&self.x).mul(&self.x);
     const z_squared = self.z.mul(&self.z);
     const z_sixth = z_squared.mul(&z_squared).mul(&z_squared);
-    const three = Fp.init(3);
-    const rhs = x_cubed.add(&three.mul(&z_sixth));
+    const rhs = x_cubed.add(&z_sixth.mulBySmallInt(3));
 
     return y_squared.equal(&rhs);
 }
@@ -114,14 +112,14 @@ pub fn double(self: *const G1) G1 {
     const Y_fourth = Y_squared.mul(&Y_squared); // Y⁴
 
     // S = 4XY²
-    const S = self.x.mul(&Y_squared).mul(&Fp.init(4));
+    const S = self.x.mul(&Y_squared).mulBySmallInt(4);
 
     // M = 3X²
-    const M = X_squared.mul(&Fp.init(3));
+    const M = X_squared.mulBySmallInt(3);
 
     // X' = M² - 2S
     const M_squared = M.mul(&M);
-    const two_S = S.mul(&Fp.init(2));
+    const two_S = S.mulBySmallInt(2);
     const x_result = M_squared.sub(&two_S);
 
     // Y' = M(S - X') - 8Y⁴
@@ -133,7 +131,7 @@ pub fn double(self: *const G1) G1 {
     const y_result = M.mul(&S_minus_X).sub(&eight_Y_fourth);
 
     // Z' = 2YZ
-    const z_result = self.y.mul(&self.z).mul(&Fp.init(2));
+    const z_result = self.y.mul(&self.z).mulBySmallInt(2);
 
     return G1{ .x = x_result, .y = y_result, .z = z_result };
 }
@@ -181,7 +179,7 @@ pub fn add(self: *const G1, other: *const G1) G1 {
 
     // X3 = R² - H³ - 2*U1*H²
     const R_sq = R.mul(&R);
-    const two_U1_H_sq = U1_H_sq.mul(&Fp.init(2));
+    const two_U1_H_sq = U1_H_sq.mulBySmallInt(2);
     const result_x = R_sq.sub(&H_cubed).sub(&two_U1_H_sq);
 
     // Y3 = R*(U1*H² - X3) - S1*H³
@@ -221,157 +219,190 @@ pub fn mulAssign(self: *G1, scalar: *const Fr) void {
     self.* = self.mul(scalar);
 }
 
+// ============================================================================
+// TESTS - Adapted from g1.zig for Montgomery form
+// ============================================================================
 
-// TESTS
-// expected output came from arkworks-rs
+const std = @import("std");
 
-test "g1.add opposite" {
-const Gen = G1.GENERATOR;
-const minusG = Gen.neg();
-const G_plus_minusG = Gen.add(&minusG);
-try std.testing.expect(G_plus_minusG.isInfinity());
+test "G1.add opposite" {
+    const Gen = G1.GENERATOR;
+    const minusG = Gen.neg();
+    const G_plus_minusG = Gen.add(&minusG);
+    try std.testing.expect(G_plus_minusG.isInfinity());
 }
 
-test "g1.add" {
-const Gen = G1.GENERATOR;
-const Gen2 = G1{
-    .x = Fp.init(21888242871839275222246405745257275088696311157297823662689037894645226208560),
-    .y = Fp.init(21888242871839275222246405745257275088696311157297823662689037894645226208572),
-    .z = Fp.init(4),
-};
-const expected_result = G1{
-    .x = Fp.init(119872),
-    .y = Fp.init(21888242871839275222246405745257275088696311157297823662689037894645159203143),
-    .z = Fp.init(312),
-};
-try std.testing.expect(Gen.add(&Gen2).equal(&expected_result));
+test "G1.add" {
+    const Gen = G1.GENERATOR;
+    const Gen2 = G1{
+        .x = FpMont.init(21888242871839275222246405745257275088696311157297823662689037894645226208560),
+        .y = FpMont.init(21888242871839275222246405745257275088696311157297823662689037894645226208572),
+        .z = FpMont.init(4),
+    };
+    const expected_result = G1{
+        .x = FpMont.init(119872),
+        .y = FpMont.init(21888242871839275222246405745257275088696311157297823662689037894645159203143),
+        .z = FpMont.init(312),
+    };
+    try std.testing.expect(Gen.add(&Gen2).equal(&expected_result));
 }
 
-test "g1.double" {
-const Gen = G1.GENERATOR;
-const doubleG = Gen.double();
-const expected_result = G1{
-    .x = Fp.init(21888242871839275222246405745257275088696311157297823662689037894645226208560),
-    .y = Fp.init(21888242871839275222246405745257275088696311157297823662689037894645226208572),
-    .z = Fp.init(4),
-};
+test "G1.double" {
+    const Gen = G1.GENERATOR;
+    const doubleG = Gen.double();
+    const expected_result = G1{
+        .x = FpMont.init(21888242871839275222246405745257275088696311157297823662689037894645226208560),
+        .y = FpMont.init(21888242871839275222246405745257275088696311157297823662689037894645226208572),
+        .z = FpMont.init(4),
+    };
 
-try std.testing.expect(doubleG.equal(&expected_result));
+    try std.testing.expect(doubleG.equal(&expected_result));
 }
 
-test "g1.mul" {
-const Gen = G1.GENERATOR;
-const minus_G = Gen.mul(&Fr.init(1).neg());
-const G_plus_minus_G = Gen.add(&minus_G);
-try std.testing.expect(G_plus_minus_G.isInfinity());
+test "G1.mul" {
+    const Gen = G1.GENERATOR;
+    const minus_G = Gen.mul(&Fr.init(1).neg());
+    const G_plus_minus_G = Gen.add(&minus_G);
+    try std.testing.expect(G_plus_minus_G.isInfinity());
 }
 
-test "g1.isOnCurve generator" {
-const gen = G1.GENERATOR;
-try std.testing.expect(gen.isOnCurve());
+test "G1.isOnCurve generator" {
+    const gen = G1.GENERATOR;
+    try std.testing.expect(gen.isOnCurve());
 }
 
-test "g1.isOnCurve identity" {
-const identity = G1.INFINITY;
-try std.testing.expect(identity.isOnCurve());
+test "G1.isOnCurve identity" {
+    const identity = G1.INFINITY;
+    try std.testing.expect(identity.isOnCurve());
 }
 
-test "g1.isOnCurve random point" {
-const k = 7; // example scalar
-const random_point = G1.GENERATOR.mul(&Fr.init(k));
-try std.testing.expect(random_point.isOnCurve());
+test "G1.isOnCurve random point" {
+    const k = 7; // example scalar
+    const random_point = G1.GENERATOR.mul(&Fr.init(k));
+    try std.testing.expect(random_point.isOnCurve());
 }
 
-test "g1.equal generator to itself" {
-const gen = G1.GENERATOR;
-try std.testing.expect(gen.equal(&gen));
+test "G1.equal generator to itself" {
+    const gen = G1.GENERATOR;
+    try std.testing.expect(gen.equal(&gen));
 }
 
-test "g1.equal different representations same point" {
-const gen = G1.GENERATOR;
-const scaled_gen = G1{
-    .x = gen.x.mul(&Fp.init(4)), // scale by 2²
-    .y = gen.y.mul(&Fp.init(8)), // scale by 2³
-    .z = gen.z.mul(&Fp.init(2)), // scale by 2
-};
-try std.testing.expect(gen.equal(&scaled_gen));
+test "G1.equal different representations same point" {
+    const gen = G1.GENERATOR;
+    const scaled_gen = G1{
+        .x = gen.x.mul(&FpMont.init(4)), // scale by 2²
+        .y = gen.y.mul(&FpMont.init(8)), // scale by 2³
+        .z = gen.z.mul(&FpMont.init(2)), // scale by 2
+    };
+    try std.testing.expect(gen.equal(&scaled_gen));
 }
 
-test "g1.toAffine random point" {
-const k = 13; // example scalar
-const random_point = G1.GENERATOR.mul(&Fr.init(k));
-const affine = random_point.toAffine();
+test "G1.toAffine random point" {
+    const k = 13; // example scalar
+    const random_point = G1.GENERATOR.mul(&Fr.init(k));
+    const affine = random_point.toAffine();
 
-const expected_result = G1{
-    .x = Fp.init(2672242651313367459976336264061690128665099451055893690004467838496751824703),
-    .y = Fp.init(18247534626997477790812670345925575171672701304065784723769023620148097699216),
-    .z = Fp.ONE, // affine points have z = 1
-};
+    const expected_result = G1{
+        .x = FpMont.init(2672242651313367459976336264061690128665099451055893690004467838496751824703),
+        .y = FpMont.init(18247534626997477790812670345925575171672701304065784723769023620148097699216),
+        .z = FpMont.ONE, // affine points have z = 1
+    };
 
-try std.testing.expect(affine.equal(&expected_result));
-try std.testing.expect(affine.isOnCurve());
+    try std.testing.expect(affine.equal(&expected_result));
+    try std.testing.expect(affine.isOnCurve());
 }
 
-test "g1.add generator to identity" {
-const gen = G1.GENERATOR;
-const identity = G1.INFINITY;
-const result = gen.add(&identity);
-try std.testing.expect(result.equal(&gen));
+test "G1.add generator to identity" {
+    const gen = G1.GENERATOR;
+    const identity = G1.INFINITY;
+    const result = gen.add(&identity);
+    try std.testing.expect(result.equal(&gen));
 }
 
-test "g1.add random points" {
-const k1 = 3; // example scalar
-const k2 = 5; // example scalar
-const point1 = G1.GENERATOR.mul(&Fr.init(k1));
-const point2 = G1.GENERATOR.mul(&Fr.init(k2));
-const result = point1.add(&point2);
+test "G1.add random points" {
+    const k1 = 3; // example scalar
+    const k2 = 5; // example scalar
+    const point1 = G1.GENERATOR.mul(&Fr.init(k1));
+    const point2 = G1.GENERATOR.mul(&Fr.init(k2));
+    const result = point1.add(&point2);
 
-const expected_result = G1{
-    .x = Fp.init(41677742803929195922238593),
-    .y = Fp.init(269065159484683478575364835230449703617),
-    .z = Fp.init(712815062608),
-};
+    const expected_result = G1{
+        .x = FpMont.init(41677742803929195922238593),
+        .y = FpMont.init(269065159484683478575364835230449703617),
+        .z = FpMont.init(712815062608),
+    };
 
-try std.testing.expect(result.equal(&expected_result));
-try std.testing.expect(result.isOnCurve());
+    try std.testing.expect(result.equal(&expected_result));
+    try std.testing.expect(result.isOnCurve());
 }
 
-test "g1.add commutativity" {
-const k1 = 11; // example scalar
-const k2 = 17; // example scalar
-const point1 = G1.GENERATOR.mul(&Fr.init(k1));
-const point2 = G1.GENERATOR.mul(&Fr.init(k2));
+test "G1.add commutativity" {
+    const k1 = 11; // example scalar
+    const k2 = 17; // example scalar
+    const point1 = G1.GENERATOR.mul(&Fr.init(k1));
+    const point2 = G1.GENERATOR.mul(&Fr.init(k2));
 
-const result1 = point1.add(&point2);
-const result2 = point2.add(&point1);
-try std.testing.expect(result1.equal(&result2));
+    const result1 = point1.add(&point2);
+    const result2 = point2.add(&point1);
+    try std.testing.expect(result1.equal(&result2));
 }
 
-test "g1.double identity" {
-const identity = G1.INFINITY;
-const result = identity.double();
-try std.testing.expect(result.isInfinity());
+test "G1.double identity" {
+    const identity = G1.INFINITY;
+    const result = identity.double();
+    try std.testing.expect(result.isInfinity());
 }
 
-test "g1.double random point" {
-const k = 9; // example scalar
-const random_point = G1.GENERATOR.mul(&Fr.init(k));
-const doubled = random_point.double();
+test "G1.double random point" {
+    const k = 9; // example scalar
+    const random_point = G1.GENERATOR.mul(&Fr.init(k));
+    const doubled = random_point.double();
 
-const expected_result = G1{
-    .x = Fp.init(16214338358589738794944521397038398142658042174982207107873684518498175669939),
-    .y = Fp.init(11686337248854933627526225912767414320106940505209835321155346996117578735613),
-    .z = Fp.init(2952297635626254264598100546197407825999396807330657291329469442697244479715),
-};
+    const expected_result = G1{
+        .x = FpMont.init(16214338358589738794944521397038398142658042174982207107873684518498175669939),
+        .y = FpMont.init(11686337248854933627526225912767414320106940505209835321155346996117578735613),
+        .z = FpMont.init(2952297635626254264598100546197407825999396807330657291329469442697244479715),
+    };
 
-try std.testing.expect(doubled.equal(&expected_result));
-try std.testing.expect(doubled.isOnCurve());
+    try std.testing.expect(doubled.equal(&expected_result));
+    try std.testing.expect(doubled.isOnCurve());
 }
 
-test "g1.chain operations" {
-const gen = G1.GENERATOR;
-const doubled = gen.double();
-const quadrupled = doubled.double();
-const gen_times_four = gen.add(&gen).add(&gen).add(&gen);
-try std.testing.expect(quadrupled.equal(&gen_times_four));
+test "G1.chain operations" {
+    const gen = G1.GENERATOR;
+    const doubled = gen.double();
+    const quadrupled = doubled.double();
+    const gen_times_four = gen.add(&gen).add(&gen).add(&gen);
+    try std.testing.expect(quadrupled.equal(&gen_times_four));
+}
+
+// Additional tests for assignment methods
+test "G1.addAssign basic assignment" {
+    var a = G1.GENERATOR;
+    const b = G1.GENERATOR.double();
+    const expected = a.add(&b);
+    a.addAssign(&b);
+    try std.testing.expect(a.equal(&expected));
+}
+
+test "G1.doubleAssign basic assignment" {
+    var a = G1.GENERATOR;
+    const expected = a.double();
+    a.doubleAssign();
+    try std.testing.expect(a.equal(&expected));
+}
+
+test "G1.negAssign basic assignment" {
+    var a = G1.GENERATOR;
+    const expected = a.neg();
+    a.negAssign();
+    try std.testing.expect(a.equal(&expected));
+}
+
+test "G1.mulAssign basic assignment" {
+    var a = G1.GENERATOR;
+    const scalar = Fr.init(7);
+    const expected = a.mul(&scalar);
+    a.mulAssign(&scalar);
+    try std.testing.expect(a.equal(&expected));
 }

@@ -1,16 +1,17 @@
 const std = @import("std");
-const Fp = @import("Fp.zig").Fp;
-const Fp2 = @import("Fp2.zig").Fp2;
-const Fp6 = @import("Fp6.zig").Fp6;
-const Fp12 = @import("Fp12.zig").Fp12;
+const FpMont = @import("FpMont.zig");
+const Fp2Mont = @import("Fp2Mont.zig");
+const Fp6Mont = @import("Fp6Mont.zig");
+const Fp12Mont = @import("Fp12Mont.zig");
 const Fr = @import("Fr.zig").Fr;
-const G1 = @import("g1.zig").G1;
-const G2 = @import("g2.zig").G2;
+const G1 = @import("G1.zig");
+const G2 = @import("G2.zig");
 const pairing_mod = @import("pairing.zig");
+const curve_parameters = @import("curve_parameters.zig");
 
 // Constants
-const FP_MOD = @import("Fp.zig").FP_MOD;
-const FR_MOD = @import("Fr.zig").FR_MOD;
+const FP_MOD = curve_parameters.FP_MOD;
+const FR_MOD = curve_parameters.FR_MOD;
 
 // Time formatting function to use appropriate scale
 fn formatTime(ns: u64) struct { value: f64, unit: []const u8 } {
@@ -40,20 +41,20 @@ fn nextRandom() u256 {
     return high | mid_high | mid_low | low;
 }
 
-fn randomFp() Fp {
-    return Fp.init(nextRandom());
+fn randomFpMont() FpMont {
+    return FpMont.init(nextRandom());
 }
 
-fn randomFp2() Fp2 {
-    return Fp2.init_from_int(nextRandom(), nextRandom());
+fn randomFp2Mont() Fp2Mont {
+    return Fp2Mont.init_from_int(nextRandom(), nextRandom());
 }
 
-fn randomFp6() Fp6 {
-    return Fp6.init_from_int(nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom());
+fn randomFp6Mont() Fp6Mont {
+    return Fp6Mont.init_from_int(nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom());
 }
 
-fn randomFp12() Fp12 {
-    return Fp12.init_from_int(nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom());
+fn randomFp12Mont() Fp12Mont {
+    return Fp12Mont.init_from_int(nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom(), nextRandom());
 }
 
 fn randomFr() Fr {
@@ -71,20 +72,20 @@ fn randomG2() G2 {
 }
 
 // =============================================================================
-// BASE FIELD OPERATIONS (Fp)
+// BASE FIELD OPERATIONS (FpMont)
 // =============================================================================
 
-test "benchmark Fp.add" {
+test "benchmark FpMont.add" {
     const n = 50000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp, n);
+    var inputs_a = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp, n);
+    var inputs_b = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp();
-        inputs_b[i] = randomFp();
+        inputs_a[i] = randomFpMont();
+        inputs_b[i] = randomFpMont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -98,20 +99,20 @@ test "benchmark Fp.add" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("FpMont.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp.sub" {
+test "benchmark FpMont.sub" {
     const n = 50000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp, n);
+    var inputs_a = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp, n);
+    var inputs_b = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp();
-        inputs_b[i] = randomFp();
+        inputs_a[i] = randomFpMont();
+        inputs_b[i] = randomFpMont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -125,20 +126,20 @@ test "benchmark Fp.sub" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("FpMont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp.mul" {
+test "benchmark FpMont.mul" {
     const n = 50000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp, n);
+    var inputs_a = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp, n);
+    var inputs_b = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp();
-        inputs_b[i] = randomFp();
+        inputs_a[i] = randomFpMont();
+        inputs_b[i] = randomFpMont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -152,19 +153,19 @@ test "benchmark Fp.mul" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("FpMont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp.pow" {
+test "benchmark FpMont.pow" {
     const n = 5000;
 
-    var inputs = try std.testing.allocator.alloc(Fp, n);
+    var inputs = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs);
     var exponents = try std.testing.allocator.alloc(u256, n);
     defer std.testing.allocator.free(exponents);
 
     for (0..n) |i| {
-        inputs[i] = randomFp();
+        inputs[i] = randomFpMont();
         exponents[i] = nextRandom();
     }
 
@@ -179,18 +180,18 @@ test "benchmark Fp.pow" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("FpMont.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp.inv" {
+test "benchmark FpMont.inv" {
     const n = 5000;
 
-    var inputs = try std.testing.allocator.alloc(Fp, n);
+    var inputs = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp();
-        if (inputs[i].value == 0) inputs[i] = Fp.ONE;
+        inputs[i] = randomFpMont();
+        if (inputs[i].value == 0) inputs[i] = FpMont.ONE;
     }
 
     const start = std.time.nanoTimestamp();
@@ -204,24 +205,24 @@ test "benchmark Fp.inv" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("FpMont.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
 // =============================================================================
-// QUADRATIC EXTENSION FIELD OPERATIONS (Fp2)
+// QUADRATIC EXTENSION FIELD OPERATIONS (Fp2Mont)
 // =============================================================================
 
-test "benchmark Fp2.add" {
+test "benchmark Fp2Mont.add" {
     const n = 10000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp2, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp2();
-        inputs_b[i] = randomFp2();
+        inputs_a[i] = randomFp2Mont();
+        inputs_b[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -235,22 +236,22 @@ test "benchmark Fp2.add" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.sub" {
+test "benchmark Fp2Mont.sub" {
     const n = 10000;
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs_a = try std.testing.allocator.alloc(Fp2, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp2();
-        inputs_b[i] = randomFp2();
+        inputs_a[i] = randomFp2Mont();
+        inputs_b[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -265,20 +266,20 @@ test "benchmark Fp2.sub" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.mul" {
+test "benchmark Fp2Mont.mul" {
     const n = 5000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp2, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp2();
-        inputs_b[i] = randomFp2();
+        inputs_a[i] = randomFp2Mont();
+        inputs_b[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -292,22 +293,22 @@ test "benchmark Fp2.mul" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.pow" {
+test "benchmark Fp2Mont.pow" {
     const n = 1000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
     var exponents = try std.testing.allocator.alloc(u256, n);
     defer std.testing.allocator.free(exponents);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
+        inputs[i] = randomFp2Mont();
         exponents[i] = nextRandom();
     }
 
@@ -323,19 +324,19 @@ test "benchmark Fp2.pow" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.inv" {
+test "benchmark Fp2Mont.inv" {
     const n = 500;
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
+        inputs[i] = randomFp2Mont();
         if (inputs[i].u0.value == 0 and inputs[i].u1.value == 0) {
-            inputs[i] = Fp2.ONE;
+            inputs[i] = Fp2Mont.ONE;
         }
     }
 
@@ -350,20 +351,20 @@ test "benchmark Fp2.inv" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.neg" {
+test "benchmark Fp2Mont.neg" {
     const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
+        inputs[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -378,20 +379,20 @@ test "benchmark Fp2.neg" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.neg n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.neg n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.norm" {
+test "benchmark Fp2Mont.norm" {
     const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
+        inputs[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -406,20 +407,20 @@ test "benchmark Fp2.norm" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.norm n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.norm n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.conj" {
+test "benchmark Fp2Mont.conj" {
     const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
+        inputs[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -434,23 +435,23 @@ test "benchmark Fp2.conj" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.conj n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.conj n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.scalarMul" {
+test "benchmark Fp2Mont.scalarMul" {
     const n = 1000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
-    var scalars = try std.testing.allocator.alloc(Fp, n);
+    var scalars = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(scalars);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
-        scalars[i] = randomFp();
+        inputs[i] = randomFp2Mont();
+        scalars[i] = randomFpMont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -465,20 +466,20 @@ test "benchmark Fp2.scalarMul" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.scalarMul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.scalarMul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp2.frobeniusMap" {
+test "benchmark Fp2Mont.frobeniusMap" {
     const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp2, n);
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp2();
+        inputs[i] = randomFp2Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -493,24 +494,24 @@ test "benchmark Fp2.frobeniusMap" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp2.frobeniusMap n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp2Mont.frobeniusMap n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
 // =============================================================================
-// SEXTIC EXTENSION FIELD OPERATIONS (Fp6)
+// SEXTIC EXTENSION FIELD OPERATIONS (Fp6Mont)
 // =============================================================================
 
-test "benchmark Fp6.add" {
+test "benchmark Fp6Mont.add" {
     const n = 1000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp6, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp6, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp6();
-        inputs_b[i] = randomFp6();
+        inputs_a[i] = randomFp6Mont();
+        inputs_b[i] = randomFp6Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -524,23 +525,23 @@ test "benchmark Fp6.add" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.sub" {
+test "benchmark Fp6Mont.sub" {
     const n = 1000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs_a = try std.testing.allocator.alloc(Fp6, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp6, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp6();
-        inputs_b[i] = randomFp6();
+        inputs_a[i] = randomFp6Mont();
+        inputs_b[i] = randomFp6Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -555,20 +556,20 @@ test "benchmark Fp6.sub" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.mul" {
+test "benchmark Fp6Mont.mul" {
     const n = 1000;
 
-    var inputs_a = try std.testing.allocator.alloc(Fp6, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp6, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp6();
-        inputs_b[i] = randomFp6();
+        inputs_a[i] = randomFp6Mont();
+        inputs_b[i] = randomFp6Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -582,22 +583,22 @@ test "benchmark Fp6.mul" {
     const avg_ns = duration_ns / n;
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.pow" {
+test "benchmark Fp6Mont.pow" {
     const n = 500;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp6, n);
+    var inputs = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs);
     var exponents = try std.testing.allocator.alloc(u256, n);
     defer std.testing.allocator.free(exponents);
 
     for (0..n) |i| {
-        inputs[i] = randomFp6();
+        inputs[i] = randomFp6Mont();
         exponents[i] = nextRandom();
     }
 
@@ -613,26 +614,26 @@ test "benchmark Fp6.pow" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.inv" {
+test "benchmark Fp6Mont.inv" {
     const n = 500;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp6, n);
+    var inputs = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp6();
+        inputs[i] = randomFp6Mont();
         // Ensure non-zero
         if (inputs[i].v0.u0.value == 0 and inputs[i].v0.u1.value == 0 and
             inputs[i].v1.u0.value == 0 and inputs[i].v1.u1.value == 0 and
             inputs[i].v2.u0.value == 0 and inputs[i].v2.u1.value == 0)
         {
-            inputs[i] = Fp6.ONE;
+            inputs[i] = Fp6Mont.ONE;
         }
     }
 
@@ -648,20 +649,20 @@ test "benchmark Fp6.inv" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.neg" {
+test "benchmark Fp6Mont.neg" {
     const n = 1000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp6, n);
+    var inputs = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp6();
+        inputs[i] = randomFp6Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -676,20 +677,20 @@ test "benchmark Fp6.neg" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.neg n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.neg n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.norm" {
+test "benchmark Fp6Mont.norm" {
     const n = 1000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp6, n);
+    var inputs = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp6();
+        inputs[i] = randomFp6Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -704,23 +705,23 @@ test "benchmark Fp6.norm" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.norm n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.norm n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp6.scalarMul" {
+test "benchmark Fp6Mont.scalarMul" {
     const n = 1000;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp6, n);
+    var inputs = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs);
-    var scalars = try std.testing.allocator.alloc(Fp, n);
+    var scalars = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(scalars);
 
     for (0..n) |i| {
-        inputs[i] = randomFp6();
-        scalars[i] = randomFp();
+        inputs[i] = randomFp6Mont();
+        scalars[i] = randomFpMont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -735,27 +736,27 @@ test "benchmark Fp6.scalarMul" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp6.scalarMul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp6Mont.scalarMul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
 // =============================================================================
-// DODECIC EXTENSION FIELD OPERATIONS (Fp12)
+// DODECIC EXTENSION FIELD OPERATIONS (Fp12Mont)
 // =============================================================================
 
-test "benchmark Fp12.add" {
+test "benchmark Fp12Mont.add" {
     const n = 500;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs_a = try std.testing.allocator.alloc(Fp12, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp12, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp12();
-        inputs_b[i] = randomFp12();
+        inputs_a[i] = randomFp12Mont();
+        inputs_b[i] = randomFp12Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -770,24 +771,24 @@ test "benchmark Fp12.add" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp12.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp12Mont.add n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp12.sub" {
+test "benchmark Fp12Mont.sub" {
     const sample_sizes = [_]usize{ 5, 50, 500 };
 
     for (sample_sizes) |n| {
         // Random number generation
         // Using deterministic PRNG
 
-        var inputs_a = try std.testing.allocator.alloc(Fp12, n);
+        var inputs_a = try std.testing.allocator.alloc(Fp12Mont, n);
         defer std.testing.allocator.free(inputs_a);
-        var inputs_b = try std.testing.allocator.alloc(Fp12, n);
+        var inputs_b = try std.testing.allocator.alloc(Fp12Mont, n);
         defer std.testing.allocator.free(inputs_b);
 
         for (0..n) |i| {
-            inputs_a[i] = randomFp12();
-            inputs_b[i] = randomFp12();
+            inputs_a[i] = randomFp12Mont();
+            inputs_b[i] = randomFp12Mont();
         }
 
         const start = std.time.nanoTimestamp();
@@ -802,24 +803,24 @@ test "benchmark Fp12.sub" {
         // ops_per_sec calculation removed
 
         const time = formatTime(avg_ns);
-        std.debug.print("Fp12.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+        std.debug.print("Fp12Mont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
     }
 }
 
-test "benchmark Fp12.mul" {
+test "benchmark Fp12Mont.mul" {
     const n = 250;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs_a = try std.testing.allocator.alloc(Fp12, n);
+    var inputs_a = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp12, n);
+    var inputs_b = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs_b);
 
     for (0..n) |i| {
-        inputs_a[i] = randomFp12();
-        inputs_b[i] = randomFp12();
+        inputs_a[i] = randomFp12Mont();
+        inputs_b[i] = randomFp12Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -834,22 +835,22 @@ test "benchmark Fp12.mul" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp12.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp12Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp12.pow" {
+test "benchmark Fp12Mont.pow" {
     const n = 100;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp12, n);
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs);
     var exponents = try std.testing.allocator.alloc(u256, n);
     defer std.testing.allocator.free(exponents);
 
     for (0..n) |i| {
-        inputs[i] = randomFp12();
+        inputs[i] = randomFp12Mont();
         exponents[i] = nextRandom();
     }
 
@@ -865,20 +866,20 @@ test "benchmark Fp12.pow" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp12.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp12Mont.pow n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp12.inv" {
+test "benchmark Fp12Mont.inv" {
     const n = 100;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp12, n);
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp12();
+        inputs[i] = randomFp12Mont();
         // Ensure non-zero (simplified check)
         if (inputs[i].w0.v0.u0.value == 0 and inputs[i].w0.v0.u1.value == 0 and
             inputs[i].w0.v1.u0.value == 0 and inputs[i].w0.v1.u1.value == 0 and
@@ -887,7 +888,7 @@ test "benchmark Fp12.inv" {
             inputs[i].w1.v1.u0.value == 0 and inputs[i].w1.v1.u1.value == 0 and
             inputs[i].w1.v2.u0.value == 0 and inputs[i].w1.v2.u1.value == 0)
         {
-            inputs[i] = Fp12.ONE;
+            inputs[i] = Fp12Mont.ONE;
         }
     }
 
@@ -903,20 +904,20 @@ test "benchmark Fp12.inv" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp12.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp12Mont.inv n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp12.neg" {
+test "benchmark Fp12Mont.neg" {
     const n = 500;
 
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp12, n);
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp12();
+        inputs[i] = randomFp12Mont();
     }
 
     const start = std.time.nanoTimestamp();
@@ -931,7 +932,7 @@ test "benchmark Fp12.neg" {
     // ops_per_sec calculation removed
 
     const time = formatTime(avg_ns);
-    std.debug.print("Fp12.neg n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    std.debug.print("Fp12Mont.neg n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
 // =============================================================================
@@ -1481,7 +1482,7 @@ test "benchmark G2.isOnCurve" {
 // =============================================================================
 
 test "benchmark pairing.pairing" {
-    const n = 5;
+    const n = 100;
 
     // Random number generation
     // Using deterministic PRNG
@@ -1548,14 +1549,14 @@ test "benchmark pairing.final_exponentiation" {
     // Random number generation
     // Using deterministic PRNG
 
-    var inputs = try std.testing.allocator.alloc(Fp12, n);
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(inputs);
 
     for (0..n) |i| {
-        inputs[i] = randomFp12();
+        inputs[i] = randomFp12Mont();
     }
 
-    var results = try std.testing.allocator.alloc(Fp12, n);
+    var results = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(results);
 
     const start = std.time.nanoTimestamp();
@@ -1573,130 +1574,64 @@ test "benchmark pairing.final_exponentiation" {
     std.debug.print("pairing.final_exponentiation n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-// =============================================================================
-// SPECIAL CASES AND EDGE CASE BENCHMARKS
-// =============================================================================
+test "benchmark pairing.final_exponentiation_hard_part" {
+    const n = 10;
 
-test "benchmark Fp.mul with identity elements" {
-    const sample_sizes = [_]usize{ 100, 1000, 10000 };
+    // Random number generation
+    // Using deterministic PRNG
 
-    for (sample_sizes) |n| {
-        // Random number generation
-        // Using deterministic PRNG
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(inputs);
 
-        var inputs = try std.testing.allocator.alloc(Fp, n);
-        defer std.testing.allocator.free(inputs);
-
-        for (0..n) |i| {
-            inputs[i] = randomFp();
-        }
-
-        const start = std.time.nanoTimestamp();
-        for (0..n) |i| {
-            const result = inputs[i].mul(&Fp.ONE);
-            std.mem.doNotOptimizeAway(result);
-        }
-        const end = std.time.nanoTimestamp();
-
-        const duration_ns = @as(u64, @intCast(end - start));
-        const avg_ns = duration_ns / n;
-        // ops_per_sec calculation removed
-
-        const time = formatTime(avg_ns);
-        std.debug.print("Fp.mul_identity n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    for (0..n) |i| {
+        inputs[i] = randomFp12Mont();
     }
+
+    var results = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(results);
+
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        results[i] = pairing_mod.final_exponentiation_hard_part(&inputs[i]);
+        std.mem.doNotOptimizeAway(results[i]);
+    }
+    const end = std.time.nanoTimestamp();
+
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+    // ops_per_sec calculation removed
+
+    const time = formatTime(avg_ns);
+    std.debug.print("pairing.final_exponentiation_hard_part n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
-test "benchmark Fp.mul near modulus boundary" {
-    const sample_sizes = [_]usize{ 10, 100, 1000 };
+test "benchmark pairing.final_exponentiation_easy_part" {
+    const n = 10;
 
-    for (sample_sizes) |n| {
-        var inputs_a = try std.testing.allocator.alloc(Fp, n);
-        defer std.testing.allocator.free(inputs_a);
-        var inputs_b = try std.testing.allocator.alloc(Fp, n);
-        defer std.testing.allocator.free(inputs_b);
+    // Random number generation
+    // Using deterministic PRNG
 
-        for (0..n) |i| {
-            inputs_a[i] = Fp.init(FP_MOD - 1 - @as(u256, @intCast(i % 100)));
-            inputs_b[i] = Fp.init(FP_MOD - 1 - @as(u256, @intCast((i + 50) % 100)));
-        }
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(inputs);
 
-        const start = std.time.nanoTimestamp();
-        for (0..n) |i| {
-            const result = inputs_a[i].mul(&inputs_b[i]);
-            std.mem.doNotOptimizeAway(result);
-        }
-        const end = std.time.nanoTimestamp();
-
-        const duration_ns = @as(u64, @intCast(end - start));
-        const avg_ns = duration_ns / n;
-        // ops_per_sec calculation removed
-
-        const time = formatTime(avg_ns);
-        std.debug.print("Fp.mul_boundary n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    for (0..n) |i| {
+        inputs[i] = randomFp12Mont();
     }
-}
 
-test "benchmark G1.add with infinity" {
-    const sample_sizes = [_]usize{ 5, 50, 500 };
+    var results = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(results);
 
-    for (sample_sizes) |n| {
-        // Random number generation
-        // Using deterministic PRNG
-
-        var inputs = try std.testing.allocator.alloc(G1, n);
-        defer std.testing.allocator.free(inputs);
-
-        for (0..n) |i| {
-            inputs[i] = randomG1();
-        }
-
-        const start = std.time.nanoTimestamp();
-        for (0..n) |i| {
-            const result = inputs[i].add(&G1.INFINITY);
-            std.mem.doNotOptimizeAway(result);
-        }
-        const end = std.time.nanoTimestamp();
-
-        const duration_ns = @as(u64, @intCast(end - start));
-        const avg_ns = duration_ns / n;
-        // ops_per_sec calculation removed
-
-        const time = formatTime(avg_ns);
-        std.debug.print("G1.add_infinity n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        results[i] = pairing_mod.final_exponentiation_easy_part(&inputs[i]);
+        std.mem.doNotOptimizeAway(results[i]);
     }
-}
+    const end = std.time.nanoTimestamp();
 
-test "benchmark Fp12.mul with sparse elements" {
-    const sample_sizes = [_]usize{ 5, 50, 500 };
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+    // ops_per_sec calculation removed
 
-    for (sample_sizes) |n| {
-        // Random number generation
-        // Using deterministic PRNG
-
-        var inputs_a = try std.testing.allocator.alloc(Fp12, n);
-        defer std.testing.allocator.free(inputs_a);
-        var inputs_b = try std.testing.allocator.alloc(Fp12, n);
-        defer std.testing.allocator.free(inputs_b);
-
-        for (0..n) |i| {
-            // Create sparse Fp12 elements (most components are zero)
-            inputs_a[i] = Fp12.init_from_int(nextRandom(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-            inputs_b[i] = Fp12.init_from_int(0, 0, 0, 0, 0, 0, nextRandom(), 0, 0, 0, 0, 0);
-        }
-
-        const start = std.time.nanoTimestamp();
-        for (0..n) |i| {
-            const result = inputs_a[i].mul(&inputs_b[i]);
-            std.mem.doNotOptimizeAway(result);
-        }
-        const end = std.time.nanoTimestamp();
-
-        const duration_ns = @as(u64, @intCast(end - start));
-        const avg_ns = duration_ns / n;
-        // ops_per_sec calculation removed
-
-        const time = formatTime(avg_ns);
-        std.debug.print("Fp12.mul_sparse n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
-    }
+    const time = formatTime(avg_ns);
+    std.debug.print("pairing.final_exponentiation_easy_part n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
