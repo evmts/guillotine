@@ -55,24 +55,22 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const StackValidation = @import("../stack/stack_validation.zig");
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 
 /// ADD opcode (0x01) - Addition with wrapping overflow
-pub fn op_add(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_add(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
     const result = a +% b;
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -101,15 +99,13 @@ pub fn op_add(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 /// ## Example
 /// Stack: [10, 20] => [200]
 /// Stack: [2^128, 2^128] => [0] (overflow wraps)
-pub fn op_mul(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_mul(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
 
     // Use optimized U256 multiplication
     const a_u256 = U256.from_u256_unsafe(a);
@@ -117,7 +113,7 @@ pub fn op_mul(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const product_u256 = a_u256.wrapping_mul(b_u256);
     const product = product_u256.to_u256_unsafe();
 
-    frame.stack.set_top_unsafe(product);
+    frame.stack_set_top_unsafe(product);
 
     return Operation.ExecutionResult{};
 }
@@ -146,19 +142,17 @@ pub fn op_mul(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 /// ## Example
 /// Stack: [30, 10] => [20]
 /// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
-pub fn op_sub(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_sub(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
 
     const result = b -% a;
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -194,15 +188,13 @@ pub fn op_sub(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 /// Unlike most programming languages, EVM division by zero does not
 /// throw an error but returns 0. This is a deliberate design choice
 /// to avoid exceptional halting conditions.
-pub fn op_div(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_div(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
 
     const result = if (a == 0) blk: {
         break :blk 0;
@@ -211,7 +203,7 @@ pub fn op_div(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
         break :blk result_u256.to_u256_unsafe();
     };
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -251,15 +243,13 @@ pub fn op_div(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 /// The special case for MIN_I256 / -1 prevents integer overflow,
 /// as the mathematical result (2^255) cannot be represented in i256.
 /// In this case, we return MIN_I256 to match EVM behavior.
-pub fn op_sdiv(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_sdiv(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
 
     const result: u256 = blk: {
         if (a == 0) {
@@ -276,7 +266,7 @@ pub fn op_sdiv(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
         }
     };
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -311,15 +301,13 @@ pub fn op_sdiv(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 /// ## Note
 /// The result is always in range [0, b-1] for b > 0.
 /// Like DIV, modulo by zero returns 0 rather than throwing an error.
-pub fn op_mod(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_mod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
 
     const result = if (a == 0) blk: {
         @branchHint(.unlikely);
@@ -332,7 +320,7 @@ pub fn op_mod(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
         break :blk div_rem_result.remainder.to_u256_unsafe();
     };
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -371,15 +359,13 @@ pub fn op_mod(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 /// In signed modulo, the result has the same sign as the dividend (a).
 /// This follows the Euclidean division convention where:
 /// a = b * q + r, where |r| < |b| and sign(r) = sign(a)
-pub fn op_smod(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_smod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_peek_unsafe().*;
 
     var result: u256 = undefined;
     if (a == 0) {
@@ -392,7 +378,7 @@ pub fn op_smod(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
         result = @as(u256, @bitCast(result_i256));
     }
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -431,16 +417,14 @@ pub fn op_smod(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 /// This operation correctly computes (a + b) mod n even when
 /// a + b exceeds 2^256, using specialized algorithms to avoid
 /// intermediate overflow.
-pub fn op_addmod(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_addmod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 3);
+    std.debug.assert(frame.stack_size >= 3);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.pop_unsafe();
-    const n = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_pop_unsafe();
+    const n = frame.stack_peek_unsafe().*;
 
     var result: u256 = undefined;
     if (n == 0) {
@@ -454,7 +438,7 @@ pub fn op_addmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
         result = result_u256.to_u256_unsafe();
     }
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -498,16 +482,14 @@ pub fn op_addmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
 /// ## Note
 /// This operation correctly computes (a * b) mod n even when
 /// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
-pub fn op_mulmod(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    const frame = state;
+pub fn op_mulmod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    std.debug.assert(frame.stack.size >= 3);
+    std.debug.assert(frame.stack_size >= 3);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.pop_unsafe();
-    const n = frame.stack.peek_unsafe().*;
+    const b = frame.stack_pop_unsafe();
+    const a = frame.stack_pop_unsafe();
+    const n = frame.stack_peek_unsafe().*;
 
     var result: u256 = undefined;
     if (n == 0) {
@@ -521,7 +503,7 @@ pub fn op_mulmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
         result = result_u256.to_u256_unsafe();
     }
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -568,17 +550,13 @@ pub fn op_mulmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
 /// - 2^10: 10 + 50*1 = 60 gas (exponent fits in 1 byte)
 /// - 2^256: 10 + 50*2 = 110 gas (exponent needs 2 bytes)
 /// - 2^(2^255): 10 + 50*32 = 1610 gas (huge exponent)
-pub fn op_exp(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_exp(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack_size >= 2);
 
-    const base = frame.stack.pop_unsafe();
-    const exp = frame.stack.peek_unsafe().*;
+    const base = frame.stack_pop_unsafe();
+    const exp = frame.stack_peek_unsafe().*;
 
     // Calculate gas cost based on exponent byte size
     var exp_copy = exp;
@@ -594,19 +572,19 @@ pub fn op_exp(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 
     // Early exit optimizations
     if (exp == 0) {
-        frame.stack.set_top_unsafe(1);
+        frame.stack_set_top_unsafe(1);
         return Operation.ExecutionResult{};
     }
     if (base == 0) {
-        frame.stack.set_top_unsafe(0);
+        frame.stack_set_top_unsafe(0);
         return Operation.ExecutionResult{};
     }
     if (base == 1) {
-        frame.stack.set_top_unsafe(1);
+        frame.stack_set_top_unsafe(1);
         return Operation.ExecutionResult{};
     }
     if (exp == 1) {
-        frame.stack.set_top_unsafe(base);
+        frame.stack_set_top_unsafe(base);
         return Operation.ExecutionResult{};
     }
 
@@ -627,7 +605,7 @@ pub fn op_exp(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
         e >>= 1;
     }
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -672,16 +650,13 @@ pub fn op_exp(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 /// - Converting int8/int16/etc to int256
 /// - Arithmetic on mixed-width signed integers
 /// - Implementing higher-level language semantics
-pub fn op_signextend(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_signextend(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
+    std.debug.assert(frame.stack_size >= 2);
 
-    std.debug.assert(frame.stack.size >= 2);
-
-    const byte_num = frame.stack.pop_unsafe();
-    const x = frame.stack.peek_unsafe().*;
+    const byte_num = frame.stack_pop_unsafe();
+    const x = frame.stack_peek_unsafe().*;
 
     var result: u256 = undefined;
 
@@ -715,7 +690,7 @@ pub fn op_signextend(pc: usize, interpreter: Operation.Interpreter, state: Opera
         }
     }
 
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
@@ -1396,13 +1371,13 @@ test "arithmetic_benchmarks" {
     while (i < iterations) : (i += 1) {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x01}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, [_]u8{0} ** 20, &.{}, vm.context);
         defer frame.deinit();
 
         // Test ADD operation
-        try frame.stack.append(@intCast(i));
-        try frame.stack.append(@intCast(i * 2));
-        _ = try op_add(0, @ptrCast(&vm), @ptrCast(&frame));
+        try frame.stack_push(@intCast(i));
+        try frame.stack_push(@intCast(i * 2));
+        _ = try op_add(@ptrCast(&vm), @ptrCast(&frame));
     }
     const basic_arithmetic_ns = timer.read();
 
@@ -1412,15 +1387,15 @@ test "arithmetic_benchmarks" {
     while (i < iterations) : (i += 1) {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x04}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, [_]u8{0} ** 20, &.{}, vm.context);
         defer frame.deinit();
 
         // Test DIV with various values including edge cases
         const dividend: u256 = @intCast(if (i == 0) 1 else i);
         const divisor: u256 = @intCast(if (i % 100 == 0) 0 else (i % 1000) + 1); // Include div by zero
-        try frame.stack.append(dividend);
-        try frame.stack.append(divisor);
-        _ = try op_div(0, @ptrCast(&vm), @ptrCast(&frame));
+        try frame.stack_push(dividend);
+        try frame.stack_push(divisor);
+        _ = try op_div(@ptrCast(&vm), @ptrCast(&frame));
     }
     const division_ops_ns = timer.read();
 
@@ -1430,14 +1405,14 @@ test "arithmetic_benchmarks" {
     while (i < iterations / 10) : (i += 1) { // Fewer iterations due to complexity
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x08}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, [_]u8{0} ** 20, &.{}, vm.context);
         defer frame.deinit();
 
         // Test ADDMOD operation
-        try frame.stack.append(@intCast(i * 1000));
-        try frame.stack.append(@intCast(i * 2000));
-        try frame.stack.append(@intCast(if (i == 0) 1 else i + 1)); // Avoid mod by zero
-        _ = try op_addmod(0, @ptrCast(&vm), @ptrCast(&frame));
+        try frame.stack_push(@intCast(i * 1000));
+        try frame.stack_push(@intCast(i * 2000));
+        try frame.stack_push(@intCast(if (i == 0) 1 else i + 1)); // Avoid mod by zero
+        _ = try op_addmod(@ptrCast(&vm), @ptrCast(&frame));
     }
     const modular_arithmetic_ns = timer.read();
 
@@ -1455,12 +1430,12 @@ test "arithmetic_benchmarks" {
     for (exp_cases) |exp_case| {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x0a}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, [_]u8{0} ** 20, &.{}, vm.context);
         defer frame.deinit();
 
-        try frame.stack.append(exp_case.base);
-        try frame.stack.append(exp_case.exp);
-        _ = try op_exp(0, @ptrCast(&vm), @ptrCast(&frame));
+        try frame.stack_push(exp_case.base);
+        try frame.stack_push(exp_case.exp);
+        _ = try op_exp(@ptrCast(&vm), @ptrCast(&frame));
     }
     const exponentiation_ns = timer.read();
 
@@ -1470,15 +1445,15 @@ test "arithmetic_benchmarks" {
     while (i < iterations) : (i += 1) {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x0b}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, [_]u8{0} ** 20, &.{}, vm.context);
         defer frame.deinit();
 
         // Test SIGNEXTEND with various byte positions
         const byte_pos: u256 = i % 32; // Valid byte positions 0-31
         const value: u256 = @intCast(i * 0x123456);
-        try frame.stack.append(byte_pos);
-        try frame.stack.append(value);
-        _ = try op_signextend(0, @ptrCast(&vm), @ptrCast(&frame));
+        try frame.stack_push(byte_pos);
+        try frame.stack_push(value);
+        _ = try op_signextend(@ptrCast(&vm), @ptrCast(&frame));
     }
     const sign_extension_ns = timer.read();
 
@@ -1488,15 +1463,15 @@ test "arithmetic_benchmarks" {
     while (i < iterations) : (i += 1) {
         var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x05}, .{ .address = [_]u8{0} ** 20 });
         defer contract.deinit(allocator, null);
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+        var frame = try Frame.init(allocator, &vm, 1000000, &contract, [_]u8{0} ** 20, &.{}, vm.context);
         defer frame.deinit();
 
         // Test SDIV with mix of positive and negative values
         const a: u256 = if (i % 2 == 0) @intCast(i + 1) else std.math.maxInt(u256) - @as(u256, @intCast(i)); // Simulate negative
         const b: u256 = @intCast(if (i % 100 == 0) 1 else (i % 1000) + 1); // Avoid div by zero
-        try frame.stack.append(a);
-        try frame.stack.append(b);
-        _ = try op_sdiv(0, @ptrCast(&vm), @ptrCast(&frame));
+        try frame.stack_push(a);
+        try frame.stack_push(b);
+        _ = try op_sdiv(@ptrCast(&vm), @ptrCast(&frame));
     }
     const signed_arithmetic_ns = timer.read();
 
@@ -1573,7 +1548,7 @@ test "ADDMOD: Issue #331 overflow test case 1" {
     const interpreter: *Operation.Interpreter = @ptrCast(&vm);
     const state: *Operation.State = @ptrCast(&frame);
 
-    _ = try op_addmod(0, interpreter, state);
+    _ = try op_addmod(interpreter, state);
 
     const result = try frame.stack.pop();
     
@@ -1615,7 +1590,7 @@ test "ADDMOD: Issue #331 overflow test case 2" {
     const interpreter: *Operation.Interpreter = @ptrCast(&vm);
     const state: *Operation.State = @ptrCast(&frame);
 
-    _ = try op_addmod(0, interpreter, state);
+    _ = try op_addmod(interpreter, state);
 
     const result = try frame.stack.pop();
     
