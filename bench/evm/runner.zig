@@ -79,10 +79,19 @@ pub fn main() !void {
             calldata,
             1_000_000_000,
             false
-        ) catch unreachable; // Assume success for benchmarking
+        ) catch |err| {
+            std.debug.print("Contract execution failed: {}\n", .{err});
+            std.process.exit(1);
+        };
         
         const duration_ns = std.time.nanoTimestamp() - timer;
         const duration_ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+        
+        // Validate successful execution
+        if (!call_result.success) {
+            std.debug.print("Contract execution failed\n", .{});
+            std.process.exit(1);
+        }
         
         // Free output if allocated
         if (call_result.output) |output| {

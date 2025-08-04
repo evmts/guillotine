@@ -8,7 +8,7 @@ const Address = primitives.Address.Address;
 const CALLER_ADDRESS = "0x1000000000000000000000000000000000000001";
 
 pub const std_options: std.Options = .{
-    .log_level = .warn,
+    .log_level = .debug,
 };
 
 pub fn main() !void {
@@ -111,8 +111,6 @@ pub fn main() !void {
     // Run benchmarks
     var run: u8 = 0;
     while (run < num_runs) : (run += 1) {
-        var timer = std.time.Timer.start() catch unreachable;
-        
         // Create contract using Contract.init()
         const code = vm.state.get_code(contract_address);
         const code_hash = [_]u8{0} ** 32; // Empty hash for simplicity
@@ -129,21 +127,27 @@ pub fn main() !void {
         defer contract.deinit(allocator, null);
         
         // Execute the contract
-        const result = vm.interpret(&contract, calldata, false) catch {
+        std.debug.print("About to execute contract at address: {any}\n", .{contract_address});
+        std.debug.print("Contract code length: {}\n", .{code.len});
+        std.debug.print("Calldata: 0x{x}\n", .{std.fmt.fmtSliceHexLower(calldata)});
+        
+        const result = vm.interpret(&contract, calldata, false) catch |err| {
+            std.debug.print("Contract execution error: {}\n", .{err});
             std.process.exit(1);
         };
 
-        const elapsed = timer.read();
-        const elapsed_ms = @as(f64, @floatFromInt(elapsed)) / 1_000_000.0;
-
         if (result.status == .Success) {
-            } else {
+            std.debug.print("Contract execution successful, gas used: {}\n", .{result.gas_used});
+        } else {
+            std.debug.print("Contract execution failed with status: {}\n", .{result.status});
             std.process.exit(1);
         }
         
         if (result.output) |output| {
+            std.debug.print("Contract output: 0x{x}\n", .{std.fmt.fmtSliceHexLower(output)});
             allocator.free(output);
         }
+        std.debug.print("\n", .{});
     }
 }
 
