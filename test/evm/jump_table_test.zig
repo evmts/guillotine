@@ -278,3 +278,151 @@ test "JumpTable @constCast memory safety issue reproduction" {
     // using our safe hardfork-specific operation variants
     try std.testing.expectEqual(@as(u64, 400), balance_op.constant_gas);
 }
+
+test "benchmark current AoS jump table memory access pattern" {
+    // Create a jump table
+    const table = JumpTable.DEFAULT;
+    
+    // Simulate typical opcode execution pattern from real EVM workloads
+    // These are the most common opcodes in order of frequency
+    const common_opcodes = [_]u8{
+        0x60, // PUSH1
+        0x61, // PUSH2
+        0x80, // DUP1
+        0x81, // DUP2
+        0x01, // ADD
+        0x50, // POP
+        0x52, // MSTORE
+        0x51, // MLOAD
+        0x14, // EQ
+        0x57, // JUMPI
+        0x56, // JUMP
+        0x5b, // JUMPDEST
+        0x15, // ISZERO
+        0x02, // MUL
+        0x04, // DIV
+        0x10, // LT
+        0x11, // GT
+        0x16, // AND
+        0x35, // CALLDATALOAD
+        0x36, // CALLDATASIZE
+    };
+    
+    // Measure memory access pattern
+    var timer = try std.time.Timer.start();
+    const iterations = 1_000_000;
+    
+    var total_gas: u64 = 0;
+    var total_stack_checks: u64 = 0;
+    
+    for (0..iterations) |_| {
+        // Simulate real execution pattern
+        for (common_opcodes) |opcode| {
+            const op = table.get_operation(opcode);
+            // Access hot fields that would be in inner loop
+            total_gas += op.constant_gas;
+            total_stack_checks += op.min_stack;
+            total_stack_checks += op.max_stack;
+            // Note: In real execution we'd also call op.execute
+        }
+    }
+    
+    const elapsed_ns = timer.read();
+    const ops_per_sec = (iterations * common_opcodes.len * 1_000_000_000) / elapsed_ns;
+    
+    std.log.info("Current AoS Performance:", .{});
+    std.log.info("  Time: {}ns", .{elapsed_ns});
+    std.log.info("  Ops/sec: {}", .{ops_per_sec});
+    std.log.info("  Total gas: {}", .{total_gas});
+    std.log.info("  Total stack checks: {}", .{total_stack_checks});
+    
+    // These values should be deterministic
+    try std.testing.expect(total_gas > 0);
+    try std.testing.expect(total_stack_checks > 0);
+}
+
+test "benchmark SoA jump table memory access pattern" {
+    const SoaJumpTable = @import("evm").SoaJumpTable;
+    
+    // Create both jump tables
+    const aos_table = JumpTable.DEFAULT;
+    const soa_table = SoaJumpTable.init_from_aos(&aos_table);
+    
+    // Same opcode pattern as AoS test
+    const common_opcodes = [_]u8{
+        0x60, // PUSH1
+        0x61, // PUSH2
+        0x80, // DUP1
+        0x81, // DUP2
+        0x01, // ADD
+        0x50, // POP
+        0x52, // MSTORE
+        0x51, // MLOAD
+        0x14, // EQ
+        0x57, // JUMPI
+        0x56, // JUMP
+        0x5b, // JUMPDEST
+        0x15, // ISZERO
+        0x02, // MUL
+        0x04, // DIV
+        0x10, // LT
+        0x11, // GT
+        0x16, // AND
+        0x35, // CALLDATALOAD
+        0x36, // CALLDATASIZE
+    };
+    
+    // Measure SoA performance
+    var timer = try std.time.Timer.start();
+    const iterations = 1_000_000;
+    
+    var total_gas: u64 = 0;
+    var total_stack_checks: u64 = 0;
+    
+    for (0..iterations) |_| {
+        for (common_opcodes) |opcode| {
+            // Use optimized SoA access patterns
+            const hot = soa_table.get_hot_fields(opcode);
+            const stack_req = soa_table.get_stack_requirements(opcode);
+            
+            total_gas += hot.gas;
+            total_stack_checks += stack_req.min_stack;
+            total_stack_checks += stack_req.max_stack;
+        }
+    }
+    
+    const elapsed_ns = timer.read();
+    const ops_per_sec = (iterations * common_opcodes.len * 1_000_000_000) / elapsed_ns;
+    
+    std.log.info("SoA Performance:", .{});
+    std.log.info("  Time: {}ns", .{elapsed_ns});
+    std.log.info("  Ops/sec: {}", .{ops_per_sec});
+    std.log.info("  Total gas: {}", .{total_gas});
+    std.log.info("  Total stack checks: {}", .{total_stack_checks});
+    
+    // Values should match AoS
+    try std.testing.expect(total_gas > 0);
+    try std.testing.expect(total_stack_checks > 0);
+}
+
+test "struct-of-arrays maintains operation correctness" {
+    const SoaJumpTable = @import("evm").SoaJumpTable;
+    
+    // Create both implementations
+    const aos_table = JumpTable.DEFAULT;
+    const soa_table = SoaJumpTable.init_from_aos(&aos_table);
+    
+    // Test that SoA returns same values as AoS
+    const opcodes_to_test = [_]u8{ 0x01, 0x60, 0x52, 0x00, 0xfe };
+    
+    for (opcodes_to_test) |opcode| {
+        const aos_op = aos_table.get_operation(opcode);
+        const soa_op = soa_table.get_operation_soa(opcode);
+        
+        try std.testing.expectEqual(aos_op.execute, soa_op.execute);
+        try std.testing.expectEqual(aos_op.constant_gas, soa_op.gas);
+        try std.testing.expectEqual(aos_op.min_stack, soa_op.min_stack);
+        try std.testing.expectEqual(aos_op.max_stack, soa_op.max_stack);
+        try std.testing.expectEqual(aos_op.undefined, soa_op.undefined);
+    }
+}
