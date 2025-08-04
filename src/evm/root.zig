@@ -147,6 +147,9 @@ pub const precompiles = struct {
     pub const PrecompileError = @import("precompiles/precompile_result.zig").PrecompileError;
 };
 
+/// Tracy profiler support
+pub const tracy_support = @import("tracy_support.zig");
+
 /// ECADD precompile (0x06)
 pub const ecadd = @import("precompiles/ecadd.zig");
 

@@ -21,6 +21,9 @@ pub fn build(b: *std.Build) void {
     // Custom build option to disable precompiles
     const no_precompiles = b.option(bool, "no_precompiles", "Disable all EVM precompiles for minimal build") orelse false;
 
+    // Tracy profiler support
+    const tracy_enabled = b.option(bool, "tracy", "Build with Tracy profiler support (default: disabled)") orelse false;
+
     // Detect Ubuntu native build (has Rust library linking issues)
     const force_bn254 = b.option(bool, "force_bn254", "Force BN254 even on Ubuntu") orelse false;
     const is_ubuntu_native = target.result.os.tag == .linux and target.result.cpu.arch == .x86_64 and !force_bn254;
@@ -32,6 +35,7 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(bool, "no_precompiles", no_precompiles);
     build_options.addOption(bool, "no_bn254", no_bn254);
+    build_options.addOption(bool, "enable_tracy", tracy_enabled);
     const build_options_mod = build_options.createModule();
 
     const lib_mod = b.createModule(.{
@@ -41,6 +45,78 @@ pub fn build(b: *std.Build) void {
     });
     lib_mod.addIncludePath(b.path("src/bn254_wrapper"));
     lib_mod.addImport("build_options", build_options_mod);
+    
+    // Tracy profiler support
+    var tracy_mod: ?*std.Build.Module = null;
+    var tracy_lib: ?*std.Build.Step.Compile = null;
+    
+    if (tracy_enabled) {
+        // Create Tracy options
+        const tracy_options = b.addOptions();
+        tracy_options.addOption(bool, "enable_tracy", true);
+        tracy_options.addOption(bool, "enable_fibers", false);
+        tracy_options.addOption(bool, "on_demand", false);
+        tracy_options.addOption(u32, "callstack", 0);
+        const tracy_options_mod = tracy_options.createModule();
+        
+        // Translate C headers
+        const tracy_c = b.addTranslateC(.{
+            .root_source_file = b.path("libs/tracy/public/tracy/TracyC.h"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        tracy_c.addIncludePath(b.path("libs/tracy/public/tracy"));
+        tracy_c.defineCMacro("TRACY_ENABLE", "");
+        tracy_c.defineCMacro("TRACY_IMPORTS", "");
+        
+        // Create Tracy module
+        tracy_mod = b.createModule(.{
+            .root_source_file = b.path("src/tracy/tracy.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tracy_mod.?.addImport("tracy_options", tracy_options_mod);
+        tracy_mod.?.addImport("tracy_c", tracy_c.createModule());
+        
+        // Build Tracy library
+        tracy_lib = b.addStaticLibrary(.{
+            .name = "tracy",
+            .target = target,
+            .optimize = optimize,
+        });
+        tracy_lib.?.addIncludePath(b.path("libs/tracy/public/tracy"));
+        tracy_lib.?.addIncludePath(b.path("libs/tracy/public/client"));
+        tracy_lib.?.addIncludePath(b.path("libs/tracy/public/common"));
+        tracy_lib.?.addCSourceFile(.{
+            .file = b.path("libs/tracy/public/TracyClient.cpp"),
+            .flags = &.{
+                "-DTRACY_ENABLE",
+                "-fno-sanitize=undefined",
+            },
+        });
+        tracy_lib.?.linkLibC();
+        if (target.result.abi != .msvc) {
+            tracy_lib.?.linkLibCpp();
+        } else {
+            tracy_lib.?.root_module.addCMacro("fileno", "_fileno");
+        }
+        
+        switch (target.result.os.tag) {
+            .windows => {
+                tracy_lib.?.linkSystemLibrary("ws2_32");
+                tracy_lib.?.linkSystemLibrary("dbghelp");
+            },
+            .macos => {
+                // macOS frameworks handled by zig automatically
+            },
+            else => {},
+        }
+        
+        // Add Tracy to lib module
+        lib_mod.addImport("tracy", tracy_mod.?);
+        lib_mod.linkLibrary(tracy_lib.?);
+    }
 
     // Create primitives module
     const primitives_mod = b.createModule(.{
@@ -166,6 +242,16 @@ pub fn build(b: *std.Build) void {
 
     // Link c-kzg library to EVM module
     evm_mod.linkLibrary(c_kzg_lib);
+    
+    // Add Tracy profiler support if enabled
+    if (tracy_enabled) {
+        if (tracy_mod) |tm| {
+            evm_mod.addImport("tracy", tm);
+        }
+        if (tracy_lib) |tl| {
+            evm_mod.linkLibrary(tl);
+        }
+    }
 
     // Create REVM library that depends on workspace build
     const revm_lib = if (rust_target != null) blk: {
@@ -252,6 +338,16 @@ pub fn build(b: *std.Build) void {
 
     // Link c-kzg library to bench EVM module
     bench_evm_mod.linkLibrary(c_kzg_lib);
+
+    // Add Tracy profiler support if enabled
+    if (tracy_enabled) {
+        if (tracy_mod) |tm| {
+            bench_evm_mod.addImport("tracy", tm);
+        }
+        if (tracy_lib) |tl| {
+            bench_evm_mod.linkLibrary(tl);
+        }
+    }
 
     const zbench_dep = b.dependency("zbench", .{
         .target = target,

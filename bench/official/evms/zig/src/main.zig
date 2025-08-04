@@ -1,6 +1,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
+const tracy = @import("evm").tracy_support;
 
 const print = std.debug.print;
 const Address = primitives.Address.Address;
@@ -12,11 +13,15 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main() !void {
+    const main_zone = tracy.zone(@src(), "main");
+    defer main_zone.end();
+    
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     // Parse command line arguments
+    const setup_zone = tracy.zone(@src(), "setup");
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
@@ -69,6 +74,7 @@ pub fn main() !void {
 
     // Read contract bytecode from file
     const contract_code_file = std.fs.cwd().openFile(contract_code_path.?, .{}) catch |err| {
+        setup_zone.end();
         std.debug.print("Error reading contract code file: {}\n", .{err});
         std.process.exit(1);
     };
@@ -95,6 +101,7 @@ pub fn main() !void {
     // Initialize EVM database
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
+    setup_zone.end();
 
     // Create EVM instance using builder pattern
     const db_interface = memory_db.to_database_interface();
@@ -105,12 +112,22 @@ pub fn main() !void {
     // Set up caller account with max balance
     try vm.state.set_balance(caller_address, std.math.maxInt(u256));
 
+    const deploy_zone = tracy.zone(@src(), "deployment");
     const contract_address = try deployContract(allocator, &vm, caller_address, contract_code);
+    deploy_zone.end();
     // std.debug.print("Deployed contract to address: {any}\n", .{contract_address});
 
     // Run benchmarks
+    const benchmark_zone = tracy.zone(@src(), "benchmark_runs");
+    defer benchmark_zone.end();
+    
     var run: u8 = 0;
     while (run < num_runs) : (run += 1) {
+        const run_zone = tracy.zone(@src(), "single_run");
+        defer run_zone.end();
+        
+        var timer = std.time.Timer.start() catch unreachable;
+        
         // Create contract using Contract.init()
         const code = vm.state.get_code(contract_address);
         const code_hash = [_]u8{0} ** 32; // Empty hash for simplicity
@@ -127,14 +144,11 @@ pub fn main() !void {
         defer contract.deinit(allocator, null);
         
         // Execute the contract
-        std.debug.print("About to execute contract at address: {any}\n", .{contract_address});
-        std.debug.print("Contract code length: {}\n", .{code.len});
-        std.debug.print("Calldata: 0x{x}\n", .{std.fmt.fmtSliceHexLower(calldata)});
-        
-        const result = vm.interpret(&contract, calldata, false) catch |err| {
-            std.debug.print("Contract execution error: {}\n", .{err});
+        const exec_zone = tracy.zone(@src(), "contract_execution");
+        const result = vm.interpret(&contract, calldata, false) catch {
             std.process.exit(1);
         };
+        exec_zone.end();
 
         if (result.status == .Success) {
             std.debug.print("Contract execution successful, gas used: {}\n", .{result.gas_used});
