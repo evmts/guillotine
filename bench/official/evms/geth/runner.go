@@ -132,11 +132,5 @@ func main() {
 		}
 		_ = ret // Ignore return value
 
-		// Output timing (rounded to nearest ms, minimum 1)
-		ms := int64(durationMs + 0.5)
-		if ms < 1 {
-			ms = 1
-		}
-		fmt.Println(ms)
 	}
 }

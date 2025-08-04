@@ -113,8 +113,6 @@ async function main() {
         const durationNs = endTime - startTime;
         const durationMs = Number(durationNs) / 1_000_000;
         
-        // Output timing (rounded to nearest ms, minimum 1)
-        console.log(Math.max(1, Math.round(durationMs)));
     }
 }
 

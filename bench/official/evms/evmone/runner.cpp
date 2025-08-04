@@ -147,10 +147,6 @@ int main(int argc, char* argv[]) {
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         double duration_ms = duration / 1000.0;
         
-        // Output timing (rounded to nearest ms, minimum 1)
-        long ms = static_cast<long>(duration_ms + 0.5);
-        if (ms < 1) ms = 1;
-        std::cout << ms << std::endl;
     }
     
     evmc_destroy(vm);

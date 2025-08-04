@@ -102,7 +102,6 @@ fn main() {
         
         // Don't commit state changes - just measure execution time
         
-        println!("{}", dur.as_micros() as f64 / 1e3);
     }
 }
 

@@ -129,8 +129,7 @@ pub fn main() !void {
         defer contract.deinit(allocator, null);
         
         // Execute the contract
-        const result = vm.interpret(&contract, calldata, false) catch |err| {
-            std.debug.print("Execution failed: {}\n", .{err});
+        const result = vm.interpret(&contract, calldata, false) catch {
             std.process.exit(1);
         };
 
@@ -138,15 +137,7 @@ pub fn main() !void {
         const elapsed_ms = @as(f64, @floatFromInt(elapsed)) / 1_000_000.0;
 
         if (result.status == .Success) {
-            print("{d:.3}\n", .{elapsed_ms});
-        } else {
-            std.debug.print("Execution failed with status: {}\n", .{result.status});
-            if (result.output) |output| {
-                std.debug.print("Output size: {}, data: {any}\n", .{output.len, output});
             } else {
-                std.debug.print("No output data\n", .{});
-            }
-            std.debug.print("Gas used: {}\n", .{result.gas_used});
             std.process.exit(1);
         }
         
@@ -168,13 +159,8 @@ fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, b
     );
     
     if (create_result.success) {
-        std.debug.print("Contract deployed to: {any}, gas used: {}\n", .{create_result.address, 10_000_000 - create_result.gas_left});
         return create_result.address;
     } else {
-        std.debug.print("Contract creation failed, gas used: {}\n", .{10_000_000 - create_result.gas_left});
-        if (create_result.output) |output| {
-            std.debug.print("Revert data: {any}\n", .{output});
-        }
         return error.DeploymentFailed;
     }
 }
