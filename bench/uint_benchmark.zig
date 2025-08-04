@@ -340,8 +340,9 @@ pub fn zbench_custom_trailing_zeros(allocator: Allocator) void {
     const data = generateTestData(allocator, 1000) catch return;
     defer data.deinit(allocator);
 
-    for (data.custom) |num| {
-        const tz = num.trailing_zeros();
+    for (data.native) |native_num| {
+        const custom_num = U256_Custom.from_u256(native_num);
+        const tz = custom_num.trailing_zeros();
         std.mem.doNotOptimizeAway(tz);
     }
 }
