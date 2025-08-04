@@ -3,6 +3,7 @@ const Stack = @import("stack.zig");
 const Operation = @import("../opcodes/operation.zig").Operation;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Log = @import("../log.zig");
+const FatFrame = @import("../frame/frame_fat.zig");
 
 /// Stack validation utilities for EVM operations.
 ///
@@ -69,6 +70,39 @@ pub fn validate_stack_requirements(
     }
 
     Log.debug("StackValidation.validate_stack_requirements: Validation passed", .{});
+}
+
+/// Validates stack requirements for fat frame structure.
+///
+/// This variant works with the fat frame where stack size is stored
+/// directly as a field rather than in a separate Stack struct.
+///
+/// @param frame The fat frame containing stack state
+/// @param operation The operation with stack requirements
+/// @throws StackUnderflow if stack has fewer than min_stack elements
+/// @throws StackOverflow if stack has more than max_stack elements
+pub fn validate_stack_requirements_fat(
+    frame: *const FatFrame,
+    operation: *const Operation,
+) ExecutionError.Error!void {
+    const stack_size = frame.stack_size;
+    Log.debug("StackValidation.validate_stack_requirements_fat: Validating stack, size={}, min_required={}, max_allowed={}", .{ stack_size, operation.min_stack, operation.max_stack });
+
+    // Check minimum stack requirement
+    if (stack_size < operation.min_stack) {
+        @branchHint(.cold);
+        Log.debug("StackValidation.validate_stack_requirements_fat: Stack underflow, size={} < min_stack={}", .{ stack_size, operation.min_stack });
+        return ExecutionError.Error.StackUnderflow;
+    }
+
+    // Check maximum stack requirement
+    if (stack_size > operation.max_stack) {
+        @branchHint(.cold);
+        Log.debug("StackValidation.validate_stack_requirements_fat: Stack overflow, size={} > max_stack={}", .{ stack_size, operation.max_stack });
+        return ExecutionError.Error.StackOverflow;
+    }
+
+    Log.debug("StackValidation.validate_stack_requirements_fat: Validation passed", .{});
 }
 
 /// Validates stack has capacity for pop/push operations.

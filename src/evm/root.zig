@@ -74,7 +74,7 @@ pub const ExecutionError = @import("execution/execution_error.zig");
 pub const ExecutionResult = @import("execution/execution_result.zig");
 
 /// Execution frame/context management
-pub const Frame = @import("frame/frame.zig");
+pub const Frame = @import("frame/frame_fat.zig");
 
 /// Execution context providing transaction and block information
 pub const Context = @import("access_list/context.zig");
