@@ -3,16 +3,16 @@ const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Memory = @import("../memory/memory.zig");
 const GasConstants = @import("primitives").GasConstants;
 
 // Common copy operation helper
-fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) !void {
+fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) ExecutionError.Error!void {
     // Calculate memory expansion gas cost
     const new_size = mem_offset + size;
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
+    const gas_cost = frame.memory_get_expansion_cost(new_size_u64);
     try frame.consume_gas(gas_cost);
 
     // Dynamic gas for copy operation
@@ -20,22 +20,24 @@ fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) !void {
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
     // Ensure memory is available
-    _ = try frame.memory.ensure_context_capacity(new_size);
+    frame.memory_ensure_capacity(@intCast(new_size)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 }
 
-pub fn op_mload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_mload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 1) {
+    if (frame.stack_size < 1) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
-    const offset = frame.stack.peek_unsafe().*;
+    const offset = frame.stack_peek_unsafe().*;
 
     // Check offset bounds
     if (offset > std.math.maxInt(usize)) {
@@ -47,36 +49,38 @@ pub fn op_mload(pc: usize, interpreter: Operation.Interpreter, state: Operation.
 
     // Calculate memory expansion gas cost
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
+    const gas_cost = frame.memory_get_expansion_cost(new_size_u64);
     try frame.consume_gas(gas_cost);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    frame.memory_ensure_capacity(@intCast(aligned_size)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     // Read 32 bytes from memory
-    const value = try frame.memory.get_u256(offset_usize);
+    const value = frame.memory_get_u256(offset_usize);
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
-    frame.stack.set_top_unsafe(value);
+    frame.stack_set_top_unsafe(value);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_mstore(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_mstore(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 2) {
+    if (frame.stack_size < 2) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // EVM Stack: [..., value, offset] where offset is on top
-    const popped = frame.stack.pop2_unsafe();
+    const popped = frame.stack_pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
@@ -90,35 +94,42 @@ pub fn op_mstore(pc: usize, interpreter: Operation.Interpreter, state: Operation
 
     // Calculate memory expansion gas cost
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
+    const gas_cost = frame.memory_get_expansion_cost(new_size_u64);
     try frame.consume_gas(gas_cost);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    frame.memory_ensure_capacity(@intCast(aligned_size)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     // Write 32 bytes to memory (big-endian)
     var bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &bytes, value, .big);
-    try frame.memory.set_data(offset_usize, &bytes);
+    frame.memory_set_data(@intCast(offset_usize), @intCast(bytes.len), &bytes) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_mstore8(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_mstore8(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 2) {
+    if (frame.stack_size < 2) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // EVM Stack: [..., value, offset] where offset is on top
-    const popped = frame.stack.pop2_unsafe();
+    const popped = frame.stack_pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
@@ -132,59 +143,63 @@ pub fn op_mstore8(pc: usize, interpreter: Operation.Interpreter, state: Operatio
 
     // Calculate memory expansion gas cost
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
+    const gas_cost = frame.memory_get_expansion_cost(new_size_u64);
     try frame.consume_gas(gas_cost);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    frame.memory_ensure_capacity(@intCast(aligned_size)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     // Write single byte to memory
     const byte_value = @as(u8, @truncate(value));
     const bytes = [_]u8{byte_value};
-    try frame.memory.set_data(offset_usize, &bytes);
+    frame.memory_set_data(@intCast(offset_usize), @intCast(bytes.len), &bytes) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_msize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_msize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack_size >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
 
     // MSIZE returns the size in bytes, but memory is always expanded in 32-byte words
     // So we need to round up to the nearest word boundary
-    const size = frame.memory.context_size();
+    const size = frame.memory_context_size();
     const aligned_size = std.mem.alignForward(usize, size, 32);
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(aligned_size)));
+    frame.stack_push_unsafe(@as(u256, @intCast(aligned_size)));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_mcopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 3) {
+    if (frame.stack_size < 3) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order per EIP-5656: [dst, src, length] (top to bottom)
-    const dest = frame.stack.pop_unsafe();
-    const src = frame.stack.pop_unsafe();
-    const length = frame.stack.pop_unsafe();
+    const dest = frame.stack_pop_unsafe();
+    const src = frame.stack_pop_unsafe();
+    const length = frame.stack_pop_unsafe();
 
     if (length == 0) {
         @branchHint(.unlikely);
@@ -202,7 +217,7 @@ pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.
 
     // Calculate memory expansion gas cost
     const max_addr = @max(dest_usize + length_usize, src_usize + length_usize);
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(max_addr)));
+    const memory_gas = frame.memory_get_expansion_cost(@as(u64, @intCast(max_addr)));
     try frame.consume_gas(memory_gas);
 
     // Dynamic gas for copy operation
@@ -210,11 +225,16 @@ pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
     // Ensure memory is available for both source and destination
-    _ = try frame.memory.ensure_context_capacity(max_addr);
+    frame.memory_ensure_capacity(@intCast(max_addr)) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     // Copy with overlap handling
     // Get memory slice and handle overlapping copy
-    const mem_slice = frame.memory.slice();
+    const mem_slice = frame.memory_slice();
     if (mem_slice.len >= max_addr) {
         @branchHint(.likely);
         // Handle overlapping memory copy correctly
@@ -237,25 +257,22 @@ pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_calldataload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 1) {
+    if (frame.stack_size < 1) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
-    const offset = frame.stack.peek_unsafe().*;
+    const offset = frame.stack_peek_unsafe().*;
 
     // Check offset bounds
     if (offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
         // Replace top of stack with 0 if offset is out of bounds
-        frame.stack.set_top_unsafe(0);
+        frame.stack_set_top_unsafe(0);
         return Operation.ExecutionResult{};
     }
     const offset_usize = @as(usize, @intCast(offset));
@@ -275,44 +292,38 @@ pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Ope
     }
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
-    frame.stack.set_top_unsafe(result);
+    frame.stack_set_top_unsafe(result);
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_calldatasize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack_size >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(frame.input.len)));
+    frame.stack_push_unsafe(@as(u256, @intCast(frame.input.len)));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_calldatacopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 3) {
+    if (frame.stack_size < 3) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order: [..., size, data_offset, mem_offset] (top to bottom)
-    const mem_offset = frame.stack.pop_unsafe();
-    const data_offset = frame.stack.pop_unsafe();
-    const size = frame.stack.pop_unsafe();
+    const mem_offset = frame.stack_pop_unsafe();
+    const data_offset = frame.stack_pop_unsafe();
+    const size = frame.stack_pop_unsafe();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -332,46 +343,45 @@ pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Ope
     try perform_copy_operation(frame, mem_offset_usize, size_usize);
 
     // Copy calldata to memory
-    try frame.memory.set_data_bounded(mem_offset_usize, frame.input, data_offset_usize, size_usize);
+    frame.memory_set_data_bounded(mem_offset_usize, frame.input, data_offset_usize, size_usize) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codesize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_codesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack_size >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(frame.contract.code.len)));
+    frame.stack_push_unsafe(@as(u256, @intCast(frame.code.len)));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_codecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 3) {
+    if (frame.stack_size < 3) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order: [..., size, code_offset, mem_offset] (top to bottom)
-    const mem_offset = frame.stack.pop_unsafe();
-    const code_offset = frame.stack.pop_unsafe();
-    const size = frame.stack.pop_unsafe();
+    const mem_offset = frame.stack_pop_unsafe();
+    const code_offset = frame.stack_pop_unsafe();
+    const size = frame.stack_pop_unsafe();
 
-    Log.debug("CODECOPY: mem_offset={}, code_offset={}, size={}, code_len={}", .{ mem_offset, code_offset, size, frame.contract.code.len });
+    Log.debug("CODECOPY: mem_offset={}, code_offset={}, size={}, code_len={}", .{ mem_offset, code_offset, size, frame.code.len });
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -392,46 +402,45 @@ pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operati
     try perform_copy_operation(frame, mem_offset_usize, size_usize);
 
     // Copy code to memory
-    try frame.memory.set_data_bounded(mem_offset_usize, frame.contract.code, code_offset_usize, size_usize);
+    frame.memory_set_data_bounded(mem_offset_usize, frame.code, code_offset_usize, size_usize) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     Log.debug("CODECOPY: copied {} bytes from code[{}..{}] to memory[{}..{}]", .{ size_usize, code_offset_usize, code_offset_usize + size_usize, mem_offset_usize, mem_offset_usize + size_usize });
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_returndatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_returndatasize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack_size >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(frame.return_data.size())));
+    frame.stack_push_unsafe(@as(u256, @intCast(frame.return_data_size())));
 
     return Operation.ExecutionResult{};
 }
 
-pub fn op_returndatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_returndatacopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = vm;
 
-    const frame = state;
-
-    if (frame.stack.size < 3) {
+    if (frame.stack_size < 3) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order: [..., size, data_offset, mem_offset] (top to bottom)
-    const mem_offset = frame.stack.pop_unsafe();
-    const data_offset = frame.stack.pop_unsafe();
-    const size = frame.stack.pop_unsafe();
+    const mem_offset = frame.stack_pop_unsafe();
+    const data_offset = frame.stack_pop_unsafe();
+    const size = frame.stack_pop_unsafe();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -448,7 +457,7 @@ pub fn op_returndatacopy(pc: usize, interpreter: Operation.Interpreter, state: O
     const size_usize = @as(usize, @intCast(size));
 
     // Check bounds
-    if (data_offset_usize + size_usize > frame.return_data.size()) {
+    if (data_offset_usize + size_usize > frame.return_data_size()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.ReturnDataOutOfBounds;
     }
@@ -457,8 +466,13 @@ pub fn op_returndatacopy(pc: usize, interpreter: Operation.Interpreter, state: O
     try perform_copy_operation(frame, mem_offset_usize, size_usize);
 
     // Copy return data to memory
-    const return_data = frame.return_data.get();
-    try frame.memory.set_data(mem_offset_usize, return_data[data_offset_usize .. data_offset_usize + size_usize]);
+    const return_data = frame.return_data_get();
+    frame.memory_set_data(mem_offset_usize, @intCast(return_data[data_offset_usize .. data_offset_usize + size_usize].len), return_data[data_offset_usize .. data_offset_usize + size_usize]) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     return Operation.ExecutionResult{};
 }
@@ -525,57 +539,57 @@ fn fuzz_memory_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         // Execute the operation based on type
         const result = switch (op.op_type) {
             .mload => blk: {
-                try frame.stack.append(op.offset);
+                try frame.stack_push(op.offset);
                 break :blk op_mload(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .mstore => blk: {
-                try frame.stack.append(op.offset);
-                try frame.stack.append(op.value);
+                try frame.stack_push(op.offset);
+                try frame.stack_push(op.value);
                 break :blk op_mstore(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .mstore8 => blk: {
-                try frame.stack.append(op.offset);
-                try frame.stack.append(op.value);
+                try frame.stack_push(op.offset);
+                try frame.stack_push(op.value);
                 break :blk op_mstore8(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .msize => blk: {
                 break :blk op_msize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .mcopy => blk: {
-                try frame.stack.append(op.offset); // dest
-                try frame.stack.append(op.src_offset); // src
-                try frame.stack.append(op.size); // size
+                try frame.stack_push(op.offset); // dest
+                try frame.stack_push(op.src_offset); // src
+                try frame.stack_push(op.size); // size
                 break :blk op_mcopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .calldataload => blk: {
-                try frame.stack.append(op.offset);
+                try frame.stack_push(op.offset);
                 break :blk op_calldataload(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .calldatasize => blk: {
                 break :blk op_calldatasize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .calldatacopy => blk: {
-                try frame.stack.append(op.offset); // mem_offset
-                try frame.stack.append(op.data_offset); // data_offset
-                try frame.stack.append(op.size); // size
+                try frame.stack_push(op.offset); // mem_offset
+                try frame.stack_push(op.data_offset); // data_offset
+                try frame.stack_push(op.size); // size
                 break :blk op_calldatacopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .codesize => blk: {
                 break :blk op_codesize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .codecopy => blk: {
-                try frame.stack.append(op.offset); // mem_offset
-                try frame.stack.append(op.data_offset); // code_offset
-                try frame.stack.append(op.size); // size
+                try frame.stack_push(op.offset); // mem_offset
+                try frame.stack_push(op.data_offset); // code_offset
+                try frame.stack_push(op.size); // size
                 break :blk op_codecopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .returndatasize => blk: {
                 break :blk op_returndatasize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
             .returndatacopy => blk: {
-                try frame.stack.append(op.offset); // mem_offset
-                try frame.stack.append(op.data_offset); // data_offset
-                try frame.stack.append(op.size); // size
+                try frame.stack_push(op.offset); // mem_offset
+                try frame.stack_push(op.data_offset); // data_offset
+                try frame.stack_push(op.size); // size
                 break :blk op_returndatacopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
             },
         };
@@ -596,15 +610,15 @@ fn validate_memory_result(frame: *const Frame, op: FuzzMemoryOperation, result: 
     // Validate stack results for operations that push values
     switch (op.op_type) {
         .mload, .calldataload => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack_size);
             // Additional validation can be done based on specific test cases
         },
         .msize, .calldatasize, .codesize, .returndatasize => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack_size);
         },
         .mstore, .mstore8, .mcopy, .calldatacopy, .codecopy, .returndatacopy => {
             // These operations don't push to stack
-            try testing.expectEqual(@as(usize, 0), frame.stack.size);
+            try testing.expectEqual(@as(usize, 0), frame.stack_size);
         },
     }
 }
