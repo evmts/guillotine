@@ -2,7 +2,7 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
+const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 
@@ -39,14 +39,10 @@ inline fn hash_with_stack_buffer(data: []const u8) [32]u8 {
     return hash;
 }
 
-pub fn op_sha3(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_sha3(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
 
-    const frame = state;
-    const vm = interpreter;
-
-    const offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const offset = try frame.stack_pop();
+    const size = try frame.stack_pop();
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -68,7 +64,7 @@ pub fn op_sha3(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
         }
         // Hash of empty data = keccak256("")
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        try frame.stack.append(empty_hash);
+        try frame.stack_push(empty_hash);
         return Operation.ExecutionResult{};
     }
 
@@ -95,10 +91,15 @@ pub fn op_sha3(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     try frame.consume_gas(gas_cost);
 
     // Ensure memory is available
-    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
+    frame.memory_ensure_capacity(end) catch |err| switch (err) {
+        error.OutOfGas => return error.OutOfGas,
+        error.AllocationError => return error.OutOfMemory,
+        error.Overflow => return error.OutOfMemory,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
     // Get data and hash using optimized stack buffer approach
-    const data = try frame.memory.get_slice(offset_usize, size_usize);
+    const data = frame.memory_get_slice(@intCast(offset_usize), @intCast(size_usize));
 
     // Calculate keccak256 hash using optimized tiered stack buffers
     const hash = hash_with_stack_buffer(data);
@@ -106,7 +107,7 @@ pub fn op_sha3(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     // Convert hash to u256 using std.mem for efficiency
     const result = std.mem.readInt(u256, &hash, .big);
 
-    try frame.stack.append(result);
+    try frame.stack_push(result);
 
     return Operation.ExecutionResult{};
 }
@@ -140,11 +141,11 @@ test "crypto_stack_buffer_benchmarks" {
         
         // Set up 32 bytes of data in memory (typical address + padding)
         const test_data = [_]u8{0x42} ** 32;
-        try frame.memory.set_data(0, &test_data);
+        frame.memory_set_data(0, &test_data);
         
         // Push offset=0, size=32 for KECCAK256
-        try frame.stack.append(0);
-        try frame.stack.append(32);
+        try frame.stack_push(0);
+        try frame.stack_push(32);
         
         _ = try op_sha3(0, @ptrCast(&vm), @ptrCast(&frame));
     }
@@ -161,11 +162,11 @@ test "crypto_stack_buffer_benchmarks" {
         
         // Set up 128 bytes of data in memory (event data size)
         const test_data = [_]u8{0x37} ** 128;
-        try frame.memory.set_data(0, &test_data);
+        frame.memory_set_data(0, &test_data);
         
         // Push offset=0, size=128 for KECCAK256
-        try frame.stack.append(0);
-        try frame.stack.append(128);
+        try frame.stack_push(0);
+        try frame.stack_push(128);
         
         _ = try op_sha3(0, @ptrCast(&vm), @ptrCast(&frame));
     }
@@ -182,11 +183,11 @@ test "crypto_stack_buffer_benchmarks" {
         
         // Set up 512 bytes of data in memory
         const test_data = [_]u8{0x73} ** 512;
-        try frame.memory.set_data(0, &test_data);
+        frame.memory_set_data(0, &test_data);
         
         // Push offset=0, size=512 for KECCAK256
-        try frame.stack.append(0);
-        try frame.stack.append(512);
+        try frame.stack_push(0);
+        try frame.stack_push(512);
         
         _ = try op_sha3(0, @ptrCast(&vm), @ptrCast(&frame));
     }
@@ -203,11 +204,11 @@ test "crypto_stack_buffer_benchmarks" {
         
         // Set up 2048 bytes of data in memory
         const test_data = [_]u8{0x99} ** 2048;
-        try frame.memory.set_data(0, &test_data);
+        frame.memory_set_data(0, &test_data);
         
         // Push offset=0, size=2048 for KECCAK256
-        try frame.stack.append(0);
-        try frame.stack.append(2048);
+        try frame.stack_push(0);
+        try frame.stack_push(2048);
         
         _ = try op_sha3(0, @ptrCast(&vm), @ptrCast(&frame));
     }
