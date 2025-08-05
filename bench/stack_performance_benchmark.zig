@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 /// Run benchmark and return average time per operation
 fn runBenchmark(iterations: usize, setup_fn: *const fn(*Stack) void, bench_fn: *const fn(*Stack) void) u64 {
     // Warm up
-    var warmup_stack = Stack{};
+    var warmup_stack = Stack.init();
     setup_fn(&warmup_stack);
     bench_fn(&warmup_stack);
     
@@ -17,7 +17,7 @@ fn runBenchmark(iterations: usize, setup_fn: *const fn(*Stack) void, bench_fn: *
     
     var r: usize = 0;
     while (r < runs) : (r += 1) {
-        var stack = Stack{};
+        var stack = Stack.init();
         
         setup_fn(&stack);
         

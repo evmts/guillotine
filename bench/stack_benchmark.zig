@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 /// Basic stack operations - append vs append_unsafe
 pub fn bench_append_safe(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
@@ -18,7 +18,7 @@ pub fn bench_append_safe(allocator: Allocator) void {
 
 pub fn bench_append_unsafe(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
@@ -30,7 +30,7 @@ pub fn bench_append_unsafe(allocator: Allocator) void {
 /// Pop operations - safe vs unsafe
 pub fn bench_pop_safe(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Pre-fill stack
     var i: usize = 0;
@@ -48,7 +48,7 @@ pub fn bench_pop_safe(allocator: Allocator) void {
 
 pub fn bench_pop_unsafe(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Pre-fill stack
     var i: usize = 0;
@@ -67,7 +67,7 @@ pub fn bench_pop_unsafe(allocator: Allocator) void {
 /// Peek operations at various depths
 pub fn bench_peek_shallow(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fill stack to moderate depth
     var i: usize = 0;
@@ -84,7 +84,7 @@ pub fn bench_peek_shallow(allocator: Allocator) void {
 
 pub fn bench_peek_deep(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fill stack to significant depth
     var i: usize = 0;
@@ -102,7 +102,7 @@ pub fn bench_peek_deep(allocator: Allocator) void {
 /// DUP operations at different depths
 pub fn bench_dup1(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Setup stack
     var i: usize = 0;
@@ -120,7 +120,7 @@ pub fn bench_dup1(allocator: Allocator) void {
 
 pub fn bench_dup16(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Setup stack
     var i: usize = 0;
@@ -139,7 +139,7 @@ pub fn bench_dup16(allocator: Allocator) void {
 /// SWAP operations at different positions
 pub fn bench_swap1(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Setup stack
     var i: usize = 0;
@@ -156,7 +156,7 @@ pub fn bench_swap1(allocator: Allocator) void {
 
 pub fn bench_swap16(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Setup stack
     var i: usize = 0;
@@ -174,7 +174,7 @@ pub fn bench_swap16(allocator: Allocator) void {
 /// Stack growth patterns
 pub fn bench_stack_growth_linear(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Linear growth from 0 to 1024
     var i: usize = 0;
@@ -188,7 +188,7 @@ pub fn bench_stack_growth_linear(allocator: Allocator) void {
 
 pub fn bench_stack_growth_burst(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Burst pattern - rapid push/pop cycles
     var i: usize = 0;
@@ -209,7 +209,7 @@ pub fn bench_stack_growth_burst(allocator: Allocator) void {
 /// Memory access patterns
 pub fn bench_sequential_access(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fill stack
     var i: usize = 0;
@@ -227,7 +227,7 @@ pub fn bench_sequential_access(allocator: Allocator) void {
 
 pub fn bench_random_access(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     var prng = std.Random.DefaultPrng.init(42);
     const random = prng.random();
     
@@ -258,7 +258,7 @@ pub fn bench_random_access(allocator: Allocator) void {
 /// Edge cases
 pub fn bench_near_full_stack(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fill to near capacity
     var i: usize = 0;
@@ -276,7 +276,7 @@ pub fn bench_near_full_stack(allocator: Allocator) void {
 
 pub fn bench_empty_stack_checks(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Repeated operations on empty/near-empty stack
     var i: usize = 0;
@@ -289,7 +289,7 @@ pub fn bench_empty_stack_checks(allocator: Allocator) void {
 /// Multi-pop operations
 pub fn bench_pop2(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fill stack
     var i: usize = 0;
@@ -309,7 +309,7 @@ pub fn bench_pop2(allocator: Allocator) void {
 
 pub fn bench_pop3(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fill stack
     var i: usize = 0;
@@ -331,7 +331,7 @@ pub fn bench_pop3(allocator: Allocator) void {
 /// Clear operations
 pub fn bench_clear_empty(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
@@ -341,7 +341,7 @@ pub fn bench_clear_empty(allocator: Allocator) void {
 
 pub fn bench_clear_full(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     var i: usize = 0;
     while (i < 10) : (i += 1) {
@@ -358,7 +358,7 @@ pub fn bench_clear_full(allocator: Allocator) void {
 /// Realistic EVM patterns
 pub fn bench_fibonacci_pattern(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Fibonacci calculation pattern
     stack.append_unsafe(0); // F(0)
@@ -390,7 +390,7 @@ pub fn bench_fibonacci_pattern(allocator: Allocator) void {
 
 pub fn bench_defi_calculation_pattern(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Simulate DeFi swap calculation pattern
     var i: usize = 0;
@@ -436,7 +436,7 @@ pub fn bench_defi_calculation_pattern(allocator: Allocator) void {
 
 pub fn bench_cryptographic_pattern(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Simulate cryptographic operation pattern (e.g., signature verification prep)
     var i: usize = 0;
@@ -478,7 +478,7 @@ pub fn bench_cryptographic_pattern(allocator: Allocator) void {
 /// Set top operation benchmark
 pub fn bench_set_top(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Setup stack with some depth
     var i: usize = 0;
@@ -496,7 +496,7 @@ pub fn bench_set_top(allocator: Allocator) void {
 /// Branch prediction impact benchmark
 pub fn bench_predictable_pattern(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Predictable push/pop pattern
     var i: usize = 0;
@@ -515,7 +515,7 @@ pub fn bench_predictable_pattern(allocator: Allocator) void {
 
 pub fn bench_unpredictable_pattern(allocator: Allocator) void {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     var prng = std.Random.DefaultPrng.init(42);
     const random = prng.random();
     
