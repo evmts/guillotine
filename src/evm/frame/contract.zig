@@ -781,22 +781,22 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
 
     // Cache the analysis in appropriate cache
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
-        simple_cache.?.put(code_hash, analysis) catch |err| {
+        simple_cache.?.put(code_hash, @constCast(analysis)) catch |err| {
             Log.debug("Failed to cache code analysis in simple cache: {any}", .{err});
         };
     } else {
         if (analysis_cache) |*cache| {
-            cache.put(code_hash, analysis) catch |err| {
+            cache.put(code_hash, @constCast(analysis)) catch |err| {
                 Log.debug("Failed to cache code analysis in LRU cache: {any}", .{err});
                 // Try simple cache as fallback
                 if (simple_cache) |*simple| {
-                    simple.put(code_hash, analysis) catch |simple_err| {
+                    simple.put(code_hash, @constCast(analysis)) catch |simple_err| {
                         Log.debug("Failed to cache code analysis in simple cache fallback: {any}", .{simple_err});
                     };
                 }
             };
         } else if (simple_cache) |*cache| {
-            cache.put(code_hash, analysis) catch |err| {
+            cache.put(code_hash, @constCast(analysis)) catch |err| {
                 Log.debug("Failed to cache code analysis in simple cache: {any}", .{err});
             };
         }
@@ -918,22 +918,22 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
 
     // Cache the analysis in appropriate cache
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
-        simple_cache.?.put(code_hash, analysis) catch |err| {
+        simple_cache.?.put(code_hash, @constCast(analysis)) catch |err| {
             Log.debug("Failed to cache code analysis in simple cache: {any}", .{err});
         };
     } else {
         if (analysis_cache) |*cache| {
-            cache.put(code_hash, analysis) catch |err| {
+            cache.put(code_hash, @constCast(analysis)) catch |err| {
                 Log.debug("Failed to cache code analysis in LRU cache: {any}", .{err});
                 // Try simple cache as fallback
                 if (simple_cache) |*simple| {
-                    simple.put(code_hash, analysis) catch |simple_err| {
+                    simple.put(code_hash, @constCast(analysis)) catch |simple_err| {
                         Log.debug("Failed to cache code analysis in simple cache fallback: {any}", .{simple_err});
                     };
                 }
             };
         } else if (simple_cache) |*cache| {
-            cache.put(code_hash, analysis) catch |err| {
+            cache.put(code_hash, @constCast(analysis)) catch |err| {
                 Log.debug("Failed to cache code analysis in simple cache: {any}", .{err});
             };
         }
