@@ -27,6 +27,8 @@ const precompiles = @import("precompiles/precompiles.zig");
 /// Manages contract execution, gas accounting, state access, and protocol enforcement
 /// according to the configured hardfork rules. Supports the full EVM instruction set
 /// including contract creation, calls, and state modifications.
+const FramePool = @import("frame/frame_pool.zig").FramePool;
+
 const Evm = @This();
 
 /// Maximum call depth supported by EVM (per EIP-150)
@@ -56,6 +58,8 @@ tracer: ?std.io.AnyWriter = null,
 state: EvmState,
 /// Warm/cold access tracking for EIP-2929 gas costs
 access_list: AccessList,
+/// Frame pool for managing execution frames
+frame_pool: FramePool,
 
 // Compile-time validation and optimizations
 comptime {
@@ -110,6 +114,9 @@ pub fn init(
     var access_list = AccessList.init(allocator, ctx);
     errdefer access_list.deinit();
 
+    var frame_pool = try FramePool.init(allocator);
+    errdefer frame_pool.deinit();
+
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
         .allocator = allocator,
@@ -117,6 +124,7 @@ pub fn init(
         .chain_rules = chain_rules orelse ChainRules.DEFAULT,
         .state = state,
         .access_list = access_list,
+        .frame_pool = frame_pool,
         .context = ctx,
         .depth = depth,
         .read_only = read_only,
@@ -127,6 +135,7 @@ pub fn init(
 /// Free all VM resources.
 /// Must be called when finished with the VM to prevent memory leaks.
 pub fn deinit(self: *Evm) void {
+    self.frame_pool.deinit();
     self.state.deinit();
     self.access_list.deinit();
     Contract.clear_analysis_cache(self.allocator);
@@ -141,6 +150,9 @@ pub fn reset(self: *Evm) void {
     // Reset execution state
     self.depth = 0;
     self.read_only = false;
+    
+    // Reset frame pool for next transaction
+    self.frame_pool.reset();
 }
 
 pub usingnamespace @import("evm/set_context.zig");
