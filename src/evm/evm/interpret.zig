@@ -13,6 +13,8 @@ const BlockResult = @import("block_result.zig").BlockResult;
 const opcode = @import("../opcodes/opcode.zig");
 const CodeAnalysis = @import("../frame/code_analysis.zig");
 const Stack = @import("../stack/stack.zig");
+const instruction_stream = @import("../advanced_interpreter/instruction_stream.zig");
+const execute_advanced = @import("../advanced_interpreter/execute_advanced.zig");
 
 /// Execute contract bytecode and return the result.
 ///
@@ -68,6 +70,53 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const interpreter: Operation.Interpreter = self;
     const state: Operation.State = &frame;
 
+    // Check if advanced interpreter should be used
+    const use_advanced_interpreter = if (contract.analysis) |analysis| 
+        analysis.block_count > 0 and 
+        analysis.jump_analysis != null and // Jump analysis available
+        contract.code_size > 100 // Only for non-trivial contracts
+    else 
+        false;
+    
+    // Use advanced interpreter with instruction stream if available
+    if (use_advanced_interpreter) {
+        Log.debug("VM.interpret: Using advanced interpreter with instruction stream", .{});
+        
+        // Generate instruction stream
+        var stream = instruction_stream.generate_instruction_stream(
+            self.allocator,
+            contract.code,
+            contract.analysis.?,
+        ) catch |err| {
+            Log.debug("Failed to generate instruction stream: {}", .{err});
+            // Fall through to block-based execution
+            return execute_block_based(self, &frame, contract, initial_gas, interpreter, state);
+        };
+        defer stream.deinit();
+        
+        // Execute using advanced interpreter
+        const result = execute_advanced.execute_advanced(self, &frame, &stream) catch |err| {
+            contract.gas = frame.gas_remaining;
+            return handle_execution_error(self, &frame, err, initial_gas);
+        };
+        
+        contract.gas = frame.gas_remaining;
+        return result;
+    }
+    
+    // Fall back to block-based execution
+    return execute_block_based(self, &frame, contract, initial_gas, interpreter, state);
+}
+
+/// Execute using block-based interpreter.
+fn execute_block_based(
+    self: *Vm,
+    frame: *Frame,
+    contract: *Contract,
+    initial_gas: u64,
+    interpreter: Operation.Interpreter,
+    state: Operation.State,
+) ExecutionError.Error!RunResult {
     // Check if block-based execution is available and beneficial
     const use_block_execution = if (contract.analysis) |analysis| 
         analysis.block_count > 0 and 
