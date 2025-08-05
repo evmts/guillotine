@@ -94,11 +94,11 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         }
 
         // Log stack state before operation
-        if (frame.stack.size > 0) {
-            Log.debug("Stack before pc={}: size={}, top 5 values:", .{ frame.pc, frame.stack.size });
+        if (frame.stack_size > 0) {
+            Log.debug("Stack before pc={}: size={}, top 5 values:", .{ frame.pc, frame.stack_size });
             var i: usize = 0;
-            while (i < @min(5, frame.stack.size)) : (i += 1) {
-                Log.debug("  [{}] = {}", .{ frame.stack.size - 1 - i, frame.stack.data[frame.stack.size - 1 - i] });
+            while (i < @min(5, frame.stack_size)) : (i += 1) {
+                Log.debug("  [{}] = {}", .{ frame.stack_size - 1 - i, frame.stack_data[frame.stack_size - 1 - i] });
             }
         }
 
@@ -106,11 +106,11 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         if (self.tracer) |writer| {
             var tracer = @import("../tracer.zig").Tracer.init(writer);
             // Get stack slice
-            const stack_slice = frame.stack.data[0..frame.stack.size];
+            const stack_slice = frame.stack_data[0..frame.stack_size];
             // Calculate gas cost for this operation
             const op_meta = self.table.get_operation(opcode);
             const gas_cost = op_meta.constant_gas;
-            tracer.trace(frame.pc, opcode, stack_slice, frame.gas_remaining, gas_cost, frame.memory.size(), @intCast(self.depth)) catch |trace_err| {
+            tracer.trace(frame.pc, opcode, stack_slice, frame.gas_remaining, gas_cost, frame.memory_shared_buffer_ref.items.len, @intCast(self.depth)) catch |trace_err| {
                 Log.debug("Failed to write trace: {}", .{trace_err});
             };
         }

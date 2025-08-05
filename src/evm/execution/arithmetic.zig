@@ -1523,7 +1523,7 @@ test "ADDMOD: Issue #331 overflow test case 1" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
 
     var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x08}, .{ .address = [_]u8{0} ** 20 });
@@ -1566,7 +1566,7 @@ test "ADDMOD: Issue #331 overflow test case 2" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
 
     var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x08}, .{ .address = [_]u8{0} ** 20 });
