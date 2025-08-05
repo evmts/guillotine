@@ -259,8 +259,8 @@ test "pre-calculated memory expansion" {
     
     // Test MSTORE with pre-calculated cost
     // Storing at offset 0 should have expansion cost for 32 bytes
-    try stack.push(0x42); // value
-    try stack.push(0);    // offset
+    try stack.append(0x42); // value
+    try stack.append(0);    // offset
     
     const expansion_cost: u64 = 3; // Cost for first word
     const instr = Instruction{
