@@ -146,7 +146,7 @@ pub fn main() !void {
             defer stream.deinit();
             
             // Create frame for advanced execution
-            var frame = try evm.frame.Frame.init(allocator, &vm, 1_000_000_000, contract, caller_address, calldata);
+            var frame = try evm.frame.Frame.init_full(allocator, &vm, 1_000_000_000, &contract, caller_address, calldata);
             defer frame.deinit();
             
             // Execute using advanced interpreter
