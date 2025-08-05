@@ -22,6 +22,18 @@ pub const BlockMetadata = packed struct {
     stack_max: i16,     // Max stack growth (2 bytes)
 };
 
+/// Memory expansion information for a block
+/// Stores pre-calculated memory expansion costs for static accesses
+pub const MemoryExpansionInfo = struct {
+    /// Maximum memory size accessed in this block (0 if no memory access)
+    max_memory_size: u64,
+    /// Pre-calculated memory expansion gas cost for this block
+    /// Only valid if all memory accesses in block are static
+    expansion_gas_cost: u64,
+    /// Whether all memory accesses in this block are static (known at compile time)
+    is_static: bool,
+};
+
 // Debug assertions for safety
 comptime {
     std.debug.assert(@sizeOf(BlockMetadata) == 8);
@@ -163,6 +175,13 @@ jump_analysis: ?*JumpAnalysis,
 /// Example: block_start_positions[5] = 128 means block 5 starts at PC 128.
 block_start_positions: []usize,
 
+/// Pre-calculated memory expansion information for each block.
+///
+/// Indexed by block number, contains memory expansion costs and metadata.
+/// This enables the interpreter to skip runtime memory expansion calculations
+/// for blocks with static memory accesses.
+memory_expansion_info: []MemoryExpansionInfo,
+
 /// Releases all memory allocated by this code analysis.
 ///
 /// This method must be called when the analysis is no longer needed to prevent
@@ -210,6 +229,11 @@ pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
     // Free block start positions
     if (self.block_start_positions.len > 0) {
         allocator.free(self.block_start_positions);
+    }
+    
+    // Free memory expansion info
+    if (self.memory_expansion_info.len > 0) {
+        allocator.free(self.memory_expansion_info);
     }
     
     // Memory best practice: zero out pointers after free
@@ -263,6 +287,7 @@ test "CodeAnalysis with block data initializes and deinits correctly" {
         .block_gas_costs = null,
         .jump_analysis = null,
         .block_start_positions = try allocator.alloc(usize, 10),
+        .memory_expansion_info = try allocator.alloc(MemoryExpansionInfo, 10),
     };
     defer analysis.deinit(allocator);
     
@@ -270,6 +295,7 @@ test "CodeAnalysis with block data initializes and deinits correctly" {
     try std.testing.expectEqual(@as(u16, 10), analysis.block_count);
     try std.testing.expectEqual(@as(usize, 10), analysis.block_metadata.len);
     try std.testing.expectEqual(@as(usize, 100), analysis.pc_to_block.len);
+    try std.testing.expectEqual(@as(usize, 10), analysis.memory_expansion_info.len);
     
     // Test pc_to_block mapping
     analysis.pc_to_block[50] = 5;
@@ -300,6 +326,7 @@ test "CodeAnalysis deinit handles partially initialized state" {
         .block_gas_costs = null,
         .jump_analysis = null,
         .block_start_positions = &[_]usize{},
+        .memory_expansion_info = &[_]MemoryExpansionInfo{},
     };
     
     // Should not crash on deinit
@@ -498,6 +525,7 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         .block_gas_costs = null,
         .jump_analysis = null,
         .block_start_positions = &[_]usize{},
+        .memory_expansion_info = &[_]MemoryExpansionInfo{},
     };
     errdefer analysis.deinit(allocator);
     
@@ -571,6 +599,19 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     analysis.block_start_positions = try allocator.alloc(usize, block_count);
     errdefer allocator.free(analysis.block_start_positions);
     
+    // Allocate memory expansion info
+    analysis.memory_expansion_info = try allocator.alloc(MemoryExpansionInfo, block_count);
+    errdefer allocator.free(analysis.memory_expansion_info);
+    
+    // Initialize memory expansion info to defaults
+    for (analysis.memory_expansion_info) |*info| {
+        info.* = .{
+            .max_memory_size = 0,
+            .expansion_gas_cost = 0,
+            .is_static = true,
+        };
+    }
+    
     // Initialize jump table for gas cost lookup
     const table = jump_table.JumpTable.init();
     
@@ -582,6 +623,11 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     var block_stack_start: i16 = 0;
     var min_stack_in_block: i16 = 0;
     var max_stack_in_block: i16 = 0;
+    
+    // Memory expansion tracking
+    var block_max_memory: u64 = 0;
+    var block_memory_is_static = true;
+    var current_memory_size: u64 = 0; // Track memory size entering the block
     
     // First block always starts at 0
     analysis.block_start_positions[0] = 0;
@@ -600,6 +646,18 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
                 .stack_max = max_stack_in_block - block_stack_start,
             };
             
+            // Save memory expansion info for completed block
+            if (block_memory_is_static and block_max_memory > current_memory_size) {
+                // Calculate expansion cost from current_memory_size to block_max_memory
+                const new_words = (block_max_memory + 31) / 32;
+                const current_words = (current_memory_size + 31) / 32;
+                const new_cost = 3 * new_words + (new_words * new_words) / 512;
+                const current_cost = if (current_memory_size == 0) 0 else 3 * current_words + (current_words * current_words) / 512;
+                analysis.memory_expansion_info[current_block].expansion_gas_cost = new_cost - current_cost;
+            }
+            analysis.memory_expansion_info[current_block].max_memory_size = block_max_memory;
+            analysis.memory_expansion_info[current_block].is_static = block_memory_is_static;
+            
             // Start new block
             current_block += 1;
             block_start_pc = i;
@@ -612,6 +670,11 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             block_stack_start = stack_depth;
             min_stack_in_block = 0;
             max_stack_in_block = stack_depth;
+            
+            // Memory state for new block
+            current_memory_size = block_max_memory; // New block starts with expanded memory
+            block_max_memory = current_memory_size;
+            block_memory_is_static = true;
         }
         
         const op = code[i];
@@ -706,6 +769,97 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             analysis.max_stack_depth = abs_stack_depth;
         }
         
+        // Analyze memory operations
+        switch (@as(opcode.Enum, @enumFromInt(op))) {
+            .MLOAD => {
+                // MLOAD: offset from stack, reads 32 bytes
+                // Check if we can determine offset statically
+                if (i > 0) {
+                    const prev_pc = i - 1;
+                    if (prev_pc < code.len and code[prev_pc] >= 0x60 and code[prev_pc] <= 0x7f) {
+                        // Previous instruction was PUSH, we might know the offset
+                        const push_size = code[prev_pc] - 0x5f;
+                        if (i >= push_size + 1) {
+                            var offset: u64 = 0;
+                            var j: usize = 0;
+                            while (j < push_size) : (j += 1) {
+                                offset = (offset << 8) | code[i - push_size + j];
+                            }
+                            const access_size = offset + 32;
+                            if (access_size > block_max_memory) {
+                                block_max_memory = access_size;
+                            }
+                        } else {
+                            block_memory_is_static = false;
+                        }
+                    } else {
+                        block_memory_is_static = false;
+                    }
+                } else {
+                    block_memory_is_static = false;
+                }
+            },
+            .MSTORE, .MSTORE8 => {
+                // MSTORE: offset from stack, writes 32 bytes
+                // MSTORE8: offset from stack, writes 1 byte
+                const write_size: u64 = if (op == @intFromEnum(opcode.Enum.MSTORE8)) 1 else 32;
+                
+                // Try to determine offset statically
+                if (i >= 2) {
+                    // Need to look back 2 instructions for the offset (value, then offset)
+                    var found_offset = false;
+                    var search_pc = i - 1;
+                    var pushes_found: u8 = 0;
+                    var static_offset: u64 = 0;
+                    
+                    // Search backwards for PUSH instructions
+                    while (search_pc > 0 and pushes_found < 2) : (search_pc -= 1) {
+                        if (code[search_pc] >= 0x60 and code[search_pc] <= 0x7f) {
+                            pushes_found += 1;
+                            if (pushes_found == 2) {
+                                // This is the offset PUSH
+                                const push_size = code[search_pc] - 0x5f;
+                                if (search_pc + push_size < i) {
+                                    var offset: u64 = 0;
+                                    var j: usize = 1;
+                                    while (j <= push_size) : (j += 1) {
+                                        offset = (offset << 8) | code[search_pc + j];
+                                    }
+                                    static_offset = offset;
+                                    found_offset = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (found_offset) {
+                        const access_size = static_offset + write_size;
+                        if (access_size > block_max_memory) {
+                            block_max_memory = access_size;
+                        }
+                    } else {
+                        block_memory_is_static = false;
+                    }
+                } else {
+                    block_memory_is_static = false;
+                }
+            },
+            .CALLDATACOPY, .CODECOPY, .RETURNDATACOPY, .EXTCODECOPY => {
+                // These copy operations use dynamic size from stack
+                // We'd need complex analysis to determine if they're static
+                block_memory_is_static = false;
+            },
+            .MCOPY => {
+                // Memory-to-memory copy, dynamic offsets and size
+                block_memory_is_static = false;
+            },
+            .MSIZE => {
+                // MSIZE just reads current size, doesn't expand
+            },
+            else => {},
+        }
+        
         // Advance PC
         if (opcode.is_push(op)) {
             const push_bytes = opcode.get_push_size(op);
@@ -726,6 +880,17 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             .stack_req = @max(0, block_stack_start + min_stack_in_block),
             .stack_max = max_stack_in_block - block_stack_start,
         };
+        
+        // Save memory expansion info for final block
+        if (block_memory_is_static and block_max_memory > current_memory_size) {
+            const new_words = (block_max_memory + 31) / 32;
+            const current_words = (current_memory_size + 31) / 32;
+            const new_cost = 3 * new_words + (new_words * new_words) / 512;
+            const current_cost = if (current_memory_size == 0) 0 else 3 * current_words + (current_words * current_words) / 512;
+            analysis.memory_expansion_info[current_block].expansion_gas_cost = new_cost - current_cost;
+        }
+        analysis.memory_expansion_info[current_block].max_memory_size = block_max_memory;
+        analysis.memory_expansion_info[current_block].is_static = block_memory_is_static;
     }
     
     // Perform jump analysis if there are any jumps
@@ -793,6 +958,57 @@ test "pc_to_block mapping edge cases" {
     try std.testing.expectEqual(@as(u16, 246), mapping[24500]);
 }
 
+test "Memory expansion analysis detects static memory accesses" {
+    const allocator = std.testing.allocator;
+    
+    // Test bytecode with static memory operations:
+    // PUSH1 0x20 PUSH1 0x40 MSTORE  ; Store at offset 0x40
+    // PUSH1 0x60 MLOAD              ; Load from offset 0x60
+    const code = &[_]u8{
+        0x60, 0x20, // PUSH1 0x20 (value)
+        0x60, 0x40, // PUSH1 0x40 (offset)
+        0x52,       // MSTORE
+        0x60, 0x60, // PUSH1 0x60
+        0x51,       // MLOAD
+    };
+    
+    var analysis = try analyze_bytecode_blocks(allocator, code);
+    defer analysis.deinit(allocator);
+    
+    // Should have 1 block
+    try std.testing.expectEqual(@as(u16, 1), analysis.block_count);
+    
+    // Check memory expansion info
+    const mem_info = analysis.memory_expansion_info[0];
+    try std.testing.expect(mem_info.is_static);
+    try std.testing.expectEqual(@as(u64, 0x60 + 32), mem_info.max_memory_size); // MLOAD at 0x60 + 32 bytes
+    
+    // Verify expansion cost is calculated
+    // Memory expands from 0 to 128 bytes (4 words)
+    // Cost = 3 * 4 + (4 * 4) / 512 = 12 + 0 = 12
+    try std.testing.expectEqual(@as(u64, 12), mem_info.expansion_gas_cost);
+}
+
+test "Memory expansion analysis detects dynamic memory accesses" {
+    const allocator = std.testing.allocator;
+    
+    // Test bytecode with dynamic memory operations:
+    // DUP1 MLOAD  ; Load from dynamic offset (whatever is on stack)
+    const code = &[_]u8{
+        0x80, // DUP1
+        0x51, // MLOAD
+    };
+    
+    var analysis = try analyze_bytecode_blocks(allocator, code);
+    defer analysis.deinit(allocator);
+    
+    // Check memory expansion info
+    const mem_info = analysis.memory_expansion_info[0];
+    try std.testing.expect(!mem_info.is_static); // Should be dynamic
+    try std.testing.expectEqual(@as(u64, 0), mem_info.max_memory_size);
+    try std.testing.expectEqual(@as(u64, 0), mem_info.expansion_gas_cost);
+}
+
 test "BlockMetadata with contract deployment scenarios" {
     const allocator = std.testing.allocator;
     
@@ -818,6 +1034,9 @@ test "BlockMetadata with contract deployment scenarios" {
             .has_selfdestruct = false,
             .has_create = false,
             .block_gas_costs = null,
+            .jump_analysis = null,
+            .block_start_positions = if (tc.blocks > 0) try allocator.alloc(usize, tc.blocks) else &[_]usize{},
+            .memory_expansion_info = if (tc.blocks > 0) try allocator.alloc(MemoryExpansionInfo, tc.blocks) else &[_]MemoryExpansionInfo{},
         };
         defer analysis.deinit(allocator);
         
