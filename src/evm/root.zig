@@ -133,7 +133,7 @@ pub const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
 pub const DatabaseFactory = @import("state/database_factory.zig");
 
 /// Precompiled contracts implementation (IDENTITY, SHA256, etc.)
-pub const Precompiles = @import("precompiles/precompiles.zig");
+pub const Precompiles = @import("precompiles/precompiles_optimized.zig");
 
 /// Precompiles namespace for easier access
 pub const precompiles = struct {

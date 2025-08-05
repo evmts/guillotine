@@ -22,6 +22,10 @@ pub const PrecompileError = error{
     /// Memory allocation failed during precompile execution
     /// Not a normal precompile error - indicates system resource exhaustion
     OutOfMemory,
+    
+    /// Output buffer is too small to hold the result
+    /// This is checked before execution to avoid partial writes
+    BufferTooSmall,
 };
 
 /// PrecompileResult represents the successful result of a precompile execution

@@ -693,6 +693,36 @@ pub fn build(b: *std.Build) void {
     const jump_table_bench_step = b.step("bench-jump-table", "Run jump table AoS vs SoA benchmarks");
     jump_table_bench_step.dependOn(&run_jump_table_bench_cmd.step);
 
+    // Add precompile optimization benchmark executable
+    const precompile_opt_bench_exe = b.addExecutable(.{
+        .name = "precompile-opt-bench",
+        .root_source_file = b.path("bench/precompile_optimized_benchmark.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    // Use minimal EVM module to avoid Rust conflicts
+    const precompile_opt_build_options = b.addOptions();
+    precompile_opt_build_options.addOption(bool, "no_precompiles", false);
+    precompile_opt_build_options.addOption(bool, "no_bn254", true); // Disable BN254 to avoid conflicts
+    const precompile_opt_build_options_mod = precompile_opt_build_options.createModule();
+    
+    const precompile_opt_evm_mod = b.createModule(.{
+        .root_source_file = b.path("src/evm/root.zig"),
+        .imports = &.{
+            .{ .name = "primitives", .module = primitives_mod },
+            .{ .name = "crypto", .module = crypto_mod },
+            .{ .name = "build_options", .module = precompile_opt_build_options_mod },
+        },
+    });
+    precompile_opt_bench_exe.root_module.addImport("evm", precompile_opt_evm_mod);
+    precompile_opt_bench_exe.root_module.addImport("primitives", primitives_mod);
+    b.installArtifact(precompile_opt_bench_exe);
+    
+    const run_precompile_opt_bench_cmd = b.addRunArtifact(precompile_opt_bench_exe);
+    run_precompile_opt_bench_cmd.step.dependOn(b.getInstallStep());
+    const precompile_opt_bench_step = b.step("bench-precompile-opt", "Run precompile optimization benchmarks");
+    precompile_opt_bench_step.dependOn(&run_precompile_opt_bench_cmd.step);
+
     // Flamegraph profiling support
     const flamegraph_step = b.step("flamegraph", "Run benchmarks with flamegraph profiling");
 

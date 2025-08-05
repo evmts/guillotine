@@ -1,0 +1,148 @@
+info: Downloading blst library...
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/compilers/Cargo.toml
+workspace: /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/revm_wrapper/Cargo.toml
+workspace: /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/Cargo.toml
+warning: /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
+warning: unused imports: `BlockEnv`, `CfgEnv`, `Env`, `TransactTo`, `TxEnv`, `inspector_handle_register`, and `inspectors::TracerEip3155`
+ --> src/revm_wrapper/src/bin/opcode_comparison.rs:4:42
+  |
+4 |         Address, Bytes, ExecutionResult, TransactTo, U256, B256,
+  |                                          ^^^^^^^^^^
+5 |         Env, TxEnv, BlockEnv, CfgEnv, Output, TxKind,
+  |         ^^^  ^^^^^  ^^^^^^^^  ^^^^^^
+...
+8 |     inspector_handle_register,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+9 |     inspectors::TracerEip3155,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `std::fs`
+  --> src/revm_wrapper/src/bin/opcode_comparison.rs:11:5
+   |
+11 | use std::fs;
+   |     ^^^^^^^
+
+warning: unused import: `std::io::Write`
+  --> src/revm_wrapper/src/bin/opcode_comparison.rs:12:5
+   |
+12 | use std::io::Write;
+   |     ^^^^^^^^^^^^^^
+
+warning: unused variable: `result2`
+  --> src/revm_wrapper/src/bin/verify_gt_order.rs:96:9
+   |
+96 |     let result2 = test_gt(U256::from(5), U256::from(10), "5 > 10 = 0 OR 10 > 5 = 1");
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_result2`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `result3`
+   --> src/revm_wrapper/src/bin/verify_gt_order.rs:101:9
+    |
+101 |     let result3 = test_gt(a, b, "0xff...01 > 0xff...ff = 0 OR 0xff...ff > 0xff...01 = 1");
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_result3`
+
+warning: `revm_wrapper` (bin "opcode_comparison") generated 3 warnings (run `cargo fix --bin "opcode_comparison"` to apply 3 suggestions)
+warning: `revm_wrapper` (bin "verify_gt_order") generated 2 warnings
+warning: unused import: `std::io::Write`
+  --> src/revm_wrapper/src/bin/trace_erc20_constructor.rs:12:5
+   |
+12 | use std::io::Write;
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `Bytes` and `TransactTo`
+ --> src/revm_wrapper/src/bin/trace_erc20_mint.rs:3:23
+  |
+3 |         hex, Address, Bytes, ExecutionResult, Output, TransactTo, TxKind, B256, U256,
+  |                       ^^^^^                           ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused import: `std::io::Write`
+ --> src/revm_wrapper/src/bin/trace_erc20_mint.rs:9:5
+  |
+9 | use std::io::Write;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused variable: `result2`
+  --> src/revm_wrapper/src/bin/verify_lt_order.rs:96:9
+   |
+96 |     let result2 = test_lt(U256::from(10), U256::from(5), "10 < 5 = 0 OR 5 < 10 = 1");
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_result2`
+   |
+   = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `result2`
+   --> src/revm_wrapper/src/bin/verify_sub_order.rs:103:9
+    |
+103 |     let result2 = test_sub(50, 30, "50 - 30 = 20");
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_result2`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `result3`
+   --> src/revm_wrapper/src/bin/verify_sub_order.rs:106:9
+    |
+106 |     let result3 = test_sub(10, 20, "10 - 20 = -10");
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_result3`
+
+warning: `revm_wrapper` (bin "trace_erc20_constructor") generated 1 warning (run `cargo fix --bin "trace_erc20_constructor"` to apply 1 suggestion)
+warning: `revm_wrapper` (bin "trace_erc20_mint") generated 2 warnings (run `cargo fix --bin "trace_erc20_mint"` to apply 2 suggestions)
+warning: `revm_wrapper` (bin "verify_lt_order") generated 1 warning
+warning: `revm_wrapper` (bin "verify_sub_order") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 0.19s
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100  583k  100  583k    0     0  1163k      0 --:--:-- --:--:-- --:--:-- 1163k
+bench-precompile-opt
++- run precompile-opt-bench
+   +- install
+      +- install precompile-opt-bench
+         +- zig build-exe precompile-opt-bench ReleaseFast native 2 errors
+bench/precompile_optimized_benchmark.zig:14:35: error: struct 'root.hardforks' has no member named 'ChainRules'
+const chain_rules = evm.hardforks.ChainRules.for_hardfork(.ISTANBUL);
+                                  ^~~~~~~~~~
+src/evm/root.zig:184:23: note: struct declared here
+pub const hardforks = struct {
+                      ^~~~~~
+bench/precompile_optimized_benchmark.zig:140:35: error: expected error union type, found 'void'
+    try sha256_suite.print_results();
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~^~
+referenced by:
+    main: /opt/homebrew/Cellar/zig/0.14.1/lib/zig/std/start.zig:660:37
+    comptime: /opt/homebrew/Cellar/zig/0.14.1/lib/zig/std/start.zig:58:30
+    2 reference(s) hidden; use '-freference-trace=4' to see all references
+error: the following command failed with 2 compilation errors:
+/opt/homebrew/Cellar/zig/0.14.1/bin/zig build-exe -OReleaseFast --dep evm --dep primitives -Mroot=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/bench/precompile_optimized_benchmark.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/7fd0cd1c575540594593608825a9261a/libbn254_wrapper.a /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/57daed6cdbbb3be4bfebb3463c3b6d07/libc_kzg_4844.a -OReleaseFast -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/bn254_wrapper -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb --dep primitives --dep crypto --dep build_options -Mevm=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/evm/root.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/57daed6cdbbb3be4bfebb3463c3b6d07/libc_kzg_4844.a -OReleaseFast -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb -Mprimitives=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/primitives/root.zig -OReleaseFast --dep primitives -Mcrypto=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/crypto/root.zig -Mbuild_options=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/c/51dd772c2c10a848db74cbe63611df28/options.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/876c931b864c78581f6911b4bbfe0846/libblst.a -lc --cache-dir /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache --global-cache-dir /Users/williamcory/.cache/zig --name precompile-opt-bench --zig-lib-dir /opt/homebrew/Cellar/zig/0.14.1/lib/zig/ --listen=- 
+bench-precompile-opt
++- run precompile-opt-bench
+   +- install
+      +- install revm-comparison
+         +- zig build-exe revm-comparison ReleaseFast native 2 errors
+error: duplicate symbol definition: __ZN3std9panicking11EMPTY_PANIC17h2876679403c3e8d4E
+    note: defined by /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/7fd0cd1c575540594593608825a9261a/libbn254_wrapper.a(bn254_wrapper.bn254_wrapper.dee088d4b48afe34-cgu.0.rcgu.o)
+    note: defined by /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/b0003e3204020d602421b2bb594c2ba1/librevm_wrapper.a(revm_wrapper.revm_wrapper.6da52df1731201af-cgu.0.rcgu.o)
+error: duplicate symbol definition: _rust_eh_personality
+    note: defined by /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/7fd0cd1c575540594593608825a9261a/libbn254_wrapper.a(bn254_wrapper.bn254_wrapper.dee088d4b48afe34-cgu.0.rcgu.o)
+    note: defined by /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/b0003e3204020d602421b2bb594c2ba1/librevm_wrapper.a(revm_wrapper.revm_wrapper.6da52df1731201af-cgu.0.rcgu.o)
+error: the following command failed with 2 compilation errors:
+/opt/homebrew/Cellar/zig/0.14.1/bin/zig build-exe -OReleaseFast --dep evm --dep primitives --dep revm -Mroot=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/bench/run_revm_comparison.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/7fd0cd1c575540594593608825a9261a/libbn254_wrapper.a /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/57daed6cdbbb3be4bfebb3463c3b6d07/libc_kzg_4844.a -OReleaseFast -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/bn254_wrapper -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb --dep primitives --dep crypto --dep build_options -Mevm=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/evm/root.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/57daed6cdbbb3be4bfebb3463c3b6d07/libc_kzg_4844.a -OReleaseFast -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb -Mprimitives=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/primitives/root.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/b0003e3204020d602421b2bb594c2ba1/librevm_wrapper.a -OReleaseFast -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/efaed383166e26499e4003483132aafb -I /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/revm_wrapper --dep primitives -Mrevm=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/revm_wrapper/revm.zig -OReleaseFast --dep primitives -Mcrypto=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/src/crypto/root.zig -Mbuild_options=/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/c/51dd772c2c10a848db74cbe63611df28/options.zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/876c931b864c78581f6911b4bbfe0846/libblst.a -lc --cache-dir /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache --global-cache-dir /Users/williamcory/.cache/zig --name revm-comparison --zig-lib-dir /opt/homebrew/Cellar/zig/0.14.1/lib/zig/ --listen=- 
+Build Summary: 37/44 steps succeeded; 2 failed
+bench-precompile-opt transitive failure
++- run precompile-opt-bench transitive failure
+   +- zig build-exe precompile-opt-bench ReleaseFast native 2 errors
+   +- install transitive failure
+      +- install revm-comparison transitive failure
+      |  +- zig build-exe revm-comparison ReleaseFast native 2 errors
+      +- install precompile-opt-bench transitive failure
+         +- zig build-exe precompile-opt-bench ReleaseFast native (+10 more reused dependencies)
+error: the following build command failed with exit code 1:
+/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/02d8a5a79ddfcca261d3e13e45055258/build /opt/homebrew/Cellar/zig/0.14.1/bin/zig /opt/homebrew/Cellar/zig/0.14.1/lib/zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache /Users/williamcory/.cache/zig --seed 0x9f7bc6df -Z5003292c77bfcbc6 bench-precompile-opt -Doptimize=ReleaseFast
