@@ -13,7 +13,22 @@ pub inline fn context_size(self: *const Memory) usize {
 /// Ensures the current context's memory region is at least `min_context_size` bytes.
 /// Returns the number of *new 32-byte words added to the shared_buffer* if it expanded.
 /// This is crucial for EVM gas calculation.
-pub noinline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
+pub inline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
+    const required_total_len = self.my_checkpoint + min_context_size;
+    
+    // Fast path: if buffer is already large enough, return immediately
+    if (self.shared_buffer_ref.items.len >= required_total_len) {
+        return 0;
+    }
+    
+    // Slow path: delegate to the noinline version
+    return self.ensure_context_capacity_slow(min_context_size);
+}
+
+/// Ensures the current context's memory region is at least `min_context_size` bytes.
+/// Returns the number of *new 32-byte words added to the shared_buffer* if it expanded.
+/// This is crucial for EVM gas calculation.
+pub noinline fn ensure_context_capacity_slow(self: *Memory, min_context_size: usize) MemoryError!u64 {
     const required_total_len = self.my_checkpoint + min_context_size;
     Log.debug("Memory.ensure_context_capacity: Ensuring capacity, min_context_size={}, required_total_len={}, memory_limit={}", .{ min_context_size, required_total_len, self.memory_limit });
 

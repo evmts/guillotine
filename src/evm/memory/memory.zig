@@ -96,6 +96,7 @@ const slice_ops = @import("slice.zig");
 // Context operations
 pub const context_size = context_ops.context_size;
 pub const ensure_context_capacity = context_ops.ensure_context_capacity;
+pub const ensure_context_capacity_slow = context_ops.ensure_context_capacity_slow;
 pub const resize_context = context_ops.resize_context;
 pub const size = context_ops.size;
 pub const total_size = context_ops.total_size;
