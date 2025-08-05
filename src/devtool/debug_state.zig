@@ -33,7 +33,7 @@ pub const DebugState = struct {
             .gas_remaining = gas_remaining,
             .depth = depth,
             .is_static = is_static,
-            .stack_size = stack.size,
+            .stack_size = stack.size(),
             .memory_size = memory.size(),
             .has_error = err != null,
             .error_name = if (err) |e| @errorName(e) else null,
@@ -229,7 +229,7 @@ pub fn serializeStack(allocator: std.mem.Allocator, stack: *const Stack) ![][]co
     
     // Get stack items (top to bottom for debugging visibility)
     var i: usize = 0;
-    while (i < stack.size) {
+    while (i < stack.size()) {
         const idx = i; // peek_n(0) is top, peek_n(1) is second from top, etc.
         const value = stack.peek_n(idx) catch break;
         const hex_str = try formatU256Hex(allocator, value);
