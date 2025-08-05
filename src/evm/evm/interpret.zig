@@ -41,27 +41,53 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     const initial_gas = contract.gas;
 
-    var frame = Frame{
-        .gas_remaining = contract.gas,
-        .pc = 0,
-        .contract = contract,
-        .allocator = self.allocator,
-        .stop = false,
-        .is_static = self.read_only,
-        .depth = @as(u32, @intCast(self.depth)),
-        .cost = 0,
-        .err = null,
-        .input = input,
-        .output = &[_]u8{},
-        .op = &.{},
-        .memory = try Memory.init_default(self.allocator),
-        .stack = .{},
-        .return_data = ReturnData.init(self.allocator),
+    // Try to acquire a frame from the pool
+    const pooled_frame = self.acquire_frame();
+    var heap_frame_storage: Frame = undefined;
+    var heap_allocated = false;
+    
+    var frame: *Frame = if (pooled_frame) |pf| pf else blk: {
+        // Pool exhausted, allocate on heap
+        heap_allocated = true;
+        heap_frame_storage = Frame{
+            .gas_remaining = contract.gas,
+            .pc = 0,
+            .contract = contract,
+            .allocator = self.allocator,
+            .stop = false,
+            .is_static = self.read_only,
+            .depth = @as(u32, @intCast(self.depth)),
+            .cost = 0,
+            .err = null,
+            .input = input,
+            .output = &[_]u8{},
+            .op = &.{},
+            .memory = undefined,
+            .stack = .{},
+            .return_data = ReturnData.init(self.allocator),
+        };
+        heap_frame_storage.memory = try Memory.init_default(self.allocator);
+        break :blk &heap_frame_storage;
     };
-    defer frame.deinit();
+    
+    // Configure the frame
+    frame.gas_remaining = contract.gas;
+    frame.pc = 0;
+    frame.contract = contract;
+    frame.is_static = self.read_only;
+    frame.depth = @as(u32, @intCast(self.depth));
+    frame.input = input;
+    
+    defer {
+        if (pooled_frame != null) {
+            self.release_frame(frame);
+        } else if (heap_allocated) {
+            heap_frame_storage.deinit();
+        }
+    }
 
     const interpreter: Operation.Interpreter = self;
-    const state: Operation.State = &frame;
+    const state: Operation.State = frame;
 
     while (frame.pc < contract.code_size) {
         @branchHint(.likely);
@@ -84,21 +110,41 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 Log.debug("VM.interpret_with_context: Duplicated output, size={}", .{output.?.len});
             }
 
+            // Check most common case first with likely hint
+            if (err == ExecutionError.Error.STOP) {
+                @branchHint(.likely);
+                // Handle normal termination inline
+                // Free memory early since execution is done
+                frame.memory.deinit();
+                // Reinitialize with minimal memory to keep struct valid
+                frame.memory = Memory.init_default(self.allocator) catch {
+                    // If we can't allocate minimal memory, just continue without it
+                    return RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
+                };
+
+                Log.debug("VM.interpret_with_context: STOP opcode, output_size={}, creating RunResult", .{if (output) |o| o.len else 0});
+                const result = RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
+                Log.debug("VM.interpret_with_context: RunResult created, output={any}", .{result.output});
+                return result;
+            }
+
+            // Then handle rare errors
             return switch (err) {
                 ExecutionError.Error.InvalidOpcode => {
-                    @branchHint(.cold);
                     // INVALID opcode consumes all remaining gas
                     frame.gas_remaining = 0;
                     contract.gas = 0;
                     return RunResult.init(initial_gas, 0, .Invalid, err, output);
                 },
-                ExecutionError.Error.STOP => {
-                    Log.debug("VM.interpret_with_context: STOP opcode, output_size={}, creating RunResult", .{if (output) |o| o.len else 0});
-                    const result = RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
-                    Log.debug("VM.interpret_with_context: RunResult created, output={any}", .{result.output});
-                    return result;
-                },
                 ExecutionError.Error.REVERT => {
+                    // Free memory early since execution is done
+                    frame.memory.deinit();
+                    // Reinitialize with minimal memory to keep struct valid
+                    frame.memory = Memory.init_default(self.allocator) catch {
+                        // If we can't allocate minimal memory, just continue without it
+                        return RunResult.init(initial_gas, frame.gas_remaining, .Revert, err, output);
+                    };
+
                     return RunResult.init(initial_gas, frame.gas_remaining, .Revert, err, output);
                 },
                 ExecutionError.Error.OutOfGas => {
@@ -113,7 +159,6 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                 ExecutionError.Error.MaxCodeSizeExceeded,
                 ExecutionError.Error.OutOfMemory,
                 => {
-                    @branchHint(.cold);
                     return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, err, output);
                 },
                 else => return err, // Unexpected error
