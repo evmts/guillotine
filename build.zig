@@ -882,6 +882,30 @@ pub fn build(b: *std.Build) void {
     const build_evm_runner_step = b.step("build-evm-runner", "Build the EVM benchmark runner");
     build_evm_runner_step.dependOn(&b.addInstallArtifact(evm_runner_exe, .{}).step);
 
+    // EVM Advanced Interpreter Benchmark Runner executable
+    const evm_runner_advanced_exe = b.addExecutable(.{
+        .name = "evm-runner-advanced",
+        .root_source_file = b.path("bench/official/evms/zig-advanced/src/main.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Always use ReleaseFast for benchmarks
+    });
+    evm_runner_advanced_exe.root_module.addImport("evm", evm_mod);
+    evm_runner_advanced_exe.root_module.addImport("primitives", primitives_mod);
+
+    b.installArtifact(evm_runner_advanced_exe);
+
+    const run_evm_runner_advanced_cmd = b.addRunArtifact(evm_runner_advanced_exe);
+    run_evm_runner_advanced_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_evm_runner_advanced_cmd.addArgs(args);
+    }
+
+    const evm_runner_advanced_step = b.step("evm-runner-advanced", "Run the EVM benchmark runner with advanced interpreter");
+    evm_runner_advanced_step.dependOn(&run_evm_runner_advanced_cmd.step);
+
+    const build_evm_runner_advanced_step = b.step("build-evm-runner-advanced", "Build the EVM benchmark runner with advanced interpreter");
+    build_evm_runner_advanced_step.dependOn(&b.addInstallArtifact(evm_runner_advanced_exe, .{}).step);
+
     // Benchmark Orchestrator executable
     const clap_dep = b.dependency("clap", .{
         .target = target,
