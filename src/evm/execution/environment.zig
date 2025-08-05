@@ -2,6 +2,7 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
@@ -10,7 +11,7 @@ const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
 const AccessList = @import("../access_list/access_list.zig").AccessList;
 
-pub fn op_address(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_address(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push contract address as u256
@@ -20,7 +21,7 @@ pub fn op_address(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_balance(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_balance(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const address_u256 = try frame.stack_pop();
     const address = from_u256(address_u256);
@@ -36,7 +37,7 @@ pub fn op_balance(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_origin(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_origin(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push transaction origin address
@@ -46,7 +47,7 @@ pub fn op_origin(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_caller(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_caller(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push caller address
@@ -56,7 +57,7 @@ pub fn op_caller(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_callvalue(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_callvalue(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push call value
@@ -65,7 +66,7 @@ pub fn op_callvalue(vm: Operation.Interpreter, frame: Operation.State) Execution
     return Operation.ExecutionResult{};
 }
 
-pub fn op_gasprice(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_gasprice(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push gas price from transaction context
@@ -74,7 +75,7 @@ pub fn op_gasprice(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_extcodesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_extcodesize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const address_u256 = try frame.stack_pop();
     const address = from_u256(address_u256);
@@ -90,7 +91,7 @@ pub fn op_extcodesize(vm: Operation.Interpreter, frame: Operation.State) Executi
     return Operation.ExecutionResult{};
 }
 
-pub fn op_extcodecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_extcodecopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const address_u256 = try frame.stack_pop();
     const mem_offset = try frame.stack_pop();
@@ -140,7 +141,7 @@ pub fn op_extcodecopy(vm: Operation.Interpreter, frame: Operation.State) Executi
     return Operation.ExecutionResult{};
 }
 
-pub fn op_extcodehash(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_extcodehash(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const address_u256 = try frame.stack_pop();
     const address = from_u256(address_u256);
@@ -168,7 +169,7 @@ pub fn op_extcodehash(vm: Operation.Interpreter, frame: Operation.State) Executi
     return Operation.ExecutionResult{};
 }
 
-pub fn op_selfbalance(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_selfbalance(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // Get balance of current executing contract
     const self_address = frame.address;
@@ -178,7 +179,7 @@ pub fn op_selfbalance(vm: Operation.Interpreter, frame: Operation.State) Executi
     return Operation.ExecutionResult{};
 }
 
-pub fn op_chainid(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_chainid(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push chain ID from VM context
@@ -187,7 +188,7 @@ pub fn op_chainid(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatasize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldatasize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push size of calldata - use frame.input which is set by the VM
@@ -197,7 +198,7 @@ pub fn op_calldatasize(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_codesize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Push size of current contract's code
@@ -206,7 +207,7 @@ pub fn op_codesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldataload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldataload(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop offset from stack
@@ -239,7 +240,7 @@ pub fn op_calldataload(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatacopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldatacopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop memory offset, data offset, and size
@@ -277,7 +278,7 @@ pub fn op_calldatacopy(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_codecopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop memory offset, code offset, and size
@@ -328,7 +329,7 @@ pub fn op_codecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
 }
 /// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data
 /// This is an EOF opcode that allows reading from the return data buffer
-pub fn op_returndataload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_returndataload(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop offset from stack

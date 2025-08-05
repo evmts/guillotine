@@ -2,8 +2,8 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
-const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 
 // Stack buffer sizes for common hash operations
@@ -39,7 +39,7 @@ inline fn hash_with_stack_buffer(data: []const u8) [32]u8 {
     return hash;
 }
 
-pub fn op_sha3(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_sha3(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const offset = try frame.stack_pop();
     const size = try frame.stack_pop();
@@ -125,7 +125,7 @@ test "crypto_stack_buffer_benchmarks" {
     var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     const iterations = 10000; // Reduced for crypto operations due to complexity

@@ -68,12 +68,12 @@ test "CREATE (0xF0): Basic contract creation" {
     const state: Evm.Operation.State = &frame;
     for (0..3) |i| {
         frame.pc = i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
     frame.pc = 6;
 
     const gas_before = frame.gas_remaining;
-    const result = try evm.table.execute(0, interpreter, state, 0xF0);
+    const result = try evm.table.execute(interpreter, state, 0xF0);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check gas consumption (VM consumes gas regardless of success/failure)
@@ -134,7 +134,7 @@ test "CREATE: Static call protection" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -186,7 +186,7 @@ test "CREATE: EIP-3860 initcode size limit" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.MaxCodeSizeExceeded, result);
 }
 
@@ -238,7 +238,7 @@ test "CREATE: Depth limit" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = try evm.table.execute(0, interpreter, state, 0xF0);
+    const result = try evm.table.execute(interpreter, state, 0xF0);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Should push 0 to stack (failure)
@@ -301,12 +301,12 @@ test "CREATE2 (0xF5): Deterministic contract creation" {
     const state: Evm.Operation.State = &frame;
     for (0..4) |i| {
         frame.pc = i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
     frame.pc = 8;
 
     const gas_before = frame.gas_remaining;
-    const result = try evm.table.execute(0, interpreter, state, 0xF5);
+    const result = try evm.table.execute(interpreter, state, 0xF5);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check gas consumption (VM consumes gas regardless of success/failure)
@@ -371,7 +371,7 @@ test "CALL (0xF1): Basic external call" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = try evm.table.execute(0, interpreter, state, 0xF1);
+    const result = try evm.table.execute(interpreter, state, 0xF1);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check status pushed to stack (VM currently returns 0 for failed calls)
@@ -432,7 +432,7 @@ test "CALL: Value transfer in static context" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF1);
+    const result = evm.table.execute(interpreter, state, 0xF1);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -489,7 +489,7 @@ test "CALL: Cold address access (EIP-2929)" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     const gas_before = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should consume some gas for CALL operation
@@ -549,7 +549,7 @@ test "CALLCODE (0xF2): Execute external code with current storage" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = try evm.table.execute(0, interpreter, state, 0xF2);
+    const result = try evm.table.execute(interpreter, state, 0xF2);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check status (VM currently returns 0 for failed calls)
@@ -612,7 +612,7 @@ test "DELEGATECALL (0xF4): Execute with current context" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = try evm.table.execute(0, interpreter, state, 0xF4);
+    const result = try evm.table.execute(interpreter, state, 0xF4);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check status
@@ -674,7 +674,7 @@ test "STATICCALL (0xFA): Read-only external call" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = try evm.table.execute(0, interpreter, state, 0xFA);
+    const result = try evm.table.execute(interpreter, state, 0xFA);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check status (basic STATICCALL implementation now returns success)
@@ -739,7 +739,7 @@ test "System opcodes: Gas consumption" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     const gas_before = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should consume gas for CREATE operation regardless of success/failure
@@ -814,7 +814,7 @@ test "CALL operations: Depth limit" {
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = try evm.table.execute(0, interpreter, state, opcode);
+        const result = try evm.table.execute(interpreter, state, opcode);
         try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
         // Should push 0 (failure)
@@ -868,7 +868,7 @@ test "CREATE/CREATE2: Failed creation scenarios" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // VM actually succeeds in creating contracts with empty init code
     const created_address = try frame.stack.pop();

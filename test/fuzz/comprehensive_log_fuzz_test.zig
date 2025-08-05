@@ -219,7 +219,7 @@ test "fuzz_log0_operation_edge_cases" {
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
         
-        const result = ctx.vm.table.execute(0, interpreter, state, 0xa0);
+        const result = ctx.vm.table.execute(interpreter, state, 0xa0);
         
         if (test_case.expected_error) |expected_err| {
             try testing.expectError(expected_err, result);
@@ -418,7 +418,7 @@ test "fuzz_log_operations_with_topics" {
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
         
-        const result = ctx.vm.table.execute(0, interpreter, state, opcode);
+        const result = ctx.vm.table.execute(interpreter, state, opcode);
         
         if (test_case.expected_error) |expected_err| {
             try testing.expectError(expected_err, result);
@@ -505,7 +505,7 @@ test "fuzz_log_operations_gas_consumption" {
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
         
-        const result = ctx.vm.table.execute(0, interpreter, state, opcode);
+        const result = ctx.vm.table.execute(interpreter, state, opcode);
         
         if (result) |_| {
             // Success - verify gas consumption makes sense
@@ -589,7 +589,7 @@ test "fuzz_log_memory_expansion_stress" {
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
         
-        const result = ctx.vm.table.execute(0, interpreter, state, opcode);
+        const result = ctx.vm.table.execute(interpreter, state, opcode);
         
         if (result) |_| {
             // Success - verify memory expanded
@@ -659,7 +659,7 @@ test "fuzz_log_operations_random_stress" {
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
         
-        const result = ctx.vm.table.execute(0, interpreter, state, opcode);
+        const result = ctx.vm.table.execute(interpreter, state, opcode);
         
         // Validate expected behavior
         if (is_static) {
@@ -727,7 +727,7 @@ test "fuzz_sequential_log_operations" {
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
         
-        const result = ctx.vm.table.execute(0, interpreter, state, opcode);
+        const result = ctx.vm.table.execute(interpreter, state, opcode);
         
         if (result) |_| {
             expected_logs += 1;

@@ -54,7 +54,7 @@ test "fuzz_comparison_lt_operations" {
     
     const interpreter: evm.Operation.Interpreter = &ctx.vm;
     const state: evm.Operation.State = &ctx.frame;
-    _ = try ctx.vm.table.execute(0, interpreter, state, 0x10);
+    _ = try ctx.vm.table.execute(interpreter, state, 0x10);
     
     const result = try ctx.frame.stack.pop();
     try testing.expectEqual(@as(u256, 1), result); // true
@@ -71,7 +71,7 @@ test "fuzz_comparison_eq_operations" {
     
     const interpreter: evm.Operation.Interpreter = &ctx.vm;
     const state: evm.Operation.State = &ctx.frame;
-    _ = try ctx.vm.table.execute(0, interpreter, state, 0x14);
+    _ = try ctx.vm.table.execute(interpreter, state, 0x14);
     
     const result = try ctx.frame.stack.pop();
     try testing.expectEqual(@as(u256, 1), result); // true
@@ -87,14 +87,14 @@ test "fuzz_comparison_iszero_operations" {
     
     const interpreter: evm.Operation.Interpreter = &ctx.vm;
     const state: evm.Operation.State = &ctx.frame;
-    _ = try ctx.vm.table.execute(0, interpreter, state, 0x15);
+    _ = try ctx.vm.table.execute(interpreter, state, 0x15);
     
     const result = try ctx.frame.stack.pop();
     try testing.expectEqual(@as(u256, 1), result); // true
     
     // Test ISZERO operation with non-zero
     try ctx.frame.stack.append(42);
-    _ = try ctx.vm.table.execute(0, interpreter, state, 0x15);
+    _ = try ctx.vm.table.execute(interpreter, state, 0x15);
     
     const result2 = try ctx.frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result2); // false

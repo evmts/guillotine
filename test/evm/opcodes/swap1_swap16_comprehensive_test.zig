@@ -57,11 +57,11 @@ test "SWAP1 (0x90): Swap top two stack items" {
 
     // Execute PUSH1 0x01
     frame.pc = 0;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 2;
 
     // Execute PUSH1 0x02
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 4;
 
     // Stack should be [0x01, 0x02] (top is 0x02)
@@ -70,7 +70,7 @@ test "SWAP1 (0x90): Swap top two stack items" {
     try testing.expectEqual(@as(u256, 0x01), frame.stack.data[frame.stack.size - 2]);
 
     // Execute SWAP1
-    const result = try evm.table.execute(0, interpreter, state, 0x90);
+    const result = try evm.table.execute(interpreter, state, 0x90);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Stack should now be [0x02, 0x01] (swapped)
@@ -124,7 +124,7 @@ test "SWAP2 (0x91): Swap 1st and 3rd stack items" {
     try frame.stack.append(0x33); // Top
 
     // Execute SWAP2
-    const result = try evm.table.execute(0, interpreter, state, 0x91);
+    const result = try evm.table.execute(interpreter, state, 0x91);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Stack should now be [0x33, 0x22, 0x11] -> [0x11, 0x22, 0x33]
@@ -180,7 +180,7 @@ test "SWAP3-SWAP5: Various swaps" {
 
     // Execute SWAP3 (swap top with 4th)
     frame.pc = 0;
-    var result = try evm.table.execute(0, interpreter, state, 0x92);
+    var result = try evm.table.execute(interpreter, state, 0x92);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
     // Stack was: [0x10, 0x20, 0x30, 0x40, 0x50, 0x60]
     // SWAP3 swaps top (0x60) with 4th from top (0x30)
@@ -191,7 +191,7 @@ test "SWAP3-SWAP5: Various swaps" {
     // Execute SWAP4 (swap new top with 5th)
     frame.pc = 1;
     // Before SWAP4
-    result = try evm.table.execute(0, interpreter, state, 0x93);
+    result = try evm.table.execute(interpreter, state, 0x93);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
     // After SWAP4
     // Stack was: [0x10, 0x20, 0x60, 0x40, 0x50, 0x30]
@@ -203,7 +203,7 @@ test "SWAP3-SWAP5: Various swaps" {
     // Execute SWAP5 (swap new top with 6th)
     frame.pc = 2;
     // Before SWAP5
-    result = try evm.table.execute(0, interpreter, state, 0x94);
+    result = try evm.table.execute(interpreter, state, 0x94);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
     // After SWAP5
     // Stack was: [0x10, 0x30, 0x60, 0x40, 0x50, 0x20]
@@ -259,29 +259,29 @@ test "SWAP6-SWAP10: Mid-range swaps" {
 
     // Execute SWAP6
     frame.pc = 0;
-    const result6 = try evm.table.execute(0, interpreter, state, 0x95);
+    const result6 = try evm.table.execute(interpreter, state, 0x95);
     try testing.expectEqual(@as(usize, 1), result6.bytes_consumed);
     try testing.expectEqual(@as(u256, 0x104), frame.stack.data[frame.stack.size - 1]); // Was at position 6
     try testing.expectEqual(@as(u256, 0x10A), frame.stack.data[frame.stack.size - 7]); // Was at top
 
     // Execute SWAP7
     frame.pc = 1;
-    _ = try evm.table.execute(0, interpreter, state, 0x96);
+    _ = try evm.table.execute(interpreter, state, 0x96);
     try testing.expectEqual(@as(u256, 0x103), frame.stack.data[frame.stack.size - 1]); // Was at position 7
 
     // Execute SWAP8
     frame.pc = 2;
-    _ = try evm.table.execute(0, interpreter, state, 0x97);
+    _ = try evm.table.execute(interpreter, state, 0x97);
     try testing.expectEqual(@as(u256, 0x102), frame.stack.data[frame.stack.size - 1]); // Was at position 8
 
     // Execute SWAP9
     frame.pc = 3;
-    _ = try evm.table.execute(0, interpreter, state, 0x98);
+    _ = try evm.table.execute(interpreter, state, 0x98);
     try testing.expectEqual(@as(u256, 0x101), frame.stack.data[frame.stack.size - 1]); // Was at position 9
 
     // Execute SWAP10
     frame.pc = 4;
-    _ = try evm.table.execute(0, interpreter, state, 0x99);
+    _ = try evm.table.execute(interpreter, state, 0x99);
     try testing.expectEqual(@as(u256, 0x100), frame.stack.data[frame.stack.size - 1]); // Was at position 10 (bottom)
 }
 
@@ -331,33 +331,33 @@ test "SWAP11-SWAP16: High-range swaps" {
 
     // Execute SWAP11
     frame.pc = 0;
-    _ = try evm.table.execute(0, interpreter, state, 0x9A);
+    _ = try evm.table.execute(interpreter, state, 0x9A);
     try testing.expectEqual(@as(u256, 0x205), frame.stack.data[frame.stack.size - 1]); // Was at position 11
     try testing.expectEqual(@as(u256, 0x210), frame.stack.data[frame.stack.size - 12]); // Was at top
 
     // Execute SWAP12
     frame.pc = 1;
-    _ = try evm.table.execute(0, interpreter, state, 0x9B);
+    _ = try evm.table.execute(interpreter, state, 0x9B);
     try testing.expectEqual(@as(u256, 0x204), frame.stack.data[frame.stack.size - 1]); // Was at position 12
 
     // Execute SWAP13
     frame.pc = 2;
-    _ = try evm.table.execute(0, interpreter, state, 0x9C);
+    _ = try evm.table.execute(interpreter, state, 0x9C);
     try testing.expectEqual(@as(u256, 0x203), frame.stack.data[frame.stack.size - 1]); // Was at position 13
 
     // Execute SWAP14
     frame.pc = 3;
-    _ = try evm.table.execute(0, interpreter, state, 0x9D);
+    _ = try evm.table.execute(interpreter, state, 0x9D);
     try testing.expectEqual(@as(u256, 0x202), frame.stack.data[frame.stack.size - 1]); // Was at position 14
 
     // Execute SWAP15
     frame.pc = 4;
-    _ = try evm.table.execute(0, interpreter, state, 0x9E);
+    _ = try evm.table.execute(interpreter, state, 0x9E);
     try testing.expectEqual(@as(u256, 0x201), frame.stack.data[frame.stack.size - 1]); // Was at position 15
 
     // Execute SWAP16
     frame.pc = 5;
-    _ = try evm.table.execute(0, interpreter, state, 0x9F);
+    _ = try evm.table.execute(interpreter, state, 0x9F);
     try testing.expectEqual(@as(u256, 0x200), frame.stack.data[frame.stack.size - 1]); // Was at position 16 (bottom)
     try testing.expectEqual(@as(u256, 0x201), frame.stack.data[frame.stack.size - 17]); // Previous top value
 }
@@ -410,7 +410,7 @@ test "SWAP16 (0x9F): Swap with 16th position (maximum)" {
     try testing.expectEqual(@as(u256, 0xA10), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xA00), frame.stack.data[frame.stack.size - 17]);
 
-    const result = try evm.table.execute(0, interpreter, state, 0x9F);
+    const result = try evm.table.execute(interpreter, state, 0x9F);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // After SWAP16: positions should be swapped
@@ -475,7 +475,7 @@ test "SWAP1-SWAP16: Gas consumption" {
         const gas_before = frame.gas_remaining;
 
         const opcode = @as(u8, @intCast(0x90 + i));
-        const result = try evm.table.execute(0, interpreter, state, opcode);
+        const result = try evm.table.execute(interpreter, state, opcode);
 
         // All SWAP operations cost 3 gas (GasFastestStep)
         const gas_used = gas_before - frame.gas_remaining;
@@ -531,25 +531,25 @@ test "SWAP operations: Stack underflow" {
 
     // Empty stack - SWAP1 should fail (needs 2 items)
     frame.pc = 0;
-    var result = evm.table.execute(0, interpreter, state, 0x90);
+    var result = evm.table.execute(interpreter, state, 0x90);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
     // Push 1 value
     try frame.stack.append(0x42);
 
     // SWAP1 still fails (needs 2 items)
-    result = evm.table.execute(0, interpreter, state, 0x90);
+    result = evm.table.execute(interpreter, state, 0x90);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
     // Push another value
     try frame.stack.append(0x43);
 
     // SWAP1 should succeed now (2 items)
-    _ = try evm.table.execute(0, interpreter, state, 0x90);
+    _ = try evm.table.execute(interpreter, state, 0x90);
 
     // SWAP2 should fail (needs 3 items, only have 2)
     frame.pc = 1;
-    result = evm.table.execute(0, interpreter, state, 0x91);
+    result = evm.table.execute(interpreter, state, 0x91);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
     // Push more values
@@ -559,11 +559,11 @@ test "SWAP operations: Stack underflow" {
 
     // SWAP6 should succeed (have 7 items, need 7)
     frame.pc = 2;
-    _ = try evm.table.execute(0, interpreter, state, 0x95);
+    _ = try evm.table.execute(interpreter, state, 0x95);
 
     // SWAP16 should fail (have 7 items, need 17)
     frame.pc = 3;
-    result = evm.table.execute(0, interpreter, state, 0x9F);
+    result = evm.table.execute(interpreter, state, 0x9F);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -617,7 +617,7 @@ test "SWAP operations: Sequential swaps" {
     // Execute PUSH operations
     for (0..4) |i| {
         frame.pc = i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
 
     // Stack: [0x01, 0x02, 0x03, 0x04]
@@ -625,21 +625,21 @@ test "SWAP operations: Sequential swaps" {
 
     // Execute first SWAP1
     frame.pc = 8;
-    _ = try evm.table.execute(0, interpreter, state, 0x90);
+    _ = try evm.table.execute(interpreter, state, 0x90);
     // Stack: [0x01, 0x02, 0x04, 0x03]
     try testing.expectEqual(@as(u256, 0x03), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0x04), frame.stack.data[frame.stack.size - 2]);
 
     // Execute SWAP2
     frame.pc = 9;
-    _ = try evm.table.execute(0, interpreter, state, 0x91);
+    _ = try evm.table.execute(interpreter, state, 0x91);
     // Stack: [0x01, 0x03, 0x04, 0x02]
     try testing.expectEqual(@as(u256, 0x02), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0x03), frame.stack.data[frame.stack.size - 3]);
 
     // Execute second SWAP1
     frame.pc = 10;
-    _ = try evm.table.execute(0, interpreter, state, 0x90);
+    _ = try evm.table.execute(interpreter, state, 0x90);
     // Stack: [0x01, 0x03, 0x02, 0x04]
     try testing.expectEqual(@as(u256, 0x04), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0x02), frame.stack.data[frame.stack.size - 2]);
@@ -695,31 +695,31 @@ test "SWAP operations: Pattern verification" {
 
     // SWAP1: swap top (0xFF10) with second (0xFF0F)
     frame.pc = 0;
-    _ = try evm.table.execute(0, interpreter, state, 0x90);
+    _ = try evm.table.execute(interpreter, state, 0x90);
     try testing.expectEqual(@as(u256, 0xFF0F), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xFF10), frame.stack.data[frame.stack.size - 2]);
 
     // SWAP5: swap new top (0xFF0F) with 6th position (0xFF0B)
     frame.pc = 1;
-    _ = try evm.table.execute(0, interpreter, state, 0x94);
+    _ = try evm.table.execute(interpreter, state, 0x94);
     try testing.expectEqual(@as(u256, 0xFF0B), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xFF0F), frame.stack.data[frame.stack.size - 6]);
 
     // SWAP9: swap new top (0xFF0B) with 10th position (0xFF07)
     frame.pc = 2;
-    _ = try evm.table.execute(0, interpreter, state, 0x98);
+    _ = try evm.table.execute(interpreter, state, 0x98);
     try testing.expectEqual(@as(u256, 0xFF07), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xFF0B), frame.stack.data[frame.stack.size - 10]);
 
     // SWAP13: swap new top (0xFF07) with 14th position (0xFF03)
     frame.pc = 3;
-    _ = try evm.table.execute(0, interpreter, state, 0x9C);
+    _ = try evm.table.execute(interpreter, state, 0x9C);
     try testing.expectEqual(@as(u256, 0xFF03), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xFF07), frame.stack.data[frame.stack.size - 14]);
 
     // SWAP16: swap new top (0xFF03) with 17th position (0xFF00)
     frame.pc = 4;
-    _ = try evm.table.execute(0, interpreter, state, 0x9F);
+    _ = try evm.table.execute(interpreter, state, 0x9F);
     try testing.expectEqual(@as(u256, 0xFF00), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xFF03), frame.stack.data[frame.stack.size - 17]);
 }
@@ -768,7 +768,7 @@ test "SWAP operations: Boundary test with exact stack size" {
     try frame.stack.append(0xBB);
 
     frame.pc = 0;
-    _ = try evm.table.execute(0, interpreter, state, 0x90);
+    _ = try evm.table.execute(interpreter, state, 0x90);
     try testing.expectEqual(@as(u256, 0xAA), frame.stack.data[frame.stack.size - 1]);
     try testing.expectEqual(@as(u256, 0xBB), frame.stack.data[frame.stack.size - 2]);
 
@@ -781,7 +781,7 @@ test "SWAP operations: Boundary test with exact stack size" {
     }
 
     frame.pc = 1;
-    _ = try evm.table.execute(0, interpreter, state, 0x9F);
+    _ = try evm.table.execute(interpreter, state, 0x9F);
     try testing.expectEqual(@as(u256, 1), frame.stack.data[frame.stack.size - 1]); // Swapped with bottom
     try testing.expectEqual(@as(u256, 17), frame.stack.data[frame.stack.size - 17]); // Was top
 
@@ -790,7 +790,7 @@ test "SWAP operations: Boundary test with exact stack size" {
     for (1..17) |i| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
-    const result = evm.table.execute(0, interpreter, state, 0x9F);
+    const result = evm.table.execute(interpreter, state, 0x9F);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -841,7 +841,7 @@ test "SWAP operations: No side effects" {
     try frame.stack.append(0x55);
 
     // Execute SWAP3
-    _ = try evm.table.execute(0, interpreter, state, 0x92);
+    _ = try evm.table.execute(interpreter, state, 0x92);
 
     // Verify only positions 0 and 3 were swapped
     try testing.expectEqual(@as(u256, 0x22), frame.stack.data[frame.stack.size - 1]); // Was at position 3

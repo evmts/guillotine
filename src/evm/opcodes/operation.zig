@@ -41,14 +41,6 @@ const Memory = @import("../memory/memory.zig");
 /// ```
 pub const ExecutionResult = @import("../execution/execution_result.zig");
 
-/// Direct pointer to the VM instance providing state and context.
-/// Simplified from a single-variant union to a direct pointer type.
-pub const Interpreter = *@import("../evm.zig");
-
-/// Direct pointer to the frame context with transaction and execution environment.
-/// Simplified from a single-variant union to a direct pointer type.
-pub const State = *@import("../frame/frame_fat.zig");
-
 /// Function signature for opcode execution.
 ///
 /// Each opcode implements this signature to perform its operation.
@@ -61,7 +53,7 @@ pub const State = *@import("../frame/frame_fat.zig");
 /// @param vm VM instance for state access
 /// @param frame Execution frame with all state
 /// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = *const fn (vm: Interpreter, frame: State) ExecutionError.Error!ExecutionResult;
+pub const ExecutionFunc = *const fn (vm: *@import("../evm.zig"), frame: *@import("../frame/frame_fat.zig")) ExecutionError.Error!ExecutionResult;
 
 /// Function signature for dynamic gas calculation.
 ///
@@ -70,14 +62,14 @@ pub const ExecutionFunc = *const fn (vm: Interpreter, frame: State) ExecutionErr
 /// - Operation parameters (e.g., memory expansion size)
 /// - Network rules (e.g., EIP-2929 access lists)
 ///
-/// @param interpreter VM interpreter context
-/// @param state Execution state
+/// @param vm VM instance context
+/// @param frame Execution frame
 /// @param stack Current stack for parameter inspection
 /// @param memory Current memory for size calculations
 /// @param requested_size Additional memory requested by operation
 /// @return Dynamic gas cost to add to constant gas
 /// @throws OutOfGas if gas calculation overflows
-pub const GasFunc = *const fn (interpreter: Interpreter, state: State, stack: *Stack, memory: *Memory, requested_size: u64) error{OutOfGas}!u64;
+pub const GasFunc = *const fn (vm: *@import("../evm.zig"), frame: *@import("../frame/frame_fat.zig"), stack: *Stack, memory: *Memory, requested_size: u64) error{OutOfGas}!u64;
 
 /// Function signature for memory size calculation.
 ///
@@ -162,7 +154,7 @@ pub const NULL_OPERATION = Operation{
 ///
 /// Consumes all remaining gas and returns InvalidOpcode error.
 /// This ensures undefined opcodes cannot be used for computation.
-fn undefined_execute(vm: Interpreter, frame: State) ExecutionError.Error!ExecutionResult {
+fn undefined_execute(vm: *@import("../evm.zig"), frame: *@import("../frame/frame_fat.zig")) ExecutionError.Error!ExecutionResult {
     _ = vm;
     _ = frame;
     return ExecutionError.Error.InvalidOpcode;

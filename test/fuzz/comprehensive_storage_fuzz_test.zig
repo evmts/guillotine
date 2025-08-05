@@ -98,11 +98,11 @@ test "fuzz_sstore_storage_write_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = *evm.Operation.State = @ptrCast(&ctx.frame);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
         
         // Verify the value was stored by reading it back with SLOAD
         try ctx.frame.stack.append(case.key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.value, result);
@@ -139,7 +139,7 @@ test "fuzz_sload_storage_read_edge_cases" {
         }
         
         try ctx.frame.stack.append(key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(@as(u256, 0), result);
@@ -172,7 +172,7 @@ test "fuzz_storage_persistence_and_overwriting" {
         
         try ctx.frame.stack.append(item.key);
         try ctx.frame.stack.append(item.value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
     }
     
     // Verify all values are stored correctly
@@ -183,7 +183,7 @@ test "fuzz_storage_persistence_and_overwriting" {
         }
         
         try ctx.frame.stack.append(item.key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(item.value, result);
@@ -204,7 +204,7 @@ test "fuzz_storage_persistence_and_overwriting" {
         
         try ctx.frame.stack.append(item.key);
         try ctx.frame.stack.append(item.value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
     }
     
     // Verify overwrites and unchanged values
@@ -215,7 +215,7 @@ test "fuzz_storage_persistence_and_overwriting" {
         }
         
         try ctx.frame.stack.append(item.key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         
         const result = try ctx.frame.stack.pop();
         
@@ -280,12 +280,12 @@ test "fuzz_tstore_transient_storage_edge_cases" {
         var state = *evm.Operation.State = @ptrCast(&ctx.frame);
         
         // Try TSTORE - might fail if not supported in this EVM version
-        const result = ctx.vm.table.execute(0, interpreter, state, 0x5D); // TSTORE
+        const result = ctx.vm.table.execute(interpreter, state, 0x5D); // TSTORE
         
         if (result) |_| {
             // If TSTORE succeeded, verify the value was stored by reading it back with TLOAD
             try ctx.frame.stack.append(case.key);
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x5C); // TLOAD
+            _ = try ctx.vm.table.execute(interpreter, state, 0x5C); // TLOAD
             
             const loaded_value = try ctx.frame.stack.pop();
             try testing.expectEqual(case.value, loaded_value);
@@ -328,7 +328,7 @@ test "fuzz_tload_transient_storage_read_edge_cases" {
         try ctx.frame.stack.append(key);
         
         // Try TLOAD - might fail if not supported in this EVM version
-        const result = ctx.vm.table.execute(0, interpreter, state, 0x5C); // TLOAD
+        const result = ctx.vm.table.execute(interpreter, state, 0x5C); // TLOAD
         
         if (result) |_| {
             const loaded_value = try ctx.frame.stack.pop();
@@ -364,7 +364,7 @@ test "fuzz_storage_separation_persistent_vs_transient" {
         
         try ctx.frame.stack.append(test_key);
         try ctx.frame.stack.append(persistent_value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
     }
     
     // Store in transient storage (if supported)
@@ -377,7 +377,7 @@ test "fuzz_storage_separation_persistent_vs_transient" {
         try ctx.frame.stack.append(test_key);
         try ctx.frame.stack.append(transient_value);
         
-        const result = ctx.vm.table.execute(0, interpreter, state, 0x5D); // TSTORE
+        const result = ctx.vm.table.execute(interpreter, state, 0x5D); // TSTORE
         
         if (result) |_| {
             // If TSTORE succeeded, verify separation
@@ -390,7 +390,7 @@ test "fuzz_storage_separation_persistent_vs_transient" {
                 }
                 
                 try ctx.frame.stack.append(test_key);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+                _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
                 
                 const persistent_result = try ctx.frame.stack.pop();
                 try testing.expectEqual(persistent_value, persistent_result);
@@ -404,7 +404,7 @@ test "fuzz_storage_separation_persistent_vs_transient" {
                 }
                 
                 try ctx.frame.stack.append(test_key);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x5C); // TLOAD
+                _ = try ctx.vm.table.execute(interpreter, state, 0x5C); // TLOAD
                 
                 const transient_result = try ctx.frame.stack.pop();
                 try testing.expectEqual(transient_value, transient_result);
@@ -448,7 +448,7 @@ test "fuzz_storage_operations_stress_test" {
                 // SSTORE
                 try ctx.frame.stack.append(key);
                 try ctx.frame.stack.append(value);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+                _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
                 
                 // Track the stored value
                 try stored_values.put(key, value);
@@ -456,7 +456,7 @@ test "fuzz_storage_operations_stress_test" {
             1 => {
                 // SLOAD
                 try ctx.frame.stack.append(key);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+                _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
                 const result = try ctx.frame.stack.pop();
                 
                 // Verify result matches what we expect
@@ -476,7 +476,7 @@ test "fuzz_storage_operations_stress_test" {
         }
         
         try ctx.frame.stack.append(entry.key_ptr.*);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         const result = try ctx.frame.stack.pop();
         
         try testing.expectEqual(entry.value_ptr.*, result);
@@ -503,7 +503,7 @@ test "fuzz_storage_zero_transitions" {
         }
         
         try ctx.frame.stack.append(test_key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         const initial_value = try ctx.frame.stack.pop();
         try testing.expectEqual(@as(u256, 0), initial_value);
     }
@@ -517,7 +517,7 @@ test "fuzz_storage_zero_transitions" {
         
         try ctx.frame.stack.append(test_key);
         try ctx.frame.stack.append(test_value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
     }
     
     // Verify the value was stored
@@ -528,7 +528,7 @@ test "fuzz_storage_zero_transitions" {
         }
         
         try ctx.frame.stack.append(test_key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         const stored_value = try ctx.frame.stack.pop();
         try testing.expectEqual(test_value, stored_value);
     }
@@ -543,7 +543,7 @@ test "fuzz_storage_zero_transitions" {
         
         try ctx.frame.stack.append(test_key);
         try ctx.frame.stack.append(new_value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
     }
     
     // Verify the new value
@@ -554,7 +554,7 @@ test "fuzz_storage_zero_transitions" {
         }
         
         try ctx.frame.stack.append(test_key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         const updated_value = try ctx.frame.stack.pop();
         try testing.expectEqual(new_value, updated_value);
     }
@@ -568,7 +568,7 @@ test "fuzz_storage_zero_transitions" {
         
         try ctx.frame.stack.append(test_key);
         try ctx.frame.stack.append(0);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x55); // SSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x55); // SSTORE
     }
     
     // Verify the value is now zero
@@ -579,7 +579,7 @@ test "fuzz_storage_zero_transitions" {
         }
         
         try ctx.frame.stack.append(test_key);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x54); // SLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x54); // SLOAD
         const final_value = try ctx.frame.stack.pop();
         try testing.expectEqual(@as(u256, 0), final_value);
     }

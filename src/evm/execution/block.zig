@@ -2,11 +2,12 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 
-pub fn op_blockhash(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_blockhash(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     const block_number = try frame.stack_pop();
@@ -32,7 +33,7 @@ pub fn op_blockhash(vm: Operation.Interpreter, frame: Operation.State) Execution
     return Operation.ExecutionResult{};
 }
 
-pub fn op_coinbase(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_coinbase(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     try frame.stack_push(primitives.Address.to_u256(frame.block_context.block_coinbase));
@@ -40,7 +41,7 @@ pub fn op_coinbase(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_timestamp(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_timestamp(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     try frame.stack_push(@as(u256, @intCast(frame.block_context.block_timestamp)));
@@ -48,7 +49,7 @@ pub fn op_timestamp(vm: Operation.Interpreter, frame: Operation.State) Execution
     return Operation.ExecutionResult{};
 }
 
-pub fn op_number(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_number(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     try frame.stack_push(@as(u256, @intCast(frame.block_context.block_number)));
@@ -56,7 +57,7 @@ pub fn op_number(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_difficulty(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_difficulty(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Get difficulty/prevrandao from block context
@@ -66,12 +67,12 @@ pub fn op_difficulty(vm: Operation.Interpreter, frame: Operation.State) Executio
     return Operation.ExecutionResult{};
 }
 
-pub fn op_prevrandao(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_prevrandao(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     // Same as difficulty post-merge
     return op_difficulty(vm, frame);
 }
 
-pub fn op_gaslimit(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_gaslimit(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     try frame.stack_push(@as(u256, @intCast(frame.block_context.block_gas_limit)));
@@ -79,7 +80,7 @@ pub fn op_gaslimit(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_basefee(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_basefee(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Get base fee from block context
@@ -89,7 +90,7 @@ pub fn op_basefee(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_blobhash(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_blobhash(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     const index = try frame.stack_pop();
@@ -106,7 +107,7 @@ pub fn op_blobhash(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_blobbasefee(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_blobbasefee(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Get blob base fee from block context
@@ -156,7 +157,7 @@ test "BLOCKHASH: Returns hash for valid recent blocks" {
     
     // Test block within range (999 blocks ago)
     try frame.stack_push(999);
-    _ = try op_blockhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blockhash(&vm, &frame);
     const recent_hash = try frame.stack_pop();
     try testing.expect(recent_hash != 0); // Should return non-zero hash
 }
@@ -194,7 +195,7 @@ test "BLOCKHASH: Returns zero for current block" {
     
     // Test current block
     try frame.stack_push(1000);
-    _ = try op_blockhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blockhash(&vm, &frame);
     const current_hash = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), current_hash);
 }
@@ -232,7 +233,7 @@ test "BLOCKHASH: Returns zero for future blocks" {
     
     // Test future block
     try frame.stack_push(1001);
-    _ = try op_blockhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blockhash(&vm, &frame);
     const future_hash = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), future_hash);
 }
@@ -270,7 +271,7 @@ test "BLOCKHASH: Returns zero for blocks beyond 256 limit" {
     
     // Test block beyond 256 limit
     try frame.stack_push(743); // 1000 - 743 = 257 blocks ago
-    _ = try op_blockhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blockhash(&vm, &frame);
     const old_hash = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), old_hash);
 }
@@ -308,7 +309,7 @@ test "BLOCKHASH: Returns zero for block number 0" {
     
     // Test block number 0 (genesis block)
     try frame.stack_push(0);
-    _ = try op_blockhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blockhash(&vm, &frame);
     const genesis_hash = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), genesis_hash);
 }
@@ -345,7 +346,7 @@ test "COINBASE: Returns correct coinbase address" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_coinbase(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_coinbase(&vm, &frame);
     const result = try frame.stack_pop();
     const expected = Address.to_u256(test_coinbase);
     try testing.expectEqual(expected, result);
@@ -383,7 +384,7 @@ test "TIMESTAMP: Returns correct timestamp" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_timestamp(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_timestamp(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, test_timestamp), result);
 }
@@ -420,7 +421,7 @@ test "NUMBER: Returns correct block number" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_number(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_number(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, test_block_number), result);
 }
@@ -457,7 +458,7 @@ test "DIFFICULTY: Returns correct difficulty value" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_difficulty(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_difficulty(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(test_difficulty, result);
 }
@@ -494,7 +495,7 @@ test "PREVRANDAO: Returns same as difficulty" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_prevrandao(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_prevrandao(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(test_prevrandao, result);
 }
@@ -531,7 +532,7 @@ test "GASLIMIT: Returns correct gas limit" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_gaslimit(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_gaslimit(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, test_gas_limit), result);
 }
@@ -568,7 +569,7 @@ test "BASEFEE: Returns correct base fee" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_basefee(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_basefee(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(test_base_fee, result);
 }
@@ -611,13 +612,13 @@ test "BLOBHASH: Returns correct blob hash for valid index" {
     
     // Test first blob hash
     try frame.stack_push(0);
-    _ = try op_blobhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blobhash(&vm, &frame);
     const result1 = try frame.stack_pop();
     try testing.expectEqual(test_blob_hashes[0], result1);
     
     // Test second blob hash
     try frame.stack_push(1);
-    _ = try op_blobhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blobhash(&vm, &frame);
     const result2 = try frame.stack_pop();
     try testing.expectEqual(test_blob_hashes[1], result2);
 }
@@ -658,7 +659,7 @@ test "BLOBHASH: Returns zero for out of bounds index" {
     
     // Test out of bounds index
     try frame.stack_push(1);
-    _ = try op_blobhash(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blobhash(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result);
 }
@@ -695,7 +696,7 @@ test "BLOBBASEFEE: Returns correct blob base fee" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, Address.ZERO, &.{});
     defer frame.deinit();
     
-    _ = try op_blobbasefee(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blobbasefee(&vm, &frame);
     const result = try frame.stack_pop();
     try testing.expectEqual(test_blob_base_fee, result);
 }
@@ -739,7 +740,7 @@ test "BLOCKHASH: Fuzz with random block numbers" {
     for (0..100) |_| {
         const block_num = random.int(u256);
         try frame.stack_push(block_num);
-        _ = try op_blockhash(0, @ptrCast(&vm), @ptrCast(&frame));
+        _ = try op_blockhash(&vm, &frame);
         const result = try frame.stack_pop();
         
         // Verify invariants
@@ -786,31 +787,31 @@ test "Block operations: All values are 256-bit" {
     defer frame.deinit();
     
     // Test all operations return valid u256 values
-    _ = try op_coinbase(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_coinbase(&vm, &frame);
     const coinbase_result = try frame.stack_pop();
     try testing.expect(@TypeOf(coinbase_result) == u256);
     
-    _ = try op_timestamp(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_timestamp(&vm, &frame);
     const timestamp_result = try frame.stack_pop();
     try testing.expect(@TypeOf(timestamp_result) == u256);
     
-    _ = try op_number(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_number(&vm, &frame);
     const number_result = try frame.stack_pop();
     try testing.expect(@TypeOf(number_result) == u256);
     
-    _ = try op_difficulty(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_difficulty(&vm, &frame);
     const difficulty_result = try frame.stack_pop();
     try testing.expect(@TypeOf(difficulty_result) == u256);
     
-    _ = try op_gaslimit(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_gaslimit(&vm, &frame);
     const gaslimit_result = try frame.stack_pop();
     try testing.expect(@TypeOf(gaslimit_result) == u256);
     
-    _ = try op_basefee(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_basefee(&vm, &frame);
     const basefee_result = try frame.stack_pop();
     try testing.expect(@TypeOf(basefee_result) == u256);
     
-    _ = try op_blobbasefee(0, @ptrCast(&vm), @ptrCast(&frame));
+    _ = try op_blobbasefee(&vm, &frame);
     const blobbasefee_result = try frame.stack_pop();
     try testing.expect(@TypeOf(blobbasefee_result) == u256);
 }
@@ -833,16 +834,14 @@ test "BLOCKHASH consistency: same block number gives same hash" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
 
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
 
     // Get hash for block 900 twice
     try frame.stack_push(900);
-    _ = try op_blockhash(0, interpreter_ptr, state_ptr);
+    _ = try op_blockhash(&vm, &frame);
     const hash1 = try frame.stack_pop();
 
     try frame.stack_push(900);
-    _ = try op_blockhash(0, interpreter_ptr, state_ptr);
+    _ = try op_blockhash(&vm, &frame);
     const hash2 = try frame.stack_pop();
 
     // Should be consistent
@@ -869,9 +868,7 @@ test "BASEFEE edge case: zero base fee" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_basefee(0, interpreter_ptr, state_ptr);
+    _ = try op_basefee(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -896,9 +893,7 @@ test "BASEFEE edge case: maximum base fee" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_basefee(0, interpreter_ptr, state_ptr);
+    _ = try op_basefee(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(std.math.maxInt(u256), result);
@@ -927,9 +922,7 @@ test "BLOBHASH empty blob hashes array" {
     // Test index 0 (should return 0 for empty array)
     try frame.stack_push(0);
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_blobhash(0, interpreter_ptr, state_ptr);
+    _ = try op_blobhash(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -954,9 +947,7 @@ test "BLOBBASEFEE edge case: zero blob base fee" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_blobbasefee(0, interpreter_ptr, state_ptr);
+    _ = try op_blobbasefee(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -981,9 +972,7 @@ test "BLOBBASEFEE edge case: maximum blob base fee" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_blobbasefee(0, interpreter_ptr, state_ptr);
+    _ = try op_blobbasefee(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(std.math.maxInt(u256), result);
@@ -1008,9 +997,7 @@ test "GASLIMIT edge case: zero gas limit" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_gaslimit(0, interpreter_ptr, state_ptr);
+    _ = try op_gaslimit(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -1035,9 +1022,7 @@ test "GASLIMIT edge case: maximum gas limit" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_gaslimit(0, interpreter_ptr, state_ptr);
+    _ = try op_gaslimit(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, std.math.maxInt(u64)), result);
@@ -1062,9 +1047,7 @@ test "DIFFICULTY zero difficulty" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_difficulty(0, interpreter_ptr, state_ptr);
+    _ = try op_difficulty(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -1090,15 +1073,13 @@ test "PREVRANDAO and DIFFICULTY are equivalent" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
     
     // Test DIFFICULTY
-    _ = try op_difficulty(0, interpreter_ptr, state_ptr);
+    _ = try op_difficulty(&vm, &frame);
     const difficulty_result = try frame.stack_pop();
     
     // Test PREVRANDAO
-    _ = try op_prevrandao(0, interpreter_ptr, state_ptr);
+    _ = try op_prevrandao(&vm, &frame);
     const prevrandao_result = try frame.stack_pop();
     
     // Should return the same value
@@ -1125,9 +1106,7 @@ test "COINBASE edge case: zero address" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_coinbase(0, interpreter_ptr, state_ptr);
+    _ = try op_coinbase(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -1153,9 +1132,7 @@ test "COINBASE edge case: maximum address" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_coinbase(0, interpreter_ptr, state_ptr);
+    _ = try op_coinbase(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(primitives.Address.to_u256(max_address), result);
@@ -1180,9 +1157,7 @@ test "TIMESTAMP edge case: zero timestamp" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_timestamp(0, interpreter_ptr, state_ptr);
+    _ = try op_timestamp(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, 0), result);
@@ -1207,9 +1182,7 @@ test "NUMBER edge case: maximum block number" {
     var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
     defer frame.deinit();
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_number(0, interpreter_ptr, state_ptr);
+    _ = try op_number(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(@as(u256, std.math.maxInt(u64)), result);
@@ -1245,9 +1218,7 @@ test "BLOBHASH edge case: maximum valid index" {
     // Test last valid index (5)
     try frame.stack_push(5);
     
-    const interpreter_ptr: Operation.Interpreter = @ptrCast(&vm);
-    const state_ptr: Operation.State = @ptrCast(&frame);
-    _ = try op_blobhash(0, interpreter_ptr, state_ptr);
+    _ = try op_blobhash(&vm, &frame);
 
     const result = try frame.stack_pop();
     try std.testing.expectEqual(max_blob_hashes[5], result);

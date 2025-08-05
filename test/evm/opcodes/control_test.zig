@@ -46,7 +46,7 @@ test "Control: STOP halts execution" {
     const state: Evm.Operation.State = &frame;
 
     // Execute STOP opcode - should return STOP error
-    const result = evm.table.execute(0, interpreter, state, 0x00);
+    const result = evm.table.execute(interpreter, state, 0x00);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Gas should not be consumed by the opcode itself (jump table handles base gas)
@@ -96,26 +96,26 @@ test "Control: JUMP basic operations" {
 
     // Test 1: Valid jump to JUMPDEST
     try frame.stack.append(5);
-    _ = try evm.table.execute(0, interpreter, state, 0x56);
+    _ = try evm.table.execute(interpreter, state, 0x56);
     try testing.expectEqual(@as(usize, 5), frame.pc);
     try testing.expectEqual(@as(usize, 0), frame.stack.size);
 
     // Test 2: Invalid jump (not a JUMPDEST)
     frame.pc = 0; // Reset PC
     try frame.stack.append(3);
-    const result = evm.table.execute(0, interpreter, state, 0x56);
+    const result = evm.table.execute(interpreter, state, 0x56);
     try testing.expectError(ExecutionError.Error.InvalidJump, result);
 
     // Test 3: Jump out of bounds
     frame.stack.clear();
     try frame.stack.append(100);
-    const result2 = evm.table.execute(0, interpreter, state, 0x56);
+    const result2 = evm.table.execute(interpreter, state, 0x56);
     try testing.expectError(ExecutionError.Error.InvalidJump, result2);
 
     // Test 4: Jump to max u256 (out of range)
     frame.stack.clear();
     try frame.stack.append(std.math.maxInt(u256));
-    const result3 = evm.table.execute(0, interpreter, state, 0x56);
+    const result3 = evm.table.execute(interpreter, state, 0x56);
     try testing.expectError(ExecutionError.Error.InvalidJump, result3);
 }
 
@@ -164,7 +164,7 @@ test "Control: JUMPI conditional jump" {
     // JUMPI expects stack: [condition, destination] with destination on top
     try frame.stack.append(1);
     try frame.stack.append(5);
-    _ = try evm.table.execute(0, interpreter, state, 0x57);
+    _ = try evm.table.execute(interpreter, state, 0x57);
     try testing.expectEqual(@as(usize, 5), frame.pc);
     try testing.expectEqual(@as(usize, 0), frame.stack.size);
 
@@ -172,7 +172,7 @@ test "Control: JUMPI conditional jump" {
     frame.pc = 0; // Reset PC
     try frame.stack.append(0);
     try frame.stack.append(5);
-    _ = try evm.table.execute(0, interpreter, state, 0x57);
+    _ = try evm.table.execute(interpreter, state, 0x57);
     try testing.expectEqual(@as(usize, 0), frame.pc); // PC unchanged
     try testing.expectEqual(@as(usize, 0), frame.stack.size);
 
@@ -180,7 +180,7 @@ test "Control: JUMPI conditional jump" {
     frame.pc = 0;
     try frame.stack.append(1);
     try frame.stack.append(3);
-    const result = evm.table.execute(0, interpreter, state, 0x57);
+    const result = evm.table.execute(interpreter, state, 0x57);
     try testing.expectError(ExecutionError.Error.InvalidJump, result);
 
     // Test 4: Invalid destination is OK if condition is zero
@@ -188,7 +188,7 @@ test "Control: JUMPI conditional jump" {
     frame.pc = 0;
     try frame.stack.append(0);
     try frame.stack.append(3);
-    _ = try evm.table.execute(0, interpreter, state, 0x57);
+    _ = try evm.table.execute(interpreter, state, 0x57);
     try testing.expectEqual(@as(usize, 0), frame.pc); // No jump occurred
 }
 
@@ -230,21 +230,21 @@ test "Control: PC returns program counter" {
     const state: Evm.Operation.State = &frame;
 
     // Test 1: PC at position 0
-    _ = try evm.table.execute(0, interpreter, state, 0x58);
+    _ = try evm.table.execute(interpreter, state, 0x58);
     const result1 = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result1);
 
     // Test 2: PC at position 42
     frame.stack.clear();
     frame.pc = 42;
-    _ = try evm.table.execute(42, interpreter, state, 0x58);
+    _ = try evm.table.execute(interpreter, state, 0x58);
     const result2 = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 42), result2);
 
     // Test 3: PC at large position
     frame.stack.clear();
     frame.pc = 1000;
-    _ = try evm.table.execute(1000, interpreter, state, 0x58);
+    _ = try evm.table.execute(interpreter, state, 0x58);
     const result3 = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 1000), result3);
 }
@@ -291,7 +291,7 @@ test "Control: JUMPDEST is a no-op" {
     try frame.stack.append(100);
 
     // Execute JUMPDEST - should be a no-op
-    _ = try evm.table.execute(0, interpreter, state, 0x5B);
+    _ = try evm.table.execute(interpreter, state, 0x5B);
 
     // Stack should be unchanged
     try testing.expectEqual(@as(usize, 2), frame.stack.size);
@@ -347,7 +347,7 @@ test "Control: RETURN with data" {
     try frame.stack.append(4);  // size (first)
     try frame.stack.append(10); // offset (second, on top)
 
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result); // RETURN uses STOP error
 
     // Check output was set
@@ -359,7 +359,7 @@ test "Control: RETURN with data" {
     try frame.stack.append(0);
     try frame.stack.append(0);
 
-    const result2 = evm.table.execute(0, interpreter, state, 0xF3);
+    const result2 = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result2);
     try testing.expectEqual(@as(usize, 0), frame.output.len);
 
@@ -369,7 +369,7 @@ test "Control: RETURN with data" {
     try frame.stack.append(100);
     try frame.stack.append(32);
 
-    const result3 = evm.table.execute(0, interpreter, state, 0xF3);
+    const result3 = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result3);
 
     // Gas should be consumed for memory expansion
@@ -419,7 +419,7 @@ test "Control: REVERT with data" {
     try frame.stack.append(4); // size (first)
     try frame.stack.append(0); // offset (second, on top)
 
-    const result = evm.table.execute(0, interpreter, state, 0xFD);
+    const result = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.REVERT, result);
 
     // Check output was set
@@ -430,7 +430,7 @@ test "Control: REVERT with data" {
     try frame.stack.append(0);
     try frame.stack.append(0);
 
-    const result2 = evm.table.execute(0, interpreter, state, 0xFD);
+    const result2 = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.REVERT, result2);
     try testing.expectEqual(@as(usize, 0), frame.output.len);
 
@@ -439,7 +439,7 @@ test "Control: REVERT with data" {
     try frame.stack.append(std.math.maxInt(u256));
     try frame.stack.append(32);
 
-    const result3 = evm.table.execute(0, interpreter, state, 0xFD);
+    const result3 = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.OutOfOffset, result3);
 }
 
@@ -481,12 +481,12 @@ test "Control: INVALID always fails" {
     const state: Evm.Operation.State = &frame;
 
     // INVALID should always return InvalidOpcode error
-    const result = evm.table.execute(0, interpreter, state, 0xFE);
+    const result = evm.table.execute(interpreter, state, 0xFE);
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result);
 
     // Stack should be unchanged
     try frame.stack.append(42);
-    const result2 = evm.table.execute(0, interpreter, state, 0xFE);
+    const result2 = evm.table.execute(interpreter, state, 0xFE);
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result2);
     try testing.expectEqual(@as(usize, 1), frame.stack.size);
 }
@@ -533,7 +533,7 @@ test "Control: SELFDESTRUCT basic operation" {
     const beneficiary_u256 = primitives.Address.to_u256(beneficiary_addr);
     try frame.stack.append(beneficiary_u256);
 
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Gas should be consumed for base SELFDESTRUCT (5000) + cold address access (2600)
@@ -548,7 +548,7 @@ test "Control: SELFDESTRUCT basic operation" {
     _ = try evm.access_list.access_address(beneficiary_addr);
     try frame.stack.append(beneficiary_u256);
 
-    const result2 = evm.table.execute(0, interpreter, state, 0xFF);
+    const result2 = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.STOP, result2);
 
     // Only base SELFDESTRUCT gas (5000) should be consumed for warm address
@@ -560,7 +560,7 @@ test "Control: SELFDESTRUCT basic operation" {
     frame.is_static = true;
     try frame.stack.append(beneficiary_u256);
 
-    const result3 = evm.table.execute(0, interpreter, state, 0xFF);
+    const result3 = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.WriteProtection, result3);
 }
 
@@ -603,26 +603,26 @@ test "Control: Stack underflow errors" {
     const state: Evm.Operation.State = &frame;
 
     // Test JUMP with empty stack
-    const jump_result = evm.table.execute(0, interpreter, state, 0x56);
+    const jump_result = evm.table.execute(interpreter, state, 0x56);
     try testing.expectError(ExecutionError.Error.StackUnderflow, jump_result);
 
     // Test JUMPI with insufficient stack
     try frame.stack.append(0); // Only destination, no condition
-    const jumpi_result = evm.table.execute(0, interpreter, state, 0x57);
+    const jumpi_result = evm.table.execute(interpreter, state, 0x57);
     try testing.expectError(ExecutionError.Error.StackUnderflow, jumpi_result);
 
     // Test RETURN with empty stack
     frame.stack.clear();
-    const return_result = evm.table.execute(0, interpreter, state, 0xF3);
+    const return_result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.StackUnderflow, return_result);
 
     // Test REVERT with only one value
     try frame.stack.append(0);
-    const revert_result = evm.table.execute(0, interpreter, state, 0xFD);
+    const revert_result = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.StackUnderflow, revert_result);
 
     // Test SELFDESTRUCT with empty stack
     frame.stack.clear();
-    const selfdestruct_result = evm.table.execute(0, interpreter, state, 0xFF);
+    const selfdestruct_result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.StackUnderflow, selfdestruct_result);
 }

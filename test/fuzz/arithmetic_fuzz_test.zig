@@ -40,7 +40,7 @@ test "fuzz_arithmetic_basic_operations" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x01);
+    _ = try vm.table.execute(interpreter, state, 0x01);
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 15), result);
@@ -83,7 +83,7 @@ test "fuzz_arithmetic_overflow_cases" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x01);
+    _ = try vm.table.execute(interpreter, state, 0x01);
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result); // Overflow wraps to 0
@@ -126,7 +126,7 @@ test "fuzz_arithmetic_division_by_zero" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x04);
+    _ = try vm.table.execute(interpreter, state, 0x04);
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result); // Division by zero returns 0
@@ -169,7 +169,7 @@ test "fuzz_arithmetic_modulo_operations" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x06);
+    _ = try vm.table.execute(interpreter, state, 0x06);
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 1), result); // 10 % 3 = 1

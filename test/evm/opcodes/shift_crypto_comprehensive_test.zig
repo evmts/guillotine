@@ -95,7 +95,7 @@ test "SHL: Comprehensive shift left edge cases" {
         frame.stack.clear();
         try frame.stack.append(tc.value); // value to shift (stays on stack, gets replaced)
         try frame.stack.append(tc.shift); // shift amount (gets popped)
-        _ = try evm.table.execute(0, interpreter, state, 0x1B);
+        _ = try evm.table.execute(interpreter, state, 0x1B);
         const result = try frame.stack.peek_n(0);
         try testing.expectEqual(tc.expected, result);
         _ = try frame.stack.pop();
@@ -184,7 +184,7 @@ test "SHR: Comprehensive logical shift right edge cases" {
         frame.stack.clear();
         try frame.stack.append(tc.value); // value to shift (stays on stack, gets replaced)
         try frame.stack.append(tc.shift); // shift amount (gets popped)
-        _ = try evm.table.execute(0, interpreter, state, 0x1C);
+        _ = try evm.table.execute(interpreter, state, 0x1C);
         const result = try frame.stack.peek_n(0);
         try testing.expectEqual(tc.expected, result);
         _ = try frame.stack.pop();
@@ -271,7 +271,7 @@ test "SAR: Comprehensive arithmetic shift right edge cases" {
         frame.stack.clear();
         try frame.stack.append(tc.value); // value to shift (stays on stack, gets replaced)
         try frame.stack.append(tc.shift); // shift amount (gets popped)
-        _ = try evm.table.execute(0, interpreter, state, 0x1D);
+        _ = try evm.table.execute(interpreter, state, 0x1D);
         const result = try frame.stack.peek_n(0);
         try testing.expectEqual(tc.expected, result);
         _ = try frame.stack.pop();
@@ -345,7 +345,7 @@ test "KECCAK256: Comprehensive hash edge cases" {
         // Hash it (size pushed first, offset on top for first pop)
         try frame.stack.append(kh.data.len); // size (will be popped 2nd)
         try frame.stack.append(kh.offset); // offset (will be popped 1st)
-        _ = try evm.table.execute(0, interpreter, state, 0x20);
+        _ = try evm.table.execute(interpreter, state, 0x20);
         const result = try frame.stack.peek_n(0);
         try testing.expectEqual(kh.expected_hash, result);
         _ = try frame.stack.pop();
@@ -364,7 +364,7 @@ test "KECCAK256: Comprehensive hash edge cases" {
 
         try frame.stack.append(length); // size (will be popped 2nd)
         try frame.stack.append(0); // offset (will be popped 1st)
-        _ = try evm.table.execute(0, interpreter, state, 0x20);
+        _ = try evm.table.execute(interpreter, state, 0x20);
 
         // Verify we got a hash (non-zero)
         const hash = try frame.stack.pop();
@@ -381,7 +381,7 @@ test "KECCAK256: Comprehensive hash edge cases" {
     }
     try frame.stack.append(test_data.len); // size (will be popped 2nd)
     try frame.stack.append(0); // offset (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x20);
+    _ = try evm.table.execute(interpreter, state, 0x20);
     const hash1 = try frame.stack.pop();
 
     // Write at offset 1000
@@ -390,7 +390,7 @@ test "KECCAK256: Comprehensive hash edge cases" {
     }
     try frame.stack.append(test_data.len); // size (will be popped 2nd)
     try frame.stack.append(1000); // offset (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x20);
+    _ = try evm.table.execute(interpreter, state, 0x20);
     const hash2 = try frame.stack.pop();
 
     try testing.expectEqual(hash1, hash2);
@@ -462,7 +462,7 @@ test "KECCAK256: Gas consumption patterns" {
         const gas_before = frame.gas_remaining;
         try frame.stack.append(tc.size); // size (will be popped 2nd)
         try frame.stack.append(tc.offset); // offset (will be popped 1st)
-        _ = try evm.table.execute(0, interpreter, state, 0x20);
+        _ = try evm.table.execute(interpreter, state, 0x20);
         const gas_after = frame.gas_remaining;
 
         const gas_used = gas_before - gas_after;
@@ -516,7 +516,7 @@ test "KECCAK256: Memory expansion edge cases" {
 
     try frame.stack.append(size); // size (will be popped 2nd)
     try frame.stack.append(large_offset); // offset (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x20);
+    _ = try evm.table.execute(interpreter, state, 0x20);
 
     // Memory should have expanded
     try testing.expect(frame.memory.size() >= large_offset + size);
@@ -529,7 +529,7 @@ test "KECCAK256: Memory expansion edge cases" {
 
     try frame.stack.append(overflow_size); // size (will be popped 2nd)
     try frame.stack.append(overflow_offset); // offset (will be popped 1st)
-    try testing.expectError(ExecutionError.Error.OutOfOffset, evm.table.execute(0, interpreter, state, 0x20));
+    try testing.expectError(ExecutionError.Error.OutOfOffset, evm.table.execute(interpreter, state, 0x20));
 
     // Test 3: Size too large for available gas
     frame.stack.clear();
@@ -538,7 +538,7 @@ test "KECCAK256: Memory expansion edge cases" {
 
     try frame.stack.append(huge_size); // size (will be popped 2nd)
     try frame.stack.append(0); // offset (will be popped 1st)
-    try testing.expectError(ExecutionError.Error.OutOfGas, evm.table.execute(0, interpreter, state, 0x20));
+    try testing.expectError(ExecutionError.Error.OutOfGas, evm.table.execute(interpreter, state, 0x20));
 }
 
 // ============================
@@ -595,13 +595,13 @@ test "Shifts: Combined operations and properties" {
                 // Shift left
                 try frame.stack.append(val); // value (stays on stack, gets replaced)
                 try frame.stack.append(shift); // shift amount (gets popped)
-                _ = try evm.table.execute(0, interpreter, state, 0x1B);
+                _ = try evm.table.execute(interpreter, state, 0x1B);
                 const shifted_left = try frame.stack.pop();
 
                 // Shift right
                 try frame.stack.append(shifted_left); // value (stays on stack, gets replaced)
                 try frame.stack.append(shift); // shift amount (gets popped)
-                _ = try evm.table.execute(0, interpreter, state, 0x1C);
+                _ = try evm.table.execute(interpreter, state, 0x1C);
                 const result = try frame.stack.pop();
 
                 try testing.expectEqual(val, result);
@@ -618,7 +618,7 @@ test "Shifts: Combined operations and properties" {
     // SAR by 4
     try frame.stack.append(negative_val); // value (stays on stack, gets replaced)
     try frame.stack.append(4); // shift amount (gets popped)
-    _ = try evm.table.execute(0, interpreter, state, 0x1D);
+    _ = try evm.table.execute(interpreter, state, 0x1D);
     const sar_result = try frame.stack.pop();
 
     // Check MSB is still 1 (negative)
@@ -633,7 +633,7 @@ test "Shifts: Combined operations and properties" {
     // Hash it to get a deterministic value
     try frame.stack.append(0); // offset
     try frame.stack.append(1); // size
-    _ = try evm.table.execute(0, interpreter, state, 0x20);
+    _ = try evm.table.execute(interpreter, state, 0x20);
     const hash_of_8 = try frame.stack.pop();
 
     // Use lower bits as shift amount (should be non-zero)
@@ -643,7 +643,7 @@ test "Shifts: Combined operations and properties" {
     // Perform shift with this amount
     try frame.stack.append(0xFF00); // value (stays on stack, gets replaced)
     try frame.stack.append(shift_from_hash); // shift amount (gets popped)
-    _ = try evm.table.execute(0, interpreter, state, 0x1C);
+    _ = try evm.table.execute(interpreter, state, 0x1C);
     const shifted_by_hash = try frame.stack.pop();
 
     // Just verify we got a result, since the exact value depends on the hash
@@ -696,19 +696,19 @@ test "Shift and Crypto: Stack underflow errors" {
 
     for (shift_opcodes) |opcode| {
         frame.stack.clear();
-        try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, opcode));
+        try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(interpreter, state, opcode));
 
         // With only one item
         try frame.stack.append(42);
-        try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, opcode));
+        try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(interpreter, state, opcode));
         frame.stack.clear();
     }
 
     // Test KECCAK256 with insufficient stack
-    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, 0x20));
+    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(interpreter, state, 0x20));
 
     try frame.stack.append(100);
-    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, 0x20));
+    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(interpreter, state, 0x20));
 }
 
 // ============================
@@ -763,21 +763,21 @@ test "Performance: Rapid shift operations" {
         const shift_amount = i % 8;
         try frame.stack.append(value); // value (stays on stack, gets replaced)
         try frame.stack.append(shift_amount); // shift amount (gets popped)
-        _ = try evm.table.execute(0, interpreter, state, 0x1B);
+        _ = try evm.table.execute(interpreter, state, 0x1B);
         value = try frame.stack.pop();
 
         // Shift right by (i + 1) % 8
         const shift_right = (i + 1) % 8;
         try frame.stack.append(value); // value (stays on stack, gets replaced)
         try frame.stack.append(shift_right); // shift amount (gets popped)
-        _ = try evm.table.execute(0, interpreter, state, 0x1C);
+        _ = try evm.table.execute(interpreter, state, 0x1C);
         value = try frame.stack.pop();
 
         // SAR by i % 4
         const sar_amount = i % 4;
         try frame.stack.append(value); // value (stays on stack, gets replaced)
         try frame.stack.append(sar_amount); // shift amount (gets popped)
-        _ = try evm.table.execute(0, interpreter, state, 0x1D);
+        _ = try evm.table.execute(interpreter, state, 0x1D);
         value = try frame.stack.pop();
     }
 
@@ -841,7 +841,7 @@ test "KECCAK256: Hash collision resistance" {
         // Hash 4 bytes
         try frame.stack.append(4); // size (will be popped 2nd)
         try frame.stack.append(0); // offset (will be popped 1st)
-        _ = try evm.table.execute(0, interpreter, state, 0x20);
+        _ = try evm.table.execute(interpreter, state, 0x20);
         const hash = try frame.stack.pop();
 
         // Check for collisions

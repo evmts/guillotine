@@ -92,7 +92,7 @@ test "fuzz_pc_program_counter_edge_cases" {
                     _ = try ctx.frame.stack.pop();
                 }
                 
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x58); // PC
+                _ = try ctx.vm.table.execute(interpreter, state, 0x58); // PC
                 const result = try ctx.frame.stack.pop();
                 
                 try testing.expectEqual(@as(u256, test_case.expected_positions[expected_index]), result);
@@ -242,7 +242,7 @@ test "fuzz_jump_valid_and_invalid_destinations" {
         try ctx.frame.stack.append(@as(u256, test_case.jump_to));
         
         // Try to execute JUMP
-        const result = ctx.vm.table.execute(0, interpreter, state, 0x56); // JUMP
+        const result = ctx.vm.table.execute(interpreter, state, 0x56); // JUMP
         
         if (test_case.should_succeed) {
             // Should succeed and update PC
@@ -326,7 +326,7 @@ test "fuzz_jumpi_conditional_jump_edge_cases" {
         const initial_pc = ctx.frame.pc;
         
         // Try to execute JUMPI
-        const result = ctx.vm.table.execute(0, interpreter, state, 0x57); // JUMPI
+        const result = ctx.vm.table.execute(interpreter, state, 0x57); // JUMPI
         
         if (test_case.should_jump and test_case.condition != 0) {
             // Should succeed and update PC
@@ -494,7 +494,7 @@ test "fuzz_control_flow_random_stress_test" {
                 var state = *evm.Operation.State = @ptrCast(&ctx.frame);
                 
                 // Execute PC operation
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x58); // PC
+                _ = try ctx.vm.table.execute(interpreter, state, 0x58); // PC
                 const result = try ctx.frame.stack.pop();
                 try testing.expectEqual(@as(u256, pc_pos), result);
             }
@@ -583,7 +583,7 @@ test "fuzz_control_flow_push_interaction_edge_cases" {
             var state = *evm.Operation.State = @ptrCast(&ctx.frame);
             
             // JUMP to invalid position should fail
-            try testing.expectError(error.InvalidJump, ctx.vm.table.execute(0, interpreter, state, 0x56)); // JUMP
+            try testing.expectError(error.InvalidJump, ctx.vm.table.execute(interpreter, state, 0x56)); // JUMP
         }
     }
 }

@@ -90,11 +90,11 @@ test "fuzz_mstore_memory_storage_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = *evm.Operation.State = @ptrCast(&ctx.frame);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x52); // MSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x52); // MSTORE
         
         // Verify the value was stored by reading it back with MLOAD
         try ctx.frame.stack.append(case.offset);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.value, result);
@@ -137,7 +137,7 @@ test "fuzz_mload_memory_loading_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = *evm.Operation.State = @ptrCast(&ctx.frame);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -194,11 +194,11 @@ test "fuzz_mstore8_byte_storage_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = *evm.Operation.State = @ptrCast(&ctx.frame);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x53); // MSTORE8
+        _ = try ctx.vm.table.execute(interpreter, state, 0x53); // MSTORE8
         
         // Verify the byte was stored by reading the word containing it
         try ctx.frame.stack.append(case.offset & ~@as(u256, 31)); // Align to 32-byte boundary
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
         
         const result = try ctx.frame.stack.pop();
         // Extract the specific byte from the 32-byte word
@@ -224,7 +224,7 @@ test "fuzz_msize_memory_size_tracking" {
             _ = try ctx.frame.stack.pop();
         }
         
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x59); // MSIZE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x59); // MSIZE
         const initial_size = try ctx.frame.stack.pop();
         try testing.expectEqual(@as(u256, 0), initial_size);
     }
@@ -250,7 +250,7 @@ test "fuzz_msize_memory_size_tracking" {
             }
             
             try ctx.frame.stack.append(case.access_offset);
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+            _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
             _ = try ctx.frame.stack.pop(); // Discard the loaded value
         }
         
@@ -261,7 +261,7 @@ test "fuzz_msize_memory_size_tracking" {
                 _ = try ctx.frame.stack.pop();
             }
             
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x59); // MSIZE
+            _ = try ctx.vm.table.execute(interpreter, state, 0x59); // MSIZE
             const current_size = try ctx.frame.stack.pop();
             try testing.expectEqual(case.expected_size, current_size);
         }
@@ -294,7 +294,7 @@ test "fuzz_mcopy_memory_copying_edge_cases" {
         
         try ctx.frame.stack.append(@as(u256, i * 32));
         try ctx.frame.stack.append(data);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x52); // MSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x52); // MSTORE
     }
     
     const copy_test_cases = [_]struct { dst: u256, src: u256, len: u256 }{
@@ -338,19 +338,19 @@ test "fuzz_mcopy_memory_copying_edge_cases" {
         try ctx.frame.stack.append(case.len);
         
         // Try MCOPY - might fail if not supported in this EVM version
-        const result = ctx.vm.table.execute(0, interpreter, state, 0x5E); // MCOPY
+        const result = ctx.vm.table.execute(interpreter, state, 0x5E); // MCOPY
         
         if (result) |_| {
             // If MCOPY succeeded, verify the copy
             if (case.len > 0 and case.len <= 32) {
                 // Verify by reading the destination
                 try ctx.frame.stack.append(case.dst);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+                _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
                 const dst_value = try ctx.frame.stack.pop();
                 
                 // Read the source for comparison
                 try ctx.frame.stack.append(case.src);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+                _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
                 const src_value = try ctx.frame.stack.pop();
                 
                 // For full word copies, values should match
@@ -393,23 +393,23 @@ test "fuzz_memory_operations_stress_test" {
                 // MSTORE
                 try ctx.frame.stack.append(offset);
                 try ctx.frame.stack.append(value);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x52); // MSTORE
+                _ = try ctx.vm.table.execute(interpreter, state, 0x52); // MSTORE
             },
             1 => {
                 // MLOAD
                 try ctx.frame.stack.append(offset);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+                _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
                 _ = try ctx.frame.stack.pop(); // Discard result
             },
             2 => {
                 // MSTORE8
                 try ctx.frame.stack.append(offset);
                 try ctx.frame.stack.append(value);
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x53); // MSTORE8
+                _ = try ctx.vm.table.execute(interpreter, state, 0x53); // MSTORE8
             },
             3 => {
                 // MSIZE
-                _ = try ctx.vm.table.execute(0, interpreter, state, 0x59); // MSIZE
+                _ = try ctx.vm.table.execute(interpreter, state, 0x59); // MSIZE
                 const size = try ctx.frame.stack.pop();
                 // Memory size should always be a multiple of 32 and >= 0
                 try testing.expect(size % 32 == 0);
@@ -425,7 +425,7 @@ test "fuzz_memory_operations_stress_test" {
             _ = try ctx.frame.stack.pop();
         }
         
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x59); // MSIZE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x59); // MSIZE
         const final_size = try ctx.frame.stack.pop();
         // Size should be reasonable (not more than 1MB for our test)
         try testing.expect(final_size <= 1024 * 1024);
@@ -459,7 +459,7 @@ test "fuzz_memory_persistence_and_consistency" {
         
         try ctx.frame.stack.append(pattern.offset);
         try ctx.frame.stack.append(pattern.value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x52); // MSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x52); // MSTORE
     }
     
     // Verify all patterns are still there
@@ -470,7 +470,7 @@ test "fuzz_memory_persistence_and_consistency" {
         }
         
         try ctx.frame.stack.append(pattern.offset);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(pattern.value, result);
     }
@@ -489,7 +489,7 @@ test "fuzz_memory_persistence_and_consistency" {
         
         try ctx.frame.stack.append(pattern.offset);
         try ctx.frame.stack.append(pattern.value);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x52); // MSTORE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x52); // MSTORE
     }
     
     // Verify overwrites and non-overwrites
@@ -500,7 +500,7 @@ test "fuzz_memory_persistence_and_consistency" {
         }
         
         try ctx.frame.stack.append(pattern.offset);
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x51); // MLOAD
+        _ = try ctx.vm.table.execute(interpreter, state, 0x51); // MLOAD
         const result = try ctx.frame.stack.pop();
         
         // Check if this offset was overwritten

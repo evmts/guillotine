@@ -56,13 +56,13 @@ const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame_fat.zig");
-const Vm = @import("../evm.zig");
+const Evm = @import("../evm.zig");
 const StackValidation = @import("../stack/stack_validation.zig");
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 
 /// ADD opcode (0x01) - Addition with wrapping overflow
-pub fn op_add(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_add(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -99,7 +99,7 @@ pub fn op_add(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
 /// ## Example
 /// Stack: [10, 20] => [200]
 /// Stack: [2^128, 2^128] => [0] (overflow wraps)
-pub fn op_mul(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mul(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -142,7 +142,7 @@ pub fn op_mul(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
 /// ## Example
 /// Stack: [30, 10] => [20]
 /// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
-pub fn op_sub(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_sub(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -188,7 +188,7 @@ pub fn op_sub(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
 /// Unlike most programming languages, EVM division by zero does not
 /// throw an error but returns 0. This is a deliberate design choice
 /// to avoid exceptional halting conditions.
-pub fn op_div(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_div(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -243,7 +243,7 @@ pub fn op_div(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
 /// The special case for MIN_I256 / -1 prevents integer overflow,
 /// as the mathematical result (2^255) cannot be represented in i256.
 /// In this case, we return MIN_I256 to match EVM behavior.
-pub fn op_sdiv(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_sdiv(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -301,7 +301,7 @@ pub fn op_sdiv(vm: Operation.Interpreter, frame: Operation.State) ExecutionError
 /// ## Note
 /// The result is always in range [0, b-1] for b > 0.
 /// Like DIV, modulo by zero returns 0 rather than throwing an error.
-pub fn op_mod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mod(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -359,7 +359,7 @@ pub fn op_mod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
 /// In signed modulo, the result has the same sign as the dividend (a).
 /// This follows the Euclidean division convention where:
 /// a = b * q + r, where |r| < |b| and sign(r) = sign(a)
-pub fn op_smod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_smod(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -417,7 +417,7 @@ pub fn op_smod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError
 /// This operation correctly computes (a + b) mod n even when
 /// a + b exceeds 2^256, using specialized algorithms to avoid
 /// intermediate overflow.
-pub fn op_addmod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_addmod(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 3);
@@ -482,7 +482,7 @@ pub fn op_addmod(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
 /// ## Note
 /// This operation correctly computes (a * b) mod n even when
 /// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
-pub fn op_mulmod(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mulmod(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 3);
@@ -550,7 +550,7 @@ pub fn op_mulmod(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
 /// - 2^10: 10 + 50*1 = 60 gas (exponent fits in 1 byte)
 /// - 2^256: 10 + 50*2 = 110 gas (exponent needs 2 bytes)
 /// - 2^(2^255): 10 + 50*32 = 1610 gas (huge exponent)
-pub fn op_exp(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_exp(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -650,7 +650,7 @@ pub fn op_exp(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
 /// - Converting int8/int16/etc to int256
 /// - Arithmetic on mixed-width signed integers
 /// - Implementing higher-level language semantics
-pub fn op_signextend(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_signextend(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -1360,7 +1360,7 @@ test "arithmetic_benchmarks" {
     var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
 
     const iterations = 100000;

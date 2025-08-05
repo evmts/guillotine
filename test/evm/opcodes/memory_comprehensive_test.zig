@@ -57,13 +57,13 @@ test "MLOAD (0x51): Basic memory load operations" {
 
     // Test 1: Load from uninitialized memory should return 0
     try frame.stack.append(0); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x51);
+    _ = try evm.table.execute(interpreter, state, 0x51);
     try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]);
     _ = try frame.stack.pop();
 
     // Test 2: Load from higher uninitialized offset
     try frame.stack.append(1000); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x51);
+    _ = try evm.table.execute(interpreter, state, 0x51);
     try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]);
     _ = try frame.stack.pop();
 
@@ -71,7 +71,7 @@ test "MLOAD (0x51): Basic memory load operations" {
     const test_value: u256 = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
     try frame.memory.set_u256(32, test_value);
     try frame.stack.append(32); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x51);
+    _ = try evm.table.execute(interpreter, state, 0x51);
     try testing.expectEqual(test_value, frame.stack.data[frame.stack.size - 1]);
     _ = try frame.stack.pop();
 }
@@ -118,7 +118,7 @@ test "MLOAD: Memory alignment and boundary conditions" {
     const word_boundary_tests = [_]u256{ 0, 32, 64, 96, 128, 160, 192, 224, 256, 512, 1024 };
     for (word_boundary_tests) |offset| {
         try frame.stack.append(offset);
-        _ = try evm.table.execute(0, interpreter, state, 0x51);
+        _ = try evm.table.execute(interpreter, state, 0x51);
         try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]); // Should be 0 for uninitialized memory
         _ = try frame.stack.pop();
     }
@@ -127,7 +127,7 @@ test "MLOAD: Memory alignment and boundary conditions" {
     const non_aligned_tests = [_]u256{ 1, 3, 5, 7, 15, 17, 31, 33, 63, 65 };
     for (non_aligned_tests) |offset| {
         try frame.stack.append(offset);
-        _ = try evm.table.execute(0, interpreter, state, 0x51);
+        _ = try evm.table.execute(interpreter, state, 0x51);
         try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]); // Should be 0 for uninitialized memory
         _ = try frame.stack.pop();
     }
@@ -139,7 +139,7 @@ test "MLOAD: Memory alignment and boundary conditions" {
 
     // Load starting from offset 16 (half way through previous word, half way through stored word)
     try frame.stack.append(16);
-    _ = try evm.table.execute(0, interpreter, state, 0x51);
+    _ = try evm.table.execute(interpreter, state, 0x51);
     const result = try frame.stack.pop();
 
     // Should load 16 zero bytes followed by 16 bytes of the pattern
@@ -188,7 +188,7 @@ test "MLOAD: Large offset handling and gas consumption" {
     // Test 1: Memory expansion gas cost for first access
     const gas_before_expansion = frame.gas_remaining;
     try frame.stack.append(1000); // offset that requires expansion
-    _ = try evm.table.execute(0, interpreter, state, 0x51);
+    _ = try evm.table.execute(interpreter, state, 0x51);
     const gas_after_expansion = frame.gas_remaining;
     _ = try frame.stack.pop();
 
@@ -198,7 +198,7 @@ test "MLOAD: Large offset handling and gas consumption" {
     // Test 2: No additional expansion cost for subsequent access in same region
     const gas_before_no_expansion = frame.gas_remaining;
     try frame.stack.append(999); // slightly lower offset in same region
-    _ = try evm.table.execute(0, interpreter, state, 0x51);
+    _ = try evm.table.execute(interpreter, state, 0x51);
     const gas_after_no_expansion = frame.gas_remaining;
     _ = try frame.stack.pop();
 
@@ -207,7 +207,7 @@ test "MLOAD: Large offset handling and gas consumption" {
 
     // Test 3: Overflow protection - very large offset should fail
     try frame.stack.append(std.math.maxInt(u256) - 10);
-    const result = evm.table.execute(0, interpreter, state, 0x51);
+    const result = evm.table.execute(interpreter, state, 0x51);
     try testing.expectError(ExecutionError.Error.OutOfOffset, result);
 }
 
@@ -250,7 +250,7 @@ test "MLOAD: Stack underflow protection" {
     const state: Evm.Operation.State = &frame;
 
     // Attempt MLOAD with empty stack
-    const result = evm.table.execute(0, interpreter, state, 0x51);
+    const result = evm.table.execute(interpreter, state, 0x51);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -300,7 +300,7 @@ test "MSTORE (0x52): Basic memory store operations" {
     const value1: u256 = 0xdeadbeefcafebabe1234567890abcdef;
     try frame.stack.append(value1); // value
     try frame.stack.append(0); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     // Verify the value was stored correctly
     const stored1 = try frame.memory.get_u256(0);
@@ -310,7 +310,7 @@ test "MSTORE (0x52): Basic memory store operations" {
     const value2: u256 = 0x1122334455667788990011223344556677889900112233445566778899001122;
     try frame.stack.append(value2); // value
     try frame.stack.append(32); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     const stored2 = try frame.memory.get_u256(32);
     try testing.expectEqual(value2, stored2);
@@ -319,7 +319,7 @@ test "MSTORE (0x52): Basic memory store operations" {
     const value3: u256 = 0x9876543210fedcba;
     try frame.stack.append(value3); // value
     try frame.stack.append(17); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     const stored3 = try frame.memory.get_u256(17);
     try testing.expectEqual(value3, stored3);
@@ -367,13 +367,13 @@ test "MSTORE: Overwrite and partial overlap scenarios" {
     const initial_value: u256 = 0xAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBCCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDD;
     try frame.stack.append(initial_value);
     try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     // Test 2: Completely overwrite with new value
     const overwrite_value: u256 = 0x1111111111111111222222222222222233333333333333334444444444444444;
     try frame.stack.append(overwrite_value);
     try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     const result_overwrite = try frame.memory.get_u256(0);
     try testing.expectEqual(overwrite_value, result_overwrite);
@@ -382,7 +382,7 @@ test "MSTORE: Overwrite and partial overlap scenarios" {
     const overlap_value: u256 = 0x9999999999999999888888888888888877777777777777776666666666666666;
     try frame.stack.append(overlap_value);
     try frame.stack.append(16);
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     // Check that the overlapping region is correctly updated
     const result_overlap = try frame.memory.get_u256(16);
@@ -396,7 +396,7 @@ test "MSTORE: Overwrite and partial overlap scenarios" {
     const adjacent_value: u256 = 0x5555555555555555;
     try frame.stack.append(adjacent_value);
     try frame.stack.append(64);
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
 
     const result_adjacent = try frame.memory.get_u256(64);
     try testing.expectEqual(adjacent_value, result_adjacent);
@@ -444,7 +444,7 @@ test "MSTORE: Memory expansion and gas costs" {
     const gas_before_no_expansion = frame.gas_remaining;
     try frame.stack.append(0x123);
     try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
     const gas_after_no_expansion = frame.gas_remaining;
     const gas_no_expansion = gas_before_no_expansion - gas_after_no_expansion;
     // First memory access should cost 3 (base) + 3 (first word) = 6 gas
@@ -456,7 +456,7 @@ test "MSTORE: Memory expansion and gas costs" {
     const gas_before_expansion = frame.gas_remaining;
     try frame.stack.append(0x456);
     try frame.stack.append(1024); // Offset requiring significant expansion
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
     const gas_after_expansion = frame.gas_remaining;
     const gas_expansion = gas_before_expansion - gas_after_expansion;
     try testing.expect(gas_expansion > gas_no_expansion); // Should cost more due to expansion
@@ -465,7 +465,7 @@ test "MSTORE: Memory expansion and gas costs" {
     const gas_before_minimal = frame.gas_remaining;
     try frame.stack.append(0x789); // value
     try frame.stack.append(1056); // offset (on top)
-    _ = try evm.table.execute(0, interpreter, state, 0x52);
+    _ = try evm.table.execute(interpreter, state, 0x52);
     const gas_after_minimal = frame.gas_remaining;
     const gas_minimal = gas_before_minimal - gas_after_minimal;
     try testing.expectEqual(@as(u64, 6), gas_minimal); // Base cost (3) + minimal expansion (3)
@@ -474,7 +474,7 @@ test "MSTORE: Memory expansion and gas costs" {
     // TODO: Re-enable after fixing stack overflow issue with very large offsets
     // try frame.stack.append(std.math.maxInt(u256) - 10);
     // try frame.stack.append(0x999);
-    // const result = evm.table.execute(0, interpreter, state, 0x52);
+    // const result = evm.table.execute(interpreter, state, 0x52);
     // try testing.expectError(ExecutionError.Error.OutOfOffset, result);
 }
 
@@ -517,12 +517,12 @@ test "MSTORE: Stack underflow protection" {
     const state: Evm.Operation.State = &frame;
 
     // Test 1: Empty stack
-    const result1 = evm.table.execute(0, interpreter, state, 0x52);
+    const result1 = evm.table.execute(interpreter, state, 0x52);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result1);
 
     // Test 2: Only one value on stack (need two)
     try frame.stack.append(42);
-    const result2 = evm.table.execute(0, interpreter, state, 0x52);
+    const result2 = evm.table.execute(interpreter, state, 0x52);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result2);
 }
 
@@ -571,7 +571,7 @@ test "MSTORE8 (0x53): Basic single byte store operations" {
     // Test 1: Store single byte at offset 0
     try frame.stack.append(0xFF); // value
     try frame.stack.append(0); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
 
     const byte0 = try frame.memory.get_byte(0);
     try testing.expectEqual(@as(u8, 0xFF), byte0);
@@ -579,7 +579,7 @@ test "MSTORE8 (0x53): Basic single byte store operations" {
     // Test 2: Store only lowest byte of larger value
     try frame.stack.append(0x123456789ABCDEF0); // value
     try frame.stack.append(1); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
 
     const byte1 = try frame.memory.get_byte(1);
     try testing.expectEqual(@as(u8, 0xF0), byte1); // Only lowest byte
@@ -596,7 +596,7 @@ test "MSTORE8 (0x53): Basic single byte store operations" {
     for (test_cases) |tc| {
         try frame.stack.append(tc.value);
         try frame.stack.append(tc.offset);
-        _ = try evm.table.execute(0, interpreter, state, 0x53);
+        _ = try evm.table.execute(interpreter, state, 0x53);
 
         const stored_byte = try frame.memory.get_byte(@intCast(tc.offset));
         try testing.expectEqual(tc.expected, stored_byte);
@@ -648,7 +648,7 @@ test "MSTORE8: Precision and non-interference" {
     // Test 2: Store single byte in the middle and verify surrounding bytes are unchanged
     try frame.stack.append(0x99); // value
     try frame.stack.append(15); // offset
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
 
     // Check the modified byte
     const modified_byte = try frame.memory.get_byte(15);
@@ -672,7 +672,7 @@ test "MSTORE8: Precision and non-interference" {
     for (positions_and_values) |pv| {
         try frame.stack.append(pv.val);
         try frame.stack.append(pv.pos);
-        _ = try evm.table.execute(0, interpreter, state, 0x53);
+        _ = try evm.table.execute(interpreter, state, 0x53);
     }
 
     // Verify all stored bytes
@@ -697,7 +697,7 @@ test "MSTORE8: Precision and non-interference" {
         const offset = 100 + i;
         try frame.stack.append(lv.input);
         try frame.stack.append(offset);
-        _ = try evm.table.execute(0, interpreter, state, 0x53);
+        _ = try evm.table.execute(interpreter, state, 0x53);
 
         const stored = try frame.memory.get_byte(offset);
         try testing.expectEqual(lv.expected, stored);
@@ -746,7 +746,7 @@ test "MSTORE8: Memory expansion and gas costs" {
     const gas_before_first = frame.gas_remaining;
     try frame.stack.append(0x42);
     try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
     const gas_after_first = frame.gas_remaining;
     const gas_first = gas_before_first - gas_after_first;
     try testing.expectEqual(@as(u64, 6), gas_first); // Base cost + memory expansion for first word
@@ -755,7 +755,7 @@ test "MSTORE8: Memory expansion and gas costs" {
     const gas_before_expansion = frame.gas_remaining;
     try frame.stack.append(0x84);
     try frame.stack.append(500); // Offset requiring expansion
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
     const gas_after_expansion = frame.gas_remaining;
     const gas_expansion = gas_before_expansion - gas_after_expansion;
     try testing.expect(gas_expansion > 3); // Should cost more than base due to expansion
@@ -764,7 +764,7 @@ test "MSTORE8: Memory expansion and gas costs" {
     const gas_before_no_expansion = frame.gas_remaining;
     try frame.stack.append(0x21);
     try frame.stack.append(499); // Within already expanded region
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
     const gas_after_no_expansion = frame.gas_remaining;
     const gas_no_expansion = gas_before_no_expansion - gas_after_no_expansion;
     try testing.expectEqual(@as(u64, 3), gas_no_expansion); // Only base cost
@@ -774,7 +774,7 @@ test "MSTORE8: Memory expansion and gas costs" {
     const gas_before_alignment = frame.gas_remaining;
     try frame.stack.append(0x63);
     try frame.stack.append(1000); // New word boundary
-    _ = try evm.table.execute(0, interpreter, state, 0x53);
+    _ = try evm.table.execute(interpreter, state, 0x53);
     const gas_after_alignment = frame.gas_remaining;
     const gas_alignment = gas_before_alignment - gas_after_alignment;
     try testing.expect(gas_alignment > 3); // Should charge for word-aligned expansion
@@ -782,7 +782,7 @@ test "MSTORE8: Memory expansion and gas costs" {
     // Test 5: Overflow protection
     try frame.stack.append(0x99);
     try frame.stack.append(std.math.maxInt(u256) - 5);
-    const result = evm.table.execute(0, interpreter, state, 0x53);
+    const result = evm.table.execute(interpreter, state, 0x53);
     try testing.expectError(ExecutionError.Error.OutOfOffset, result);
 }
 
@@ -825,12 +825,12 @@ test "MSTORE8: Stack underflow protection" {
     const state: Evm.Operation.State = &frame;
 
     // Test 1: Empty stack
-    const result1 = evm.table.execute(0, interpreter, state, 0x53);
+    const result1 = evm.table.execute(interpreter, state, 0x53);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result1);
 
     // Test 2: Only one value on stack (need two)
     try frame.stack.append(42);
-    const result2 = evm.table.execute(0, interpreter, state, 0x53);
+    const result2 = evm.table.execute(interpreter, state, 0x53);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result2);
 }
 
@@ -877,25 +877,25 @@ test "MSIZE (0x59): Basic memory size tracking" {
     const state: Evm.Operation.State = &frame;
 
     // Test 1: Initial memory size should be 0
-    _ = try evm.table.execute(0, interpreter, state, 0x59);
+    _ = try evm.table.execute(interpreter, state, 0x59);
     try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]);
     _ = try frame.stack.pop();
 
     // Test 2: Memory size after writing to memory
     try frame.memory.set_u256(0, 0x12345);
-    _ = try evm.table.execute(0, interpreter, state, 0x59);
+    _ = try evm.table.execute(interpreter, state, 0x59);
     try testing.expectEqual(@as(u256, 32), frame.stack.data[frame.stack.size - 1]); // Word-aligned to 32 bytes
     _ = try frame.stack.pop();
 
     // Test 3: Memory size after writing to higher offset
     try frame.memory.set_u256(64, 0x67890);
-    _ = try evm.table.execute(0, interpreter, state, 0x59);
+    _ = try evm.table.execute(interpreter, state, 0x59);
     try testing.expectEqual(@as(u256, 96), frame.stack.data[frame.stack.size - 1]); // Word-aligned to 96 bytes
     _ = try frame.stack.pop();
 
     // Test 4: Memory size with single byte write (should still be word-aligned)
     try frame.memory.set_data(100, &[_]u8{0xFF});
-    _ = try evm.table.execute(0, interpreter, state, 0x59);
+    _ = try evm.table.execute(interpreter, state, 0x59);
     try testing.expectEqual(@as(u256, 128), frame.stack.data[frame.stack.size - 1]); // Word-aligned to 128 bytes (4 words)
     _ = try frame.stack.pop();
 }

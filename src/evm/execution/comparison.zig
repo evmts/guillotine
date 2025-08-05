@@ -2,6 +2,7 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
 
 // Helper to convert Stack errors to ExecutionError
@@ -9,7 +10,7 @@ const Frame = @import("../frame/frame_fat.zig");
 // The op_* functions below use unsafe stack operations,
 // so these helpers are unused anyway.
 
-pub fn op_lt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_lt(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop the top operand (b) unsafely
@@ -29,7 +30,7 @@ pub fn op_lt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.E
     return Operation.ExecutionResult{};
 }
 
-pub fn op_gt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_gt(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop the top operand (b) unsafely
@@ -49,7 +50,7 @@ pub fn op_gt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.E
     return Operation.ExecutionResult{};
 }
 
-pub fn op_slt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_slt(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop the top operand (b) unsafely
@@ -72,7 +73,7 @@ pub fn op_slt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
     return Operation.ExecutionResult{};
 }
 
-pub fn op_sgt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_sgt(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop the top operand (b) unsafely
@@ -92,7 +93,7 @@ pub fn op_sgt(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.
     return Operation.ExecutionResult{};
 }
 
-pub fn op_eq(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_eq(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Pop the top operand (b) unsafely
@@ -108,7 +109,7 @@ pub fn op_eq(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.E
     return Operation.ExecutionResult{};
 }
 
-pub fn op_iszero(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_iszero(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     // Peek the operand unsafely

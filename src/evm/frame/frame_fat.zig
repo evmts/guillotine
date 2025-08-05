@@ -214,7 +214,18 @@ pub fn init(
 ///
 /// Releases memory allocated by the frame. Must be called when
 /// the frame is no longer needed to prevent memory leaks.
+/// 
+/// This version assumes no pool was used (most common case).
+/// Use deinit_with_pool() if a storage pool was used.
 pub fn deinit(self: *Frame) void {
+    self.deinit_with_pool(null);
+}
+
+/// Clean up frame resources with optional storage pool.
+///
+/// Releases memory allocated by the frame. Must be called when
+/// the frame is no longer needed to prevent memory leaks.
+pub fn deinit_with_pool(self: *Frame, pool: ?*@import("storage_pool.zig")) void {
     // Clean up memory
     if (self.memory_owns_buffer) {
         self.memory_shared_buffer_ref.deinit();
@@ -224,7 +235,24 @@ pub fn deinit(self: *Frame) void {
     // Clean up return data
     self.return_data_buffer.deinit();
     
-    // Storage maps are borrowed from Contract/StoragePool, don't free here
+    // Clean up storage maps - they may be owned by this frame if no pool was used
+    if (pool) |p| {
+        if (self.storage_access) |map| {
+            p.return_access_map(map);
+        }
+        if (self.original_storage) |map| {
+            p.return_storage_map(map);
+        }
+    } else {
+        if (self.storage_access) |map| {
+            map.deinit();
+            self.allocator.destroy(map);
+        }
+        if (self.original_storage) |map| {
+            map.deinit();
+            self.allocator.destroy(map);
+        }
+    }
 }
 
 // ============================================================================

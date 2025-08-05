@@ -1,4 +1,5 @@
 const std = @import("std");
+const Evm = @import("../evm.zig");
 const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
@@ -28,7 +29,7 @@ fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) Executi
     };
 }
 
-pub fn op_mload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mload(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 1) {
@@ -70,7 +71,7 @@ pub fn op_mload(vm: Operation.Interpreter, frame: Operation.State) ExecutionErro
     return Operation.ExecutionResult{};
 }
 
-pub fn op_mstore(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mstore(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 2) {
@@ -119,7 +120,7 @@ pub fn op_mstore(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_mstore8(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mstore8(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 2) {
@@ -168,7 +169,7 @@ pub fn op_mstore8(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_msize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_msize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size >= Stack.CAPACITY) {
@@ -187,7 +188,7 @@ pub fn op_msize(vm: Operation.Interpreter, frame: Operation.State) ExecutionErro
     return Operation.ExecutionResult{};
 }
 
-pub fn op_mcopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_mcopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 3) {
@@ -257,7 +258,7 @@ pub fn op_mcopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionErro
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldataload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldataload(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 1) {
@@ -297,7 +298,7 @@ pub fn op_calldataload(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatasize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldatasize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size >= Stack.CAPACITY) {
@@ -311,7 +312,7 @@ pub fn op_calldatasize(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_calldatacopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldatacopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 3) {
@@ -353,7 +354,7 @@ pub fn op_calldatacopy(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_codesize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size >= Stack.CAPACITY) {
@@ -367,7 +368,7 @@ pub fn op_codesize(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_codecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_codecopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 3) {
@@ -414,7 +415,7 @@ pub fn op_codecopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_returndatasize(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_returndatasize(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size >= Stack.CAPACITY) {
@@ -428,7 +429,7 @@ pub fn op_returndatasize(vm: Operation.Interpreter, frame: Operation.State) Exec
     return Operation.ExecutionResult{};
 }
 
-pub fn op_returndatacopy(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_returndatacopy(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     if (frame.stack_size < 3) {
@@ -481,7 +482,7 @@ pub fn op_returndatacopy(vm: Operation.Interpreter, frame: Operation.State) Exec
 const testing = std.testing;
 const MemoryDatabase = @import("../state/memory_database.zig");
 const primitives = @import("primitives");
-const Vm = @import("../evm.zig");
+const TestEvm = @import("../evm.zig");
 const Contract = @import("../frame/contract.zig");
 const Address = primitives.Address;
 
@@ -520,7 +521,7 @@ fn fuzz_memory_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         defer memory_db.deinit();
 
         const db_interface = memory_db.to_database_interface();
-        var vm = try Vm.init(allocator, db_interface, null, null);
+        var vm = try TestEvm.init(allocator, db_interface, null, null);
         defer vm.deinit();
 
         var contract = try Contract.init(allocator, op.code, .{
@@ -540,57 +541,57 @@ fn fuzz_memory_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         const result = switch (op.op_type) {
             .mload => blk: {
                 try frame.stack_push(op.offset);
-                break :blk op_mload(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_mload(&vm, &frame);
             },
             .mstore => blk: {
                 try frame.stack_push(op.offset);
                 try frame.stack_push(op.value);
-                break :blk op_mstore(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_mstore(&vm, &frame);
             },
             .mstore8 => blk: {
                 try frame.stack_push(op.offset);
                 try frame.stack_push(op.value);
-                break :blk op_mstore8(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_mstore8(&vm, &frame);
             },
             .msize => blk: {
-                break :blk op_msize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_msize(&vm, &frame);
             },
             .mcopy => blk: {
                 try frame.stack_push(op.offset); // dest
                 try frame.stack_push(op.src_offset); // src
                 try frame.stack_push(op.size); // size
-                break :blk op_mcopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_mcopy(&vm, &frame);
             },
             .calldataload => blk: {
                 try frame.stack_push(op.offset);
-                break :blk op_calldataload(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_calldataload(&vm, &frame);
             },
             .calldatasize => blk: {
-                break :blk op_calldatasize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_calldatasize(&vm, &frame);
             },
             .calldatacopy => blk: {
                 try frame.stack_push(op.offset); // mem_offset
                 try frame.stack_push(op.data_offset); // data_offset
                 try frame.stack_push(op.size); // size
-                break :blk op_calldatacopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_calldatacopy(&vm, &frame);
             },
             .codesize => blk: {
-                break :blk op_codesize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_codesize(&vm, &frame);
             },
             .codecopy => blk: {
                 try frame.stack_push(op.offset); // mem_offset
                 try frame.stack_push(op.data_offset); // code_offset
                 try frame.stack_push(op.size); // size
-                break :blk op_codecopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_codecopy(&vm, &frame);
             },
             .returndatasize => blk: {
-                break :blk op_returndatasize(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_returndatasize(&vm, &frame);
             },
             .returndatacopy => blk: {
                 try frame.stack_push(op.offset); // mem_offset
                 try frame.stack_push(op.data_offset); // data_offset
                 try frame.stack_push(op.size); // size
-                break :blk op_returndatacopy(0, &Operation.Interpreter{ .vm = &vm }, &Operation.State{ .frame = &frame });
+                break :blk op_returndatacopy(&vm, &frame);
             },
         };
 

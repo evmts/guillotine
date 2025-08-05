@@ -40,7 +40,7 @@ test "fuzz_storage_sload_operations" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x54); // SLOAD opcode
+    _ = try vm.table.execute(interpreter, state, 0x54); // SLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result);
@@ -85,11 +85,11 @@ test "fuzz_storage_sstore_sload_roundtrip" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x55); // SSTORE opcode
+    _ = try vm.table.execute(interpreter, state, 0x55); // SSTORE opcode
     
     // Now test SLOAD to retrieve the stored value
     try frame.stack.append(slot);
-    _ = try vm.table.execute(0, interpreter, state, 0x54); // SLOAD opcode
+    _ = try vm.table.execute(interpreter, state, 0x54); // SLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(value, result);
@@ -132,7 +132,7 @@ test "fuzz_storage_tload_operations" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x5C); // TLOAD opcode
+    _ = try vm.table.execute(interpreter, state, 0x5C); // TLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result);
@@ -177,11 +177,11 @@ test "fuzz_storage_tstore_tload_roundtrip" {
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x5D); // TSTORE opcode
+    _ = try vm.table.execute(interpreter, state, 0x5D); // TSTORE opcode
     
     // Now test TLOAD to retrieve the stored value
     try frame.stack.append(slot);
-    _ = try vm.table.execute(0, interpreter, state, 0x5C); // TLOAD opcode
+    _ = try vm.table.execute(interpreter, state, 0x5C); // TLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(value, result);

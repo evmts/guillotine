@@ -88,7 +88,7 @@ test "Security: Stack overflow protection across all operation types" {
         // Execute operation - should fail with overflow
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         testing.expectError(test_case.expected_error, result) catch |err| {
             return err;
         };
@@ -175,7 +175,7 @@ test "Security: Stack underflow protection across all operation types" {
         // Execute operation - should fail with underflow
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         testing.expectError(ExecutionError.Error.StackUnderflow, result) catch |err| {
             return err;
         };
@@ -224,7 +224,7 @@ test "Security: SWAP operations at stack capacity should succeed" {
     // SWAP1 should succeed (doesn't grow stack)
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0x90);
+    _ = try evm.table.execute(interpreter, state, 0x90);
     try testing.expectEqual(@as(u32, 1024), frame.stack.size);
 }
 
@@ -270,11 +270,11 @@ test "Security: Stack boundary conditions at exactly 1024 elements" {
     // DUP1 should succeed (bringing stack to exactly 1024)
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0x80);
+    _ = try evm.table.execute(interpreter, state, 0x80);
     try testing.expectEqual(@as(u32, 1024), frame.stack.size);
 
     // Now DUP1 should fail (would exceed 1024)
-    const result = evm.table.execute(0, interpreter, state, 0x80);
+    const result = evm.table.execute(interpreter, state, 0x80);
     try testing.expectError(ExecutionError.Error.StackOverflow, result);
 }
 
@@ -354,7 +354,7 @@ test "Security: Memory bounds checking with invalid offsets" {
         // Execute operation - may succeed with sufficient gas, or fail with bounds/gas error
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         if (result) |_| {
             // Some operations may succeed if there's enough gas - this is acceptable
             // The important thing is they don't crash or corrupt memory
@@ -407,7 +407,7 @@ test "Security: Memory expansion limit enforcement (32MB default)" {
     // Should fail with memory limit exceeded or out of gas
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0x51);
+    const result = evm.table.execute(interpreter, state, 0x51);
     try testing.expect(result == ExecutionError.Error.MemoryLimitExceeded or
         result == ExecutionError.Error.OutOfGas or
         result == ExecutionError.Error.InvalidOffset);
@@ -456,7 +456,7 @@ test "Security: Memory gas cost grows quadratically" {
         const gas_before = frame.gas_remaining;
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, 0x51);
+        _ = try evm.table.execute(interpreter, state, 0x51);
         const gas_cost = gas_before - frame.gas_remaining;
 
         // Gas cost should increase (we just check it's growing, not strict quadratic)
@@ -526,7 +526,7 @@ test "Security: Gas limit enforcement across operation categories" {
         // Execute with insufficient gas - should fail
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         testing.expectError(ExecutionError.Error.OutOfGas, result) catch |err| {
             return err;
         };
@@ -580,7 +580,7 @@ test "Security: Gas exhaustion in complex operations" {
     // Should either fail with OutOfGas or succeed with failure status
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF1);
+    const result = evm.table.execute(interpreter, state, 0xF1);
     if (result) |_| {
         // If execution succeeds, check that call failed due to insufficient gas
         const call_success = try frame.stack.pop();
@@ -631,7 +631,7 @@ test "Security: Gas refund limits and calculations" {
     const gas_before_store = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0x55);
+    _ = try evm.table.execute(interpreter, state, 0x55);
     const gas_after_store = frame.gas_remaining;
     const store_cost = gas_before_store - gas_after_store;
 
@@ -640,7 +640,7 @@ test "Security: Gas refund limits and calculations" {
     try frame.stack.append(0); // key
 
     const gas_before_clear = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0x55);
+    _ = try evm.table.execute(interpreter, state, 0x55);
     const gas_after_clear = frame.gas_remaining;
 
     // Clearing should cost less than initial store due to refunds
@@ -739,7 +739,7 @@ test "Security: Call depth limit enforcement at 1024 levels" {
         // Execute at maximum depth - should return failure (0) not error
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, call_test.opcode);
+        _ = try evm.table.execute(interpreter, state, call_test.opcode);
 
         // All call operations should push 0 (failure) when depth limit is reached
         const result = try frame.stack.pop();
@@ -802,7 +802,7 @@ test "Security: Depth tracking in nested calls" {
         // Execute CALL - should succeed if depth < 1024
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, 0xF1);
+        _ = try evm.table.execute(interpreter, state, 0xF1);
         const call_result = try frame.stack.pop();
 
         if (depth < 1024) {
@@ -874,7 +874,7 @@ test "Security: Arithmetic operations handle integer overflow correctly" {
         // Execute operation - should not crash, should wrap correctly
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, test_case.opcode);
+        _ = try evm.table.execute(interpreter, state, test_case.opcode);
 
         const result = try frame.stack.pop();
         testing.expectEqual(test_case.expected_result, result) catch |err| {
@@ -937,7 +937,7 @@ test "Security: Division by zero handling" {
         // Execute division - should return 0, not crash
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, test_case.opcode);
+        _ = try evm.table.execute(interpreter, state, test_case.opcode);
 
         const result = try frame.stack.pop();
         testing.expectEqual(test_case.expected_result, result) catch |err| {
@@ -1003,7 +1003,7 @@ test "Security: Modular arithmetic overflow protection" {
         // Execute modular operation - should not crash
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, test_case.opcode);
+        _ = try evm.table.execute(interpreter, state, test_case.opcode);
 
         const result = try frame.stack.pop();
 
@@ -1071,7 +1071,7 @@ test "Security: Zero-value transfer handling" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should use less gas than value transfers (no CallValueTransferGas)
@@ -1122,7 +1122,7 @@ test "Security: Zero-value CREATE operations" {
     // Should succeed and create empty contract
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     const created_address = try frame.stack.pop();
     // Should create a valid address (or 0 if implementation doesn't support it)
@@ -1220,7 +1220,7 @@ test "Security: CALL to empty contract" {
     // Should succeed (calling empty code succeeds but does nothing)
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     const call_result = try frame.stack.pop();
     // Implementation dependent - may return 1 (success) for empty code calls
@@ -1276,7 +1276,7 @@ test "Security: Self-call detection and handling" {
     // Self-calls should be allowed but may have depth limits
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     const call_result = try frame.stack.pop();
     // Should either succeed or fail gracefully (no crash)
@@ -1331,7 +1331,7 @@ test "Security: Reentrancy with depth tracking" {
     // Should succeed but not allow further deep recursion
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     const call_result = try frame.stack.pop();
     // At depth 1020, should still succeed initially
@@ -1400,7 +1400,7 @@ test "Security: Invalid jump destination handling" {
         // Execute jump - should fail with InvalidJump
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         testing.expectError(test_case.expected_error, result) catch |err| {
             return err;
         };
@@ -1456,7 +1456,7 @@ test "Security: Valid jump destination validation" {
         // Should succeed since position 0 has a JUMPDEST
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, 0x56);
+        _ = try evm.table.execute(interpreter, state, 0x56);
 
         // PC should be updated to jump destination
         try testing.expectEqual(@as(usize, 0), frame.pc);
@@ -1478,7 +1478,7 @@ test "Security: Valid jump destination validation" {
         // Should succeed but not jump due to false condition
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(0, interpreter, state, 0x57);
+        _ = try evm.table.execute(interpreter, state, 0x57);
 
         // PC should not change for false condition (stays at 0)
         try testing.expectEqual(@as(usize, 0), frame.pc);
@@ -1545,7 +1545,7 @@ test "Security: Static call protection for state modification" {
         // Execute in static context - should fail
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         testing.expectError(ExecutionError.Error.WriteProtection, result) catch |err| {
             return err;
         };
@@ -1613,7 +1613,7 @@ test "Security: Combined boundary conditions stress test" {
     // Should fail gracefully with appropriate error
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0x51);
+    const result = evm.table.execute(interpreter, state, 0x51);
     try testing.expect(result == ExecutionError.Error.OutOfGas or
         result == ExecutionError.Error.InvalidOffset or
         result == ExecutionError.Error.MemoryLimitExceeded);
@@ -1665,7 +1665,7 @@ test "Security: Attack vector simulation - DoS via resource exhaustion" {
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        const result = evm.table.execute(0, interpreter, state, 0xF0);
+        const result = evm.table.execute(interpreter, state, 0xF0);
         if (result) |_| {
             const created_address = frame.stack.pop() catch 0;
             if (created_address != 0) {

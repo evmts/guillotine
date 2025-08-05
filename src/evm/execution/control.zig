@@ -4,21 +4,21 @@ const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const ExecutionResult = @import("execution_result.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
-const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
 const AccessList = @import("../access_list/access_list.zig").AccessList;
 const primitives = @import("primitives");
 const from_u256 = primitives.Address.from_u256;
 
-pub fn op_stop(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_stop(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
     _ = frame;
 
     return ExecutionError.Error.STOP;
 }
 
-pub fn op_jump(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_jump(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 1);
@@ -40,7 +40,7 @@ pub fn op_jump(vm: Operation.Interpreter, frame: Operation.State) ExecutionError
     return ExecutionResult{};
 }
 
-pub fn op_jumpi(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_jumpi(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -72,7 +72,7 @@ pub fn op_jumpi(vm: Operation.Interpreter, frame: Operation.State) ExecutionErro
     return ExecutionResult{};
 }
 
-pub fn op_pc(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_pc(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size < 1024);
@@ -83,7 +83,7 @@ pub fn op_pc(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.E
     return ExecutionResult{};
 }
 
-pub fn op_jumpdest(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_jumpdest(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
     _ = frame;
 
@@ -91,7 +91,7 @@ pub fn op_jumpdest(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return ExecutionResult{};
 }
 
-pub fn op_return(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_return(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -151,7 +151,7 @@ pub fn op_return(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return ExecutionError.Error.STOP; // RETURN ends execution normally
 }
 
-pub fn op_revert(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_revert(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
 
     std.debug.assert(frame.stack_size >= 2);
@@ -199,7 +199,7 @@ pub fn op_revert(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return ExecutionError.Error.REVERT;
 }
 
-pub fn op_invalid(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_invalid(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = vm;
 
     // Debug: op_invalid entered
@@ -210,7 +210,7 @@ pub fn op_invalid(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return ExecutionError.Error.InvalidOpcode;
 }
 
-pub fn op_selfdestruct(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!ExecutionResult {
+pub fn op_selfdestruct(vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
 
     // Check if we're in a static call
     if (frame.is_static) {
@@ -255,7 +255,7 @@ pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const
         var db = @import("../state/memory_database.zig").init(allocator);
         defer db.deinit();
 
-        var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
+        var vm = try Evm.init(allocator, db.to_database_interface(), null, null);
         defer vm.deinit();
 
         // Create bytecode with JUMPDEST at positions we want to jump to
@@ -349,18 +349,18 @@ const ControlOpType = enum {
     selfdestruct,
 };
 
-fn execute_control_operation(op_type: ControlOpType, pc: usize, vm: *Vm, frame: *Frame) ExecutionError.Error!ExecutionResult {
+fn execute_control_operation(op_type: ControlOpType, pc: usize, vm: *Evm, frame: *Frame) ExecutionError.Error!ExecutionResult {
     _ = pc; // Unused parameter, kept for compatibility with existing tests
     switch (op_type) {
-        .stop => return op_stop(@ptrCast(vm), @ptrCast(frame)),
-        .jump => return op_jump(@ptrCast(vm), @ptrCast(frame)),
-        .jumpi => return op_jumpi(@ptrCast(vm), @ptrCast(frame)),
-        .pc => return op_pc(@ptrCast(vm), @ptrCast(frame)),
-        .jumpdest => return op_jumpdest(@ptrCast(vm), @ptrCast(frame)),
-        .return_op => return op_return(@ptrCast(vm), @ptrCast(frame)),
-        .revert => return op_revert(@ptrCast(vm), @ptrCast(frame)),
-        .invalid => return op_invalid(@ptrCast(vm), @ptrCast(frame)),
-        .selfdestruct => return op_selfdestruct(@ptrCast(vm), @ptrCast(frame)),
+        .stop => return op_stop(vm, frame),
+        .jump => return op_jump(vm, frame),
+        .jumpi => return op_jumpi(vm, frame),
+        .pc => return op_pc(vm, frame),
+        .jumpdest => return op_jumpdest(vm, frame),
+        .return_op => return op_return(vm, frame),
+        .revert => return op_revert(vm, frame),
+        .invalid => return op_invalid(vm, frame),
+        .selfdestruct => return op_selfdestruct(vm, frame),
     }
 }
 

@@ -2,8 +2,8 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
-const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 
@@ -11,13 +11,13 @@ const primitives = @import("primitives");
 const COMPILE_TIME_LOG_VERSION = "2024_LOG_FIX_V2";
 
 // Import Log struct from VM
-const Log = Vm.Log;
+const Log = Evm.Log;
 
 // Import helper functions from error_mapping
 
-pub fn make_log(comptime num_topics: u8) fn (Operation.Interpreter, Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn make_log(comptime num_topics: u8) fn (*Evm, *Frame) ExecutionError.Error!Operation.ExecutionResult {
     return struct {
-        pub fn log(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+        pub fn log(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
             // Check if we're in a static call
             if (frame.is_static) {
@@ -98,28 +98,28 @@ pub fn make_log(comptime num_topics: u8) fn (Operation.Interpreter, Operation.St
 // Runtime dispatch versions for LOG operations (used in ReleaseSmall mode)
 // Each LOG operation gets its own function to avoid opcode detection issues
 
-pub fn log_0(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn log_0(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     return log_impl(0, vm, frame);
 }
 
-pub fn log_1(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn log_1(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     return log_impl(1, vm, frame);
 }
 
-pub fn log_2(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn log_2(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     return log_impl(2, vm, frame);
 }
 
-pub fn log_3(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn log_3(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     return log_impl(3, vm, frame);
 }
 
-pub fn log_4(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn log_4(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     return log_impl(4, vm, frame);
 }
 
 // Common implementation for all LOG operations
-fn log_impl(num_topics: u8, vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+fn log_impl(num_topics: u8, vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     
     // Check if we're in a static call
     if (frame.is_static) {
@@ -188,7 +188,7 @@ test "LOG0 emits correct number of topics" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -219,7 +219,7 @@ test "LOG1 emits correct number of topics" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa1}, .{ .address = Address.ZERO });
@@ -253,7 +253,7 @@ test "LOG2 emits correct number of topics" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa2}, .{ .address = Address.ZERO });
@@ -290,7 +290,7 @@ test "LOG3 emits correct number of topics" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa3}, .{ .address = Address.ZERO });
@@ -330,7 +330,7 @@ test "LOG4 emits correct number of topics" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa4}, .{ .address = Address.ZERO });
@@ -373,7 +373,7 @@ test "LOG operations with zero-length data" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -401,7 +401,7 @@ test "LOG operations with large data sizes" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -439,7 +439,7 @@ test "LOG operations fail in static call context" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -469,7 +469,7 @@ test "LOG operations with memory offset beyond bounds" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -495,7 +495,7 @@ test "LOG operations trigger memory expansion" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -530,7 +530,7 @@ test "LOG address is correctly recorded" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     const test_address = Address{ .inner = [_]u8{0x12} ++ [_]u8{0x34} ** 19 };
@@ -560,7 +560,7 @@ test "Multiple LOG operations in sequence" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0xa0}, .{ .address = Address.ZERO });
@@ -602,7 +602,7 @@ test "log_2 runtime dispatch function" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Vm.init(allocator, db_interface, null, null);
+    var vm = try Evm.init(allocator, db_interface, null, null);
     defer vm.deinit();
     
     // Test LOG2 using runtime dispatch (opcode 0xa2)
@@ -648,7 +648,7 @@ fn fuzz_log_operations(allocator: std.mem.Allocator, operations: []const FuzzLog
         defer memory_db.deinit();
         
         const db_interface = memory_db.to_database_interface();
-        var vm = try Vm.init(allocator, db_interface, null, null);
+        var vm = try Evm.init(allocator, db_interface, null, null);
         defer vm.deinit();
         
         const opcode = 0xa0 + op.num_topics;

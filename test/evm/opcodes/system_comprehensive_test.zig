@@ -74,7 +74,7 @@ test "CREATE (0xF0): Basic contract creation with valid init code" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Check gas consumption
     const gas_used = gas_before - frame.gas_remaining;
@@ -126,7 +126,7 @@ test "CREATE: Empty init code creates empty contract" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Empty init code should still create a contract
     const created_address = try frame.stack.pop();
@@ -178,7 +178,7 @@ test "CREATE: Static call protection" {
     // Should fail with WriteProtection
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -226,7 +226,7 @@ test "CREATE: Depth limit enforcement" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should push 0 due to depth limit
     const result = try frame.stack.pop();
@@ -278,7 +278,7 @@ test "CREATE: EIP-3860 initcode size limit (Shanghai+)" {
     // Should fail with MaxCodeSizeExceeded
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.MaxCodeSizeExceeded, result);
 }
 
@@ -331,7 +331,7 @@ test "CREATE: EIP-3860 initcode word gas cost" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should include word gas cost (2 gas per 32-byte word)
@@ -387,7 +387,7 @@ test "CREATE: Memory expansion gas cost" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should include significant memory expansion cost
@@ -435,7 +435,7 @@ test "CREATE: Stack underflow" {
     // Should fail with StackUnderflow
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -489,7 +489,7 @@ test "CREATE2 (0xF5): Deterministic address generation" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF5);
+    _ = try evm.table.execute(interpreter, state, 0xF5);
 
     // Should create contract (implementation may return 0 for unimplemented parts)
     _ = try frame.stack.pop(); // created_address
@@ -543,7 +543,7 @@ test "CREATE2: Same parameters produce same address" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state1: Evm.Operation.State = &frame1;
-    _ = try evm.table.execute(0, interpreter, state1, 0xF5);
+    _ = try evm.table.execute(interpreter, state1, 0xF5);
     const address1 = try frame1.stack.pop();
 
     // Second creation with same parameters
@@ -575,7 +575,7 @@ test "CREATE2: Same parameters produce same address" {
     try frame2.stack.append(0);
 
     const state2: Evm.Operation.State = &frame2;
-    _ = try evm.table.execute(0, interpreter, state2, 0xF5);
+    _ = try evm.table.execute(interpreter, state2, 0xF5);
     const address2 = try frame2.stack.pop();
 
     // Addresses should be the same (deterministic)
@@ -631,7 +631,7 @@ test "CREATE2: Additional gas for keccak256 hashing" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF5);
+    _ = try evm.table.execute(interpreter, state, 0xF5);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should include hash cost (6 gas per word for keccak256)
@@ -692,7 +692,7 @@ test "CALL (0xF1): Basic external call" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Check success status (implementation may return 0 for unimplemented)
     _ = try frame.stack.pop(); // success
@@ -749,7 +749,7 @@ test "CALL: Value transfer in static context fails" {
     // Should fail with WriteProtection
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF1);
+    const result = evm.table.execute(interpreter, state, 0xF1);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -802,7 +802,7 @@ test "CALL: Cold address access (EIP-2929)" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should consume cold access gas (2600)
@@ -858,7 +858,7 @@ test "CALL: Return data handling" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Check that operation completed (implementation details may vary)
     _ = try frame.stack.pop(); // success
@@ -915,7 +915,7 @@ test "CALLCODE (0xF2): Execute external code with current storage" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF2);
+    _ = try evm.table.execute(interpreter, state, 0xF2);
 
     // Check success status
     _ = try frame.stack.pop(); // success
@@ -971,7 +971,7 @@ test "DELEGATECALL (0xF4): Execute with current context (no value transfer)" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF4);
+    _ = try evm.table.execute(interpreter, state, 0xF4);
 
     // Check success status
     _ = try frame.stack.pop(); // success
@@ -1027,7 +1027,7 @@ test "STATICCALL (0xFA): Read-only external call" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xFA);
+    _ = try evm.table.execute(interpreter, state, 0xFA);
 
     // Check success status
     _ = try frame.stack.pop(); // success
@@ -1083,7 +1083,7 @@ test "RETURN (0xF3): Return data from execution" {
     // Execute RETURN - should trigger STOP
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Check return data buffer was set
@@ -1130,7 +1130,7 @@ test "RETURN: Empty return data" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Check empty return data
@@ -1178,7 +1178,7 @@ test "RETURN: Memory expansion gas cost" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     const gas_used = gas_before - frame.gas_remaining;
@@ -1235,7 +1235,7 @@ test "REVERT (0xFD): Revert with error data" {
     // Execute REVERT - should trigger REVERT error
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFD);
+    const result = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.REVERT, result);
 
     // Check revert data was set
@@ -1282,7 +1282,7 @@ test "REVERT: Empty revert data" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFD);
+    const result = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.REVERT, result);
 
     // Check empty revert data
@@ -1332,7 +1332,7 @@ test "INVALID (0xFE): Consume all gas and fail" {
     // Execute INVALID - should consume all gas and fail
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFE);
+    const result = evm.table.execute(interpreter, state, 0xFE);
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result);
 
     // Should consume all remaining gas
@@ -1383,7 +1383,7 @@ test "INVALID: No stack manipulation" {
     // Execute INVALID
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFE);
+    const result = evm.table.execute(interpreter, state, 0xFE);
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result);
 
     // Stack should remain unchanged
@@ -1435,7 +1435,7 @@ test "SELFDESTRUCT (0xFF): Schedule contract destruction" {
     // Execute SELFDESTRUCT - should trigger STOP
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.STOP, result);
 }
 
@@ -1483,7 +1483,7 @@ test "SELFDESTRUCT: Static call protection" {
     // Should fail with WriteProtection
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -1531,7 +1531,7 @@ test "SELFDESTRUCT: Cold beneficiary address (EIP-2929)" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Should consume cold access gas (2600)
@@ -1603,7 +1603,7 @@ test "System opcodes: Stack underflow validation" {
         // Should fail with StackUnderflow
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        const result = evm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = evm.table.execute(interpreter, state, test_case.opcode);
         testing.expectError(ExecutionError.Error.StackUnderflow, result) catch |err| {
             return err;
         };
@@ -1674,7 +1674,7 @@ test "System opcodes: Depth limit enforcement" {
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        _ = try evm.table.execute(0, interpreter, state, opcode);
+        _ = try evm.table.execute(interpreter, state, opcode);
 
         // Should push 0 (failure) due to depth limit
         const success = try test_frame.stack.pop();
@@ -1739,7 +1739,7 @@ test "System opcodes: Gas consumption verification" {
         const gas_before = test_frame.gas_remaining;
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        _ = try evm.table.execute(0, interpreter, state, 0xF0);
+        _ = try evm.table.execute(interpreter, state, 0xF0);
         const gas_used = gas_before - test_frame.gas_remaining;
 
         // Should consume increasing gas for larger init code
@@ -1797,7 +1797,7 @@ test "System opcodes: CREATE followed by CALL" {
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
     const created_address = try frame.stack.pop();
 
     // Now CALL the created contract (if creation succeeded)
@@ -1811,7 +1811,7 @@ test "System opcodes: CREATE followed by CALL" {
         try frame.stack.append(created_address); // to (created contract)
         try frame.stack.append(50000); // gas
 
-        _ = try evm.table.execute(0, interpreter, state, 0xF1);
+        _ = try evm.table.execute(interpreter, state, 0xF1);
         _ = try frame.stack.pop(); // call_success
         // Note: Implementation may return 0 for unimplemented external calls
     }
@@ -1866,7 +1866,7 @@ test "System opcodes: Nested STATICCALL restrictions" {
     // STATICCALL should succeed even within static context
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xFA);
+    _ = try evm.table.execute(interpreter, state, 0xFA);
     _ = try frame.stack.pop(); // success
     // Note: Implementation may return 0
 }
@@ -1916,7 +1916,7 @@ test "System opcodes: REVERT vs RETURN data handling" {
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        const result = evm.table.execute(0, interpreter, state, 0xF3);
+        const result = evm.table.execute(interpreter, state, 0xF3);
         try testing.expectError(ExecutionError.Error.STOP, result);
         try testing.expectEqualSlices(u8, test_data, test_frame.return_data_buffer);
     }
@@ -1952,7 +1952,7 @@ test "System opcodes: REVERT vs RETURN data handling" {
 
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        const result = evm.table.execute(0, interpreter, state, 0xFD);
+        const result = evm.table.execute(interpreter, state, 0xFD);
         try testing.expectError(ExecutionError.Error.REVERT, result);
         try testing.expectEqualSlices(u8, test_data, test_frame.return_data_buffer);
     }
@@ -2019,7 +2019,7 @@ test "System opcodes: Large memory offsets" {
         // Should fail with appropriate error (OutOfGas due to memory expansion or InvalidOffset)
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        const result = evm.table.execute(0, interpreter, state, opcode);
+        const result = evm.table.execute(interpreter, state, opcode);
         try testing.expect(result == ExecutionError.Error.OutOfGas or result == ExecutionError.Error.OutOfOffset or result == ExecutionError.Error.InvalidOffset);
     }
 }
@@ -2075,7 +2075,7 @@ test "System opcodes: Zero gas scenarios" {
     // Should either fail with OutOfGas or succeed with minimal gas
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF1);
+    const result = evm.table.execute(interpreter, state, 0xF1);
     if (result) |_| {
         // If it succeeds, check result
         _ = try frame.stack.pop(); // success
@@ -2136,7 +2136,7 @@ test "System opcodes: Hardfork feature availability" {
         // DELEGATECALL may not be available in Frontier
         const interpreter: Evm.Operation.Interpreter = &test_vm;
         const state: Evm.Operation.State = &test_frame;
-        if (test_vm.table.execute(0, interpreter, state, 0xF4)) |_| {
+        if (test_vm.table.execute(interpreter, state, 0xF4)) |_| {
             // May succeed in some implementations
         } else |_| {
             // May fail in Frontier (expected)
@@ -2184,7 +2184,7 @@ test "System opcodes: Hardfork feature availability" {
         // CREATE2 may not be available in Byzantium
         const interpreter: Evm.Operation.Interpreter = &test_vm;
         const state: Evm.Operation.State = &test_frame;
-        if (test_vm.table.execute(0, interpreter, state, 0xF5)) |_| {
+        if (test_vm.table.execute(interpreter, state, 0xF5)) |_| {
             // May succeed in some implementations
         } else |_| {
             // May fail in Byzantium (expected)
@@ -2239,7 +2239,7 @@ test "System opcodes: Memory bounds checking" {
     // Should fail with appropriate error
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expect(result == ExecutionError.Error.OutOfGas or result == ExecutionError.Error.InvalidOffset);
 }
 
@@ -2298,7 +2298,7 @@ test "System opcodes: Gas optimization for warm addresses" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should use less gas than cold access (no additional 2600 gas)

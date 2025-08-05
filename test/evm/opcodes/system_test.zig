@@ -10,6 +10,7 @@ const Hardfork = Evm.Hardfork.Hardfork;
 const MemoryDatabase = Evm.MemoryDatabase;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
+const Context = Evm.Context;
 
 // Test CREATE operation
 test "CREATE: create new contract" {
@@ -42,12 +43,8 @@ test "CREATE: create new contract" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure (CREATE should return 0)
@@ -57,7 +54,7 @@ test "CREATE: create new contract" {
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 }; // PUSH1 0 PUSH1 0 RETURN
     var i: usize = 0;
     while (i < init_code.len) : (i += 1) {
-        try frame.memory.set_data(i, &[_]u8{init_code[i]});
+        try frame.memory_set_data(i, 1, &[_]u8{init_code[i]});
     }
 
     // Push size, offset, value
@@ -68,7 +65,7 @@ test "CREATE: create new contract" {
     // Execute CREATE through jump table
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should push 0 for failure - VM doesn't execute init code yet
     const result = try frame.stack.pop();
@@ -105,12 +102,8 @@ test "CREATE: empty init code creates empty contract" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Push size, offset, value
@@ -121,7 +114,7 @@ test "CREATE: empty init code creates empty contract" {
     // Execute CREATE through jump table
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should push non-zero address for successful empty contract creation
     const created_address = try frame.stack.pop();
@@ -158,13 +151,9 @@ test "CREATE: write protection in static call" {
     defer contract.deinit(allocator, null);
 
     // Create frame with static call
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .isStatic(true)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
+    frame.is_static = true;
     defer frame.deinit();
 
     // Push size, offset, value
@@ -175,7 +164,7 @@ test "CREATE: write protection in static call" {
     // Execute CREATE - should fail
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -209,12 +198,8 @@ test "CREATE: depth limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame with max depth
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
@@ -228,7 +213,7 @@ test "CREATE: depth limit" {
     // Execute CREATE
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should push 0 due to depth limit
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -265,12 +250,8 @@ test "CREATE2: create with deterministic address" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
@@ -280,7 +261,7 @@ test "CREATE2: create with deterministic address" {
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 };
     var i: usize = 0;
     while (i < init_code.len) : (i += 1) {
-        try frame.memory.set_data(i, &[_]u8{init_code[i]});
+        try frame.memory_set_data(i, 1, &[_]u8{init_code[i]});
     }
 
     // Push salt, size, offset, value
@@ -292,7 +273,7 @@ test "CREATE2: create with deterministic address" {
     // Execute CREATE2
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF5);
+    _ = try evm.table.execute(interpreter, state, 0xF5);
 
     // Should push 0 for failed creation (VM doesn't execute init code yet)
     const result = try frame.stack.pop();
@@ -330,12 +311,8 @@ test "CALL: basic call behavior" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
@@ -345,11 +322,11 @@ test "CALL: basic call behavior" {
     const call_data = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
     var i: usize = 0;
     while (i < call_data.len) : (i += 1) {
-        try frame.memory.set_data(i, &[_]u8{call_data[i]});
+        try frame.memory_set_data(i, 1, &[_]u8{call_data[i]});
     }
 
     // Pre-expand memory to accommodate return data at offset 100
-    _ = try frame.memory.ensure_context_capacity(110); // Need at least 100 + 10 bytes
+    _ = try frame.memory_ensure_capacity(110); // Need at least 100 + 10 bytes
 
     // Push in reverse order for stack (LIFO): ret_size, ret_offset, args_size, args_offset, value, to, gas
     try frame.stack.append(10); // ret_size
@@ -364,7 +341,7 @@ test "CALL: basic call behavior" {
     // Execute CALL
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Should push 0 for failure (regular calls not implemented yet)
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -400,12 +377,8 @@ test "CALL: failed call" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
@@ -424,7 +397,7 @@ test "CALL: failed call" {
     // Execute CALL
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Should push 0 for failure (regular calls not implemented yet)
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -460,12 +433,8 @@ test "CALL: cold address access costs more gas" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(10000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 10000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
@@ -486,7 +455,7 @@ test "CALL: cold address access costs more gas" {
     // Execute CALL
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Should push 0 for failure (regular calls not implemented yet)
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -524,13 +493,9 @@ test "CALL: value transfer in static call fails" {
     defer contract.deinit(allocator, null);
 
     // Create frame with static call
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .isStatic(true)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
+    frame.is_static = true;
     defer frame.deinit();
 
     // Push in reverse order for stack (LIFO) with non-zero value
@@ -546,7 +511,7 @@ test "CALL: value transfer in static call fails" {
     // Execute CALL - should fail
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF1);
+    const result = evm.table.execute(interpreter, state, 0xF1);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -581,19 +546,15 @@ test "DELEGATECALL: execute code in current context" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
 
     // Pre-expand memory to accommodate return data at offset 50
-    _ = try frame.memory.ensure_context_capacity(52); // Need at least 50 + 2 bytes
+    _ = try frame.memory_ensure_capacity(52); // Need at least 50 + 2 bytes
 
     // Push in reverse order for stack (LIFO): ret_size, ret_offset, args_size, args_offset, to, gas
     try frame.stack.append(2); // ret_size
@@ -607,7 +568,7 @@ test "DELEGATECALL: execute code in current context" {
     // Execute DELEGATECALL
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF4);
+    _ = try evm.table.execute(interpreter, state, 0xF4);
 
     // Should push 0 for failure (VM doesn't implement delegatecall yet)
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -644,19 +605,15 @@ test "STATICCALL: read-only call" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
     frame.depth = 1024;
 
     // Pre-expand memory to accommodate return data at offset 200
-    _ = try frame.memory.ensure_context_capacity(202); // Need at least 200 + 2 bytes
+    _ = try frame.memory_ensure_capacity(202); // Need at least 200 + 2 bytes
 
     // Push in reverse order for stack (LIFO): ret_size, ret_offset, args_size, args_offset, to, gas
     try frame.stack.append(2); // ret_size
@@ -670,7 +627,7 @@ test "STATICCALL: read-only call" {
     // Execute STATICCALL
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xFA);
+    _ = try evm.table.execute(interpreter, state, 0xFA);
 
     // Should push 0 for failure (regular calls not implemented yet)
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -707,12 +664,8 @@ test "CALL: depth limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame with max depth
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set depth to 1024 to trigger depth limit failure
@@ -731,7 +684,7 @@ test "CALL: depth limit" {
     // Execute CALL
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Should push 0 due to depth limit
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
@@ -768,19 +721,15 @@ test "CREATE: gas consumption" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Write init code to memory
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 };
     var i: usize = 0;
     while (i < init_code.len) : (i += 1) {
-        try frame.memory.set_data(i, &[_]u8{init_code[i]});
+        try frame.memory_set_data(i, 1, &[_]u8{init_code[i]});
     }
 
     // Push parameters
@@ -793,7 +742,7 @@ test "CREATE: gas consumption" {
     // Execute CREATE
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should consume gas for CREATE operation regardless of success/failure
     const gas_used = gas_before - frame.gas_remaining;
@@ -830,19 +779,15 @@ test "CREATE2: additional gas for hashing" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Write init code to memory
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 };
     var i: usize = 0;
     while (i < init_code.len) : (i += 1) {
-        try frame.memory.set_data(i, &[_]u8{init_code[i]});
+        try frame.memory_set_data(i, 1, &[_]u8{init_code[i]});
     }
 
     // Push parameters
@@ -856,7 +801,7 @@ test "CREATE2: additional gas for hashing" {
     // Execute CREATE2
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF5);
+    _ = try evm.table.execute(interpreter, state, 0xF5);
 
     // Should consume gas for CREATE2 operation regardless of success/failure
     const gas_used = gas_before - frame.gas_remaining;
@@ -894,12 +839,8 @@ test "CREATE: stack underflow" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Push only two values (need three)
@@ -909,7 +850,7 @@ test "CREATE: stack underflow" {
     // Execute CREATE - should fail
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -943,12 +884,8 @@ test "CALL: stack underflow" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Push only six values (need seven)
@@ -962,7 +899,7 @@ test "CALL: stack underflow" {
     // Execute CALL - should fail
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF1);
+    const result = evm.table.execute(interpreter, state, 0xF1);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -997,12 +934,8 @@ test "CREATE: memory expansion for init code" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set up sufficient balance for contract creation
@@ -1011,7 +944,7 @@ test "CREATE: memory expansion for init code" {
     // Initialize memory with some init code at offset 200
     var i: usize = 0;
     while (i < 100) : (i += 1) {
-        try frame.memory.set_data(200 + i, &[_]u8{@intCast(i % 256)});
+        try frame.memory_set_data(200 + i, 1, &[_]u8{@intCast(i % 256)});
     }
 
     // Push parameters that require memory expansion
@@ -1024,7 +957,7 @@ test "CREATE: memory expansion for init code" {
     // Execute CREATE
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should consume gas for memory expansion regardless of success/failure
     const gas_used = gas_before - frame.gas_remaining;
@@ -1062,12 +995,8 @@ test "CREATE: EIP-3860 initcode size limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(10000000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 10000000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Push parameters with size exceeding MaxInitcodeSize (49152)
@@ -1078,7 +1007,7 @@ test "CREATE: EIP-3860 initcode size limit" {
     // Execute CREATE with oversized code - should fail
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF0);
+    const result = evm.table.execute(interpreter, state, 0xF0);
     try testing.expectError(ExecutionError.Error.MaxCodeSizeExceeded, result);
 }
 
@@ -1112,12 +1041,8 @@ test "CREATE: EIP-3860 initcode word gas" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 100000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Set up sufficient balance for contract creation
@@ -1126,7 +1051,7 @@ test "CREATE: EIP-3860 initcode word gas" {
     // Write 64 bytes of init code (2 words)
     var i: usize = 0;
     while (i < 64) : (i += 1) {
-        try frame.memory.set_data(i, &[_]u8{0x00});
+        try frame.memory_set_data(i, 1, &[_]u8{0x00});
     }
 
     // Push parameters
@@ -1139,7 +1064,7 @@ test "CREATE: EIP-3860 initcode word gas" {
     // Execute CREATE
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF0);
+    _ = try evm.table.execute(interpreter, state, 0xF0);
 
     // Should consume gas for CREATE operation regardless of success/failure
     const gas_used = gas_before - frame.gas_remaining;
@@ -1176,12 +1101,8 @@ test "CREATE2: EIP-3860 initcode size limit" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(10000000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 10000000, &contract, caller_address, &.{}, context);
     defer frame.deinit();
 
     // Push parameters with size exceeding MaxInitcodeSize (49152)
@@ -1193,6 +1114,6 @@ test "CREATE2: EIP-3860 initcode size limit" {
     // Execute CREATE2 - should fail with MaxCodeSizeExceeded
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF5);
+    const result = evm.table.execute(interpreter, state, 0xF5);
     try testing.expectError(ExecutionError.Error.MaxCodeSizeExceeded, result);
 }

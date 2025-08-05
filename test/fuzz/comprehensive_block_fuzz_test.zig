@@ -194,7 +194,7 @@ test "fuzz_blockhash_operation_edge_cases" {
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
         
-        const result = try ctx.vm.table.execute(0, interpreter, state, 0x40);
+        const result = try ctx.vm.table.execute(interpreter, state, 0x40);
         _ = result;
         
         const block_hash = try ctx.frame.stack.pop();
@@ -532,7 +532,7 @@ test "fuzz_block_info_operations" {
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
         
-        const result = try ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = try ctx.vm.table.execute(interpreter, state, test_case.opcode);
         _ = result;
         
         const returned_value = try ctx.frame.stack.pop();
@@ -713,7 +713,7 @@ test "fuzz_blobhash_operation_edge_cases" {
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
         
-        const result = try ctx.vm.table.execute(0, interpreter, state, 0x49);
+        const result = try ctx.vm.table.execute(interpreter, state, 0x49);
         _ = result;
         
         const returned_hash = try ctx.frame.stack.pop();
@@ -776,7 +776,7 @@ test "fuzz_block_operations_random_stress" {
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
         
-        const result = try ctx.vm.table.execute(0, interpreter, state, opcode);
+        const result = try ctx.vm.table.execute(interpreter, state, opcode);
         _ = result;
         
         // All operations should return a valid u256 value
@@ -855,12 +855,12 @@ test "fuzz_block_context_consistency" {
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
         
         // First call
-        const result1 = try ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
+        const result1 = try ctx.vm.table.execute(interpreter, state, test_case.opcode);
         _ = result1;
         const value1 = try ctx.frame.stack.pop();
         
         // Second call
-        const result2 = try ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
+        const result2 = try ctx.vm.table.execute(interpreter, state, test_case.opcode);
         _ = result2;
         const value2 = try ctx.frame.stack.pop();
         
@@ -921,7 +921,7 @@ test "fuzz_block_operations_gas_consumption" {
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
         
-        const result = ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
+        const result = ctx.vm.table.execute(interpreter, state, test_case.opcode);
         
         if (result) |_| {
             // Success - verify gas consumption

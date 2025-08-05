@@ -84,7 +84,7 @@ test "fuzz_and_bitwise_and_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x16); // AND
+        _ = try ctx.vm.table.execute(interpreter, state, 0x16); // AND
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -128,7 +128,7 @@ test "fuzz_or_bitwise_or_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x17); // OR
+        _ = try ctx.vm.table.execute(interpreter, state, 0x17); // OR
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -176,7 +176,7 @@ test "fuzz_xor_bitwise_xor_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x18); // XOR
+        _ = try ctx.vm.table.execute(interpreter, state, 0x18); // XOR
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -217,7 +217,7 @@ test "fuzz_not_bitwise_not_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x19); // NOT
+        _ = try ctx.vm.table.execute(interpreter, state, 0x19); // NOT
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -268,7 +268,7 @@ test "fuzz_byte_byte_extraction_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x1A); // BYTE
+        _ = try ctx.vm.table.execute(interpreter, state, 0x1A); // BYTE
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -319,7 +319,7 @@ test "fuzz_shl_shift_left_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x1B); // SHL
+        _ = try ctx.vm.table.execute(interpreter, state, 0x1B); // SHL
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -373,7 +373,7 @@ test "fuzz_shr_shift_right_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x1C); // SHR
+        _ = try ctx.vm.table.execute(interpreter, state, 0x1C); // SHR
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -434,7 +434,7 @@ test "fuzz_sar_arithmetic_shift_right_edge_cases" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x1D); // SAR
+        _ = try ctx.vm.table.execute(interpreter, state, 0x1D); // SAR
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(case.expected, result);
@@ -468,7 +468,7 @@ test "fuzz_bitwise_random_stress_test" {
             
             var interpreter = evm.Operation.Interpreter = &ctx.vm;
             var state = evm.Operation.State = &ctx.frame;
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x16); // AND
+            _ = try ctx.vm.table.execute(interpreter, state, 0x16); // AND
             
             const result = try ctx.frame.stack.pop();
             const expected = a & b;
@@ -487,7 +487,7 @@ test "fuzz_bitwise_random_stress_test" {
             
             var interpreter = evm.Operation.Interpreter = &ctx.vm;
             var state = evm.Operation.State = &ctx.frame;
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x17); // OR
+            _ = try ctx.vm.table.execute(interpreter, state, 0x17); // OR
             
             const result = try ctx.frame.stack.pop();
             const expected = a | b;
@@ -506,7 +506,7 @@ test "fuzz_bitwise_random_stress_test" {
             
             var interpreter = evm.Operation.Interpreter = &ctx.vm;
             var state = evm.Operation.State = &ctx.frame;
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x18); // XOR
+            _ = try ctx.vm.table.execute(interpreter, state, 0x18); // XOR
             
             const result = try ctx.frame.stack.pop();
             const expected = a ^ b;
@@ -525,7 +525,7 @@ test "fuzz_bitwise_random_stress_test" {
             
             var interpreter = evm.Operation.Interpreter = &ctx.vm;
             var state = evm.Operation.State = &ctx.frame;
-            _ = try ctx.vm.table.execute(0, interpreter, state, 0x1B); // SHL
+            _ = try ctx.vm.table.execute(interpreter, state, 0x1B); // SHL
             
             const result = try ctx.frame.stack.pop();
             const expected = if (shift >= 256) 0 else a << @intCast(shift);

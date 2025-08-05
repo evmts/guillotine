@@ -38,7 +38,7 @@ test "fuzz_environment_address_operations" {
     // Test ADDRESS operation
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x30); // ADDRESS opcode
+    _ = try vm.table.execute(interpreter, state, 0x30); // ADDRESS opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(primitives.Address.to_u256(contract_address), result);
@@ -79,7 +79,7 @@ test "fuzz_environment_caller_operations" {
     // Test CALLER operation
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x33); // CALLER opcode
+    _ = try vm.table.execute(interpreter, state, 0x33); // CALLER opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(primitives.Address.to_u256(caller_address), result);
@@ -120,7 +120,7 @@ test "fuzz_environment_callvalue_operations" {
     // Test CALLVALUE operation
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x34); // CALLVALUE opcode
+    _ = try vm.table.execute(interpreter, state, 0x34); // CALLVALUE opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(call_value, result);
@@ -160,7 +160,7 @@ test "fuzz_environment_codesize_operations" {
     // Test CODESIZE operation
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x38); // CODESIZE opcode
+    _ = try vm.table.execute(interpreter, state, 0x38); // CODESIZE opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, test_code.len), result);

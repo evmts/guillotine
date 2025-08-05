@@ -60,13 +60,13 @@ test "RETURN (0xF3): Return data from execution" {
     frame.pc = 0;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 2;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 4;
 
     // Execute RETURN
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
 
     // RETURN should trigger STOP error with return data
     try testing.expectError(ExecutionError.Error.STOP, result);
@@ -119,13 +119,13 @@ test "RETURN: Empty return data" {
     frame.pc = 0;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 2;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 4;
 
     // Execute RETURN
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Check empty output
@@ -184,13 +184,13 @@ test "REVERT (0xFD): Revert with data" {
     frame.pc = 0;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 2;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 4;
 
     // Execute REVERT
-    const result = evm.table.execute(0, interpreter, state, 0xFD);
+    const result = evm.table.execute(interpreter, state, 0xFD);
 
     // REVERT should trigger REVERT error
     try testing.expectError(ExecutionError.Error.REVERT, result);
@@ -244,14 +244,14 @@ test "REVERT: Empty revert data" {
         frame.pc = i * 2;
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
     frame.pc = 4;
 
     // Execute REVERT
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFD);
+    const result = evm.table.execute(interpreter, state, 0xFD);
     try testing.expectError(ExecutionError.Error.REVERT, result);
 
     // Check empty revert data in output
@@ -303,7 +303,7 @@ test "INVALID (0xFE): Consume all gas and fail" {
     // Execute INVALID
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFE);
+    const result = evm.table.execute(interpreter, state, 0xFE);
 
     // Should return InvalidOpcode error
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result);
@@ -382,11 +382,11 @@ test "SELFDESTRUCT (0xFF): Schedule contract destruction" {
     frame.pc = 0;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0x73);
+    _ = try evm.table.execute(interpreter, state, 0x73);
     frame.pc = 21;
 
     // Execute SELFDESTRUCT
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
 
     // SELFDESTRUCT returns STOP
     try testing.expectError(ExecutionError.Error.STOP, result);
@@ -438,7 +438,7 @@ test "SELFDESTRUCT: Static call protection" {
     // Execute SELFDESTRUCT
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -488,7 +488,7 @@ test "SELFDESTRUCT: Cold beneficiary address (EIP-2929)" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xFF);
+    const result = evm.table.execute(interpreter, state, 0xFF);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Check that cold address access cost was consumed
@@ -545,7 +545,7 @@ test "Control opcodes: Gas consumption" {
     const gas_before = frame.gas_remaining;
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    const result = evm.table.execute(0, interpreter, state, 0xF3);
+    const result = evm.table.execute(interpreter, state, 0xF3);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     const gas_used = gas_before - frame.gas_remaining;
@@ -601,7 +601,7 @@ test "RETURN/REVERT: Large memory offset" {
         const gas_before = test_frame.gas_remaining;
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        const result = evm.table.execute(0, interpreter, state, opcode);
+        const result = evm.table.execute(interpreter, state, opcode);
 
         if (opcode == 0xF3) {
             try testing.expectError(ExecutionError.Error.STOP, result);
@@ -655,12 +655,12 @@ test "RETURN/REVERT: Stack underflow" {
         // Empty stack
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &test_frame;
-        const result = evm.table.execute(0, interpreter, state, opcode);
+        const result = evm.table.execute(interpreter, state, opcode);
         try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
         // Only one item on stack (need 2)
         try test_frame.stack.append(0);
-        const result2 = evm.table.execute(0, interpreter, state, opcode);
+        const result2 = evm.table.execute(interpreter, state, opcode);
         try testing.expectError(ExecutionError.Error.StackUnderflow, result2);
     }
 }
@@ -716,7 +716,7 @@ test "Control flow interaction: Call with REVERT" {
     // Execute the CALL (VM handles the actual call)
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    _ = try evm.table.execute(0, interpreter, state, 0xF1);
+    _ = try evm.table.execute(interpreter, state, 0xF1);
 
     // Check success status pushed to stack
     const success = try frame.stack.pop();

@@ -7,6 +7,7 @@ const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+const Context = Evm.Context;
 
 // ============================
 // 0x00: STOP opcode
@@ -24,8 +25,8 @@ test "STOP (0x00): Halt execution" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     const code = [_]u8{0x00}; // STOP
     var contract = Contract.init(
         caller,
@@ -39,19 +40,12 @@ test "STOP (0x00): Halt execution" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Execute STOP
-    const result = evm.table.execute(0, interpreter, state, 0x00);
+    const result = evm.table.execute(&evm, &frame, 0x00);
 
     // Should return STOP error
     try testing.expectError(ExecutionError.Error.STOP, result);
@@ -73,8 +67,8 @@ test "ADD (0x01): Basic addition" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     const code = [_]u8{0x01}; // ADD
     var contract = Contract.init(
         caller,
@@ -88,25 +82,18 @@ test "ADD (0x01): Basic addition" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test basic addition: 5 + 10 = 15
-    try frame.stack.append(5);
-    try frame.stack.append(10);
+    try frame.stack_push(5);
+    try frame.stack_push(10);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
-    const result = try evm.table.execute(0, interpreter, state, 0x01);
+    const result = try evm.table.execute(&evm, &frame, 0x01);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 15), value);
 }
 
@@ -122,8 +109,8 @@ test "ADD: Overflow wraps to zero" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -136,25 +123,18 @@ test "ADD: Overflow wraps to zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test overflow: MAX + 1 = 0
     const max_u256 = std.math.maxInt(u256);
-    try frame.stack.append(max_u256);
-    try frame.stack.append(1);
+    try frame.stack_push(max_u256);
+    try frame.stack_push(1);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x01);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x01);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -170,8 +150,8 @@ test "ADD: Large numbers" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -184,26 +164,19 @@ test "ADD: Large numbers" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test large number addition
     const large1 = std.math.maxInt(u256) / 2;
     const large2 = std.math.maxInt(u256) / 3;
-    try frame.stack.append(large1);
-    try frame.stack.append(large2);
+    try frame.stack_push(large1);
+    try frame.stack_push(large2);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x01);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x01);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     const expected = large1 +% large2; // Wrapping addition
     try testing.expectEqual(expected, value);
 }
@@ -224,8 +197,8 @@ test "MUL (0x02): Basic multiplication" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -238,24 +211,17 @@ test "MUL (0x02): Basic multiplication" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test basic multiplication: 5 * 10 = 50
-    try frame.stack.append(5);
-    try frame.stack.append(10);
+    try frame.stack_push(5);
+    try frame.stack_push(10);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x02);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x02);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 50), value);
 }
 
@@ -271,8 +237,8 @@ test "MUL: Multiplication by zero" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -285,24 +251,17 @@ test "MUL: Multiplication by zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test multiplication by zero
-    try frame.stack.append(1000);
-    try frame.stack.append(0);
+    try frame.stack_push(1000);
+    try frame.stack_push(0);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x02);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x02);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -318,8 +277,8 @@ test "MUL: Overflow behavior" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -332,25 +291,18 @@ test "MUL: Overflow behavior" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test overflow: (2^128) * (2^128) should wrap
     const half_max = @as(u256, 1) << 128;
-    try frame.stack.append(half_max);
-    try frame.stack.append(half_max);
+    try frame.stack_push(half_max);
+    try frame.stack_push(half_max);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x02);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x02);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     // Result should be 0 due to overflow (2^256 mod 2^256 = 0)
     try testing.expectEqual(@as(u256, 0), value);
 }
@@ -371,8 +323,8 @@ test "SUB (0x03): Basic subtraction" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -385,25 +337,18 @@ test "SUB (0x03): Basic subtraction" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test basic subtraction: 10 - 5 = 5
     // SUB calculates top - second, so we need [5, 10] with 10 on top
-    try frame.stack.append(5);
-    try frame.stack.append(10);
+    try frame.stack_push(5);
+    try frame.stack_push(10);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x03);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x03);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 5), value);
 }
 
@@ -419,8 +364,8 @@ test "SUB: Underflow wraps to max" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -433,25 +378,18 @@ test "SUB: Underflow wraps to max" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test underflow: 1 - 2 = MAX (wraps around)
     // SUB calculates top - second, so we need [2, 1] with 1 on top
-    try frame.stack.append(2);
-    try frame.stack.append(1);
+    try frame.stack_push(2);
+    try frame.stack_push(1);
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x03);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x03);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(std.math.maxInt(u256), value);
 }
 
@@ -471,8 +409,8 @@ test "DIV (0x04): Basic division" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -485,25 +423,18 @@ test "DIV (0x04): Basic division" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test basic division: 20 / 5 = 4
     // DIV pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(5); // divisor (bottom)
-    try frame.stack.append(20); // dividend (top)
+    try frame.stack_push(5); // divisor (bottom)
+    try frame.stack_push(20); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x04);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x04);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 4), value);
 }
 
@@ -519,8 +450,8 @@ test "DIV: Division by zero returns zero" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -533,25 +464,18 @@ test "DIV: Division by zero returns zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test division by zero: 100 / 0 = 0
     // DIV pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(0); // divisor (bottom)
-    try frame.stack.append(100); // dividend (top)
+    try frame.stack_push(0); // divisor (bottom)
+    try frame.stack_push(100); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x04);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x04);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -567,8 +491,8 @@ test "DIV: Integer division truncates" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -581,25 +505,18 @@ test "DIV: Integer division truncates" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test truncation: 7 / 3 = 2 (not 2.33...)
     // DIV pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(3); // divisor (bottom)
-    try frame.stack.append(7); // dividend (top)
+    try frame.stack_push(3); // divisor (bottom)
+    try frame.stack_push(7); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x04);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x04);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 2), value);
 }
 
@@ -619,8 +536,8 @@ test "SDIV (0x05): Signed division positive" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -633,25 +550,18 @@ test "SDIV (0x05): Signed division positive" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test positive division: 20 / 5 = 4
     // SDIV pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(5); // divisor (bottom)
-    try frame.stack.append(20); // dividend (top)
+    try frame.stack_push(5); // divisor (bottom)
+    try frame.stack_push(20); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x05);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x05);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 4), value);
 }
 
@@ -667,8 +577,8 @@ test "SDIV: Signed division negative" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -681,27 +591,20 @@ test "SDIV: Signed division negative" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test negative division: -20 / 5 = -4
     // In two's complement: -20 = MAX - 19
     // SDIV pops dividend first, then divisor, so dividend must be on top
     const neg_20 = std.math.maxInt(u256) - 19;
-    try frame.stack.append(5); // divisor (bottom)
-    try frame.stack.append(neg_20); // dividend (top)
+    try frame.stack_push(5); // divisor (bottom)
+    try frame.stack_push(neg_20); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x05);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x05);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     const expected = std.math.maxInt(u256) - 3; // -4 in two's complement
     try testing.expectEqual(expected, value);
 }
@@ -718,8 +621,8 @@ test "SDIV: Division by zero returns zero" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -732,25 +635,18 @@ test "SDIV: Division by zero returns zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test division by zero
     // SDIV pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(0); // divisor (bottom)
-    try frame.stack.append(100); // dividend (top)
+    try frame.stack_push(0); // divisor (bottom)
+    try frame.stack_push(100); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x05);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x05);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -766,8 +662,8 @@ test "SDIV: Edge case MIN / -1" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -780,27 +676,20 @@ test "SDIV: Edge case MIN / -1" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test MIN / -1 = MIN (special case)
     const min_i256 = @as(u256, 1) << 255; // -2^255 in two's complement
     const neg_1 = std.math.maxInt(u256); // -1 in two's complement
     // SDIV pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(neg_1); // divisor (bottom)
-    try frame.stack.append(min_i256); // dividend (top)
+    try frame.stack_push(neg_1); // divisor (bottom)
+    try frame.stack_push(min_i256); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x05);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x05);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(min_i256, value);
 }
 
@@ -820,8 +709,8 @@ test "MOD (0x06): Basic modulo" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -834,25 +723,18 @@ test "MOD (0x06): Basic modulo" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test basic modulo: 17 % 5 = 2
     // MOD pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(5); // divisor (bottom)
-    try frame.stack.append(17); // dividend (top)
+    try frame.stack_push(5); // divisor (bottom)
+    try frame.stack_push(17); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x06);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x06);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 2), value);
 }
 
@@ -868,8 +750,8 @@ test "MOD: Modulo by zero returns zero" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -882,25 +764,18 @@ test "MOD: Modulo by zero returns zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test modulo by zero: 100 % 0 = 0
     // MOD pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(0); // divisor (bottom)
-    try frame.stack.append(100); // dividend (top)
+    try frame.stack_push(0); // divisor (bottom)
+    try frame.stack_push(100); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x06);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x06);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -920,8 +795,8 @@ test "SMOD (0x07): Signed modulo positive" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -934,25 +809,18 @@ test "SMOD (0x07): Signed modulo positive" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test positive modulo: 17 % 5 = 2
     // SMOD pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(5); // divisor (bottom)
-    try frame.stack.append(17); // dividend (top)
+    try frame.stack_push(5); // divisor (bottom)
+    try frame.stack_push(17); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x07);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x07);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 2), value);
 }
 
@@ -968,8 +836,8 @@ test "SMOD: Signed modulo negative" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -982,26 +850,19 @@ test "SMOD: Signed modulo negative" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test negative modulo: -17 % 5 = -2
     const neg_17 = std.math.maxInt(u256) - 16;
     // SMOD pops dividend first, then divisor, so dividend must be on top
-    try frame.stack.append(5); // divisor (bottom)
-    try frame.stack.append(neg_17); // dividend (top)
+    try frame.stack_push(5); // divisor (bottom)
+    try frame.stack_push(neg_17); // dividend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x07);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x07);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     const expected = std.math.maxInt(u256) - 1; // -2 in two's complement
     try testing.expectEqual(expected, value);
 }
@@ -1022,8 +883,8 @@ test "ADDMOD (0x08): Basic modular addition" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1036,26 +897,19 @@ test "ADDMOD (0x08): Basic modular addition" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: (10 + 10) % 8 = 4
     // ADDMOD pops modulus first, then second addend, then first addend
-    try frame.stack.append(8); // modulus (bottom)
-    try frame.stack.append(10); // second addend (middle)
-    try frame.stack.append(10); // first addend (top)
+    try frame.stack_push(8); // modulus (bottom)
+    try frame.stack_push(10); // second addend (middle)
+    try frame.stack_push(10); // first addend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x08);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x08);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 4), value);
 }
 
@@ -1071,8 +925,8 @@ test "ADDMOD: Modulo zero returns zero" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1085,26 +939,19 @@ test "ADDMOD: Modulo zero returns zero" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: (10 + 10) % 0 = 0
     // ADDMOD pops modulus first, then second addend, then first addend
-    try frame.stack.append(0); // modulus (bottom)
-    try frame.stack.append(10); // second addend (middle)
-    try frame.stack.append(10); // first addend (top)
+    try frame.stack_push(0); // modulus (bottom)
+    try frame.stack_push(10); // second addend (middle)
+    try frame.stack_push(10); // first addend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x08);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x08);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -1120,8 +967,8 @@ test "ADDMOD: No intermediate overflow" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1134,27 +981,20 @@ test "ADDMOD: No intermediate overflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test with values that would overflow u256
     const max = std.math.maxInt(u256);
     // ADDMOD pops modulus first, then second addend, then first addend
-    try frame.stack.append(10); // modulus (bottom)
-    try frame.stack.append(max); // second addend (middle)
-    try frame.stack.append(max); // first addend (top)
+    try frame.stack_push(10); // modulus (bottom)
+    try frame.stack_push(max); // second addend (middle)
+    try frame.stack_push(max); // first addend (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x08);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x08);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     // (MAX + MAX) % 10 = 0 (correct calculation)
     // MAX = 2^256 - 1, so MAX + MAX = 2^257 - 2
     // 2^256 ≡ 6 (mod 10), so 2^257 ≡ 2 (mod 10)
@@ -1178,8 +1018,8 @@ test "MULMOD (0x09): Basic modular multiplication" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1192,26 +1032,19 @@ test "MULMOD (0x09): Basic modular multiplication" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: (10 * 10) % 8 = 4
     // MULMOD pops modulus first, then second factor, then first factor
-    try frame.stack.append(8); // modulus (bottom)
-    try frame.stack.append(10); // second factor (middle)
-    try frame.stack.append(10); // first factor (top)
+    try frame.stack_push(8); // modulus (bottom)
+    try frame.stack_push(10); // second factor (middle)
+    try frame.stack_push(10); // first factor (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x09);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x09);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 4), value);
 }
 
@@ -1227,8 +1060,8 @@ test "MULMOD: No intermediate overflow" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1241,27 +1074,20 @@ test "MULMOD: No intermediate overflow" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test with values that would overflow u256
     const large = @as(u256, 1) << 200;
     // MULMOD pops modulus first, then second factor, then first factor
-    try frame.stack.append(100); // modulus (bottom)
-    try frame.stack.append(large); // second factor (middle)
-    try frame.stack.append(large); // first factor (top)
+    try frame.stack_push(100); // modulus (bottom)
+    try frame.stack_push(large); // second factor (middle)
+    try frame.stack_push(large); // first factor (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x09);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x09);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     // Should compute correctly without overflow
     try testing.expect(value < 100);
 }
@@ -1282,8 +1108,8 @@ test "EXP (0x0A): Basic exponentiation" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1296,25 +1122,18 @@ test "EXP (0x0A): Basic exponentiation" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: 2^8 = 256
     // EXP pops base first, then exponent, so base must be on top
-    try frame.stack.append(8); // exponent (bottom)
-    try frame.stack.append(2); // base (top)
+    try frame.stack_push(8); // exponent (bottom)
+    try frame.stack_push(2); // base (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0A);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0A);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 256), value);
 }
 
@@ -1330,8 +1149,8 @@ test "EXP: Zero exponent" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1344,25 +1163,18 @@ test "EXP: Zero exponent" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: 100^0 = 1
     // EXP pops base first, then exponent, so base must be on top
-    try frame.stack.append(0); // exponent (bottom)
-    try frame.stack.append(100); // base (top)
+    try frame.stack_push(0); // exponent (bottom)
+    try frame.stack_push(100); // base (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0A);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0A);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 1), value);
 }
 
@@ -1378,8 +1190,8 @@ test "EXP: Zero base with non-zero exponent" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1392,25 +1204,18 @@ test "EXP: Zero base with non-zero exponent" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: 0^10 = 0
     // EXP pops base first, then exponent, so base must be on top
-    try frame.stack.append(10); // exponent (bottom)
-    try frame.stack.append(0); // base (top)
+    try frame.stack_push(10); // exponent (bottom)
+    try frame.stack_push(0); // base (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0A);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0A);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), value);
 }
 
@@ -1426,8 +1231,8 @@ test "EXP: Gas consumption scales with exponent size" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1440,24 +1245,17 @@ test "EXP: Gas consumption scales with exponent size" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(10000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 10000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test with large exponent
     // EXP pops base first, then exponent, so base must be on top
-    try frame.stack.append(0x10000); // exponent (bottom)
-    try frame.stack.append(2); // base (top)
+    try frame.stack_push(0x10000); // exponent (bottom)
+    try frame.stack_push(2); // base (top)
 
     const gas_before = frame.gas_remaining;
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
-    _ = try evm.table.execute(0, interpreter, state, 0x0A);
+    _ = try evm.table.execute(&evm, &frame, 0x0A);
     const gas_used = gas_before - frame.gas_remaining;
 
     // EXP uses 10 + 50 * byte_size_of_exponent
@@ -1482,8 +1280,8 @@ test "SIGNEXTEND (0x0B): Extend positive byte" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1496,25 +1294,18 @@ test "SIGNEXTEND (0x0B): Extend positive byte" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: sign extend 0x7F (positive) from byte 0
     // SIGNEXTEND pops byte_index first, then value, so byte_index must be on top
-    try frame.stack.append(0x7F); // value (bottom)
-    try frame.stack.append(0); // byte_index (top)
+    try frame.stack_push(0x7F); // value (bottom)
+    try frame.stack_push(0); // byte_index (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0B);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0B);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x7F), value);
 }
 
@@ -1530,8 +1321,8 @@ test "SIGNEXTEND: Extend negative byte" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1544,25 +1335,18 @@ test "SIGNEXTEND: Extend negative byte" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: sign extend 0xFF (negative) from byte 0
     // SIGNEXTEND pops byte_index first, then value, so byte_index must be on top
-    try frame.stack.append(0xFF); // value (bottom)
-    try frame.stack.append(0); // byte_index (top)
+    try frame.stack_push(0xFF); // value (bottom)
+    try frame.stack_push(0); // byte_index (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0B);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0B);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     // Should extend with 1s
     const expected = std.math.maxInt(u256); // All 1s
     try testing.expectEqual(expected, value);
@@ -1580,8 +1364,8 @@ test "SIGNEXTEND: Extend from higher byte position" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1594,25 +1378,18 @@ test "SIGNEXTEND: Extend from higher byte position" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: sign extend 0x00FF from byte 1 (second byte)
     // SIGNEXTEND pops byte_index first, then value, so byte_index must be on top
-    try frame.stack.append(0x00FF); // value (bottom)
-    try frame.stack.append(1); // byte_index (top)
+    try frame.stack_push(0x00FF); // value (bottom)
+    try frame.stack_push(1); // byte_index (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0B);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0B);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     // Since bit 15 is 0, it's positive, no extension
     try testing.expectEqual(@as(u256, 0x00FF), value);
 }
@@ -1629,8 +1406,8 @@ test "SIGNEXTEND: Byte position >= 31 returns value unchanged" {
     var evm = try builder.build();
     defer evm.deinit();
 
-    const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const caller: [20]u8 = [_]u8{0x11} ** 20;
+    const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
     var contract = Contract.init(
         caller,
         contract_addr,
@@ -1643,26 +1420,19 @@ test "SIGNEXTEND: Byte position >= 31 returns value unchanged" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
     defer frame.deinit();
 
     // Test: byte position >= 31 returns original value
     const test_value = 0x123456789ABCDEF;
     // SIGNEXTEND pops byte_index first, then value, so byte_index must be on top
-    try frame.stack.append(test_value); // value (bottom)
-    try frame.stack.append(31); // byte_index (top)
+    try frame.stack_push(test_value); // value (bottom)
+    try frame.stack_push(31); // byte_index (top)
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    _ = try evm.table.execute(&evm, &frame, 0x0B);
 
-    _ = try evm.table.execute(0, interpreter, state, 0x0B);
-
-    const value = try frame.stack.pop();
+    const value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, test_value), value);
 }
 
@@ -1692,8 +1462,8 @@ test "Arithmetic opcodes: Gas consumption" {
             .expected_gas = 3,
             .setup = struct { // ADD
                 fn setup(frame: *Frame) !void {
-                    try frame.stack.append(5);
-                    try frame.stack.append(10);
+                    try frame.stack_push(5);
+                    try frame.stack_push(10);
                 }
             }.setup,
         },
@@ -1702,8 +1472,8 @@ test "Arithmetic opcodes: Gas consumption" {
             .expected_gas = 5,
             .setup = struct { // MUL
                 fn setup(frame: *Frame) !void {
-                    try frame.stack.append(5);
-                    try frame.stack.append(10);
+                    try frame.stack_push(5);
+                    try frame.stack_push(10);
                 }
             }.setup,
         },
@@ -1713,17 +1483,17 @@ test "Arithmetic opcodes: Gas consumption" {
             .setup = struct { // ADDMOD
                 fn setup(frame: *Frame) !void {
                     // ADDMOD pops modulus first, then second addend, then first addend
-                    try frame.stack.append(8); // modulus (bottom)
-                    try frame.stack.append(10); // second addend (middle)
-                    try frame.stack.append(10); // first addend (top)
+                    try frame.stack_push(8); // modulus (bottom)
+                    try frame.stack_push(10); // second addend (middle)
+                    try frame.stack_push(10); // first addend (top)
                 }
             }.setup,
         },
     };
 
     for (test_cases) |tc| {
-        const caller = [_]u8{0x11} ** 20;
-        const contract_addr = [_]u8{0x11} ** 20;
+        const caller: [20]u8 = [_]u8{0x11} ** 20;
+        const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
         var contract = Contract.init(
             caller,
             contract_addr,
@@ -1736,21 +1506,14 @@ test "Arithmetic opcodes: Gas consumption" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withVm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        const context = Context.init();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
         defer frame.deinit();
 
         try tc.setup(&frame);
 
         const gas_before = frame.gas_remaining;
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
-
-        _ = try evm.table.execute(0, interpreter, state, tc.opcode);
+        _ = try evm.table.execute(&evm, &frame, tc.opcode);
         const gas_used = gas_before - frame.gas_remaining;
 
         try testing.expectEqual(tc.expected_gas, gas_used);
@@ -1778,8 +1541,8 @@ test "Arithmetic opcodes: Stack underflow" {
 
     // Test binary operations with empty stack
     for (binary_ops) |opcode| {
-        const caller = [_]u8{0x11} ** 20;
-        const contract_addr = [_]u8{0x11} ** 20;
+        const caller: [20]u8 = [_]u8{0x11} ** 20;
+        const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
         var contract = Contract.init(
             caller,
             contract_addr,
@@ -1792,31 +1555,24 @@ test "Arithmetic opcodes: Stack underflow" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withVm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        const context = Context.init();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
-
         // Empty stack
-        const result = evm.table.execute(0, interpreter, state, opcode);
+        const result = evm.table.execute(&evm, &frame, opcode);
         try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
         // Only one item
-        try frame.stack.append(10);
-        const result2 = evm.table.execute(0, interpreter, state, opcode);
+        try frame.stack_push(10);
+        const result2 = evm.table.execute(&evm, &frame, opcode);
         try testing.expectError(ExecutionError.Error.StackUnderflow, result2);
     }
 
     // Test ternary operations
     for (ternary_ops) |opcode| {
-        const caller = [_]u8{0x11} ** 20;
-        const contract_addr = [_]u8{0x11} ** 20;
+        const caller: [20]u8 = [_]u8{0x11} ** 20;
+        const contract_addr: [20]u8 = [_]u8{0x11} ** 20;
         var contract = Contract.init(
             caller,
             contract_addr,
@@ -1829,21 +1585,14 @@ test "Arithmetic opcodes: Stack underflow" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withVm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        const context = Context.init();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &[_]u8{}, context);
         defer frame.deinit();
 
-        const interpreter: Evm.Operation.Interpreter = &evm;
-        const state: Evm.Operation.State = &frame;
-
         // Only two items (need three)
-        try frame.stack.append(10);
-        try frame.stack.append(20);
-        const result = evm.table.execute(0, interpreter, state, opcode);
+        try frame.stack_push(10);
+        try frame.stack_push(20);
+        const result = evm.table.execute(&evm, &frame, opcode);
         try testing.expectError(ExecutionError.Error.StackUnderflow, result);
     }
 }

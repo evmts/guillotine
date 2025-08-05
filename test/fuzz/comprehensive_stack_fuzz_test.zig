@@ -75,7 +75,7 @@ test "fuzz_push_operations_all_sizes" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+        _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
         
         const result = try ctx.frame.stack.pop();
         
@@ -197,7 +197,7 @@ test "fuzz_push_value_patterns" {
         
         var interpreter = evm.Operation.Interpreter = &ctx.vm;
         var state = evm.Operation.State = &ctx.frame;
-        _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+        _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
         
         const result = try ctx.frame.stack.pop();
         try testing.expectEqual(test_case.expected, result);
@@ -237,7 +237,7 @@ test "fuzz_pop_operation_edge_cases" {
         const initial_stack_size = ctx.frame.stack.items.len;
         
         // Execute POP
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x50); // POP
+        _ = try ctx.vm.table.execute(interpreter, state, 0x50); // POP
         
         // Verify stack size decreased by 1
         try testing.expectEqual(initial_stack_size - 1, ctx.frame.stack.items.len);
@@ -251,7 +251,7 @@ test "fuzz_pop_operation_edge_cases" {
         }
         
         // POP on empty stack should fail
-        try testing.expectError(error.StackUnderflow, ctx.vm.table.execute(0, interpreter, state, 0x50));
+        try testing.expectError(error.StackUnderflow, ctx.vm.table.execute(interpreter, state, 0x50));
     }
 }
 
@@ -304,7 +304,7 @@ test "fuzz_dup_operations_all_positions" {
         const expected_value = stack_values[dup_position - 1]; // Value that should be duplicated
         
         // Execute DUP operation
-        _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+        _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
         
         // Verify stack size increased by 1
         try testing.expectEqual(initial_stack_size + 1, ctx.frame.stack.items.len);
@@ -347,10 +347,10 @@ test "fuzz_dup_stack_underflow_cases" {
             
             if (stack_depth < dup_position) {
                 // Should fail with stack underflow
-                try testing.expectError(error.StackUnderflow, ctx.vm.table.execute(0, interpreter, state, @intCast(opcode)));
+                try testing.expectError(error.StackUnderflow, ctx.vm.table.execute(interpreter, state, @intCast(opcode)));
             } else {
                 // Should succeed
-                _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+                _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
                 
                 // Clean up for next iteration
                 _ = try ctx.frame.stack.pop(); // Remove the duplicated value
@@ -410,7 +410,7 @@ test "fuzz_swap_operations_all_positions" {
         const swap_target_value = stack_values[0]; // Will be at swap_position from top
         
         // Execute SWAP operation
-        _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+        _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
         
         // Verify stack size unchanged
         try testing.expectEqual(initial_stack_size, ctx.frame.stack.items.len);
@@ -453,10 +453,10 @@ test "fuzz_swap_stack_underflow_cases" {
             
             if (stack_depth < required_depth) {
                 // Should fail with stack underflow
-                try testing.expectError(error.StackUnderflow, ctx.vm.table.execute(0, interpreter, state, @intCast(opcode)));
+                try testing.expectError(error.StackUnderflow, ctx.vm.table.execute(interpreter, state, @intCast(opcode)));
             } else {
                 // Should succeed
-                _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+                _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
             }
         }
     }
@@ -494,12 +494,12 @@ test "fuzz_stack_operations_max_depth" {
         var push_state = evm.Operation.State = &push_ctx.frame;
         
         // This should succeed (brings stack to exactly max_stack_size)
-        _ = try push_ctx.vm.table.execute(0, &push_interpreter, &push_state, 0x60);
+        _ = try push_ctx.vm.table.execute(&push_interpreter, &push_state, 0x60);
         try testing.expectEqual(max_stack_size, push_ctx.frame.stack.items.len);
         
         // Trying to push one more should fail
         push_ctx.frame.pc = 0; // Reset PC for next instruction
-        try testing.expectError(error.StackOverflow, push_ctx.vm.table.execute(0, &push_interpreter, &push_state, 0x60));
+        try testing.expectError(error.StackOverflow, push_ctx.vm.table.execute(&push_interpreter, &push_state, 0x60));
     }
     
     // Test DUP operations on nearly full stack
@@ -514,7 +514,7 @@ test "fuzz_stack_operations_max_depth" {
                 }
                 
                 // DUP should succeed (brings stack to max_stack_size)
-                _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+                _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
                 try testing.expectEqual(max_stack_size, ctx.frame.stack.items.len);
                 
                 // Remove the duplicated item for next test
@@ -561,7 +561,7 @@ test "fuzz_stack_operations_complex_patterns" {
                     const stack_len = ctx.frame.stack.items.len;
                     const expected_value = ctx.frame.stack.items[stack_len - dup_pos];
                     
-                    _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+                    _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
                     
                     // Verify duplication worked
                     const result = ctx.frame.stack.items[ctx.frame.stack.items.len - 1];
@@ -577,7 +577,7 @@ test "fuzz_stack_operations_complex_patterns" {
                     const top_value = ctx.frame.stack.items[stack_len - 1];
                     const swap_target_value = ctx.frame.stack.items[stack_len - 1 - swap_pos];
                     
-                    _ = try ctx.vm.table.execute(0, interpreter, state, @intCast(opcode));
+                    _ = try ctx.vm.table.execute(interpreter, state, @intCast(opcode));
                     
                     // Verify swap worked
                     const new_top = ctx.frame.stack.items[stack_len - 1];
@@ -610,7 +610,7 @@ test "fuzz_push0_operation" {
         const initial_stack_size = ctx.frame.stack.items.len;
         
         // Execute PUSH0
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x5F);
+        _ = try ctx.vm.table.execute(interpreter, state, 0x5F);
         
         // Verify stack size increased by 1
         try testing.expectEqual(initial_stack_size + 1, ctx.frame.stack.items.len);
@@ -629,7 +629,7 @@ test "fuzz_push0_operation" {
         }
         
         // PUSH0 should succeed (brings stack to exactly 1024)
-        _ = try ctx.vm.table.execute(0, interpreter, state, 0x5F);
+        _ = try ctx.vm.table.execute(interpreter, state, 0x5F);
         try testing.expectEqual(@as(usize, 1024), ctx.frame.stack.items.len);
         
         // Verify the pushed value is 0
@@ -637,6 +637,6 @@ test "fuzz_push0_operation" {
         try testing.expectEqual(@as(u256, 0), top_value);
         
         // Trying to push one more should fail
-        try testing.expectError(error.StackOverflow, ctx.vm.table.execute(0, interpreter, state, 0x5F));
+        try testing.expectError(error.StackOverflow, ctx.vm.table.execute(interpreter, state, 0x5F));
     }
 }

@@ -61,7 +61,7 @@ test "PUSH4 (0x63): Push 4 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x63);
+        const result = try evm.table.execute(interpreter, state, 0x63);
 
         // Check that 5 bytes were consumed (opcode + 4 data bytes)
         try testing.expectEqual(@as(usize, 5), result.bytes_consumed);
@@ -122,7 +122,7 @@ test "PUSH5 (0x64): Push 5 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x64);
+        const result = try evm.table.execute(interpreter, state, 0x64);
 
         // Check that 6 bytes were consumed (opcode + 5 data bytes)
         try testing.expectEqual(@as(usize, 6), result.bytes_consumed);
@@ -183,7 +183,7 @@ test "PUSH6 (0x65): Push 6 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x65);
+        const result = try evm.table.execute(interpreter, state, 0x65);
 
         // Check that 7 bytes were consumed (opcode + 6 data bytes)
         try testing.expectEqual(@as(usize, 7), result.bytes_consumed);
@@ -243,7 +243,7 @@ test "PUSH7 (0x66): Push 7 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x66);
+        const result = try evm.table.execute(interpreter, state, 0x66);
 
         // Check that 8 bytes were consumed (opcode + 7 data bytes)
         try testing.expectEqual(@as(usize, 8), result.bytes_consumed);
@@ -304,7 +304,7 @@ test "PUSH8 (0x67): Push 8 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x67);
+        const result = try evm.table.execute(interpreter, state, 0x67);
 
         // Check that 9 bytes were consumed (opcode + 8 data bytes)
         try testing.expectEqual(@as(usize, 9), result.bytes_consumed);
@@ -368,7 +368,7 @@ test "PUSH9 (0x68): Push 9 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x68);
+        const result = try evm.table.execute(interpreter, state, 0x68);
 
         // Check that 10 bytes were consumed (opcode + 9 data bytes)
         try testing.expectEqual(@as(usize, 10), result.bytes_consumed);
@@ -432,7 +432,7 @@ test "PUSH10 (0x69): Push 10 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x69);
+        const result = try evm.table.execute(interpreter, state, 0x69);
 
         // Check that 11 bytes were consumed (opcode + 10 data bytes)
         try testing.expectEqual(@as(usize, 11), result.bytes_consumed);
@@ -496,7 +496,7 @@ test "PUSH11 (0x6A): Push 11 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x6A);
+        const result = try evm.table.execute(interpreter, state, 0x6A);
 
         // Check that 12 bytes were consumed (opcode + 11 data bytes)
         try testing.expectEqual(@as(usize, 12), result.bytes_consumed);
@@ -562,7 +562,7 @@ test "PUSH12 (0x6B): Push 12 bytes onto stack" {
 
     for (expected_values) |expected| {
         const pc = frame.pc;
-        const result = try evm.table.execute(pc, interpreter, state, 0x6B);
+        const result = try evm.table.execute(interpreter, state, 0x6B);
 
         // Check that 13 bytes were consumed (opcode + 12 data bytes)
         try testing.expectEqual(@as(usize, 13), result.bytes_consumed);
@@ -617,7 +617,7 @@ test "PUSH13 (0x6C): Push 13 bytes onto stack" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
 
-    const result = try evm.table.execute(frame.pc, interpreter, state, 0x6C);
+    const result = try evm.table.execute(interpreter, state, 0x6C);
 
     // Check that 14 bytes were consumed (opcode + 13 data bytes)
     try testing.expectEqual(@as(usize, 14), result.bytes_consumed);
@@ -706,7 +706,7 @@ test "PUSH4-PUSH12: Gas consumption" {
         frame.stack.clear();
 
         const gas_before = frame.gas_remaining;
-        const result = try evm.table.execute(frame.pc, interpreter, state, op.opcode);
+        const result = try evm.table.execute(interpreter, state, op.opcode);
 
         // All PUSH operations cost 3 gas (GasFastestStep)
         const gas_used = gas_before - frame.gas_remaining;
@@ -770,7 +770,7 @@ test "PUSH operations: Boundary conditions with truncated data" {
     const state: Evm.Operation.State = &frame;
 
     // First PUSH4 should work normally
-    const result1 = try evm.table.execute(frame.pc, interpreter, state, 0x63);
+    const result1 = try evm.table.execute(interpreter, state, 0x63);
     try testing.expectEqual(@as(usize, 5), result1.bytes_consumed);
     const top1 = try frame.stack.peek_n(0);
     try testing.expectEqual(@as(u256, 0x12345678), top1);
@@ -778,7 +778,7 @@ test "PUSH operations: Boundary conditions with truncated data" {
     frame.pc = 5;
 
     // Second PUSH8 should pad with zeros for missing bytes
-    const result2 = try evm.table.execute(frame.pc, interpreter, state, 0x67);
+    const result2 = try evm.table.execute(interpreter, state, 0x67);
     try testing.expectEqual(@as(usize, 9), result2.bytes_consumed);
     // Should be 0xABCDEF0000000000 (3 bytes followed by 5 zeros)
     const top2 = try frame.stack.peek_n(0);
@@ -836,7 +836,7 @@ test "PUSH operations: Sequential pushes filling stack" {
     // Push 1023 values (leaving room for one more)
     for (0..1023) |i| {
         frame.pc = i * 5;
-        const result = try evm.table.execute(frame.pc, interpreter, state, 0x63);
+        const result = try evm.table.execute(interpreter, state, 0x63);
         try testing.expectEqual(@as(usize, 5), result.bytes_consumed);
     }
 
@@ -844,12 +844,12 @@ test "PUSH operations: Sequential pushes filling stack" {
 
     // One more should succeed (reaching stack limit of 1024)
     frame.pc = 1023 * 5;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x63);
+    _ = try evm.table.execute(interpreter, state, 0x63);
     try testing.expectEqual(@as(usize, 1024), frame.stack.size);
 
     // Next one should fail with stack overflow
     frame.pc = 1024 * 5;
-    const overflow_result = evm.table.execute(frame.pc, interpreter, state, 0x63);
+    const overflow_result = evm.table.execute(interpreter, state, 0x63);
     try testing.expectError(ExecutionError.Error.StackOverflow, overflow_result);
 }
 
@@ -896,7 +896,7 @@ test "PUSH operations: Verify big-endian byte order" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
 
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x67);
+    _ = try evm.table.execute(interpreter, state, 0x67);
 
     // Value should be 0x0102030405060708 (big-endian interpretation)
     const expected: u256 = (@as(u256, 0x01) << 56) |

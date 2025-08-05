@@ -11,6 +11,7 @@ const Address = Evm.Address;
 const Operation = Evm.Operation;
 const ExecutionError = Evm.ExecutionError;
 const opcodes = Evm.opcodes;
+const Context = Evm.Context;
 
 // Integration tests for call operations and environment interactions
 
@@ -52,22 +53,23 @@ test "Integration: Call with value transfer and balance check" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        primitives.Address.ZERO_ADDRESS, // caller
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Check balance of BOB before call
-    try frame.stack.append(primitives.Address.to_u256(bob_addr));
-    _ = try vm.table.execute(0, interpreter, state, 0x31);
-    const balance_before = try frame.stack.pop();
+    try frame.stack_push(primitives.Address.to_u256(bob_addr));
+    _ = try vm.table.execute(&vm, &frame, 0x31);
+    const balance_before = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 500), balance_before);
 
     // Prepare to call BOB with 100 wei
@@ -79,16 +81,16 @@ test "Integration: Call with value transfer and balance check" {
     // Push CALL parameters
     // CALL(gas, address, value, argsOffset, argsSize, retOffset, retSize)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(0); // ret_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(value); // value (100 wei)
-    try frame.stack.append(primitives.Address.to_u256(bob_addr)); // to
-    try frame.stack.append(50000); // gas
+    try frame.stack_push(0); // ret_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(value); // value (100 wei)
+    try frame.stack_push(primitives.Address.to_u256(bob_addr)); // to
+    try frame.stack_push(50000); // gas
 
-    _ = try vm.table.execute(0, interpreter, state, 0xF1);
-    const call_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
+    const call_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 1), call_result); // Success
 
     // In a real implementation, balance would be updated
@@ -97,9 +99,9 @@ test "Integration: Call with value transfer and balance check" {
     try vm.state.set_balance(bob_addr, 600);
 
     // Check balance of BOB after call
-    try frame.stack.append(primitives.Address.to_u256(bob_addr));
-    _ = try vm.table.execute(0, interpreter, state, 0x31);
-    const balance_after = try frame.stack.pop();
+    try frame.stack_push(primitives.Address.to_u256(bob_addr));
+    _ = try vm.table.execute(&vm, &frame, 0x31);
+    const balance_after = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 600), balance_after);
 }
 
@@ -145,58 +147,59 @@ test "Integration: Environment opcodes in context" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        bob_addr, // caller (BOB is the caller)
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Test ADDRESS
-    _ = try vm.table.execute(0, interpreter, state, 0x30);
-    const address_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x30);
+    const address_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, primitives.Address.to_u256(contract_addr)), address_result);
 
     // Test ORIGIN
-    _ = try vm.table.execute(0, interpreter, state, 0x32);
-    const origin_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x32);
+    const origin_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, primitives.Address.to_u256(alice_addr)), origin_result);
 
     // Test CALLER
-    _ = try vm.table.execute(0, interpreter, state, 0x33);
-    const caller_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x33);
+    const caller_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, primitives.Address.to_u256(bob_addr)), caller_result);
 
     // Test CALLVALUE
-    _ = try vm.table.execute(0, interpreter, state, 0x34);
-    const callvalue_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x34);
+    const callvalue_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 500), callvalue_result);
 
     // Test GASPRICE
-    _ = try vm.table.execute(0, interpreter, state, 0x3A);
-    const gasprice_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x3A);
+    const gasprice_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 20_000_000_000), gasprice_result);
 
     // Test block-related opcodes
-    _ = try vm.table.execute(0, interpreter, state, 0x43);
-    const number_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x43);
+    const number_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 15_000_000), number_result);
 
-    _ = try vm.table.execute(0, interpreter, state, 0x42);
-    const timestamp_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x42);
+    const timestamp_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 1_650_000_000), timestamp_result);
 
-    _ = try vm.table.execute(0, interpreter, state, 0x41);
-    const coinbase_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x41);
+    const coinbase_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, primitives.Address.to_u256(charlie_addr)), coinbase_result);
 
-    _ = try vm.table.execute(0, interpreter, state, 0x46);
-    const chainid_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x46);
+    const chainid_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 1), chainid_result);
 }
 
@@ -233,12 +236,15 @@ test "Integration: CREATE with init code from memory" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_addr, // caller
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Build init code that stores a value and returns runtime code
@@ -263,27 +269,25 @@ test "Integration: CREATE with init code from memory" {
     try frame.memory.set_data(0, &init_code);
 
     // Execute CREATE through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Execute CREATE
     // CREATE(value, offset, size)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(init_code.len); // size
-    try frame.stack.append(0); // offset
-    try frame.stack.append(1000); // value
+    try frame.stack_push(init_code.len); // size
+    try frame.stack_push(0); // offset
+    try frame.stack_push(1000); // value
 
-    _ = vm.table.execute(0, interpreter, state, 0xF0) catch |err| {
+    _ = try vm.table.execute(&vm, &frame, 0xF0) catch |err| {
         // CREATE may not be fully implemented
         try testing.expect(err == ExecutionError.Error.OutOfGas or
             err == ExecutionError.Error.StackUnderflow or
             err == ExecutionError.Error.MaxCodeSizeExceeded);
         // If CREATE fails, push a zero address
-        try frame.stack.append(0);
+        try frame.stack_push(0);
     };
 
     // Should have some result on stack (address or zero)
-    const addr = try frame.stack.pop();
+    const addr = try frame.stack_pop();
     _ = addr; // Just verify we got something
 }
 
@@ -330,17 +334,18 @@ test "Integration: DELEGATECALL preserves context" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_addr, // caller (Original caller)
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Note: In black box testing, we don't mock internal state.
     // The DELEGATECALL opcode will execute and return its actual result.
@@ -348,15 +353,15 @@ test "Integration: DELEGATECALL preserves context" {
     // Execute DELEGATECALL
     // DELEGATECALL(gas, address, argsOffset, argsSize, retOffset, retSize)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(0); // ret_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(primitives.Address.to_u256(bob_addr)); // to
-    try frame.stack.append(50000); // gas
+    try frame.stack_push(0); // ret_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(primitives.Address.to_u256(bob_addr)); // to
+    try frame.stack_push(50000); // gas
 
-    _ = try vm.table.execute(0, interpreter, state, 0xF4);
-    const call_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0xF4);
+    const call_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 1), call_result); // Success
 
     // In DELEGATECALL, the called code should see the original caller (ALICE)
@@ -398,17 +403,18 @@ test "Integration: STATICCALL prevents state changes" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_addr, // caller
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Note: In black box testing, we don't mock internal state.
     // The STATICCALL opcode will execute and return its actual result.
@@ -416,15 +422,15 @@ test "Integration: STATICCALL prevents state changes" {
     // Execute STATICCALL
     // STATICCALL(gas, address, argsOffset, argsSize, retOffset, retSize)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(1); // ret_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(primitives.Address.to_u256(bob_addr)); // to
-    try frame.stack.append(50000); // gas
+    try frame.stack_push(1); // ret_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(primitives.Address.to_u256(bob_addr)); // to
+    try frame.stack_push(50000); // gas
 
-    _ = try vm.table.execute(0, interpreter, state, 0xFA);
-    const call_result = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0xFA);
+    const call_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 1), call_result); // Success
 
     // The is_static flag would be set in the called context,
@@ -466,17 +472,18 @@ test "Integration: Call depth limit handling" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_addr, // caller
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Test at maximum depth
     frame.depth = 1024;
@@ -484,25 +491,25 @@ test "Integration: Call depth limit handling" {
     // Try CREATE at max depth
     // CREATE(value, offset, size)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(0); // size
-    try frame.stack.append(0); // offset
-    try frame.stack.append(0); // value
-    _ = try vm.table.execute(0, interpreter, state, 0xF0);
-    const create_result = try frame.stack.pop();
+    try frame.stack_push(0); // size
+    try frame.stack_push(0); // offset
+    try frame.stack_push(0); // value
+    _ = try vm.table.execute(&vm, &frame, 0xF0);
+    const create_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), create_result); // Should fail
 
     // Try CALL at max depth
     // CALL(gas, address, value, argsOffset, argsSize, retOffset, retSize)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(0); // ret_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(0); // value
-    try frame.stack.append(primitives.Address.to_u256(bob_addr)); // to
-    try frame.stack.append(1000); // gas
-    _ = try vm.table.execute(0, interpreter, state, 0xF1);
-    const call_result = try frame.stack.pop();
+    try frame.stack_push(0); // ret_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(0); // value
+    try frame.stack_push(primitives.Address.to_u256(bob_addr)); // to
+    try frame.stack_push(1000); // gas
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
+    const call_result = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), call_result); // Should fail
 }
 
@@ -541,17 +548,18 @@ test "Integration: Return data handling across calls" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_addr, // caller
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // First call returns some data
     const return_data = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
@@ -559,39 +567,39 @@ test "Integration: Return data handling across calls" {
     // Execute CALL
     // CALL(gas, address, value, argsOffset, argsSize, retOffset, retSize)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(32); // ret_size (larger than actual return)
-    try frame.stack.append(100); // ret_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(0); // value
-    try frame.stack.append(primitives.Address.to_u256(bob_addr)); // to
-    try frame.stack.append(50000); // gas
+    try frame.stack_push(32); // ret_size (larger than actual return)
+    try frame.stack_push(100); // ret_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(0); // value
+    try frame.stack_push(primitives.Address.to_u256(bob_addr)); // to
+    try frame.stack_push(50000); // gas
 
-    _ = try vm.table.execute(0, interpreter, state, 0xF1);
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
 
     // Set return data buffer to simulate real execution
     try frame.return_data.set(&return_data);
 
     // Check RETURNDATASIZE
-    _ = try vm.table.execute(0, interpreter, state, 0x3D);
-    const return_size = try frame.stack.pop();
+    _ = try vm.table.execute(&vm, &frame, 0x3D);
+    const return_size = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 4), return_size);
 
     // Copy return data to memory
     // RETURNDATACOPY(mem_offset, data_offset, size)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(4); // size
-    try frame.stack.append(0); // data offset
-    try frame.stack.append(200); // memory offset
-    _ = try vm.table.execute(0, interpreter, state, 0x3E);
+    try frame.stack_push(4); // size
+    try frame.stack_push(0); // data offset
+    try frame.stack_push(200); // memory offset
+    _ = try vm.table.execute(&vm, &frame, 0x3E);
 
     // Verify data was copied
-    try frame.stack.append(200);
-    _ = try vm.table.execute(0, interpreter, state, 0x51);
+    try frame.stack_push(200);
+    _ = try vm.table.execute(&vm, &frame, 0x51);
 
     // Should have 0xAABBCCDD in the most significant bytes
     const expected = (@as(u256, 0xAABBCCDD) << (28 * 8));
-    const actual = try frame.stack.pop();
+    const actual = try frame.stack_pop();
     const mask = @as(u256, 0xFFFFFFFF) << (28 * 8);
     try testing.expectEqual(expected, actual & mask);
 }
@@ -631,17 +639,18 @@ test "Integration: Gas forwarding in calls" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_addr, // caller
+        &.{}, // input
+        vm.context
+    );
     defer frame.deinit();
 
     // Execute opcodes through jump table
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
 
     // Test gas calculation for CALL
     const initial_gas = frame.gas_remaining;
@@ -651,15 +660,15 @@ test "Integration: Gas forwarding in calls" {
 
     // CALL(gas, address, value, argsOffset, argsSize, retOffset, retSize)
     // Push in reverse order since stack is LIFO
-    try frame.stack.append(0); // ret_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(0); // value
-    try frame.stack.append(primitives.Address.to_u256(bob_addr)); // to
-    try frame.stack.append(requested_gas); // gas
+    try frame.stack_push(0); // ret_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(0); // value
+    try frame.stack_push(primitives.Address.to_u256(bob_addr)); // to
+    try frame.stack_push(requested_gas); // gas
 
-    _ = try vm.table.execute(0, interpreter, state, 0xF1);
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
 
     // Gas should be deducted for:
     // 1. Cold address access (2600)

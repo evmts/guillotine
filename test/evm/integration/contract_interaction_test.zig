@@ -43,12 +43,15 @@ test "Integration: contract creation and initialization" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Create simple init code that stores a value and returns runtime code
@@ -60,7 +63,7 @@ test "Integration: contract creation and initialization" {
     };
 
     // Write init code to memory
-    try frame.memory.set_data(0, &init_code);
+    try frame.memory_set_data(0, &init_code);
 
     // Set up CREATE result
     const new_contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -72,16 +75,14 @@ test "Integration: contract creation and initialization" {
     };
 
     // Execute CREATE
-    try frame.stack.append(0); // offset
-    try frame.stack.append(init_code.len); // size
-    try frame.stack.append(1000); // value to send
+    try frame.stack_push(0); // offset
+    try frame.stack_push(init_code.len); // size
+    try frame.stack_push(1000); // value to send
 
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0xF0);
+    _ = try vm.table.execute(&vm, &frame, 0xF0);
 
     // Check result
-    const created_address = try frame.stack.pop();
+    const created_address = try frame.stack_pop();
     try testing.expectEqual(Address.to_u256(new_contract_address), created_address);
 
     // Verify address is warm (EIP-2929)
@@ -126,12 +127,15 @@ test "Integration: inter-contract calls" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Set up accounts
@@ -140,7 +144,7 @@ test "Integration: inter-contract calls" {
 
     // Prepare call data
     const call_data = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
-    try frame.memory.set_data(0, &call_data);
+    try frame.memory_set_data(0, &call_data);
 
     // Set up mock call result
     const return_data = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
@@ -151,23 +155,21 @@ test "Integration: inter-contract calls" {
     };
 
     // Execute CALL
-    try frame.stack.append(50000); // gas
-    try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(500); // value to send
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(4); // args_size
-    try frame.stack.append(100); // ret_offset
-    try frame.stack.append(32); // ret_size
+    try frame.stack_push(50000); // gas
+    try frame.stack_push(Address.to_u256(target_address)); // to
+    try frame.stack_push(500); // value to send
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(4); // args_size
+    try frame.stack_push(100); // ret_offset
+    try frame.stack_push(32); // ret_size
 
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0xF1);
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
 
     // Check success
-    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+    try testing.expectEqual(@as(u256, 1), try frame.stack_pop());
 
     // Verify return data was written to memory
-    const returned_data = try frame.memory.get_slice(100, return_data.len);
+    const returned_data = try frame.memory_get_slice(100, return_data.len);
     try testing.expectEqualSlices(u8, &return_data, returned_data);
 
     // Check gas accounting
@@ -209,18 +211,21 @@ test "Integration: delegatecall context preservation" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(50000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        50000, // gas_limit
+        &contract,
+        caller_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
     frame.value = 1000;
 
     // Prepare call data
     const call_data = [_]u8{ 0x01, 0x02 };
-    try frame.memory.set_data(0, &call_data);
+    try frame.memory_set_data(0, &call_data);
 
     // Set up mock call result
     vm.call_result = .{
@@ -230,23 +235,21 @@ test "Integration: delegatecall context preservation" {
     };
 
     // Execute DELEGATECALL
-    try frame.stack.append(30000); // gas
-    try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(2); // args_size
-    try frame.stack.append(50); // ret_offset
-    try frame.stack.append(1); // ret_size
+    try frame.stack_push(30000); // gas
+    try frame.stack_push(Address.to_u256(target_address)); // to
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(2); // args_size
+    try frame.stack_push(50); // ret_offset
+    try frame.stack_push(1); // ret_size
 
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0xF4);
+    _ = try vm.table.execute(&vm, &frame, 0xF4);
 
     // Check success
-    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+    try testing.expectEqual(@as(u256, 1), try frame.stack_pop());
 
     // Context should be preserved (caller, value, storage context)
-    try testing.expectEqual(contract_address, frame.contract.address);
-    try testing.expectEqual(caller_address, frame.contract.caller);
+    try testing.expectEqual(contract_address, frame.address);
+    try testing.expectEqual(caller_address, frame.caller);
     try testing.expectEqual(@as(u256, 1000), frame.value);
 }
 
@@ -285,12 +288,15 @@ test "Integration: staticcall restrictions" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(50000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        50000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Set up for STATICCALL
@@ -301,42 +307,40 @@ test "Integration: staticcall restrictions" {
     };
 
     // Execute STATICCALL
-    try frame.stack.append(30000); // gas
-    try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // ret_size
+    try frame.stack_push(30000); // gas
+    try frame.stack_push(Address.to_u256(target_address)); // to
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // ret_size
 
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0xFA);
+    _ = try vm.table.execute(&vm, &frame, 0xFA);
 
     // Check success
-    try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
+    try testing.expectEqual(@as(u256, 1), try frame.stack_pop());
 
     // Now test that state modifications fail in static context
     frame.is_static = true;
 
     // Try SSTORE - should fail
-    try frame.stack.append(0); // slot
-    try frame.stack.append(100); // value
-    const sstore_result = vm.table.execute(0, interpreter, state, 0x55);
+    try frame.stack_push(0); // slot
+    try frame.stack_push(100); // value
+    const sstore_result = vm.table.execute(&vm, &frame, 0x55);
     try testing.expectError(ExecutionError.Error.WriteProtection, sstore_result);
 
     // Try LOG0 - should fail
-    frame.stack.clear();
-    try frame.stack.append(0); // offset
-    try frame.stack.append(0); // size
-    const log_result = vm.table.execute(0, interpreter, state, 0xA0);
+    frame.stack_clear();
+    try frame.stack_push(0); // offset
+    try frame.stack_push(0); // size
+    const log_result = vm.table.execute(&vm, &frame, 0xA0);
     try testing.expectError(ExecutionError.Error.WriteProtection, log_result);
 
     // Try CREATE - should fail
-    frame.stack.clear();
-    try frame.stack.append(0); // offset
-    try frame.stack.append(0); // size
-    try frame.stack.append(0); // value
-    const create_result = vm.table.execute(0, interpreter, state, 0xF0);
+    frame.stack_clear();
+    try frame.stack_push(0); // offset
+    try frame.stack_push(0); // size
+    try frame.stack_push(0); // value
+    const create_result = vm.table.execute(&vm, &frame, 0xF0);
     try testing.expectError(ExecutionError.Error.WriteProtection, create_result);
 }
 
@@ -374,19 +378,22 @@ test "Integration: CREATE2 deterministic deployment" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Simple init code
     const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xF3 }; // PUSH1 0 PUSH1 0 RETURN
 
     // Write init code to memory
-    try frame.memory.set_data(0, &init_code);
+    try frame.memory_set_data(0, &init_code);
 
     // Set up CREATE2 result
     const deterministic_address = Address.from_u256(0x4444444444444444444444444444444444444444);
@@ -399,17 +406,15 @@ test "Integration: CREATE2 deterministic deployment" {
 
     // Execute CREATE2 with salt
     const salt: u256 = 0x1234567890ABCDEF;
-    try frame.stack.append(0); // offset
-    try frame.stack.append(init_code.len); // size
-    try frame.stack.append(0); // value
-    try frame.stack.append(salt); // salt
+    try frame.stack_push(0); // offset
+    try frame.stack_push(init_code.len); // size
+    try frame.stack_push(0); // value
+    try frame.stack_push(salt); // salt
 
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0xF5);
+    _ = try vm.table.execute(&vm, &frame, 0xF5);
 
     // Check result
-    const created_address = try frame.stack.pop();
+    const created_address = try frame.stack_pop();
     try testing.expectEqual(Address.to_u256(deterministic_address), created_address);
 
     // Address should be warm
@@ -457,12 +462,15 @@ test "Integration: selfdestruct with balance transfer" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Set up contract with balance
@@ -470,11 +478,9 @@ test "Integration: selfdestruct with balance transfer" {
     try vm.set_balance(contract_address, contract_balance);
 
     // Execute SELFDESTRUCT
-    try frame.stack.append(Address.to_u256(beneficiary));
+    try frame.stack_push(Address.to_u256(beneficiary));
 
-    const interpreter: Operation.Interpreter = &vm;
-    const state: Operation.State = &frame;
-    const result = vm.table.execute(0, interpreter, state, 0xFF);
+    const result = vm.table.execute(&vm, &frame, 0xFF);
     try testing.expectError(ExecutionError.Error.STOP, result);
 
     // Verify contract is marked for deletion
@@ -519,44 +525,43 @@ test "Integration: call depth limit enforcement" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(100000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        100000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Set depth to maximum
     frame.depth = 1024;
 
     // Try CREATE - should fail silently (push 0)
-    try frame.stack.append(0); // offset
-    try frame.stack.append(0); // size
-    try frame.stack.append(0); // value
+    try frame.stack_push(0); // offset
+    try frame.stack_push(0); // size
+    try frame.stack_push(0); // value
 
-    const interpreter1: Operation.Interpreter = &vm;
-    const state1: Operation.State = &frame;
-    _ = try vm.table.execute(0, &interpreter1, state1, 0xF0);
+    _ = try vm.table.execute(&vm, &frame, 0xF0);
 
     // Should push 0 for failure
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+    try testing.expectEqual(@as(u256, 0), try frame.stack_pop());
 
     // Try CALL - should fail silently (push 0)
-    try frame.stack.append(1000); // gas
-    try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(0); // value
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // ret_size
+    try frame.stack_push(1000); // gas
+    try frame.stack_push(Address.to_u256(target_address)); // to
+    try frame.stack_push(0); // value
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // ret_size
 
-    const interpreter2: Operation.Interpreter = &vm;
-    const state2: Operation.State = &frame;
-    _ = try vm.table.execute(0, &interpreter2, state2, 0xF1);
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
 
     // Should push 0 for failure
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+    try testing.expectEqual(@as(u256, 0), try frame.stack_pop());
 }
 
 // Test return data handling across calls
@@ -594,19 +599,20 @@ test "Integration: return data buffer management" {
     defer contract.deinit(allocator, null);
 
     // Create frame
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&vm)
-        .withContract(&contract)
-        .withGas(50000)
-        .build();
+    var frame = try Frame.init(
+        allocator,
+        &vm,
+        50000, // gas_limit
+        &contract,
+        alice_address, // caller
+        &.{}, // input
+        vm.context,
+    );
     defer frame.deinit();
 
     // Initial state - no return data
-    const interpreter1: Operation.Interpreter = &vm;
-    const state1: Operation.State = &frame;
-    _ = try vm.table.execute(0, &interpreter1, state1, 0x3D);
-    try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
+    _ = try vm.table.execute(&vm, &frame, 0x3D);
+    try testing.expectEqual(@as(u256, 0), try frame.stack_pop());
 
     // Make a call that returns data
     const return_data = [_]u8{ 0x11, 0x22, 0x33, 0x44, 0x55 };
@@ -616,45 +622,37 @@ test "Integration: return data buffer management" {
         .output = &return_data,
     };
 
-    try frame.stack.append(30000); // gas
-    try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(0); // value
-    try frame.stack.append(0); // args_offset
-    try frame.stack.append(0); // args_size
-    try frame.stack.append(0); // ret_offset
-    try frame.stack.append(0); // ret_size (don't copy to memory)
+    try frame.stack_push(30000); // gas
+    try frame.stack_push(Address.to_u256(target_address)); // to
+    try frame.stack_push(0); // value
+    try frame.stack_push(0); // args_offset
+    try frame.stack_push(0); // args_size
+    try frame.stack_push(0); // ret_offset
+    try frame.stack_push(0); // ret_size (don't copy to memory)
 
-    const interpreter2: Operation.Interpreter = &vm;
-    const state2: Operation.State = &frame;
-    _ = try vm.table.execute(0, &interpreter2, state2, 0xF1);
-    _ = try frame.stack.pop(); // Discard success flag
+    _ = try vm.table.execute(&vm, &frame, 0xF1);
+    _ = try frame.stack_pop(); // Discard success flag
 
     // Check return data size
-    const interpreter3: Operation.Interpreter = &vm;
-    const state3: Operation.State = &frame;
-    _ = try vm.table.execute(0, &interpreter3, state3, 0x3D);
-    try testing.expectEqual(@as(u256, return_data.len), try frame.stack.pop());
+    _ = try vm.table.execute(&vm, &frame, 0x3D);
+    try testing.expectEqual(@as(u256, return_data.len), try frame.stack_pop());
 
     // Copy return data to memory
-    try frame.stack.append(200); // memory offset
-    try frame.stack.append(0); // data offset
-    try frame.stack.append(return_data.len); // size
+    try frame.stack_push(200); // memory offset
+    try frame.stack_push(0); // data offset
+    try frame.stack_push(return_data.len); // size
 
-    const interpreter4: Operation.Interpreter = &vm;
-    const state4: Operation.State = &frame;
-    _ = try vm.table.execute(0, &interpreter4, &state4, 0x3E);
+    _ = try vm.table.execute(&vm, &frame, 0x3E);
 
     // Verify data was copied
-    const copied_data = try frame.memory.get_slice(200, return_data.len);
+    const copied_data = try frame.memory_get_slice(200, return_data.len);
     try testing.expectEqualSlices(u8, &return_data, copied_data);
 
     // Try to copy beyond return data size - should fail
-    try frame.stack.append(300); // memory offset
-    try frame.stack.append(0); // data offset
-    try frame.stack.append(10); // size (too large)
+    try frame.stack_push(300); // memory offset
+    try frame.stack_push(0); // data offset
+    try frame.stack_push(10); // size (too large)
 
-    const interpreter5: Operation.Interpreter = &vm;
-    const state5: Operation.State = &frame;
-    const copy_result = vm.table.execute(0, &interpreter5, &state5, 0x3E);
+    const copy_result = vm.table.execute(&vm, &frame, 0x3E);
     try testing.expectError(ExecutionError.Error.ReturnDataOutOfBounds, copy_result);
 }

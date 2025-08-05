@@ -7,6 +7,7 @@ const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame_fat.zig");
+const Evm = @import("../evm.zig");
 const Contract = @import("../frame/contract.zig");
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
@@ -137,7 +138,7 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) *const Operation
 /// ```zig
 /// const result = try table.execute(&vm, &frame, bytecode[frame.pc]);
 /// ```
-pub inline fn execute(self: *const JumpTable, vm: operation_module.Interpreter, frame: operation_module.State, opcode: u8) ExecutionError.Error!operation_module.ExecutionResult {
+pub inline fn execute(self: *const JumpTable, vm: *Evm, frame: *Frame, opcode: u8) ExecutionError.Error!operation_module.ExecutionResult {
     @branchHint(.likely);
     const operation = self.get_operation(opcode);
 

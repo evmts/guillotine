@@ -7,6 +7,7 @@ const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const Operation = Evm.Operation;
+const Context = Evm.Context;
 
 // Test allocator will be created per test to avoid conflicts
 
@@ -138,51 +139,50 @@ test "E2E: Arithmetic operations" {
     defer test_contract.deinit(allocator, null);
 
     // Create a frame for testing
-    var frame = try allocator.create(Frame);
-    defer allocator.destroy(frame);
-
-    var builder = Frame.builder(allocator);
-    frame.* = try builder
-        .withVm(evm_instance)
-        .withContract(&test_contract)
-        .withGas(100_000)
-        .withCaller([_]u8{0x11} ** 20)
-        .withInput(test_contract.input)
-        .build();
+    const context = Context.init();
+    const caller: Address = [_]u8{0x11} ** 20;
+    
+    var frame = try Frame.init(
+        allocator,
+        evm_instance,
+        100_000,
+        &test_contract,
+        caller,
+        test_contract.input,
+        context
+    );
     defer frame.deinit();
 
     // Test ADD operation: 25 + 17 = 42
-    try frame.stack.append(25);
-    try frame.stack.append(17);
+    try frame.stack_push(25);
+    try frame.stack_push(17);
 
     // Execute ADD operation
-    const interpreter: Operation.Interpreter = evm_instance;
-    const state: Operation.State = frame;
-    const add_result = try evm_instance.table.execute(0, interpreter, state, 0x01); // ADD opcode
+    const add_result = try evm_instance.table.execute(evm_instance, &frame, 0x01); // ADD opcode
 
     try testing.expect(add_result.output.len == 0); // Continue means empty output
 
-    const sum = try frame.stack.pop();
+    const sum = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 42), sum);
 
     // Test SUB operation: 100 - 58 = 42
-    try frame.stack.append(58);
-    try frame.stack.append(100);
+    try frame.stack_push(58);
+    try frame.stack_push(100);
 
-    const sub_result = try evm_instance.table.execute(0, interpreter, state, 0x03); // SUB
+    const sub_result = try evm_instance.table.execute(evm_instance, &frame, 0x03); // SUB
     try testing.expect(sub_result.output.len == 0);
 
-    const diff = try frame.stack.pop();
+    const diff = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 42), diff);
 
     // Test MUL operation: 6 * 7 = 42
-    try frame.stack.append(6);
-    try frame.stack.append(7);
+    try frame.stack_push(6);
+    try frame.stack_push(7);
 
-    const mul_result = try evm_instance.table.execute(0, interpreter, state, 0x02); // MUL
+    const mul_result = try evm_instance.table.execute(evm_instance, &frame, 0x02); // MUL
     try testing.expect(mul_result.output.len == 0);
 
-    const product = try frame.stack.pop();
+    const product = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 42), product);
 }
 
@@ -225,50 +225,49 @@ test "E2E: Memory operations" {
     defer test_contract.deinit(allocator, null);
 
     // Create a frame for testing
-    var frame = try allocator.create(Frame);
-    defer allocator.destroy(frame);
-
-    var frame_builder = Frame.builder(allocator);
-    frame.* = try frame_builder
-        .withVm(evm_instance)
-        .withContract(&test_contract)
-        .withGas(100_000)
-        .withCaller([_]u8{0x11} ** 20)
-        .withInput(test_contract.input)
-        .build();
+    const context = Context.init();
+    const caller: Address = [_]u8{0x11} ** 20;
+    
+    var frame = try Frame.init(
+        allocator,
+        evm_instance,
+        100_000,
+        &test_contract,
+        caller,
+        test_contract.input,
+        context
+    );
     defer frame.deinit();
 
     // Test MSTORE operation
-    try frame.stack.append(0xDEADBEEF);
-    try frame.stack.append(0);
+    try frame.stack_push(0xDEADBEEF);
+    try frame.stack_push(0);
 
-    const interpreter: Operation.Interpreter = evm_instance;
-    const state: Operation.State = frame;
 
-    const mstore_result = try evm_instance.table.execute(0, interpreter, state, 0x52); // MSTORE
+    const mstore_result = try evm_instance.table.execute(evm_instance, &frame, 0x52); // MSTORE
     try testing.expect(mstore_result.output.len == 0);
 
     // Test MLOAD operation
-    try frame.stack.append(0);
+    try frame.stack_push(0);
 
-    const mload_result = try evm_instance.table.execute(0, interpreter, state, 0x51); // MLOAD
+    const mload_result = try evm_instance.table.execute(evm_instance, &frame, 0x51); // MLOAD
     try testing.expect(mload_result.output.len == 0);
 
-    const loaded_value = try frame.stack.pop();
+    const loaded_value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xDEADBEEF), loaded_value);
 
     // Test memory expansion
-    try frame.stack.append(0xCAFEBABE);
-    try frame.stack.append(1024);
+    try frame.stack_push(0xCAFEBABE);
+    try frame.stack_push(1024);
 
-    const expand_result = try evm_instance.table.execute(0, interpreter, state, 0x52); // MSTORE at high offset
+    const expand_result = try evm_instance.table.execute(evm_instance, &frame, 0x52); // MSTORE at high offset
     try testing.expect(expand_result.output.len == 0);
 
     // Verify the value at high offset
-    try frame.stack.append(1024);
+    try frame.stack_push(1024);
 
-    _ = try evm_instance.table.execute(0, interpreter, state, 0x51); // MLOAD
-    const high_value = try frame.stack.pop();
+    _ = try evm_instance.table.execute(evm_instance, &frame, 0x51); // MLOAD
+    const high_value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xCAFEBABE), high_value);
 }
 
@@ -311,36 +310,35 @@ test "E2E: Storage operations" {
     defer test_contract.deinit(allocator, null);
 
     // Create a frame for testing
-    var frame = try allocator.create(Frame);
-    defer allocator.destroy(frame);
-
-    var frame_builder = Frame.builder(allocator);
-    frame.* = try frame_builder
-        .withVm(evm_instance)
-        .withContract(&test_contract)
-        .withGas(100_000)
-        .withCaller([_]u8{0x11} ** 20)
-        .withInput(test_contract.input)
-        .build();
+    const context = Context.init();
+    const caller: Address = [_]u8{0x11} ** 20;
+    
+    var frame = try Frame.init(
+        allocator,
+        evm_instance,
+        100_000,
+        &test_contract,
+        caller,
+        test_contract.input,
+        context
+    );
     defer frame.deinit();
 
     // Test SSTORE operation
-    try frame.stack.append(0x12345678);
-    try frame.stack.append(5);
+    try frame.stack_push(0x12345678);
+    try frame.stack_push(5);
 
-    const interpreter: Operation.Interpreter = evm_instance;
-    const state: Operation.State = frame;
 
-    const sstore_result = try evm_instance.table.execute(0, interpreter, state, 0x55); // SSTORE
+    const sstore_result = try evm_instance.table.execute(evm_instance, &frame, 0x55); // SSTORE
     try testing.expect(sstore_result.output.len == 0);
 
     // Test SLOAD operation
-    try frame.stack.append(5);
+    try frame.stack_push(5);
 
-    const sload_result = try evm_instance.table.execute(0, interpreter, state, 0x54); // SLOAD
+    const sload_result = try evm_instance.table.execute(evm_instance, &frame, 0x54); // SLOAD
     try testing.expect(sload_result.output.len == 0);
 
-    const stored_value = try frame.stack.pop();
+    const stored_value = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x12345678), stored_value);
 }
 
@@ -383,49 +381,48 @@ test "E2E: Stack operations" {
     defer test_contract.deinit(allocator, null);
 
     // Create a frame for testing
-    var frame = try allocator.create(Frame);
-    defer allocator.destroy(frame);
-
-    var frame_builder = Frame.builder(allocator);
-    frame.* = try frame_builder
-        .withVm(evm_instance)
-        .withContract(&test_contract)
-        .withGas(100_000)
-        .withCaller([_]u8{0x11} ** 20)
-        .withInput(test_contract.input)
-        .build();
+    const context = Context.init();
+    const caller: Address = [_]u8{0x11} ** 20;
+    
+    var frame = try Frame.init(
+        allocator,
+        evm_instance,
+        100_000,
+        &test_contract,
+        caller,
+        test_contract.input,
+        context
+    );
     defer frame.deinit();
 
     // Push some values
-    try frame.stack.append(100);
-    try frame.stack.append(200);
-    try frame.stack.append(300);
+    try frame.stack_push(100);
+    try frame.stack_push(200);
+    try frame.stack_push(300);
 
-    const interpreter: Operation.Interpreter = evm_instance;
-    const state: Operation.State = frame;
 
     // Test DUP1 (duplicate top element)
-    const dup_result = try evm_instance.table.execute(0, interpreter, state, 0x80); // DUP1
+    const dup_result = try evm_instance.table.execute(evm_instance, &frame, 0x80); // DUP1
     try testing.expect(dup_result.output.len == 0);
 
-    try testing.expectEqual(@as(usize, 4), frame.stack.size);
+    try testing.expectEqual(@as(usize, 4), frame.stack_size);
 
     // Top two elements should be the same
-    const top1 = try frame.stack.pop();
-    const top2 = try frame.stack.pop();
+    const top1 = try frame.stack_pop();
+    const top2 = try frame.stack_pop();
     try testing.expectEqual(top1, top2);
     try testing.expectEqual(@as(u256, 300), top1);
 
     // Test SWAP1 (swap top two elements)
-    try frame.stack.append(400);
+    try frame.stack_push(400);
     // Stack is now: 100, 200, 400
 
-    const swap_result = try evm_instance.table.execute(0, interpreter, state, 0x90); // SWAP1
+    const swap_result = try evm_instance.table.execute(evm_instance, &frame, 0x90); // SWAP1
     try testing.expect(swap_result.output.len == 0);
 
     // Stack should now be: 100, 400, 200
-    const after_swap1 = try frame.stack.pop();
-    const after_swap2 = try frame.stack.pop();
+    const after_swap1 = try frame.stack_pop();
+    const after_swap2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 200), after_swap1);
     try testing.expectEqual(@as(u256, 400), after_swap2);
 }
@@ -469,28 +466,27 @@ test "E2E: Gas consumption patterns" {
     defer test_contract.deinit(allocator, null);
 
     // Create a frame for testing
-    var frame = try allocator.create(Frame);
-    defer allocator.destroy(frame);
-
-    var frame_builder = Frame.builder(allocator);
-    frame.* = try frame_builder
-        .withVm(evm_instance)
-        .withContract(&test_contract)
-        .withGas(100_000)
-        .withCaller([_]u8{0x11} ** 20)
-        .withInput(test_contract.input)
-        .build();
+    const context = Context.init();
+    const caller: Address = [_]u8{0x11} ** 20;
+    
+    var frame = try Frame.init(
+        allocator,
+        evm_instance,
+        100_000,
+        &test_contract,
+        caller,
+        test_contract.input,
+        context
+    );
     defer frame.deinit();
 
     const initial_gas = frame.gas_remaining;
 
     // Execute a simple operation
-    try frame.stack.append(42);
+    try frame.stack_push(42);
 
-    const interpreter: Operation.Interpreter = evm_instance;
-    const state: Operation.State = frame;
 
-    _ = try evm_instance.table.execute(0, interpreter, state, 0x50); // POP
+    _ = try evm_instance.table.execute(evm_instance, &frame, 0x50); // POP
 
     const gas_after_pop = frame.gas_remaining;
     const pop_cost = initial_gas - gas_after_pop;
@@ -499,9 +495,9 @@ test "E2E: Gas consumption patterns" {
     try testing.expectEqual(@as(u64, 2), pop_cost);
 
     // Test expensive operation (SSTORE)
-    try frame.stack.append(100);
-    try frame.stack.append(0);
-    _ = try evm_instance.table.execute(0, interpreter, state, 0x55); // SSTORE
+    try frame.stack_push(100);
+    try frame.stack_push(0);
+    _ = try evm_instance.table.execute(evm_instance, &frame, 0x55); // SSTORE
 
     const gas_after_sstore = frame.gas_remaining;
     const sstore_cost = gas_after_pop - gas_after_sstore;

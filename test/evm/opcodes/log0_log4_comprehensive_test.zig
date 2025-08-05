@@ -60,13 +60,13 @@ test "LOG0 (0xA0): Emit log with no topics" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     frame.pc = 0;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 2;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+    _ = try evm.table.execute(interpreter, state, 0x60);
     frame.pc = 4;
 
     // Execute LOG0
-    const result = try evm.table.execute(0, interpreter, state, 0xA0);
+    const result = try evm.table.execute(interpreter, state, 0xA0);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check that log was emitted
@@ -157,15 +157,15 @@ test "LOG1 (0xA1): Emit log with one topic" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     frame.pc = 0;
-    _ = try evm.table.execute(0, interpreter, state, 0x7F); // PUSH32 topic
+    _ = try evm.table.execute(interpreter, state, 0x7F); // PUSH32 topic
     frame.pc = 33;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60); // PUSH1 size
+    _ = try evm.table.execute(interpreter, state, 0x60); // PUSH1 size
     frame.pc = 35;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60); // PUSH1 offset
+    _ = try evm.table.execute(interpreter, state, 0x60); // PUSH1 offset
     frame.pc = 37;
 
     // Execute LOG1
-    const result = try evm.table.execute(0, interpreter, state, 0xA1);
+    const result = try evm.table.execute(interpreter, state, 0xA1);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check log
@@ -249,10 +249,10 @@ test "LOG2-LOG4: Multiple topics" {
     // Execute LOG2
     frame.pc = 0;
     for (0..4) |_| {
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
         frame.pc += 2;
     }
-    _ = try evm.table.execute(0, interpreter, state, 0xA2);
+    _ = try evm.table.execute(interpreter, state, 0xA2);
 
     // Clear stack before LOG3
     frame.stack.clear();
@@ -260,10 +260,10 @@ test "LOG2-LOG4: Multiple topics" {
     // Execute LOG3 - PC should be at 9 (4 PUSH1s * 2 bytes + LOG2)
     frame.pc = 9;
     for (0..5) |_| {
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
         frame.pc += 2;
     }
-    _ = try evm.table.execute(0, interpreter, state, 0xA3);
+    _ = try evm.table.execute(interpreter, state, 0xA3);
 
     // Clear stack before LOG4
     frame.stack.clear();
@@ -271,10 +271,10 @@ test "LOG2-LOG4: Multiple topics" {
     // Execute LOG4 - PC should be at 20 (9 + 5 PUSH1s * 2 bytes + LOG3)
     frame.pc = 20;
     for (0..6) |_| {
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
         frame.pc += 2;
     }
-    _ = try evm.table.execute(0, interpreter, state, 0xA4);
+    _ = try evm.table.execute(interpreter, state, 0xA4);
 
     // Verify all logs
     try testing.expectEqual(@as(usize, 3), evm.state.logs.items.len);
@@ -352,7 +352,7 @@ test "LOG0-LOG4: Gas consumption" {
 
     frame.pc = 0;
     const gas_before_log0 = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
     const gas_used_log0 = gas_before_log0 - frame.gas_remaining;
 
     // LOG0 gas = 375 (base) + 8*32 (data) + memory expansion
@@ -366,7 +366,7 @@ test "LOG0-LOG4: Gas consumption" {
 
     frame.pc = 1;
     const gas_before_log1 = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0xA1);
+    _ = try evm.table.execute(interpreter, state, 0xA1);
     const gas_used_log1 = gas_before_log1 - frame.gas_remaining;
 
     // LOG1 gas = 375 (base) + 375 (1 topic) + 8*16 (data) + 0 (no new memory)
@@ -382,7 +382,7 @@ test "LOG0-LOG4: Gas consumption" {
 
     frame.pc = 4;
     const gas_before_log4 = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0xA4);
+    _ = try evm.table.execute(interpreter, state, 0xA4);
     const gas_used_log4 = gas_before_log4 - frame.gas_remaining;
 
     // LOG4 gas = 375 (base) + 375*4 (4 topics) + 0 (no data) + 0 (no memory)
@@ -443,7 +443,7 @@ test "LOG operations: Static call protection" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     frame.pc = 4;
-    const result = evm.table.execute(0, interpreter, state, 0xA0);
+    const result = evm.table.execute(interpreter, state, 0xA0);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 
     // Test all LOG opcodes in static mode
@@ -462,7 +462,7 @@ test "LOG operations: Static call protection" {
             try frame.stack.append(0);
         }
 
-        const res = evm.table.execute(0, interpreter, state, opcode);
+        const res = evm.table.execute(interpreter, state, opcode);
         try testing.expectError(ExecutionError.Error.WriteProtection, res);
     }
 }
@@ -507,11 +507,11 @@ test "LOG operations: Stack underflow" {
 
     // Test LOG0 with insufficient stack (needs 2)
     frame.pc = 0;
-    var result = evm.table.execute(0, interpreter, state, 0xA0);
+    var result = evm.table.execute(interpreter, state, 0xA0);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
     try frame.stack.append(0);
-    result = evm.table.execute(0, interpreter, state, 0xA0);
+    result = evm.table.execute(interpreter, state, 0xA0);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
     // Test LOG4 with insufficient stack (needs 6)
@@ -520,7 +520,7 @@ test "LOG operations: Stack underflow" {
         try frame.stack.append(0);
     }
     frame.pc = 4;
-    result = evm.table.execute(0, interpreter, state, 0xA4);
+    result = evm.table.execute(interpreter, state, 0xA4);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -570,12 +570,12 @@ test "LOG operations: Empty data" {
     // Execute push operations
     for (0..3) |i| {
         frame.pc = i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
 
     // Execute LOG1 with empty data
     frame.pc = 6;
-    const result = try evm.table.execute(0, interpreter, state, 0xA1);
+    const result = try evm.table.execute(interpreter, state, 0xA1);
     try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
 
     // Check log has empty data
@@ -627,7 +627,7 @@ test "LOG operations: Large memory offset" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     const gas_before = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
     const gas_used = gas_before - frame.gas_remaining;
 
     // Should include memory expansion cost
@@ -767,19 +767,19 @@ test "LOG operations: ERC20 Transfer event pattern" {
 
     // Execute all push operations in new order
     frame.pc = 0;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x73); // to address
+    _ = try evm.table.execute(interpreter, state, 0x73); // to address
     frame.pc = 21;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x73); // from address
+    _ = try evm.table.execute(interpreter, state, 0x73); // from address
     frame.pc = 42;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x7F); // signature
+    _ = try evm.table.execute(interpreter, state, 0x7F); // signature
     frame.pc = 75;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60); // size
+    _ = try evm.table.execute(interpreter, state, 0x60); // size
     frame.pc = 77;
-    _ = try evm.table.execute(frame.pc, interpreter, state, 0x60); // offset
+    _ = try evm.table.execute(interpreter, state, 0x60); // offset
     frame.pc = 79;
 
     // Execute LOG3
-    _ = try evm.table.execute(0, interpreter, state, 0xA3);
+    _ = try evm.table.execute(interpreter, state, 0xA3);
 
     // Verify Transfer event
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -857,26 +857,26 @@ test "LOG operations: Multiple logs in sequence" {
     // Execute first LOG0
     for (0..2) |i| {
         frame.pc = i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
     frame.pc = 4;
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
 
     // Execute LOG1
     for (0..3) |i| {
         frame.pc = 5 + i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
     frame.pc = 11;
-    _ = try evm.table.execute(0, interpreter, state, 0xA1);
+    _ = try evm.table.execute(interpreter, state, 0xA1);
 
     // Execute second LOG0
     for (0..2) |i| {
         frame.pc = 12 + i * 2;
-        _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
+        _ = try evm.table.execute(interpreter, state, 0x60);
     }
     frame.pc = 16;
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
 
     // Verify all logs
     try testing.expectEqual(@as(usize, 3), evm.state.logs.items.len);

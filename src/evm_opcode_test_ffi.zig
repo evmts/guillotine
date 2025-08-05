@@ -195,8 +195,8 @@ export fn zigExecuteOpcode(evm_ptr: ?*anyopaque, frame_ptr: ?*anyopaque, opcode:
             const evm_wrapper: *EvmWrapper = @ptrCast(@alignCast(evm_p));
             const frame_wrapper: *FrameWrapper = @ptrCast(@alignCast(frame_p));
 
-            const interpreter: Evm.Operation.Interpreter = evm_wrapper.evm;
-            const state: Evm.Operation.State = frame_wrapper.frame;
+            const interpreter: *Evm.Evm = evm_wrapper.evm;
+            const state: *Evm.Frame = frame_wrapper.frame;
 
             _ = evm_wrapper.evm.table.execute(interpreter, state, opcode) catch |err| {
                 // Return error code based on error type

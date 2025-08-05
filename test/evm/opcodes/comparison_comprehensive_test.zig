@@ -85,7 +85,7 @@ test "LT: Comprehensive edge cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x10);
+        _ = try evm.table.execute(interpreter, state, 0x10);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -155,7 +155,7 @@ test "GT: Comprehensive edge cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x11);
+        _ = try evm.table.execute(interpreter, state, 0x11);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -247,7 +247,7 @@ test "SLT: Comprehensive signed comparison cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x12);
+        _ = try evm.table.execute(interpreter, state, 0x12);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -321,7 +321,7 @@ test "SGT: Comprehensive signed greater than cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x13);
+        _ = try evm.table.execute(interpreter, state, 0x13);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -398,7 +398,7 @@ test "EQ: Comprehensive equality cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x14);
+        _ = try evm.table.execute(interpreter, state, 0x14);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -475,7 +475,7 @@ test "ISZERO: Comprehensive zero detection cases" {
     for (test_cases) |tc| {
         frame.stack.clear();
         try frame.stack.append(tc.value);
-        _ = try evm.table.execute(0, interpreter, state, 0x15);
+        _ = try evm.table.execute(interpreter, state, 0x15);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -554,7 +554,7 @@ test "AND: Comprehensive bitwise AND cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x16);
+        _ = try evm.table.execute(interpreter, state, 0x16);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -632,7 +632,7 @@ test "OR: Comprehensive bitwise OR cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x17);
+        _ = try evm.table.execute(interpreter, state, 0x17);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -711,7 +711,7 @@ test "XOR: Comprehensive bitwise XOR cases" {
         frame.stack.clear();
         try frame.stack.append(tc.b);
         try frame.stack.append(tc.a);
-        _ = try evm.table.execute(0, interpreter, state, 0x18);
+        _ = try evm.table.execute(interpreter, state, 0x18);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -724,13 +724,13 @@ test "XOR: Comprehensive bitwise XOR cases" {
     // Encrypt
     try frame.stack.append(key);
     try frame.stack.append(data);
-    _ = try evm.table.execute(0, interpreter, state, 0x18);
+    _ = try evm.table.execute(interpreter, state, 0x18);
     const encrypted = try frame.stack.pop();
 
     // Decrypt
     try frame.stack.append(key);
     try frame.stack.append(encrypted);
-    _ = try evm.table.execute(0, interpreter, state, 0x18);
+    _ = try evm.table.execute(interpreter, state, 0x18);
     const decrypted = try frame.stack.pop();
 
     try testing.expectEqual(data, decrypted);
@@ -806,7 +806,7 @@ test "NOT: Comprehensive bitwise NOT cases" {
     for (test_cases) |tc| {
         frame.stack.clear();
         try frame.stack.append(tc.value);
-        _ = try evm.table.execute(0, interpreter, state, 0x19);
+        _ = try evm.table.execute(interpreter, state, 0x19);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -815,8 +815,8 @@ test "NOT: Comprehensive bitwise NOT cases" {
     frame.stack.clear();
     const original: u256 = 0x123456789ABCDEF0;
     try frame.stack.append(original);
-    _ = try evm.table.execute(0, interpreter, state, 0x19); // NOT
-    _ = try evm.table.execute(0, interpreter, state, 0x19); // NOT again
+    _ = try evm.table.execute(interpreter, state, 0x19); // NOT
+    _ = try evm.table.execute(interpreter, state, 0x19); // NOT again
     const result = try frame.stack.pop();
     try testing.expectEqual(original, result);
 }
@@ -874,7 +874,7 @@ test "BYTE: Comprehensive byte extraction cases" {
         frame.stack.clear();
         try frame.stack.append(test_value);
         try frame.stack.append(i);
-        _ = try evm.table.execute(0, interpreter, state, 0x1A);
+        _ = try evm.table.execute(interpreter, state, 0x1A);
         const result = try frame.stack.pop();
         try testing.expectEqual(@as(u256, i + 1), result);
     }
@@ -885,7 +885,7 @@ test "BYTE: Comprehensive byte extraction cases" {
         frame.stack.clear();
         try frame.stack.append(test_value);
         try frame.stack.append(idx);
-        _ = try evm.table.execute(0, interpreter, state, 0x1A);
+        _ = try evm.table.execute(interpreter, state, 0x1A);
         const result = try frame.stack.pop();
         try testing.expectEqual(@as(u256, 0), result);
     }
@@ -910,7 +910,7 @@ test "BYTE: Comprehensive byte extraction cases" {
         frame.stack.clear();
         try frame.stack.append(tc.value);
         try frame.stack.append(tc.index);
-        _ = try evm.table.execute(0, interpreter, state, 0x1A);
+        _ = try evm.table.execute(interpreter, state, 0x1A);
         const result = try frame.stack.pop();
         try testing.expectEqual(tc.expected, result);
     }
@@ -965,13 +965,13 @@ test "Combined: Complex bitwise and comparison operations" {
         // Calculate a AND a
         try frame.stack.append(val);
         try frame.stack.append(val);
-        _ = try evm.table.execute(0, interpreter, state, 0x16);
+        _ = try evm.table.execute(interpreter, state, 0x16);
         const and_result = try frame.stack.pop();
 
         // Calculate a OR a
         try frame.stack.append(val);
         try frame.stack.append(val);
-        _ = try evm.table.execute(0, interpreter, state, 0x17);
+        _ = try evm.table.execute(interpreter, state, 0x17);
         const or_result = try frame.stack.pop();
 
         // They should be equal
@@ -985,11 +985,11 @@ test "Combined: Complex bitwise and comparison operations" {
     // Create a comparison result (5 < 10) = 1
     try frame.stack.append(10);
     try frame.stack.append(5);
-    _ = try evm.table.execute(0, interpreter, state, 0x10); // LT
+    _ = try evm.table.execute(interpreter, state, 0x10); // LT
 
     // Use it as a mask with AND
     try frame.stack.append(0xFFFFFFFF);
-    _ = try evm.table.execute(0, interpreter, state, 0x16); // AND
+    _ = try evm.table.execute(interpreter, state, 0x16); // AND
     const masked_result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 1), masked_result); // 0xFFFFFFFF AND 1 = 1
 
@@ -1000,14 +1000,14 @@ test "Combined: Complex bitwise and comparison operations" {
     // Case 1: true comparison
     try frame.stack.append(10);
     try frame.stack.append(5);
-    _ = try evm.table.execute(0, interpreter, state, 0x10); // LT = 1
+    _ = try evm.table.execute(interpreter, state, 0x10); // LT = 1
     const true_result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 1), true_result);
 
     // Case 2: false comparison
     try frame.stack.append(5);
     try frame.stack.append(10);
-    _ = try evm.table.execute(0, interpreter, state, 0x10); // LT = 0
+    _ = try evm.table.execute(interpreter, state, 0x10); // LT = 0
     const false_result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), false_result);
 }
@@ -1064,9 +1064,9 @@ test "Performance: Rapid successive operations" {
         try frame.stack.append(i);
 
         // Do various operations
-        _ = try evm.table.execute(0, interpreter, state, 0x10); // LT
-        _ = try evm.table.execute(0, interpreter, state, 0x16); // AND
-        _ = try evm.table.execute(0, interpreter, state, 0x19); // NOT
+        _ = try evm.table.execute(interpreter, state, 0x10); // LT
+        _ = try evm.table.execute(interpreter, state, 0x16); // AND
+        _ = try evm.table.execute(interpreter, state, 0x19); // NOT
 
         // Verify stack has one result
         try testing.expectEqual(@as(usize, 1), frame.stack.size);

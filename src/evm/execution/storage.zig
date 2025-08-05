@@ -2,13 +2,14 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
+const Evm = @import("../evm.zig");
 const Frame = @import("../frame/frame_fat.zig");
 const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const storage_costs = @import("../gas/storage_costs.zig");
 
-pub fn op_sload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_sload(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     if (frame.stack_size < 1) unreachable;
 
@@ -33,7 +34,7 @@ pub fn op_sload(vm: Operation.Interpreter, frame: Operation.State) ExecutionErro
 }
 
 /// SSTORE opcode - Store value in persistent storage
-pub fn op_sstore(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_sstore(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     if (frame.is_static) {
         @branchHint(.unlikely);
@@ -85,7 +86,7 @@ pub fn op_sstore(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_tload(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_tload(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // Gas is already handled by jump table constant_gas = 100
 
@@ -102,7 +103,7 @@ pub fn op_tload(vm: Operation.Interpreter, frame: Operation.State) ExecutionErro
     return Operation.ExecutionResult{};
 }
 
-pub fn op_tstore(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_tstore(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     if (frame.is_static) {
         @branchHint(.unlikely);

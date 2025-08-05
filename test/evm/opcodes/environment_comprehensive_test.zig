@@ -51,7 +51,7 @@ test "ADDRESS (0x30): Push current contract address" {
     const state: Evm.Operation.State = &frame;
 
     // Execute ADDRESS opcode
-    _ = try evm.table.execute(0, interpreter, state, 0x30);
+    _ = try evm.table.execute(interpreter, state, 0x30);
 
     // Check result - address should be zero-extended to u256
     const expected = primitives.Address.to_u256(contract_addr);
@@ -105,20 +105,20 @@ test "BALANCE (0x31): Get account balance" {
 
     // Test 1: Check ALICE's balance
     try frame.stack.append(primitives.Address.to_u256(alice_addr));
-    _ = try evm.table.execute(0, interpreter, state, 0x31);
+    _ = try evm.table.execute(interpreter, state, 0x31);
     const result1 = try frame.stack.pop();
     try testing.expectEqual(test_balance, result1);
 
     // Test 2: Check BOB's balance
     try frame.stack.append(primitives.Address.to_u256(bob_addr));
-    _ = try evm.table.execute(0, interpreter, state, 0x31);
+    _ = try evm.table.execute(interpreter, state, 0x31);
     const result2 = try frame.stack.pop();
     try testing.expectEqual(test_balance * 2, result2);
 
     // Test 3: Check non-existent account (should return 0)
     const zero_addr = primitives.Address.ZERO_ADDRESS;
     try frame.stack.append(primitives.Address.to_u256(zero_addr));
-    _ = try evm.table.execute(0, interpreter, state, 0x31);
+    _ = try evm.table.execute(interpreter, state, 0x31);
     const result3 = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result3);
 }
@@ -166,7 +166,7 @@ test "ORIGIN (0x32): Get transaction origin" {
     const state: Evm.Operation.State = &frame;
 
     // Execute ORIGIN opcode
-    _ = try evm.table.execute(0, interpreter, state, 0x32);
+    _ = try evm.table.execute(interpreter, state, 0x32);
 
     // Should push tx_origin (ALICE), not caller (BOB)
     const expected = primitives.Address.to_u256(alice_addr);
@@ -217,7 +217,7 @@ test "CALLER (0x33): Get immediate caller" {
     const state: Evm.Operation.State = &frame;
 
     // Execute CALLER opcode
-    _ = try evm.table.execute(0, interpreter, state, 0x33);
+    _ = try evm.table.execute(interpreter, state, 0x33);
 
     // Should push caller (BOB), not origin (ALICE)
     const expected = primitives.Address.to_u256(bob_addr);
@@ -272,7 +272,7 @@ test "CALLVALUE (0x34): Get msg.value" {
         const state: Evm.Operation.State = &frame;
 
         // Execute CALLVALUE opcode
-        _ = try evm.table.execute(0, interpreter, state, 0x34);
+        _ = try evm.table.execute(interpreter, state, 0x34);
 
         const result = try frame.stack.pop();
         try testing.expectEqual(value, result);
@@ -330,7 +330,7 @@ test "CALLDATALOAD (0x35): Load 32 bytes from calldata" {
 
     // Test 1: Load from offset 0
     try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x35);
+    _ = try evm.table.execute(interpreter, state, 0x35);
 
     // Expected: first 32 bytes as big-endian u256
     const expected1: u256 = 0x0102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F20;
@@ -339,7 +339,7 @@ test "CALLDATALOAD (0x35): Load 32 bytes from calldata" {
 
     // Test 2: Load from offset 4
     try frame.stack.append(4);
-    _ = try evm.table.execute(0, interpreter, state, 0x35);
+    _ = try evm.table.execute(interpreter, state, 0x35);
 
     const expected2: u256 = 0x05060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F2021222324;
     const result2 = try frame.stack.pop();
@@ -347,7 +347,7 @@ test "CALLDATALOAD (0x35): Load 32 bytes from calldata" {
 
     // Test 3: Load beyond calldata (should pad with zeros)
     try frame.stack.append(32);
-    _ = try evm.table.execute(0, interpreter, state, 0x35);
+    _ = try evm.table.execute(interpreter, state, 0x35);
 
     const expected3: u256 = 0x2122232400000000000000000000000000000000000000000000000000000000;
     const result3 = try frame.stack.pop();
@@ -355,7 +355,7 @@ test "CALLDATALOAD (0x35): Load 32 bytes from calldata" {
 
     // Test 4: Load from very large offset (should return 0)
     try frame.stack.append(std.math.maxInt(u256) - 10);
-    _ = try evm.table.execute(0, interpreter, state, 0x35);
+    _ = try evm.table.execute(interpreter, state, 0x35);
 
     const result4 = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result4);
@@ -414,7 +414,7 @@ test "CALLDATASIZE (0x36): Get calldata size" {
         frame.input = tc.data;
 
         // Execute CALLDATASIZE
-        _ = try evm.table.execute(0, interpreter, state, 0x36);
+        _ = try evm.table.execute(interpreter, state, 0x36);
 
         const result = try frame.stack.pop();
         try testing.expectEqual(@as(u256, tc.data.len), result);
@@ -470,7 +470,7 @@ test "CALLDATACOPY (0x37): Copy calldata to memory" {
     try frame.stack.append(calldata.len); // size (will be popped 3rd)
     try frame.stack.append(0); // data_offset (will be popped 2nd)
     try frame.stack.append(0); // mem_offset (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x37);
+    _ = try evm.table.execute(interpreter, state, 0x37);
 
     // Check memory contents
     const mem_slice1 = try frame.memory.get_slice(0, calldata.len);
@@ -481,7 +481,7 @@ test "CALLDATACOPY (0x37): Copy calldata to memory" {
     try frame.stack.append(8); // size=8 (will be popped 3rd)
     try frame.stack.append(4); // data_offset=4 (will be popped 2nd)
     try frame.stack.append(32); // mem_offset=32 (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x37);
+    _ = try evm.table.execute(interpreter, state, 0x37);
 
     const mem_slice2 = try frame.memory.get_slice(32, 8);
     try testing.expectEqualSlices(u8, calldata[4..12], mem_slice2);
@@ -491,7 +491,7 @@ test "CALLDATACOPY (0x37): Copy calldata to memory" {
     try frame.stack.append(8); // size=8 (will be popped 3rd)
     try frame.stack.append(12); // data_offset=12 (will be popped 2nd)
     try frame.stack.append(0); // mem_offset=0 (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x37);
+    _ = try evm.table.execute(interpreter, state, 0x37);
 
     const mem_slice3 = try frame.memory.get_slice(0, 8);
     const expected3 = [_]u8{ 0x0D, 0x0E, 0x0F, 0x10, 0x00, 0x00, 0x00, 0x00 };
@@ -502,7 +502,7 @@ test "CALLDATACOPY (0x37): Copy calldata to memory" {
     try frame.stack.append(0); // size=0 (will be popped 3rd)
     try frame.stack.append(0); // data_offset=0 (will be popped 2nd)
     try frame.stack.append(0); // mem_offset=0 (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x37);
+    _ = try evm.table.execute(interpreter, state, 0x37);
 
     // Should only consume base gas (3)
     try testing.expectEqual(gas_before - 3, frame.gas_remaining);
@@ -557,7 +557,7 @@ test "CODESIZE (0x38): Get code size" {
         const state: Evm.Operation.State = &frame;
 
         // Execute CODESIZE
-        _ = try evm.table.execute(0, interpreter, state, 0x38);
+        _ = try evm.table.execute(interpreter, state, 0x38);
 
         const result = try frame.stack.pop();
         try testing.expectEqual(@as(u256, tc.code.len), result);
@@ -614,7 +614,7 @@ test "CODECOPY (0x39): Copy code to memory" {
     try frame.stack.append(code.len); // size (will be popped 3rd)
     try frame.stack.append(0); // code_offset (will be popped 2nd)
     try frame.stack.append(0); // mem_offset (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x39);
+    _ = try evm.table.execute(interpreter, state, 0x39);
 
     const mem_slice1 = try frame.memory.get_slice(0, code.len);
     try testing.expectEqualSlices(u8, &code, mem_slice1);
@@ -624,7 +624,7 @@ test "CODECOPY (0x39): Copy code to memory" {
     try frame.stack.append(4); // size=4 (will be popped 3rd)
     try frame.stack.append(2); // code_offset=2 (will be popped 2nd)
     try frame.stack.append(10); // mem_offset=10 (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x39);
+    _ = try evm.table.execute(interpreter, state, 0x39);
 
     const mem_slice2 = try frame.memory.get_slice(10, 4);
     try testing.expectEqualSlices(u8, code[2..6], mem_slice2);
@@ -634,7 +634,7 @@ test "CODECOPY (0x39): Copy code to memory" {
     try frame.stack.append(10); // size=10 (will be popped 3rd)
     try frame.stack.append(5); // code_offset=5 (will be popped 2nd)
     try frame.stack.append(0); // mem_offset=0 (will be popped 1st)
-    _ = try evm.table.execute(0, interpreter, state, 0x39);
+    _ = try evm.table.execute(interpreter, state, 0x39);
 
     const mem_slice3 = try frame.memory.get_slice(0, 10);
     var expected: [10]u8 = undefined;
@@ -697,7 +697,7 @@ test "GASPRICE (0x3A): Get gas price" {
         const state: Evm.Operation.State = &frame;
 
         // Execute GASPRICE
-        _ = try evm.table.execute(0, interpreter, state, 0x3A);
+        _ = try evm.table.execute(interpreter, state, 0x3A);
 
         const result = try frame.stack.pop();
         try testing.expectEqual(price, result);
@@ -765,7 +765,7 @@ test "Environmental opcodes: Gas consumption" {
         const gas_before = 1000;
         frame.gas_remaining = gas_before;
 
-        _ = try evm.table.execute(0, interpreter, state, op.opcode);
+        _ = try evm.table.execute(interpreter, state, op.opcode);
 
         const gas_used = gas_before - frame.gas_remaining;
         try testing.expectEqual(op.expected_gas, gas_used);
@@ -824,7 +824,7 @@ test "Environmental opcodes: Stack underflow" {
     for (stack_opcodes) |opcode| {
         frame.stack.clear();
 
-        const result = evm.table.execute(0, interpreter, state, opcode);
+        const result = evm.table.execute(interpreter, state, opcode);
         try testing.expectError(ExecutionError.Error.StackUnderflow, result);
     }
 }
@@ -873,7 +873,7 @@ test "Environmental opcodes: Memory expansion limits" {
     try frame.stack.append(0); // code_offset=0
     try frame.stack.append(32); // size=32
 
-    const result = evm.table.execute(0, interpreter, state, 0x39);
+    const result = evm.table.execute(interpreter, state, 0x39);
     try testing.expectError(ExecutionError.Error.OutOfGas, result);
 }
 
@@ -919,14 +919,14 @@ test "BALANCE: EIP-2929 cold/warm account access" {
     // First access to an address should be cold (2600 gas)
     try frame.stack.append(primitives.Address.to_u256(bob_addr));
     const gas_before_cold = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0x31);
+    _ = try evm.table.execute(interpreter, state, 0x31);
     const gas_cold = gas_before_cold - frame.gas_remaining;
 
     // Second access should be warm (100 gas)
     _ = try frame.stack.pop();
     try frame.stack.append(primitives.Address.to_u256(bob_addr));
     const gas_before_warm = frame.gas_remaining;
-    _ = try evm.table.execute(0, interpreter, state, 0x31);
+    _ = try evm.table.execute(interpreter, state, 0x31);
     const gas_warm = gas_before_warm - frame.gas_remaining;
 
     // Cold access should cost more than warm

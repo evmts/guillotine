@@ -55,8 +55,8 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     const initial_gas = frame.gas_remaining;
 
-    const interpreter: Operation.Interpreter = self;
-    const state: Operation.State = &frame;
+    const interpreter: *Vm = self;
+    const state: *Frame = &frame;
 
     var instruction_count: u64 = 0;
 

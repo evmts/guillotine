@@ -7,6 +7,7 @@ const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+const Context = Evm.Context;
 
 test "Bitwise: AND basic operations" {
     const allocator = testing.allocator;
@@ -34,47 +35,40 @@ test "Bitwise: AND basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: Simple AND
-    try frame.stack.append(0xFF00);
-    try frame.stack.append(0xF0F0);
-    _ = try evm.table.execute(0, interpreter, state, 0x16);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0xFF00);
+    try frame.stack_push(0xF0F0);
+    _ = try evm.table.execute(&evm, &frame, 0x16);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xF000), result1);
 
     // Test 2: AND with zero
-    frame.stack.clear();
-    try frame.stack.append(0);
-    try frame.stack.append(0xFFFF);
-    _ = try evm.table.execute(0, interpreter, state, 0x16);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0);
+    try frame.stack_push(0xFFFF);
+    _ = try evm.table.execute(&evm, &frame, 0x16);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result2);
 
     // Test 3: AND with all ones
-    frame.stack.clear();
+    frame.stack_clear();
     const max_u256 = std.math.maxInt(u256);
-    try frame.stack.append(max_u256);
-    try frame.stack.append(0x12345678);
-    _ = try evm.table.execute(0, interpreter, state, 0x16);
-    const result3 = try frame.stack.pop();
+    try frame.stack_push(max_u256);
+    try frame.stack_push(0x12345678);
+    _ = try evm.table.execute(&evm, &frame, 0x16);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x12345678), result3);
 
     // Test gas consumption
-    frame.stack.clear();
+    frame.stack_clear();
     frame.gas_remaining = 1000;
-    try frame.stack.append(0xFF00);
-    try frame.stack.append(0xF0F0);
-    _ = try evm.table.execute(0, interpreter, state, 0x16);
+    try frame.stack_push(0xFF00);
+    try frame.stack_push(0xF0F0);
+    _ = try evm.table.execute(&evm, &frame, 0x16);
     const gas_used = 1000 - frame.gas_remaining;
     try testing.expectEqual(@as(u64, 3), gas_used); // GasFastestStep = 3
 }
@@ -105,39 +99,32 @@ test "Bitwise: OR basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: Simple OR
-    try frame.stack.append(0xFF00);
-    try frame.stack.append(0x00FF);
-    _ = try evm.table.execute(0, interpreter, state, 0x17);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0xFF00);
+    try frame.stack_push(0x00FF);
+    _ = try evm.table.execute(&evm, &frame, 0x17);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xFFFF), result1);
 
     // Test 2: OR with zero
-    frame.stack.clear();
-    try frame.stack.append(0);
-    try frame.stack.append(0xABCD);
-    _ = try evm.table.execute(0, interpreter, state, 0x17);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0);
+    try frame.stack_push(0xABCD);
+    _ = try evm.table.execute(&evm, &frame, 0x17);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xABCD), result2);
 
     // Test 3: OR with all ones
-    frame.stack.clear();
+    frame.stack_clear();
     const max_u256 = std.math.maxInt(u256);
-    try frame.stack.append(max_u256);
-    try frame.stack.append(0x12345678);
-    _ = try evm.table.execute(0, interpreter, state, 0x17);
-    const result3 = try frame.stack.pop();
+    try frame.stack_push(max_u256);
+    try frame.stack_push(0x12345678);
+    _ = try evm.table.execute(&evm, &frame, 0x17);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, max_u256), result3);
 }
 
@@ -167,38 +154,31 @@ test "Bitwise: XOR basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: Simple XOR
-    try frame.stack.append(0xFF00);
-    try frame.stack.append(0xF0F0);
-    _ = try evm.table.execute(0, interpreter, state, 0x18);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0xFF00);
+    try frame.stack_push(0xF0F0);
+    _ = try evm.table.execute(&evm, &frame, 0x18);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x0FF0), result1);
 
     // Test 2: XOR with itself (should be zero)
-    frame.stack.clear();
-    try frame.stack.append(0xABCD);
-    try frame.stack.append(0xABCD);
-    _ = try evm.table.execute(0, interpreter, state, 0x18);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0xABCD);
+    try frame.stack_push(0xABCD);
+    _ = try evm.table.execute(&evm, &frame, 0x18);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result2);
 
     // Test 3: XOR with zero (identity)
-    frame.stack.clear();
-    try frame.stack.append(0);
-    try frame.stack.append(0x1234);
-    _ = try evm.table.execute(0, interpreter, state, 0x18);
-    const result3 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0);
+    try frame.stack_push(0x1234);
+    _ = try evm.table.execute(&evm, &frame, 0x18);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x1234), result3);
 }
 
@@ -228,36 +208,29 @@ test "Bitwise: NOT basic operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: NOT of zero
-    try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x19);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0);
+    _ = try evm.table.execute(&evm, &frame, 0x19);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, std.math.maxInt(u256)), result1);
 
     // Test 2: NOT of all ones
-    frame.stack.clear();
-    try frame.stack.append(std.math.maxInt(u256));
-    _ = try evm.table.execute(0, interpreter, state, 0x19);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(std.math.maxInt(u256));
+    _ = try evm.table.execute(&evm, &frame, 0x19);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result2);
 
     // Test 3: NOT of pattern
-    frame.stack.clear();
-    try frame.stack.append(0xFFFF0000FFFF0000);
-    _ = try evm.table.execute(0, interpreter, state, 0x19);
+    frame.stack_clear();
+    try frame.stack_push(0xFFFF0000FFFF0000);
+    _ = try evm.table.execute(&evm, &frame, 0x19);
     const expected = std.math.maxInt(u256) ^ 0xFFFF0000FFFF0000;
-    const result3 = try frame.stack.pop();
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, expected), result3);
 }
 
@@ -287,47 +260,40 @@ test "Bitwise: BYTE extraction operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
-
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
 
     // Test 1: Extract first byte (most significant)
     const test_value = 0xABCDEF1234567890;
-    try frame.stack.append(test_value);
-    try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x1A);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(test_value);
+    try frame.stack_push(0);
+    _ = try evm.table.execute(&evm, &frame, 0x1A);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result1); // Byte 0 is 0x00 in a 256-bit number
 
     // Test 2: Extract last byte (least significant)
-    frame.stack.clear();
-    try frame.stack.append(test_value);
-    try frame.stack.append(31);
-    _ = try evm.table.execute(0, interpreter, state, 0x1A);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(test_value);
+    try frame.stack_push(31);
+    _ = try evm.table.execute(&evm, &frame, 0x1A);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x90), result2);
 
     // Test 3: Out of bounds index
-    frame.stack.clear();
-    try frame.stack.append(test_value);
-    try frame.stack.append(32);
-    _ = try evm.table.execute(0, interpreter, state, 0x1A);
-    const result3 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(test_value);
+    try frame.stack_push(32);
+    _ = try evm.table.execute(&evm, &frame, 0x1A);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result3); // Should return 0
 
     // Test 4: Extract from byte 24
-    frame.stack.clear();
-    try frame.stack.append(test_value);
-    try frame.stack.append(24);
-    _ = try evm.table.execute(0, interpreter, state, 0x1A);
-    const result4 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(test_value);
+    try frame.stack_push(24);
+    _ = try evm.table.execute(&evm, &frame, 0x1A);
+    const result4 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xAB), result4); // Byte 24 is where 0xAB is located
 }
 
@@ -357,47 +323,40 @@ test "Bitwise: SHL (shift left) operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: Simple left shift
-    try frame.stack.append(0xFF);
-    try frame.stack.append(8);
-    _ = try evm.table.execute(0, interpreter, state, 0x1B);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0xFF);
+    try frame.stack_push(8);
+    _ = try evm.table.execute(&evm, &frame, 0x1B);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xFF00), result1);
 
     // Test 2: Shift by zero
-    frame.stack.clear();
-    try frame.stack.append(0x1234);
-    try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x1B);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0x1234);
+    try frame.stack_push(0);
+    _ = try evm.table.execute(&evm, &frame, 0x1B);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x1234), result2);
 
     // Test 3: Shift by >= 256 (should return 0)
-    frame.stack.clear();
-    try frame.stack.append(0xFFFF);
-    try frame.stack.append(256);
-    _ = try evm.table.execute(0, interpreter, state, 0x1B);
-    const result3 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0xFFFF);
+    try frame.stack_push(256);
+    _ = try evm.table.execute(&evm, &frame, 0x1B);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result3);
 
     // Test 4: Large shift
-    frame.stack.clear();
-    try frame.stack.append(1);
-    try frame.stack.append(255);
-    _ = try evm.table.execute(0, interpreter, state, 0x1B);
+    frame.stack_clear();
+    try frame.stack_push(1);
+    try frame.stack_push(255);
+    _ = try evm.table.execute(&evm, &frame, 0x1B);
     const expected = @as(u256, 1) << 255;
-    const result4 = try frame.stack.pop();
+    const result4 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, expected), result4);
 }
 
@@ -427,38 +386,31 @@ test "Bitwise: SHR (logical shift right) operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: Simple right shift
-    try frame.stack.append(0xFF00);
-    try frame.stack.append(8);
-    _ = try evm.table.execute(0, interpreter, state, 0x1C);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0xFF00);
+    try frame.stack_push(8);
+    _ = try evm.table.execute(&evm, &frame, 0x1C);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xFF), result1);
 
     // Test 2: Shift by zero
-    frame.stack.clear();
-    try frame.stack.append(0x1234);
-    try frame.stack.append(0);
-    _ = try evm.table.execute(0, interpreter, state, 0x1C);
-    const result2 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0x1234);
+    try frame.stack_push(0);
+    _ = try evm.table.execute(&evm, &frame, 0x1C);
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0x1234), result2);
 
     // Test 3: Shift by >= 256 (should return 0)
-    frame.stack.clear();
-    try frame.stack.append(0xFFFF);
-    try frame.stack.append(256);
-    _ = try evm.table.execute(0, interpreter, state, 0x1C);
-    const result3 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0xFFFF);
+    try frame.stack_push(256);
+    _ = try evm.table.execute(&evm, &frame, 0x1C);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result3);
 }
 
@@ -488,49 +440,42 @@ test "Bitwise: SAR (arithmetic shift right) operations" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test 1: SAR with positive number (same as logical shift)
-    try frame.stack.append(0xFF00);
-    try frame.stack.append(8);
-    _ = try evm.table.execute(0, interpreter, state, 0x1D);
-    const result1 = try frame.stack.pop();
+    try frame.stack_push(0xFF00);
+    try frame.stack_push(8);
+    _ = try evm.table.execute(&evm, &frame, 0x1D);
+    const result1 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0xFF), result1);
 
     // Test 2: SAR with negative number (sign bit = 1)
-    frame.stack.clear();
+    frame.stack_clear();
     const negative = @as(u256, 1) << 255 | 0xFF00; // Set sign bit
-    try frame.stack.append(negative);
-    try frame.stack.append(8);
-    _ = try evm.table.execute(0, interpreter, state, 0x1D);
+    try frame.stack_push(negative);
+    try frame.stack_push(8);
+    _ = try evm.table.execute(&evm, &frame, 0x1D);
     // Should fill with 1s from left
     const expected = ((@as(u256, 0xFF) << 248) | (negative >> 8));
-    const result2 = try frame.stack.pop();
+    const result2 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, expected), result2);
 
     // Test 3: SAR by >= 256 with negative number (should return all 1s)
-    frame.stack.clear();
-    try frame.stack.append(negative);
-    try frame.stack.append(256);
-    _ = try evm.table.execute(0, interpreter, state, 0x1D);
-    const result3 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(negative);
+    try frame.stack_push(256);
+    _ = try evm.table.execute(&evm, &frame, 0x1D);
+    const result3 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, std.math.maxInt(u256)), result3);
 
     // Test 4: SAR by >= 256 with positive number (should return 0)
-    frame.stack.clear();
-    try frame.stack.append(0x7FFF);
-    try frame.stack.append(256);
-    _ = try evm.table.execute(0, interpreter, state, 0x1D);
-    const result4 = try frame.stack.pop();
+    frame.stack_clear();
+    try frame.stack_push(0x7FFF);
+    try frame.stack_push(256);
+    _ = try evm.table.execute(&evm, &frame, 0x1D);
+    const result4 = try frame.stack_pop();
     try testing.expectEqual(@as(u256, 0), result4);
 }
 
@@ -560,28 +505,21 @@ test "Bitwise: Stack underflow errors" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
-
     // Test AND with empty stack
-    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, 0x16));
+    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(&evm, &frame, 0x16));
 
     // Test NOT with empty stack
-    frame.stack.clear();
-    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, 0x19));
+    frame.stack_clear();
+    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(&evm, &frame, 0x19));
 
     // Test BYTE with only one item
-    frame.stack.clear();
-    try frame.stack.append(42);
-    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(0, interpreter, state, 0x1A));
+    frame.stack_clear();
+    try frame.stack_push(42);
+    try testing.expectError(ExecutionError.Error.StackUnderflow, evm.table.execute(&evm, &frame, 0x1A));
 }
 
 test "Bitwise: Gas consumption" {
@@ -610,16 +548,9 @@ test "Bitwise: Gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
-
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
 
     // All bitwise operations cost 3 gas (GasFastestStep)
     const operations = [_]struct {
@@ -638,16 +569,16 @@ test "Bitwise: Gas consumption" {
     };
 
     inline for (operations) |op_info| {
-        frame.stack.clear();
+        frame.stack_clear();
         frame.gas_remaining = 1000;
 
         // Push required stack items
         var i: u8 = 0;
         while (i < op_info.stack_items) : (i += 1) {
-            try frame.stack.append(0x42);
+            try frame.stack_push(0x42);
         }
 
-        _ = try evm.table.execute(0, interpreter, state, op_info.opcode);
+        _ = try evm.table.execute(&evm, &frame, op_info.opcode);
         const gas_used = 1000 - frame.gas_remaining;
         try testing.expectEqual(@as(u64, 3), gas_used); // GasFastestStep = 3
     }

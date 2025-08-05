@@ -3,7 +3,7 @@ const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame_fat.zig");
-const Vm = @import("../evm.zig");
+const Evm = @import("../evm.zig");
 const Contract = @import("../frame/contract.zig");
 const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
@@ -229,7 +229,7 @@ fn ensure_return_memory(frame: *Frame, ret_offset: u256, ret_size: u256) Executi
 
 /// Handle address conversion and EIP-2929 access cost
 /// Returns the target address
-fn handle_address_access(vm: *Vm, frame: *Frame, to: u256) ExecutionError.Error!primitives.Address.Address {
+fn handle_address_access(vm: *Evm, frame: *Frame, to: u256) ExecutionError.Error!primitives.Address.Address {
     const to_address = from_u256(to);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -298,7 +298,7 @@ fn validate_create_static_context(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// Extract initcode from memory with bounds checking and gas accounting
-fn get_initcode_from_memory(frame: *Frame, vm: *Vm, offset: u256, size: u256) ExecutionError.Error![]const u8 {
+fn get_initcode_from_memory(frame: *Frame, vm: *Evm, offset: u256, size: u256) ExecutionError.Error![]const u8 {
     // Check initcode size bounds
     try check_offset_bounds(size);
     const size_usize = @as(usize, @intCast(size));
@@ -330,7 +330,7 @@ fn get_initcode_from_memory(frame: *Frame, vm: *Vm, offset: u256, size: u256) Ex
 }
 
 /// Calculate and consume gas for CREATE operations
-fn consume_create_gas(frame: *Frame, vm: *Vm, init_code: []const u8) ExecutionError.Error!void {
+fn consume_create_gas(frame: *Frame, vm: *Evm, init_code: []const u8) ExecutionError.Error!void {
     const init_code_cost = @as(u64, @intCast(init_code.len)) * GasConstants.CreateDataGas;
 
     // EIP-3860: Add gas cost for initcode word size (2 gas per 32-byte word) - Shanghai and later
@@ -343,7 +343,7 @@ fn consume_create_gas(frame: *Frame, vm: *Vm, init_code: []const u8) ExecutionEr
 }
 
 /// Calculate and consume gas for CREATE2 operations (includes hash cost)
-fn consume_create2_gas(frame: *Frame, vm: *Vm, init_code: []const u8) ExecutionError.Error!void {
+fn consume_create2_gas(frame: *Frame, vm: *Evm, init_code: []const u8) ExecutionError.Error!void {
     const init_code_cost = @as(u64, @intCast(init_code.len)) * GasConstants.CreateDataGas;
     const hash_cost = @as(u64, @intCast(GasConstants.wordCount(init_code.len))) * GasConstants.Keccak256WordGas;
 
@@ -357,7 +357,7 @@ fn consume_create2_gas(frame: *Frame, vm: *Vm, init_code: []const u8) ExecutionE
 }
 
 /// Handle CREATE result with gas updates and return data
-fn handle_create_result(frame: *Frame, vm: *Vm, result: anytype, gas_for_call: u64) ExecutionError.Error!void {
+fn handle_create_result(frame: *Frame, vm: *Evm, result: anytype, gas_for_call: u64) ExecutionError.Error!void {
     _ = gas_for_call;
     // Update gas remaining
     frame.gas_remaining = frame.gas_remaining / GasConstants.CALL_GAS_RETENTION_DIVISOR + result.gas_left;
@@ -451,7 +451,7 @@ pub fn calculate_call_gas(
 // ============================================================================
 
 // Gas opcode handler
-pub fn gas_op(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn gas_op(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
 
     try frame.stack_push(@as(u256, @intCast(frame.gas_remaining)));
@@ -480,7 +480,7 @@ fn check_offset_bounds(value: u256) ExecutionError.Error!void {
 /// ## Returns
 /// - Success: Snapshot identifier
 /// - Error: OutOfMemory if snapshot allocation fails
-pub fn create_snapshot(vm: *Vm) std.mem.Allocator.Error!usize {
+pub fn create_snapshot(vm: *Evm) std.mem.Allocator.Error!usize {
     Log.debug("system.create_snapshot: Creating state snapshot", .{});
     return try vm.create_snapshot();
 }
@@ -493,7 +493,7 @@ pub fn create_snapshot(vm: *Vm) std.mem.Allocator.Error!usize {
 /// ## Parameters
 /// - `vm`: VM instance to commit snapshot on
 /// - `snapshot_id`: Identifier of the snapshot to commit
-pub fn commit_snapshot(vm: *Vm, snapshot_id: usize) void {
+pub fn commit_snapshot(vm: *Evm, snapshot_id: usize) void {
     Log.debug("system.commit_snapshot: Committing snapshot id={}", .{snapshot_id});
     vm.commit_snapshot(snapshot_id);
 }
@@ -510,12 +510,12 @@ pub fn commit_snapshot(vm: *Vm, snapshot_id: usize) void {
 /// ## Returns
 /// - Success: void
 /// - Error: Invalid snapshot ID or reversion failure
-pub fn revert_to_snapshot(vm: *Vm, snapshot_id: usize) !void {
+pub fn revert_to_snapshot(vm: *Evm, snapshot_id: usize) !void {
     Log.debug("system.revert_to_snapshot: Reverting to snapshot id={}", .{snapshot_id});
     try vm.revert_to_snapshot(snapshot_id);
 }
 
-pub fn op_create(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_create(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // Check static call restrictions
     try validate_create_static_context(frame);
@@ -553,7 +553,7 @@ pub fn op_create(vm: Operation.Interpreter, frame: Operation.State) ExecutionErr
 }
 
 /// CREATE2 opcode - Create contract with deterministic address
-pub fn op_create2(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_create2(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // Check static call restrictions
     try validate_create_static_context(frame);
@@ -590,7 +590,7 @@ pub fn op_create2(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
     return Operation.ExecutionResult{};
 }
 
-pub fn op_call(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_call(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const gas = try frame.stack_pop();
     const to = try frame.stack_pop();
@@ -637,7 +637,7 @@ pub fn op_call(vm: Operation.Interpreter, frame: Operation.State) ExecutionError
     return Operation.ExecutionResult{};
 }
 
-pub fn op_callcode(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_callcode(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     const gas = try frame.stack_pop();
     const to = try frame.stack_pop();
@@ -679,7 +679,7 @@ pub fn op_callcode(vm: Operation.Interpreter, frame: Operation.State) ExecutionE
     return Operation.ExecutionResult{};
 }
 
-pub fn op_delegatecall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_delegatecall(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // DELEGATECALL takes 6 parameters (no value parameter)
     const gas = try frame.stack_pop();
@@ -733,7 +733,7 @@ pub fn op_delegatecall(vm: Operation.Interpreter, frame: Operation.State) Execut
     return Operation.ExecutionResult{};
 }
 
-pub fn op_staticcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_staticcall(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // STATICCALL takes 6 parameters (no value parameter)
     const gas = try frame.stack_pop();
@@ -796,11 +796,7 @@ pub fn op_staticcall(vm: Operation.Interpreter, frame: Operation.State) Executio
 /// Gas: Variable based on hardfork and account creation
 /// Memory: No memory access
 /// Storage: Contract marked for destruction
-pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const vm = interpreter;
-    const frame = state;
+pub fn op_selfdestruct(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
 
     // Static call protection - SELFDESTRUCT forbidden in static context
     if (frame.is_static) {
@@ -861,7 +857,7 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
 /// EXTCALL opcode (0xF8): External call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_extcall(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
     _ = frame;
 
@@ -871,7 +867,7 @@ pub fn op_extcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionEr
 
 /// EXTDELEGATECALL opcode (0xF9): External delegate call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extdelegatecall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_extdelegatecall(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
     _ = frame;
 
@@ -881,7 +877,7 @@ pub fn op_extdelegatecall(vm: Operation.Interpreter, frame: Operation.State) Exe
 
 /// EXTSTATICCALL opcode (0xFB): External static call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extstaticcall(vm: Operation.Interpreter, frame: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_extstaticcall(vm: *Evm, frame: *Frame) ExecutionError.Error!Operation.ExecutionResult {
     _ = vm;
     _ = frame;
 
@@ -934,7 +930,7 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         defer memory_db.deinit();
 
         const db_interface = memory_db.to_database_interface();
-        var vm = try Vm.init(allocator, db_interface, null, null);
+        var vm = try Evm.init(allocator, db_interface, null, null);
         defer vm.deinit();
 
         // Set up target contract if needed for call operations
@@ -985,20 +981,20 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
         // Execute the operation based on type
         const result = switch (op.op_type) {
             .gas => blk: {
-                break :blk gas_op(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk gas_op(@ptrCast(&vm), @ptrCast(&frame));
             },
             .create => blk: {
                 try frame.stack_push(op.value);
                 try frame.stack_push(op.init_offset);
                 try frame.stack_push(op.init_size);
-                break :blk op_create(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_create(@ptrCast(&vm), @ptrCast(&frame));
             },
             .create2 => blk: {
                 try frame.stack_push(op.value);
                 try frame.stack_push(op.init_offset);
                 try frame.stack_push(op.init_size);
                 try frame.stack_push(op.salt);
-                break :blk op_create2(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_create2(@ptrCast(&vm), @ptrCast(&frame));
             },
             .call => blk: {
                 try frame.stack_push(op.gas);
@@ -1008,7 +1004,7 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
                 try frame.stack_push(op.args_size);
                 try frame.stack_push(op.ret_offset);
                 try frame.stack_push(op.ret_size);
-                break :blk op_call(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_call(@ptrCast(&vm), @ptrCast(&frame));
             },
             .callcode => blk: {
                 try frame.stack_push(op.gas);
@@ -1018,7 +1014,7 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
                 try frame.stack_push(op.args_size);
                 try frame.stack_push(op.ret_offset);
                 try frame.stack_push(op.ret_size);
-                break :blk op_callcode(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_callcode(@ptrCast(&vm), @ptrCast(&frame));
             },
             .delegatecall => blk: {
                 try frame.stack_push(op.gas);
@@ -1027,7 +1023,7 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
                 try frame.stack_push(op.args_size);
                 try frame.stack_push(op.ret_offset);
                 try frame.stack_push(op.ret_size);
-                break :blk op_delegatecall(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_delegatecall(@ptrCast(&vm), @ptrCast(&frame));
             },
             .staticcall => blk: {
                 try frame.stack_push(op.gas);
@@ -1036,11 +1032,11 @@ fn fuzz_system_operations(allocator: std.mem.Allocator, operations: []const Fuzz
                 try frame.stack_push(op.args_size);
                 try frame.stack_push(op.ret_offset);
                 try frame.stack_push(op.ret_size);
-                break :blk op_staticcall(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_staticcall(@ptrCast(&vm), @ptrCast(&frame));
             },
             .selfdestruct => blk: {
                 try frame.stack_push(op.to);
-                break :blk op_selfdestruct(0, @ptrCast(&vm), @ptrCast(&frame));
+                break :blk op_selfdestruct(@ptrCast(&vm), @ptrCast(&frame));
             },
         };
 

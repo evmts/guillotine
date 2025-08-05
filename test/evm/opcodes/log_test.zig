@@ -58,7 +58,7 @@ test "LOG0: emit log with no topics" {
     try frame.stack.append(0); // offset
 
     // Execute LOG0
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
 
     // Check that log was emitted
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -110,7 +110,7 @@ test "LOG0: emit log with empty data" {
     try frame.stack.append(0); // offset
 
     // Execute LOG0
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
 
     // Check that log was emitted with empty data
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -170,7 +170,7 @@ test "LOG1: emit log with one topic" {
     try frame.stack.append(0); // offset
 
     // Execute LOG1
-    _ = try evm.table.execute(0, interpreter, state, 0xA1);
+    _ = try evm.table.execute(interpreter, state, 0xA1);
 
     // Check that log was emitted
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -232,7 +232,7 @@ test "LOG2: emit log with two topics" {
     try frame.stack.append(10); // offset
 
     // Execute LOG2
-    _ = try evm.table.execute(0, interpreter, state, 0xA2);
+    _ = try evm.table.execute(interpreter, state, 0xA2);
 
     // Check that log was emitted
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -289,7 +289,7 @@ test "LOG3: emit log with three topics" {
     try frame.stack.append(0); // offset
 
     // Execute LOG3
-    _ = try evm.table.execute(0, interpreter, state, 0xA3);
+    _ = try evm.table.execute(interpreter, state, 0xA3);
 
     // Check that log was emitted
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -356,7 +356,7 @@ test "LOG4: emit log with four topics" {
     try frame.stack.append(0); // offset
 
     // Execute LOG4
-    _ = try evm.table.execute(0, interpreter, state, 0xA4);
+    _ = try evm.table.execute(interpreter, state, 0xA4);
 
     // Check that log was emitted
     try testing.expectEqual(@as(usize, 1), evm.state.logs.items.len);
@@ -415,7 +415,7 @@ test "LOG0: write protection in static call" {
     try frame.stack.append(0); // offset (pushed last, popped first)
 
     // Execute LOG0 - should fail
-    const result = evm.table.execute(0, interpreter, state, 0xA0);
+    const result = evm.table.execute(interpreter, state, 0xA0);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -465,7 +465,7 @@ test "LOG1: write protection in static call" {
     try frame.stack.append(0); // offset
 
     // Execute LOG1 - should fail
-    const result = evm.table.execute(0, interpreter, state, 0xA1);
+    const result = evm.table.execute(interpreter, state, 0xA1);
     try testing.expectError(ExecutionError.Error.WriteProtection, result);
 }
 
@@ -514,7 +514,7 @@ test "LOG0: gas consumption" {
     const gas_before = frame.gas_remaining;
 
     // Execute LOG0
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
 
     // LOG0 base cost is 375 gas
     // Plus 8 gas per byte: 32 * 8 = 256
@@ -571,7 +571,7 @@ test "LOG4: gas consumption with topics" {
     const gas_before = frame.gas_remaining;
 
     // Execute LOG4
-    _ = try evm.table.execute(0, interpreter, state, 0xA4);
+    _ = try evm.table.execute(interpreter, state, 0xA4);
 
     // LOG4 base cost is 375 gas
     // Plus 375 gas per topic: 4 * 375 = 1500
@@ -626,7 +626,7 @@ test "LOG0: memory expansion gas" {
     const gas_before = frame.gas_remaining;
 
     // Execute LOG0
-    _ = try evm.table.execute(0, interpreter, state, 0xA0);
+    _ = try evm.table.execute(interpreter, state, 0xA0);
 
     // Should consume gas for LOG0 plus memory expansion
     const gas_used = gas_before - frame.gas_remaining;
@@ -675,7 +675,7 @@ test "LOG0: stack underflow" {
     try frame.stack.append(0);
 
     // Execute LOG0 - should fail
-    const result = evm.table.execute(0, interpreter, state, 0xA0);
+    const result = evm.table.execute(interpreter, state, 0xA0);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -725,7 +725,7 @@ test "LOG4: stack underflow" {
     // Missing offset
 
     // Execute LOG4 - should fail
-    const result = evm.table.execute(0, interpreter, state, 0xA4);
+    const result = evm.table.execute(interpreter, state, 0xA4);
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 }
 
@@ -772,6 +772,6 @@ test "LOG0: out of gas" {
     try frame.stack.append(0); // offset (pushed last, popped first)
 
     // Execute LOG0 - should fail
-    const result = evm.table.execute(0, interpreter, state, 0xA0);
+    const result = evm.table.execute(interpreter, state, 0xA0);
     try testing.expectError(ExecutionError.Error.OutOfGas, result);
 }
