@@ -37,21 +37,21 @@ pub const AnalysisLRUCache = struct {
     
     /// Cache size configurations for different use cases
     pub const CacheSize = enum {
-        /// For embedded systems: 100 entries
+        /// For embedded systems: 1,000 entries
         embedded,
-        /// For light clients: 1,000 entries  
+        /// For light clients: 10,000 entries  
         light_client,
-        /// For full nodes: 10,000 entries
+        /// For full nodes: 100,000 entries
         full_node,
         /// Custom size
         custom,
         
         pub fn getMaxSize(self: CacheSize, custom_size: ?usize) usize {
             return switch (self) {
-                .embedded => 100,
-                .light_client => 1000,
-                .full_node => 10000,
-                .custom => custom_size orelse 1000,
+                .embedded => 1000,
+                .light_client => 10000,
+                .full_node => 100000,
+                .custom => custom_size orelse 10000,
             };
         }
     };
