@@ -10,7 +10,7 @@ test "Error mapping: Stack errors mapped correctly" {
     const allocator = testing.allocator;
 
     // Test stack overflow mapping
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Fill stack to capacity
     var i: usize = 0;
@@ -23,7 +23,7 @@ test "Error mapping: Stack errors mapped correctly" {
     try testing.expectError(ExecutionError.Error.StackOverflow, result);
 
     // Test stack underflow mapping
-    var empty_stack = Stack{};
+    var empty_stack = Stack.init();
     const pop_result = error_mapping.stack_pop(&empty_stack);
     try testing.expectError(ExecutionError.Error.StackUnderflow, pop_result);
 
@@ -93,7 +93,7 @@ test "Error mapping: Helper functions work correctly" {
     const allocator = testing.allocator;
 
     // Test successful operations
-    var stack = Stack{};
+    var stack = Stack.init();
     try error_mapping.stack_push(&stack, 42);
     const value = try error_mapping.stack_pop(&stack);
     try testing.expectEqual(@as(u256, 42), value);

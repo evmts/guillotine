@@ -3,7 +3,7 @@ const evm = @import("evm");
 const testing = std.testing;
 
 test "fuzz_stack_basic_operations" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     // Test boundary conditions
     try stack.append(100);
@@ -24,7 +24,7 @@ test "fuzz_stack_basic_operations" {
 }
 
 test "fuzz_stack_overflow" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     // Fill stack to capacity
     var i: usize = 0;
@@ -37,14 +37,14 @@ test "fuzz_stack_overflow" {
 }
 
 test "fuzz_stack_underflow" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     // Should fail on underflow
     try testing.expectError(evm.Stack.Error.StackUnderflow, stack.pop());
 }
 
 test "fuzz_stack_dup_operations" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -60,7 +60,7 @@ test "fuzz_stack_dup_operations" {
 }
 
 test "fuzz_stack_swap_operations" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -74,7 +74,7 @@ test "fuzz_stack_swap_operations" {
 }
 
 test "fuzz_stack_multi_pop_operations" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -95,7 +95,7 @@ test "fuzz_stack_multi_pop_operations" {
 }
 
 test "fuzz_stack_edge_values" {
-    var stack = evm.Stack{};
+    var stack = evm.Stack.init();
     
     const edge_values = [_]u256{
         0,

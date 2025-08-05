@@ -5,7 +5,7 @@ const Stack = evm.Stack;
 
 fn setup_stack(allocator: std.mem.Allocator, items: []const u256) !Stack {
     _ = allocator;
-    var stack = Stack{};
+    var stack = Stack.init();
     for (items) |item| {
         try stack.append(item);
     }
@@ -13,13 +13,13 @@ fn setup_stack(allocator: std.mem.Allocator, items: []const u256) !Stack {
 }
 
 test "Stack: initialization" {
-    const stack = Stack{};
+    const stack = Stack.init();
     try testing.expectEqual(@as(usize, 0), stack.size);
     try testing.expectEqual(@as(usize, Stack.CAPACITY), Stack.CAPACITY);
 }
 
 test "Stack: basic push and pop operations" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Push values
     try stack.append(1);
@@ -42,7 +42,7 @@ test "Stack: basic push and pop operations" {
 }
 
 test "Stack: push_unsafe and pop_unsafe" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Safe operations first to set up state
     try stack.append(100);
@@ -151,7 +151,7 @@ test "Stack: clear operation" {
 }
 
 test "Stack: overflow protection" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Fill stack to capacity - 1
     for (0..Stack.CAPACITY - 1) |i| {
@@ -168,7 +168,7 @@ test "Stack: overflow protection" {
 }
 
 test "Stack: data alignment and access" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test that we can store large values
     const large_value: u256 = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;

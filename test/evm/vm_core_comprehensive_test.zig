@@ -731,7 +731,7 @@ test "VMCore: Memory copy operations and data integrity" {
 
 test "VMCore: Stack depth limits and overflow protection" {
     const stack_limit = 1024;
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Fill stack to capacity
     var i: usize = 0;
@@ -751,7 +751,7 @@ test "VMCore: Stack depth limits and overflow protection" {
 }
 
 test "VMCore: Stack underflow protection and error handling" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test underflow on empty stack
     try testing.expectError(Stack.StackError.StackUnderflow, stack.pop());
@@ -772,7 +772,7 @@ test "VMCore: Stack underflow protection and error handling" {
 }
 
 test "VMCore: Stack manipulation operations and data integrity" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test basic push/pop operations
     const test_values = [_]u256{ 0x123, 0x456, 0x789, 0xabc, 0xdef };
@@ -802,7 +802,7 @@ test "VMCore: Stack manipulation operations and data integrity" {
 }
 
 test "VMCore: Stack bounds validation and edge cases" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test edge case: access at exact limit
     try stack.append(1);
@@ -824,7 +824,7 @@ test "VMCore: Stack bounds validation and edge cases" {
 }
 
 test "VMCore: Stack performance and large data handling" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test with maximum u256 values
     const large_values = [_]u256{

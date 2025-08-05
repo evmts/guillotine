@@ -19,7 +19,7 @@ test "Stack validation: binary operations" {
     try testing.expectEqual(@as(u32, 2), add_op.min_stack);
 
     // Test with a standalone stack
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test underflow - empty stack
     try testing.expectError(ExecutionError.Error.StackUnderflow, stack_validation.validate_stack_requirements(&stack, add_op));
@@ -41,7 +41,7 @@ test "Stack validation: PUSH operations" {
     try testing.expectEqual(@as(u32, 0), push1_op.min_stack);
 
     // Test with a standalone stack
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Fill stack to capacity
     stack.size = Stack.CAPACITY;
@@ -58,7 +58,7 @@ test "Stack validation: DUP operations" {
     try testing.expectEqual(@as(u32, 1), dup1_op.min_stack);
 
     // Test with a standalone stack
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test with empty stack
     try testing.expectError(ExecutionError.Error.StackUnderflow, stack_validation.validate_stack_requirements(&stack, dup1_op));
@@ -80,7 +80,7 @@ test "Stack validation: SWAP operations" {
     try testing.expectEqual(@as(u32, 2), swap1_op.min_stack);
 
     // Test with a standalone stack
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test validation patterns
     try testing.expectError(ExecutionError.Error.StackUnderflow, stack_validation.ValidationPatterns.validate_swap(&stack, 1));
@@ -131,7 +131,7 @@ test "Stack validation: jump table stack requirements verification" {
     try testing.expectEqual(@as(u32, Stack.CAPACITY), add_op.max_stack);
 
     // Test with a simple stack
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Should fail with empty stack
     try testing.expectError(ExecutionError.Error.StackUnderflow, stack_validation.validate_stack_requirements(&stack, add_op));
