@@ -112,6 +112,23 @@ pub fn is_available(address: primitives.Address.Address, chain_rules: ChainRules
     };
 }
 
+/// Checks if a precompile ID is available in the given chain rules
+/// This variant accepts a precompile ID directly to avoid redundant address checks
+///
+/// @param precompile_id The precompile ID (1-10)
+/// @param chain_rules The current chain rules configuration
+/// @return true if the precompile is available with these chain rules
+pub fn is_available_by_id(precompile_id: u8, chain_rules: ChainRules) bool {
+    return switch (precompile_id) {
+        1, 2, 3, 4 => true, // ECRECOVER, SHA256, RIPEMD160, IDENTITY available from Frontier
+        5 => chain_rules.is_byzantium, // MODEXP from Byzantium
+        6, 7, 8 => chain_rules.is_byzantium, // ECADD, ECMUL, ECPAIRING from Byzantium
+        9 => chain_rules.is_istanbul, // BLAKE2F from Istanbul
+        10 => chain_rules.is_cancun, // POINT_EVALUATION from Cancun
+        else => false,
+    };
+}
+
 /// Executes a precompile with the given parameters
 ///
 /// This is the main execution function that routes precompile calls to their
@@ -147,15 +164,8 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
         const precompile_id = addresses.get_precompile_id(address);
 
         // Use table lookup for O(1) dispatch
-        if (precompile_id < 1 or precompile_id > 10) {
-            @branchHint(.cold);
-            return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-        }
-
-        const handler = PRECOMPILE_TABLE[precompile_id - 1] orelse {
-            @branchHint(.cold);
-            return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
-        };
+        // After is_precompile check, we know id is valid (1-10)
+        const handler = PRECOMPILE_TABLE[precompile_id - 1].?;
 
         // Dispatch based on handler type
         return switch (handler) {
@@ -163,6 +173,38 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
             .with_chain_rules => |fn_ptr| fn_ptr(input, output, gas_limit, chain_rules),
         };
     }
+}
+
+/// Executes a precompile given its ID directly
+/// This variant avoids redundant address-to-ID conversions
+///
+/// @param precompile_id The precompile ID (1-10)
+/// @param input Input data for the precompile
+/// @param output Output buffer to write results (must be large enough)
+/// @param gas_limit Maximum gas available for execution
+/// @param chain_rules Current chain rules for availability checking
+/// @return PrecompileOutput containing success/failure and gas usage
+pub fn execute_precompile_by_id(precompile_id: u8, input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
+    // When precompiles are disabled, always fail
+    if (comptime no_precompiles) {
+        return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+    }
+
+    // Check if this precompile is available with the current chain rules
+    if (!is_available_by_id(precompile_id, chain_rules)) {
+        @branchHint(.cold);
+        return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
+    }
+
+    // Use table lookup for O(1) dispatch
+    // After is_available_by_id check, we know id is valid (1-10)
+    const handler = PRECOMPILE_TABLE[precompile_id - 1].?;
+
+    // Dispatch based on handler type
+    return switch (handler) {
+        .standard => |fn_ptr| fn_ptr(input, output, gas_limit),
+        .with_chain_rules => |fn_ptr| fn_ptr(input, output, gas_limit, chain_rules),
+    };
 }
 
 /// Estimates the gas cost for a precompile call
@@ -249,6 +291,39 @@ pub fn get_output_size(address: primitives.Address.Address, input_size: usize, c
     };
 }
 
+/// Gets the expected output size for a precompile given its ID
+/// This variant avoids redundant address-to-ID conversions
+///
+/// @param precompile_id The precompile ID (1-10)
+/// @param input_size Size of the input data
+/// @param chain_rules Current chain rules
+/// @return Expected output size or error
+pub fn get_output_size_by_id(precompile_id: u8, input_size: usize, chain_rules: ChainRules) !usize {
+    // Early return if precompiles are disabled
+    if (comptime no_precompiles) {
+        return error.InvalidPrecompile;
+    }
+
+    if (!is_available_by_id(precompile_id, chain_rules)) {
+        @branchHint(.cold);
+        return error.PrecompileNotAvailable;
+    }
+
+    return switch (precompile_id) {
+        1 => ecrecover.get_output_size(input_size),
+        2 => sha256.get_output_size(input_size),
+        3 => ripemd160.get_output_size(input_size),
+        4 => identity.get_output_size(input_size),
+        5 => 32, // MODEXP output size depends on modulus length, return default
+        6 => 64, // ECADD - fixed 64 bytes (point)
+        7 => 64, // ECMUL - fixed 64 bytes (point)
+        8 => 32, // ECPAIRING - fixed 32 bytes (boolean result)
+        9 => blake2f.get_output_size(input_size),
+        10 => kzg_point_evaluation.get_output_size(input_size),
+        else => error.InvalidPrecompile,
+    };
+}
+
 /// Validates that a precompile call would succeed
 ///
 /// This function performs all validation checks without executing the precompile.
@@ -274,4 +349,47 @@ pub fn validate_call(address: primitives.Address.Address, input_size: usize, gas
         return false;
     };
     return gas_cost <= gas_limit;
+}
+
+/// Checks if a precompile has a fixed output size
+///
+/// Some precompiles always return the same size output regardless of input,
+/// making them suitable for stack allocation optimization.
+///
+/// @param precompile_id The precompile ID (1-10)
+/// @return true if the precompile has a fixed output size
+pub fn has_fixed_output_size(precompile_id: u8) bool {
+    return switch (precompile_id) {
+        1 => true,  // ECRECOVER - always 32 bytes
+        2 => true,  // SHA256 - always 32 bytes
+        3 => true,  // RIPEMD160 - always 32 bytes (padded to 32)
+        4 => false, // IDENTITY - output size matches input
+        5 => false, // MODEXP - output size depends on modulus
+        6 => true,  // ECADD - always 64 bytes
+        7 => true,  // ECMUL - always 64 bytes
+        8 => true,  // ECPAIRING - always 32 bytes
+        9 => true,  // BLAKE2F - always 64 bytes
+        10 => true, // KZG_POINT_EVALUATION - always 64 bytes
+        else => false,
+    };
+}
+
+/// Gets the fixed output size for precompiles that have one
+///
+/// This should only be called for precompiles where has_fixed_output_size returns true.
+///
+/// @param precompile_id The precompile ID (1-10)
+/// @return The fixed output size in bytes
+pub fn get_fixed_output_size(precompile_id: u8) usize {
+    return switch (precompile_id) {
+        1 => 32,  // ECRECOVER
+        2 => 32,  // SHA256
+        3 => 32,  // RIPEMD160 (padded to 32)
+        6 => 64,  // ECADD
+        7 => 64,  // ECMUL
+        8 => 32,  // ECPAIRING
+        9 => 64,  // BLAKE2F
+        10 => 64, // KZG_POINT_EVALUATION
+        else => unreachable, // Should only be called for fixed-size precompiles
+    };
 }
