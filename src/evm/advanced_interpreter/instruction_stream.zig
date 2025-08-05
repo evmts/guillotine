@@ -308,11 +308,30 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
-            .RETURN => Instruction{
-                .fn_ptr = &op_return,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+            .RETURN => blk: {
+                // Check if we have pre-calculated memory expansion cost
+                if (memory_blocks) |blocks| {
+                    if (current_block < blocks.len) {
+                        if (blocks[current_block].accesses.get(pc)) |access| {
+                            if (access.expansion_cost) |cost| {
+                                // Use optimized version with pre-calculated cost
+                                break :blk Instruction{
+                                    .fn_ptr = &memory_optimized_ops.op_return_precalc,
+                                    .arg = .{ .data = cost },
+                                    .pc = @intCast(pc),
+                                    .opcode = op,
+                                };
+                            }
+                        }
+                    }
+                }
+                // Fall back to regular RETURN
+                break :blk Instruction{
+                    .fn_ptr = &op_return,
+                    .arg = .{ .none = 0 },
+                    .pc = @intCast(pc),
+                    .opcode = op,
+                };
             },
             .REVERT => Instruction{
                 .fn_ptr = &op_revert,
