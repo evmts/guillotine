@@ -87,7 +87,15 @@ pub fn init() Stack {
 
 /// Get the current number of elements on the stack.
 pub fn size(self: *const Stack) usize {
-    const byte_diff = @intFromPtr(self.end) - @intFromPtr(&self.data[0]);
+    const end_addr = @intFromPtr(self.end);
+    const start_addr = @intFromPtr(&self.data[0]);
+    
+    // Handle uninitialized or corrupted stack
+    if (end_addr < start_addr) {
+        return 0;
+    }
+    
+    const byte_diff = end_addr - start_addr;
     return byte_diff / @sizeOf(u256);
 }
 
