@@ -100,10 +100,14 @@ allocator: std.mem.Allocator, // 8 bytes
 /// Gas cost of current operation.
 cost: u64 = 0, // 8 bytes
 
+/// Gas cost of current block (for BEGINBLOCK optimization).
+/// Used for gas corrections in operations like CALL.
+current_block_cost: u64 = 0, // 8 bytes
+
 /// Error that occurred during execution, if any.
 err: ?ExecutionError.Error = null, // 16 bytes (optional enum)
 
-// Subtotal: 40 bytes, leaves room for growth
+// Subtotal: 48 bytes, leaves room for growth
 
 // ========================================================================
 // COLD FIELDS - Rarely accessed
@@ -158,6 +162,7 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
         ._padding = .{ 0, 0 },
         .allocator = allocator,
         .cost = 0,
+        .current_block_cost = 0,
         .err = null,
         .input = &[_]u8{},
         .output = &[_]u8{},
@@ -208,6 +213,7 @@ pub fn init_full(
         ._padding = .{ 0, 0 },
         .allocator = allocator,
         .cost = 0,
+        .current_block_cost = 0,
         .err = null,
         .input = input,
         .output = &[_]u8{},
