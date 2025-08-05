@@ -44,6 +44,7 @@ const bitvec = @import("bitvec.zig");
 const primitives = @import("primitives");
 const ExecutionError = @import("../execution/execution_error.zig");
 const CodeAnalysis = @import("code_analysis.zig");
+const BasicBlockAnalysis = @import("basic_block_analysis.zig").BasicBlockAnalysis;
 const AnalysisLRUCache = @import("analysis_lru_cache.zig").AnalysisLRUCache;
 const AnalysisCacheConfig = @import("analysis_lru_cache.zig").AnalysisCacheConfig;
 const StoragePool = @import("storage_pool.zig");
@@ -164,6 +165,16 @@ code_size: u64,
 ///
 /// This is lazily computed on first jump and cached globally.
 analysis: ?*const CodeAnalysis,
+
+/// Optional reference to basic block analysis for optimized stack validation.
+///
+/// Contains:
+/// - Basic block boundaries and stack requirements
+/// - Pre-computed stack effects for entire blocks
+/// - Enables skipping per-opcode validation in straight-line code
+///
+/// This is computed on-demand for contracts with significant straight-line code.
+basic_block_analysis: ?*const BasicBlockAnalysis,
 
 // ============================================================================
 // Gas Tracking Fields
@@ -337,6 +348,7 @@ pub fn init(
         .input = input,
         .is_static = is_static,
         .analysis = null,
+        .basic_block_analysis = null,
         .storage_access = null,
         .original_storage = null,
         .is_cold = true,
@@ -400,6 +412,7 @@ pub fn init_deployment(
         .input = &[_]u8{},
         .is_static = false,
         .analysis = null,
+        .basic_block_analysis = null,
         .storage_access = null,
         .original_storage = null,
         .is_cold = false, // Deployment is always warm
@@ -1212,6 +1225,7 @@ pub fn init_at_address(
         .input = input,
         .is_static = is_static,
         .analysis = null,
+        .basic_block_analysis = null,
         .storage_access = null,
         .original_storage = null,
         .is_cold = true,

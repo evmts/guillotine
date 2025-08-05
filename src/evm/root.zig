@@ -64,6 +64,9 @@ pub const primitives = @import("primitives");
 /// Bytecode analysis for jump destination detection
 pub const CodeAnalysis = @import("frame/code_analysis.zig");
 
+/// Basic block analysis for optimized stack validation
+pub const BasicBlockAnalysis = @import("frame/basic_block_analysis.zig").BasicBlockAnalysis;
+
 /// Contract code and storage management
 pub const Contract = @import("frame/contract.zig");
 
@@ -85,6 +88,9 @@ pub const Hardfork = @import("hardforks/hardfork.zig");
 /// Opcode to implementation mapping
 pub const JumpTable = @import("jump_table/jump_table.zig");
 
+/// Struct-of-arrays jump table for improved cache locality
+pub const SoaJumpTable = @import("jump_table/soa_jump_table.zig").SoaJumpTable;
+
 /// Byte-addressable memory implementation
 pub const Memory = @import("memory/memory.zig");
 /// Memory module package for additional memory utilities
@@ -101,6 +107,9 @@ pub const Stack = @import("stack/stack.zig");
 
 /// Stack depth validation utilities
 pub const stack_validation = @import("stack/stack_validation.zig");
+
+/// Stack class constants
+pub const STACK_CAPACITY = Stack.CAPACITY;
 
 /// Storage slot pooling for gas optimization
 pub const StoragePool = @import("frame/storage_pool.zig");

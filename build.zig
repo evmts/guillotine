@@ -658,6 +658,23 @@ pub fn build(b: *std.Build) void {
     const bn254_zig_bench_step = b.step("bench-bn254-zig", "Run BN254 Zig native benchmarks");
     bn254_zig_bench_step.dependOn(&run_bn254_zig_bench_cmd.step);
 
+    // Add basic block benchmark executable
+    const basic_block_bench_exe = b.addExecutable(.{
+        .name = "basic-block-benchmark",
+        .root_source_file = b.path("bench/basic_block_benchmark.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    basic_block_bench_exe.root_module.addImport("evm", bench_evm_mod);
+    basic_block_bench_exe.root_module.addImport("primitives", primitives_mod);
+    b.installArtifact(basic_block_bench_exe);
+
+    const run_basic_block_bench_cmd = b.addRunArtifact(basic_block_bench_exe);
+    run_basic_block_bench_cmd.step.dependOn(b.getInstallStep());
+
+    const basic_block_bench_step = b.step("bench-basic-block", "Run basic block optimization benchmarks");
+    basic_block_bench_step.dependOn(&run_basic_block_bench_cmd.step);
+
     // Flamegraph profiling support
     const flamegraph_step = b.step("flamegraph", "Run benchmarks with flamegraph profiling");
 
@@ -1753,6 +1770,20 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_jumpi_bug_test.step);
     const jumpi_bug_test_step = b.step("test-jumpi", "Run JUMPI bug test");
     jumpi_bug_test_step.dependOn(&run_jumpi_bug_test.step);
+
+    // Add basic block test
+    const basic_block_test = b.addTest(.{
+        .name = "basic-block-test",
+        .root_source_file = b.path("test/evm/basic_block_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    basic_block_test.root_module.addImport("evm", evm_mod);
+    basic_block_test.root_module.addImport("primitives", primitives_mod);
+    const run_basic_block_test = b.addRunArtifact(basic_block_test);
+    test_step.dependOn(&run_basic_block_test.step);
+    const basic_block_test_step = b.step("test-basic-block", "Run basic block test");
+    basic_block_test_step.dependOn(&run_basic_block_test.step);
 
     // TRACER REMOVED: Commenting out tracer tests until tracer is reimplemented
     // See: https://github.com/evmts/guillotine/issues/325
