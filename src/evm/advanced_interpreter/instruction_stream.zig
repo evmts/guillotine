@@ -298,8 +298,8 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
-            .PUSH1...opcode.Enum.PUSH32 => |push_op| blk: {
-                const n = @intFromEnum(push_op) - @intFromEnum(opcode.Enum.PUSH1) + 1;
+            .PUSH1...PUSH32 => blk: {
+                const n = @intFromEnum(op_enum) - @intFromEnum(opcode.Enum.PUSH1) + 1;
                 const bytes = bytecode[pc + 1..][0..n];
                 var value: u256 = 0;
                 for (bytes) |byte| {
@@ -997,7 +997,7 @@ fn op_generic(instr: *const Instruction, state: *AdvancedExecutionState) ?*const
     // Temporarily convert gas back to unsigned
     state.frame.gas_remaining = @intCast(state.gas_left.*);
     
-    const result = state.vm.table.execute(state.frame.pc, interpreter, frame_state, instr.opcode) catch |err| {
+    _ = state.vm.table.execute(state.frame.pc, interpreter, frame_state, instr.opcode) catch |err| {
         state.exit_status = err;
         return null;
     };
