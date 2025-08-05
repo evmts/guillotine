@@ -62,6 +62,7 @@ comptime {
 /// The analysis owns its allocated memory and must be properly cleaned up
 /// using the `deinit` method to prevent memory leaks.
 const CodeAnalysis = @This();
+const JumpAnalysis = @import("jump_analysis.zig").JumpAnalysis;
 
 /// Bit vector marking which bytes in the bytecode are executable code vs data.
 ///
@@ -149,6 +150,19 @@ pc_to_block: []u16,
 /// contracts have far fewer than 65535 blocks. Most contracts have < 1000 blocks.
 block_count: u16,
 
+/// Pre-computed jump destination analysis for O(1) validation.
+///
+/// This optional field contains analyzed jump information that enables
+/// fast validation of static jumps without runtime checks.
+jump_analysis: ?*JumpAnalysis,
+
+/// Pre-computed block start positions for O(1) block boundary lookup.
+///
+/// Each entry contains the PC where a block starts, indexed by block number.
+/// This eliminates the need for linear scanning in find_block_start.
+/// Example: block_start_positions[5] = 128 means block 5 starts at PC 128.
+block_start_positions: []usize,
+
 /// Releases all memory allocated by this code analysis.
 ///
 /// This method must be called when the analysis is no longer needed to prevent
@@ -178,7 +192,7 @@ pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
         allocator.free(costs);
     }
     
-    // NEW: Free block-related allocations
+    // Free block-related allocations
     if (self.block_metadata.len > 0) {
         allocator.free(self.block_metadata);
     }
@@ -186,6 +200,17 @@ pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
         allocator.free(self.pc_to_block);
     }
     self.block_starts.deinit(allocator);
+    
+    // Free jump analysis if present
+    if (self.jump_analysis) |analysis| {
+        analysis.deinit();
+        allocator.destroy(analysis);
+    }
+    
+    // Free block start positions
+    if (self.block_start_positions.len > 0) {
+        allocator.free(self.block_start_positions);
+    }
     
     // Memory best practice: zero out pointers after free
     self.* = undefined;
@@ -236,6 +261,8 @@ test "CodeAnalysis with block data initializes and deinits correctly" {
         .has_selfdestruct = false,
         .has_create = false,
         .block_gas_costs = null,
+        .jump_analysis = null,
+        .block_start_positions = try allocator.alloc(usize, 10),
     };
     defer analysis.deinit(allocator);
     
@@ -271,6 +298,8 @@ test "CodeAnalysis deinit handles partially initialized state" {
         .has_selfdestruct = false,
         .has_create = false,
         .block_gas_costs = null,
+        .jump_analysis = null,
+        .block_start_positions = &[_]usize{},
     };
     
     // Should not crash on deinit
@@ -451,6 +480,7 @@ test "Block analysis tracks stack effects" {
 pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !CodeAnalysis {
     const opcode = @import("../opcodes/opcode.zig");
     const jump_table = @import("../jump_table/jump_table.zig");
+    const jump_analysis = @import("jump_analysis.zig");
     
     // Initialize analysis structure
     var analysis = CodeAnalysis{
@@ -466,6 +496,8 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         .has_selfdestruct = false,
         .has_create = false,
         .block_gas_costs = null,
+        .jump_analysis = null,
+        .block_start_positions = &[_]usize{},
     };
     errdefer analysis.deinit(allocator);
     
@@ -535,6 +567,10 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     analysis.pc_to_block = try allocator.alloc(u16, code.len);
     errdefer allocator.free(analysis.pc_to_block);
     
+    // Allocate block start positions
+    analysis.block_start_positions = try allocator.alloc(usize, block_count);
+    errdefer allocator.free(analysis.block_start_positions);
+    
     // Initialize jump table for gas cost lookup
     const table = jump_table.JumpTable.init();
     
@@ -546,6 +582,9 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     var block_stack_start: i16 = 0;
     var min_stack_in_block: i16 = 0;
     var max_stack_in_block: i16 = 0;
+    
+    // First block always starts at 0
+    analysis.block_start_positions[0] = 0;
     
     i = 0;
     while (i < code.len) {
@@ -564,6 +603,10 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             // Start new block
             current_block += 1;
             block_start_pc = i;
+            // Record block start position
+            if (current_block < block_count) {
+                analysis.block_start_positions[current_block] = i;
+            }
             gas_cost = 0;
             // New block inherits stack depth from previous
             block_stack_start = stack_depth;
@@ -683,6 +726,26 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             .stack_req = @max(0, block_stack_start + min_stack_in_block),
             .stack_max = max_stack_in_block - block_stack_start,
         };
+    }
+    
+    // Perform jump analysis if there are any jumps
+    if (analysis.has_static_jumps or analysis.has_dynamic_jumps) {
+        const jump_analysis_ptr = try allocator.create(JumpAnalysis);
+        errdefer allocator.destroy(jump_analysis_ptr);
+        
+        jump_analysis_ptr.* = try jump_analysis.analyze_jumps(
+            allocator,
+            code,
+            &analysis.code_segments,
+            &analysis.jumpdest_bitmap,
+        );
+        
+        analysis.jump_analysis = jump_analysis_ptr;
+        
+        // Update dynamic jump flag based on detailed analysis
+        if (analysis.jump_analysis.?.all_jumps_static) {
+            analysis.has_dynamic_jumps = false;
+        }
     }
     
     return analysis;
