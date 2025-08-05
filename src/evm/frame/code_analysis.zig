@@ -580,14 +580,14 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         }
         
         // Get operation from jump table
-        const operation_ptr = table.get(@enumFromInt(op));
+        const operation_ptr = table.get_operation(op);
         
         // Add constant gas cost
         gas_cost = @min(gas_cost + @as(u32, @intCast(operation_ptr.constant_gas)), std.math.maxInt(u32));
         
         // Track stack effects
         const stack_inputs = @as(i16, @intCast(operation_ptr.min_stack));
-        const stack_outputs = switch (@as(opcode.Enum, @enumFromInt(op))) {
+        const stack_outputs: i16 = switch (@as(opcode.Enum, @enumFromInt(op))) {
             // Most operations consume min_stack and push 1
             .ADD, .MUL, .SUB, .DIV, .SDIV, .MOD, .SMOD, .EXP,
             .LT, .GT, .SLT, .SGT, .EQ, .ISZERO,
@@ -596,7 +596,7 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             .CALLVALUE, .CALLDATASIZE, .CODESIZE, .GASPRICE,
             .EXTCODESIZE, .RETURNDATASIZE, .EXTCODEHASH,
             .BLOCKHASH, .COINBASE, .TIMESTAMP, .NUMBER,
-            .DIFFICULTY, .GASLIMIT, .CHAINID, .SELFBALANCE,
+            .PREVRANDAO, .GASLIMIT, .CHAINID, .SELFBALANCE,
             .BASEFEE, .PC, .MSIZE, .GAS => 1,
             
             // Operations that push 0 (consume inputs, no output)
@@ -637,7 +637,7 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL => 1,
             
             // Unknown/future opcodes
-            _ => 0,
+            else => 0,
         };
         
         // First check if we have enough stack items

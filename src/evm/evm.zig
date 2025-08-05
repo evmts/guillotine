@@ -689,7 +689,7 @@ test "Evm.init_with_state creates EVM with custom settings" {
     defer evm.deinit();
 
     try testing.expectEqualSlices(u8, test_return_data, evm.return_data);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
+    try testing.expectEqual(@as(usize, 0), evm.stack.size());
     try testing.expectEqual(@as(u16, 42), evm.depth);
     try testing.expectEqual(true, evm.read_only);
 }
@@ -706,7 +706,7 @@ test "Evm.init_with_state uses defaults for null parameters" {
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size);
+    try testing.expectEqual(@as(usize, 0), evm.stack.size());
     try testing.expectEqual(@as(u16, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -751,7 +751,7 @@ test "Evm init_with_state vs init comparison" {
     try testing.expectEqual(evm1.depth, evm2.depth);
     try testing.expectEqual(evm1.read_only, evm2.read_only);
     try testing.expectEqual(evm1.return_data.len, evm2.return_data.len);
-    try testing.expectEqual(evm1.stack.size, evm2.stack.size);
+    try testing.expectEqual(evm1.stack.size(), evm2.stack.size());
 }
 
 test "Evm child instance creation pattern" {

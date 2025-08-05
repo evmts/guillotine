@@ -149,7 +149,7 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
     return Frame{
         .pc = 0,
         .gas_remaining = 0,
-        .stack = Stack{},
+        .stack = Stack.init(),
         .memory = memory,
         .contract = contract,
         .depth = 0,
@@ -199,7 +199,7 @@ pub fn init_full(
     return Frame{
         .pc = 0,
         .gas_remaining = gas_limit,
-        .stack = Stack{},
+        .stack = Stack.init(),
         .memory = try Memory.init_default(allocator),
         .contract = contract,
         .depth = 0,
@@ -267,7 +267,7 @@ pub fn init_with_state(
     var memory_to_use = memory orelse try Memory.init_default(allocator);
     errdefer if (memory == null) memory_to_use.deinit();
 
-    const stack_to_use = stack orelse Stack{};
+    const stack_to_use = stack orelse Stack.init();
 
     return Frame{
         .pc = pc orelse 0,
@@ -441,7 +441,7 @@ pub const FrameBuilder = struct {
         return Frame{
             .pc = 0,
             .gas_remaining = self.gas,
-            .stack = .{},
+            .stack = Stack.init(),
             .memory = Memory.init_default(self.allocator) catch return BuildError.OutOfMemory,
             .contract = self.contract.?,
             .depth = self.depth,

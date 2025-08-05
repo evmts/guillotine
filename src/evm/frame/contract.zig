@@ -803,70 +803,21 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
 
 /// Direct bytecode analysis without caching (for size-optimized builds)
 fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnalysisError!*const CodeAnalysis {
-    // When caching is disabled, we still need to manage memory properly
-    // The caller (ensure_analysis) is responsible for cleanup
-    const analysis = allocator.create(CodeAnalysis) catch |err| {
-        Log.debug("Failed to allocate CodeAnalysis: {any}", .{err});
+    // Use the comprehensive block analysis from code_analysis.zig
+    const block_analysis = CodeAnalysis.analyze_bytecode_blocks(allocator, code) catch |err| {
+        Log.debug("Failed to analyze bytecode blocks: {any}", .{err});
         return error.OutOfMemory;
     };
-    errdefer allocator.destroy(analysis);
-
-    // Initialize with basic analysis - no block analysis for now
-    analysis.* = CodeAnalysis{
-        .code_segments = bitvec.BitVec64.codeBitmap(allocator, code) catch |err| {
-            Log.debug("Failed to create code bitmap: {any}", .{err});
-            allocator.destroy(analysis);
-            return error.OutOfMemory;
-        },
-        .jumpdest_bitmap = bitvec.BitVec64.init(allocator, code.len) catch |err| {
-            Log.debug("Failed to create jumpdest bitmap: {any}", .{err});
-            analysis.code_segments.deinit(allocator);
-            allocator.destroy(analysis);
-            return error.OutOfMemory;
-        },
-        .block_gas_costs = null,
-        .max_stack_depth = 0,
-        .has_dynamic_jumps = false,
-        .has_static_jumps = false,
-        .has_selfdestruct = false,
-        .has_create = false,
-        // Block-related fields with empty/default values
-        .block_starts = bitvec.BitVec64{
-            .bits = &[_]u64{},
-            .size = 0,
-            .owned = false,
-            .cached_ptr = undefined,
-        },
-        .block_metadata = &.{}, // Empty slice
-        .pc_to_block = &.{}, // Empty slice
-        .block_count = 0,
+    
+    // Allocate on heap and copy the analysis
+    const analysis = allocator.create(CodeAnalysis) catch |err| {
+        Log.debug("Failed to allocate CodeAnalysis: {any}", .{err});
+        var mutable_analysis = block_analysis;
+        mutable_analysis.deinit(allocator);
+        return error.OutOfMemory;
     };
-
-    // Mark JUMPDESTs
-    var i: usize = 0;
-    while (i < code.len) {
-        const op = code[i];
-        if (op == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
-            analysis.jumpdest_bitmap.setUnchecked(i);
-        }
-        
-        // Track opcodes
-        switch (@as(opcode.Enum, @enumFromInt(op))) {
-            .JUMP, .JUMPI => analysis.has_static_jumps = true,
-            .SELFDESTRUCT => analysis.has_selfdestruct = true,
-            .CREATE, .CREATE2 => analysis.has_create = true,
-            else => {},
-        }
-        
-        // Advance PC
-        if (opcode.is_push(op)) {
-            const push_bytes = opcode.get_push_size(op);
-            i += 1 + push_bytes;
-        } else {
-            i += 1;
-        }
-    }
-
+    
+    analysis.* = block_analysis;
     return analysis;
 }
 
