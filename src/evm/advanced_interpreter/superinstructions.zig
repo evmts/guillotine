@@ -304,7 +304,7 @@ fn op_push_push_div(instr: *const Instruction, state: *AdvancedExecutionState) ?
 /// PUSH + PUSH + EQ - push two values and check equality
 fn op_push_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const values = @as(*const [2]u64, @ptrCast(&instr.arg.data));
-    const result = if (values[0] == values[1]) 1 else 0;
+    const result: u256 = if (values[0] == values[1]) 1 else 0;
     state.stack.append_unsafe(result);
     return next_instruction(instr);
 }
@@ -312,7 +312,7 @@ fn op_push_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*
 /// PUSH + PUSH + LT - push two values and check less than
 fn op_push_push_lt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const values = @as(*const [2]u64, @ptrCast(&instr.arg.data));
-    const result = if (values[0] < values[1]) 1 else 0;
+    const result: u256 = if (values[0] < values[1]) 1 else 0;
     state.stack.append_unsafe(result);
     return next_instruction(instr);
 }
@@ -320,16 +320,18 @@ fn op_push_push_lt(instr: *const Instruction, state: *AdvancedExecutionState) ?*
 /// PUSH + PUSH + GT - push two values and check greater than
 fn op_push_push_gt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const values = @as(*const [2]u64, @ptrCast(&instr.arg.data));
-    const result = if (values[0] > values[1]) 1 else 0;
+    const result: u256 = if (values[0] > values[1]) 1 else 0;
     state.stack.append_unsafe(result);
     return next_instruction(instr);
 }
 
 /// DUP + PUSH + EQ - duplicate top, push value, and check equality
 fn op_dup_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const top = state.stack.peek_unsafe(0);
+    // Duplicate top of stack
+    state.stack.dup_unsafe(1);
+    const top = state.stack.pop_unsafe();
     const push_value = instr.arg.small_push;
-    const result = if (top == push_value) 1 else 0;
+    const result: u256 = if (top == push_value) 1 else 0;
     state.stack.append_unsafe(result);
     return next_instruction(instr);
 }
@@ -373,8 +375,10 @@ fn op_iszero_push_jumpi(instr: *const Instruction, state: *AdvancedExecutionStat
 
 /// DUP + ISZERO - duplicate top and check if zero
 fn op_dup_iszero(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const value = state.stack.peek_unsafe(0);
-    const result = if (value == 0) 1 else 0;
+    // Duplicate top of stack
+    state.stack.dup_unsafe(1);
+    const value = state.stack.pop_unsafe();
+    const result: u256 = if (value == 0) 1 else 0;
     state.stack.append_unsafe(result);
     return next_instruction(instr);
 }

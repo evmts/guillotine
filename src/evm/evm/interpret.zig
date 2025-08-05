@@ -136,10 +136,10 @@ fn execute_block_based(
             
             // Find current block index
             if (current_block < contract.analysis.?.block_count) {
-                const block_result = execute_block(self, &frame, current_block) catch |err| {
+                const block_result = execute_block(self, frame, current_block) catch |err| {
                     // Handle block execution error
                     contract.gas = frame.gas_remaining;
-                    return handle_execution_error(self, &frame, err, initial_gas);
+                    return handle_execution_error(self, frame, err, initial_gas);
                 };
                 
                 // Handle block exit
@@ -177,7 +177,7 @@ fn execute_block_based(
                     .error_ => {
                         contract.gas = frame.gas_remaining;
                         if (block_result.err) |err| {
-                            return handle_execution_error(self, &frame, err, initial_gas);
+                            return handle_execution_error(self, frame, err, initial_gas);
                         }
                         return RunResult.init(initial_gas, 0, .Invalid, ExecutionError.Error.InvalidOpcode, null);
                     },
@@ -187,7 +187,7 @@ fn execute_block_based(
                         const op = contract.get_op(frame.pc);
                         const result = self.table.execute(frame.pc, interpreter, state, op) catch |err| {
                             contract.gas = frame.gas_remaining;
-                            return handle_execution_error(self, &frame, err, initial_gas);
+                            return handle_execution_error(self, frame, err, initial_gas);
                         };
                         frame.pc += result.bytes_consumed;
                     },

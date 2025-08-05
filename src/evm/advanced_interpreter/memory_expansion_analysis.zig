@@ -95,23 +95,30 @@ pub fn analyze_memory_expansion(
         switch (op_enum) {
             // Memory read operations
             .MLOAD => {
-                const offset = if (push_stack.items.len > 0) push_stack.pop() else null;
-                
-                if (offset) |static_offset| {
-                    // Static offset - pre-calculate expansion
-                    const required_size = static_offset + 32;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
-                    
-                    try blocks[current_block].accesses.put(pc, .{
-                        .access_type = .read,
-                        .static_offset = static_offset,
-                        .static_size = 32,
-                        .expansion_cost = expansion_cost,
-                        .max_memory_size = required_size,
-                    });
-                    
-                    blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, required_size);
+                if (push_stack.items.len > 0) {
+                    const static_offset = push_stack.pop();
+                    if (static_offset) |offset| {
+                        // Static offset - pre-calculate expansion
+                        const required_size = offset + 32;
+                        const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
+                        
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .read,
+                            .static_offset = @as(u64, @intCast(offset)),
+                            .static_size = 32,
+                            .expansion_cost = expansion_cost,
+                            .max_memory_size = @as(u64, @intCast(required_size)),
+                        });
+                        
+                        blocks[current_block].total_static_expansion_cost += expansion_cost;
+                        current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
+                    } else {
+                        // Dynamic offset
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .read,
+                        });
+                    }
                 } else {
                     // Dynamic offset
                     blocks[current_block].has_dynamic_access = true;
@@ -133,18 +140,18 @@ pub fn analyze_memory_expansion(
                 if (offset) |static_offset| {
                     // Static offset - pre-calculate expansion
                     const required_size = static_offset + 32;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .write,
-                        .static_offset = static_offset,
+                        .static_offset = @as(u64, @intCast(static_offset)),
                         .static_size = 32,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = required_size,
+                        .max_memory_size = @as(u64, @intCast(required_size)),
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, required_size);
+                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
                 } else {
                     // Dynamic offset
                     blocks[current_block].has_dynamic_access = true;
@@ -162,18 +169,18 @@ pub fn analyze_memory_expansion(
                 if (offset) |static_offset| {
                     // Static offset - pre-calculate expansion
                     const required_size = static_offset + 1;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .write,
-                        .static_offset = static_offset,
+                        .static_offset = @as(u64, @intCast(static_offset)),
                         .static_size = 1,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = required_size,
+                        .max_memory_size = @as(u64, @intCast(required_size)),
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, required_size);
+                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
                 } else {
                     // Dynamic offset
                     blocks[current_block].has_dynamic_access = true;
@@ -193,18 +200,18 @@ pub fn analyze_memory_expansion(
                 if (dest_offset != null and size != null) {
                     // Static copy - pre-calculate expansion
                     const required_size = dest_offset.? + size.?;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .copy_write,
-                        .static_offset = dest_offset,
-                        .static_size = size,
+                        .static_offset = if (dest_offset) |off| @as(u64, @intCast(off)) else null,
+                        .static_size = if (size) |sz| @as(u64, @intCast(sz)) else null,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = required_size,
+                        .max_memory_size = @as(u64, @intCast(required_size)),
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, required_size);
+                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
                 } else {
                     // Dynamic copy
                     blocks[current_block].has_dynamic_access = true;
@@ -222,18 +229,18 @@ pub fn analyze_memory_expansion(
                 if (offset != null and size != null and size.? > 0) {
                     // Static return data
                     const required_size = offset.? + size.?;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .return_data,
                         .static_offset = offset,
-                        .static_size = size,
+                        .static_size = if (size) |sz| @as(u64, @intCast(sz)) else null,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = required_size,
+                        .max_memory_size = @as(u64, @intCast(required_size)),
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, required_size);
+                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
                 } else if (size == null or size.? > 0) {
                     // Dynamic return data
                     blocks[current_block].has_dynamic_access = true;

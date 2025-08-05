@@ -50,8 +50,8 @@ const memory_optimized_ops = @import("memory_optimized_ops.zig");
 /// Function pointer type for instruction execution.
 pub const InstructionFn = *const fn (instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction;
 
-/// Instruction argument
-pub const InstructionArg = union(enum) {
+/// Packed instruction argument (8 bytes)
+pub const InstructionArg = packed union {
     /// No argument
     none: u64,
     
@@ -61,41 +61,28 @@ pub const InstructionArg = union(enum) {
     /// Index into push_values array for large pushes (PUSH9-32)
     push_index: u32,
     
-    /// Block metadata
-    block: BlockMetadata,
+    /// Pointer to block metadata
+    block_ptr: *const BlockMetadata,
     
-    /// Jump info
-    jump: struct {
-        target_instr: u32,
-        is_static: bool,
-    },
-    
-    /// Jump target
+    /// Jump target instruction index
     jump_target: u32,
-    
-    /// Push info
-    push: struct {
-        value: u256,
-        bytes: u8,
-    },
     
     /// Generic data (PC for PC opcode, opcode for generic handler, etc.)
     data: u64,
 };
 
-/// A single instruction in the stream
+/// A single instruction in the stream (16 bytes total)
 pub const Instruction = struct {
-    /// Function to execute this instruction
+    /// Function to execute this instruction (8 bytes)
     fn_ptr: InstructionFn,
     
-    /// Instruction-specific argument
+    /// Instruction-specific argument (8 bytes)
     arg: InstructionArg,
     
-    /// Program counter where this instruction came from
-    pc: u32 = 0,
-    
-    /// Original opcode (for debugging/fallback)
-    opcode: u8 = 0,
+    comptime {
+        // Ensure instruction is exactly 16 bytes
+        std.debug.assert(@sizeOf(Instruction) == 16);
+    }
 };
 
 /// Advanced execution state (replaces Frame for instruction execution).
@@ -104,7 +91,7 @@ pub const AdvancedExecutionState = struct {
     stack: *Stack,
     
     /// Memory (reference to Frame's memory)
-    memory: *@import("../memory/memory.zig"),
+    memory: *@import("../memory/memory.zig").Memory,
     
     /// Gas remaining
     gas_left: *i64, // Signed for easier underflow detection
@@ -117,6 +104,9 @@ pub const AdvancedExecutionState = struct {
     
     /// Exit status (set when execution should stop)
     exit_status: ?ExecutionError.Error = null,
+    
+    /// Reference to push values array (for large pushes)
+    push_values: []const u256,
 };
 
 /// Result of instruction stream generation.
@@ -159,18 +149,17 @@ pub fn generate_instruction_stream(
     var pc_to_instruction = try allocator.alloc(u32, bytecode.len);
     errdefer allocator.free(pc_to_instruction);
     
+    var push_values = std.ArrayList(u256).init(allocator);
+    defer push_values.deinit();
+    
     // Initialize all to invalid
     @memset(pc_to_instruction, std.math.maxInt(u32));
     
-    // Analyze memory expansion costs
-    var memory_blocks: ?[]memory_expansion_analysis.BlockMemoryAnalysis = null;
-    if (analysis.block_start_positions.len > 0) {
-        memory_blocks = try memory_expansion_analysis.analyze_memory_expansion(
-            allocator,
-            bytecode,
-            analysis.block_start_positions,
-        );
-    }
+    // Run memory expansion analysis if enabled
+    const memory_blocks = if (analysis.block_count > 0) blk: {
+        const blocks = try memory_expansion_analysis.analyze_memory_expansion(allocator, bytecode, analysis.block_start_positions);
+        break :blk blocks;
+    } else null;
     defer if (memory_blocks) |blocks| {
         for (blocks) |*block| {
             block.accesses.deinit();
@@ -188,12 +177,10 @@ pub fn generate_instruction_stream(
         // Check if we're at a block boundary
         if (analysis.block_starts.isSetUnchecked(pc)) {
             // Insert BEGINBLOCK instruction
-            const block_meta = analysis.block_metadata[current_block];
+            const block_meta = &analysis.block_metadata[current_block];
             try instructions.append(.{
                 .fn_ptr = &opx_beginblock,
-                .arg = .{ .block = block_meta },
-                .pc = @intCast(pc),
-                .opcode = @intFromEnum(opcode.Enum.JUMPDEST), // Reuse JUMPDEST as BEGINBLOCK
+                .arg = .{ .block_ptr = block_meta },
             });
             current_block += 1;
         }
@@ -259,106 +246,33 @@ pub fn generate_instruction_stream(
             // Control flow
             .STOP => Instruction{
                 .fn_ptr = &op_stop,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
-            .JUMP => blk: {
-                // Check if we have jump analysis for static optimization
-                if (analysis.jump_analysis) |jump_analysis| {
-                    if (jump_analysis.get_jump_info(pc)) |jump_info| {
-                        if (jump_info.jump_type == .static and jump_info.destination != null and jump_info.is_valid) {
-                            // Pre-resolve static jump to instruction index
-                            _ = @as(usize, @intCast(jump_info.destination.?));
-                            break :blk Instruction{
-                                .fn_ptr = &op_jump_static,
-                                .arg = .{ .jump = .{
-                                    .target_instr = 0, // Will be resolved in second pass
-                                    .is_static = true,
-                                } },
-                                .pc = @intCast(pc),
-                                .opcode = op,
-                            };
-                        }
-                    }
-                }
-                break :blk Instruction{
-                    .fn_ptr = &op_jump,
-                    .arg = .none,
-                    .pc = @intCast(pc),
-                    .opcode = op,
-                };
+            .JUMP => Instruction{
+                .fn_ptr = &op_jump,
+                .arg = .{ .none = 0 },
             },
-            .JUMPI => blk: {
-                // Check if we have jump analysis for static optimization
-                if (analysis.jump_analysis) |jump_analysis| {
-                    if (jump_analysis.get_jump_info(pc)) |jump_info| {
-                        if (jump_info.jump_type == .static and jump_info.destination != null and jump_info.is_valid) {
-                            // Pre-resolve static jump to instruction index
-                            _ = @as(usize, @intCast(jump_info.destination.?));
-                            break :blk Instruction{
-                                .fn_ptr = &op_jumpi_static,
-                                .arg = .{ .jump = .{
-                                    .target_instr = 0, // Will be resolved in second pass
-                                    .is_static = true,
-                                } },
-                                .pc = @intCast(pc),
-                                .opcode = op,
-                            };
-                        }
-                    }
-                }
-                break :blk Instruction{
-                    .fn_ptr = &op_jumpi,
-                    .arg = .none,
-                    .pc = @intCast(pc),
-                    .opcode = op,
-                };
+            .JUMPI => Instruction{
+                .fn_ptr = &op_jumpi,
+                .arg = .{ .none = 0 },
             },
             .JUMPDEST => Instruction{
                 .fn_ptr = &op_jumpdest,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
-            .RETURN => blk: {
-                // Check if we have pre-calculated memory expansion cost
-                if (memory_blocks) |blocks| {
-                    if (current_block < blocks.len) {
-                        if (blocks[current_block].accesses.get(pc)) |access| {
-                            if (access.expansion_cost) |cost| {
-                                // Use optimized version with pre-calculated cost
-                                break :blk Instruction{
-                                    .fn_ptr = &memory_optimized_ops.op_return_precalc,
-                                    .arg = .{ .data = cost },
-                                    .pc = @intCast(pc),
-                                    .opcode = op,
-                                };
-                            }
-                        }
-                    }
-                }
-                // Fall back to regular RETURN
-                break :blk Instruction{
-                    .fn_ptr = &op_return,
-                    .arg = .{ .none = 0 },
-                    .pc = @intCast(pc),
-                    .opcode = op,
-                };
+            .RETURN => Instruction{
+                .fn_ptr = &op_return,
+                .arg = .{ .none = 0 },
             },
             .REVERT => Instruction{
                 .fn_ptr = &op_revert,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Stack operations
             .POP => Instruction{
                 .fn_ptr = &op_pop,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .MLOAD => blk: {
                 // Check if we have pre-calculated memory expansion cost
@@ -370,8 +284,6 @@ pub fn generate_instruction_stream(
                                 break :blk Instruction{
                                     .fn_ptr = &memory_optimized_ops.op_mload_precalc,
                                     .arg = .{ .data = cost },
-                                    .pc = @intCast(pc),
-                                    .opcode = op,
                                 };
                             }
                         }
@@ -381,8 +293,6 @@ pub fn generate_instruction_stream(
                 break :blk Instruction{
                     .fn_ptr = &op_mload,
                     .arg = .{ .none = 0 },
-                    .pc = @intCast(pc),
-                    .opcode = op,
                 };
             },
             .MSTORE => blk: {
@@ -395,8 +305,6 @@ pub fn generate_instruction_stream(
                                 break :blk Instruction{
                                     .fn_ptr = &memory_optimized_ops.op_mstore_precalc,
                                     .arg = .{ .data = cost },
-                                    .pc = @intCast(pc),
-                                    .opcode = op,
                                 };
                             }
                         }
@@ -406,85 +314,59 @@ pub fn generate_instruction_stream(
                 break :blk Instruction{
                     .fn_ptr = &op_mstore,
                     .arg = .{ .none = 0 },
-                    .pc = @intCast(pc),
-                    .opcode = op,
                 };
             },
             
             // Arithmetic
             .ADD => Instruction{
                 .fn_ptr = &op_add,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SUB => Instruction{
                 .fn_ptr = &op_sub,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .MUL => Instruction{
                 .fn_ptr = &op_mul,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .DIV => Instruction{
                 .fn_ptr = &op_div,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SDIV => Instruction{
                 .fn_ptr = &op_sdiv,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .MOD => Instruction{
                 .fn_ptr = &op_mod,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SMOD => Instruction{
                 .fn_ptr = &op_smod,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .ADDMOD => Instruction{
                 .fn_ptr = &op_addmod,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .MULMOD => Instruction{
                 .fn_ptr = &op_mulmod,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EXP => Instruction{
                 .fn_ptr = &op_exp,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SIGNEXTEND => Instruction{
                 .fn_ptr = &op_signextend,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // PUSH operations
             .PUSH0 => Instruction{
                 .fn_ptr = &op_push,
-                .arg = .{ .push = .{ .value = 0, .bytes = 0 } },
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .small_push = 0 },
             },
             .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
             .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
@@ -496,438 +378,315 @@ pub fn generate_instruction_stream(
                 for (bytes) |byte| {
                     value = (value << 8) | byte;
                 }
-                break :blk Instruction{
-                    .fn_ptr = &op_push,
-                    .arg = .{ .push = .{ .value = value, .bytes = @intCast(n) } },
-                    .pc = @intCast(pc),
-                    .opcode = op,
-                };
+                
+                // Store small pushes inline, large pushes in separate array
+                if (n <= 8) {
+                    break :blk Instruction{
+                        .fn_ptr = &op_push,
+                        .arg = .{ .small_push = @as(u64, @intCast(value)) },
+                    };
+                } else {
+                    const push_idx = @as(u32, @intCast(push_values.items.len));
+                    try push_values.append(value);
+                    break :blk Instruction{
+                        .fn_ptr = &op_push_large,
+                        .arg = .{ .push_index = push_idx },
+                    };
+                }
             },
             
             // DUP operations
             .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8,
             .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16 => Instruction{
                 .fn_ptr = &op_dup,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .data = @intFromEnum(op_enum) - @intFromEnum(opcode.Enum.DUP1) + 1 },
             },
             
             // SWAP operations
             .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8,
             .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16 => Instruction{
                 .fn_ptr = &op_swap,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .data = @intFromEnum(op_enum) - @intFromEnum(opcode.Enum.SWAP1) + 1 },
             },
             
             // Comparison operations
             .LT => Instruction{
                 .fn_ptr = &op_lt,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .GT => Instruction{
                 .fn_ptr = &op_gt,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SLT => Instruction{
                 .fn_ptr = &op_slt,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SGT => Instruction{
                 .fn_ptr = &op_sgt,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EQ => Instruction{
                 .fn_ptr = &op_eq,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .ISZERO => Instruction{
                 .fn_ptr = &op_iszero,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Bitwise operations
             .AND => Instruction{
                 .fn_ptr = &op_and,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .OR => Instruction{
                 .fn_ptr = &op_or,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .XOR => Instruction{
                 .fn_ptr = &op_xor,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .NOT => Instruction{
                 .fn_ptr = &op_not,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .BYTE => Instruction{
                 .fn_ptr = &op_byte,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SHL => Instruction{
                 .fn_ptr = &op_shl,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SHR => Instruction{
                 .fn_ptr = &op_shr,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SAR => Instruction{
                 .fn_ptr = &op_sar,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Hashing
             .KECCAK256 => Instruction{
                 .fn_ptr = &op_keccak256,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Environmental information
             .ADDRESS => Instruction{
                 .fn_ptr = &op_address,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .BALANCE => Instruction{
                 .fn_ptr = &op_balance,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .ORIGIN => Instruction{
                 .fn_ptr = &op_origin,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALLER => Instruction{
                 .fn_ptr = &op_caller,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALLVALUE => Instruction{
                 .fn_ptr = &op_callvalue,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALLDATALOAD => Instruction{
                 .fn_ptr = &op_calldataload,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALLDATASIZE => Instruction{
                 .fn_ptr = &op_calldatasize,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALLDATACOPY => Instruction{
                 .fn_ptr = &op_calldatacopy,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CODESIZE => Instruction{
                 .fn_ptr = &op_codesize,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CODECOPY => Instruction{
                 .fn_ptr = &op_codecopy,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EXTCODESIZE => Instruction{
                 .fn_ptr = &op_extcodesize,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EXTCODECOPY => Instruction{
                 .fn_ptr = &op_extcodecopy,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .RETURNDATASIZE => Instruction{
                 .fn_ptr = &op_returndatasize,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .RETURNDATACOPY => Instruction{
                 .fn_ptr = &op_returndatacopy,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EXTCODEHASH => Instruction{
                 .fn_ptr = &op_extcodehash,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SELFBALANCE => Instruction{
                 .fn_ptr = &op_selfbalance,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Block information
             .BLOCKHASH => Instruction{
                 .fn_ptr = &op_blockhash,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .COINBASE => Instruction{
                 .fn_ptr = &op_coinbase,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .TIMESTAMP => Instruction{
                 .fn_ptr = &op_timestamp,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .NUMBER => Instruction{
                 .fn_ptr = &op_number,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .PREVRANDAO => Instruction{
                 .fn_ptr = &op_prevrandao,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .GASLIMIT => Instruction{
                 .fn_ptr = &op_gaslimit,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CHAINID => Instruction{
                 .fn_ptr = &op_chainid,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .BASEFEE => Instruction{
                 .fn_ptr = &op_basefee,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .BLOBHASH => Instruction{
                 .fn_ptr = &op_blobhash,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .BLOBBASEFEE => Instruction{
                 .fn_ptr = &op_blobbasefee,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .GASPRICE => Instruction{
                 .fn_ptr = &op_gasprice,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Memory operations
             .MSTORE8 => Instruction{
                 .fn_ptr = &op_mstore8,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .MSIZE => Instruction{
                 .fn_ptr = &op_msize,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .MCOPY => Instruction{
                 .fn_ptr = &op_mcopy,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Storage operations
             .SLOAD => Instruction{
                 .fn_ptr = &op_sload,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SSTORE => Instruction{
                 .fn_ptr = &op_sstore,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .TLOAD => Instruction{
                 .fn_ptr = &op_tload,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .TSTORE => Instruction{
                 .fn_ptr = &op_tstore,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Gas opcode
             .GAS => Instruction{
                 .fn_ptr = &op_gas,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // PC opcode
             .PC => Instruction{
                 .fn_ptr = &op_pc,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .data = pc },
             },
             
             // Logging operations
             .LOG0, .LOG1, .LOG2, .LOG3, .LOG4 => Instruction{
                 .fn_ptr = &op_log,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .data = opcode.get_log_topic_count(op) },
             },
             
             // System operations  
             .CREATE => Instruction{
                 .fn_ptr = &op_create,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CREATE2 => Instruction{
                 .fn_ptr = &op_create2,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALL => Instruction{
                 .fn_ptr = &op_call,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .CALLCODE => Instruction{
                 .fn_ptr = &op_callcode,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .DELEGATECALL => Instruction{
                 .fn_ptr = &op_delegatecall,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .STATICCALL => Instruction{
                 .fn_ptr = &op_staticcall,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .RETURNDATALOAD => Instruction{
                 .fn_ptr = &op_returndataload,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .INVALID => Instruction{
                 .fn_ptr = &op_invalid,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .SELFDESTRUCT => Instruction{
                 .fn_ptr = &op_selfdestruct,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             
             // Extended operations (EOF) - not implemented yet
             .EXTCALL => Instruction{
                 .fn_ptr = &op_extcall,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EXTDELEGATECALL => Instruction{
                 .fn_ptr = &op_extdelegatecall,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
             .EXTSTATICCALL => Instruction{
                 .fn_ptr = &op_extstaticcall,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+                .arg = .{ .none = 0 },
             },
         };
         
@@ -941,37 +700,10 @@ pub fn generate_instruction_stream(
         pc += bytes_consumed;
     }
     
-    // Second pass: resolve static jump targets to instruction indices
-    if (analysis.jump_analysis) |jump_analysis| {
-        for (instructions.items, 0..instructions.items.len) |*instr, _| {
-            if (instr.opcode == @intFromEnum(opcode.Enum.JUMP) or 
-                instr.opcode == @intFromEnum(opcode.Enum.JUMPI)) {
-                if (instr.arg == .jump and instr.arg.jump.is_static) {
-                    // Get the static destination from jump analysis
-                    if (jump_analysis.get_jump_info(instr.pc)) |jump_info| {
-                        if (jump_info.destination) |dest| {
-                            const dest_pc = @as(usize, @intCast(dest));
-                            if (dest_pc < pc_to_instruction.len) {
-                                const target_idx = pc_to_instruction[dest_pc];
-                                if (target_idx != std.math.maxInt(u32)) {
-                                    instr.arg = .{ .jump = .{
-                                        .target_instr = target_idx,
-                                        .is_static = true,
-                                    } };
-                                    Log.debug("Resolved static jump at PC {} to instruction index {}", .{instr.pc, target_idx});
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
     return InstructionStream{
         .instructions = try instructions.toOwnedSlice(),
         .pc_to_instruction = pc_to_instruction,
-        .push_values = &[_]u256{}, // TODO: implement push value storage for PUSH9-32
+        .push_values = try push_values.toOwnedSlice(),
         .allocator = allocator,
     };
 }
@@ -982,7 +714,7 @@ pub fn generate_instruction_stream(
 
 /// BEGINBLOCK - validate gas and stack for entire block.
 fn opx_beginblock(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const block = instr.arg.block;
+    const block = instr.arg.block_ptr.*;
     
     // Check gas
     state.gas_left.* -= @as(i64, @intCast(block.gas_cost));
@@ -1052,22 +784,29 @@ fn op_pop(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
     return next_instruction(instr);
 }
 
-/// PUSH - push immediate value.
+/// PUSH - push immediate value (small, inline).
 fn op_push(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(instr.arg.push.value);
+    state.stack.append_unsafe(instr.arg.small_push);
+    return next_instruction(instr);
+}
+
+/// PUSH - push immediate value (large, from push_values array).
+fn op_push_large(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const value = state.push_values[instr.arg.push_index];
+    state.stack.append_unsafe(value);
     return next_instruction(instr);
 }
 
 /// DUP - duplicate stack item.
 fn op_dup(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const n = instr.opcode - @intFromEnum(opcode.Enum.DUP1) + 1;
+    const n = @as(u8, @intCast(instr.arg.data));
     state.stack.dup_unsafe(n);
     return next_instruction(instr);
 }
 
 /// SWAP - swap stack items.
 fn op_swap(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const n = instr.opcode - @intFromEnum(opcode.Enum.SWAP1) + 1;
+    const n = @as(u8, @intCast(instr.arg.data));
     state.stack.swap_unsafe(n);
     return next_instruction(instr);
 }
@@ -1110,20 +849,6 @@ fn op_jump(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instru
     return null;
 }
 
-/// JUMP - static unconditional jump (pre-resolved).
-fn op_jump_static(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    // Pop the destination from stack (for compatibility)
-    const dest = state.stack.pop_unsafe();
-    
-    // Use pre-resolved instruction index
-    _ = instr.arg.jump.target_instr;
-    
-    // For now, set PC and re-enter (will optimize later)
-    // TODO: Use the pre-resolved instruction index for direct jump
-    state.frame.pc = @intCast(dest);
-    return null;
-}
-
 /// JUMPI - conditional jump.
 fn op_jumpi(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const dest = state.stack.pop_unsafe();
@@ -1138,24 +863,6 @@ fn op_jumpi(instr: *const Instruction, state: *AdvancedExecutionState) ?*const I
         
         state.frame.pc = @intCast(dest);
         return null; // Re-enter at jump target
-    }
-    
-    return next_instruction(instr); // Continue to next instruction
-}
-
-/// JUMPI - static conditional jump (pre-resolved).
-fn op_jumpi_static(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const dest = state.stack.pop_unsafe();
-    const condition = state.stack.pop_unsafe();
-    
-    if (condition != 0) {
-        // Use pre-resolved instruction index
-        const target_idx = instr.arg.jump.target_instr;
-        _ = target_idx;
-        
-        // For now, set PC and re-enter (will optimize later)
-        state.frame.pc = @intCast(dest);
-        return null;
     }
     
     return next_instruction(instr); // Continue to next instruction
@@ -1274,21 +981,21 @@ fn op_not(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
 
 /// ADDRESS - get address of current account.
 fn op_address(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const addr = primitives.U256.from_le_bytes(state.frame.contract.target_address.data ++ [_]u8{0} ** 12);
+    const addr = primitives.Address.to_u256(state.frame.contract.target_address);
     state.stack.append_unsafe(addr);
     return next_instruction(instr);
 }
 
 /// CALLER - get caller address.
 fn op_caller(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const caller = primitives.U256.from_le_bytes(state.frame.msg_sender.data ++ [_]u8{0} ** 12);
+    const caller = primitives.Address.to_u256(state.frame.msg_sender);
     state.stack.append_unsafe(caller);
     return next_instruction(instr);
 }
 
 /// CALLVALUE - get call value.
 fn op_callvalue(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(state.frame.value);
+    state.stack.append_unsafe(state.frame.msg_value);
     return next_instruction(instr);
 }
 
@@ -1309,7 +1016,7 @@ fn op_calldataload(instr: *const Instruction, state: *AdvancedExecutionState) ?*
         @memcpy(data[0..copy_len], state.frame.input[@intCast(offset)..][0..copy_len]);
     }
     
-    state.stack.append_unsafe(primitives.U256.from_be_bytes(data));
+    state.stack.append_unsafe(primitives.B256.to_u256(data));
     return next_instruction(instr);
 }
 
@@ -1325,10 +1032,7 @@ fn op_calldatacopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*
         const len = @as(usize, @intCast(size));
         
         // Gas cost for memory expansion
-        const memory_cost = state.memory.expansion_cost(dest + len) catch {
-            state.exit_status = ExecutionError.Error.OutOfGas;
-            return null;
-        };
+        const memory_cost = state.memory.get_expansion_cost(dest + len);
         
         state.gas_left.* -= @as(i64, @intCast(memory_cost));
         if (state.gas_left.* < 0) {
@@ -1337,7 +1041,7 @@ fn op_calldatacopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*
         }
         
         // Copy data
-        state.memory.set_data(dest, src, len, state.frame.input) catch {
+        state.memory.set_data_bounded(dest, state.frame.input, src, len) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -1357,14 +1061,14 @@ fn op_blockhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*con
 
 /// COINBASE - get block coinbase.
 fn op_coinbase(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const coinbase = primitives.U256.from_le_bytes(state.vm.env.block.coinbase.data ++ [_]u8{0} ** 12);
+    const coinbase = primitives.Address.to_u256(state.vm.env.block.coinbase);
     state.stack.append_unsafe(coinbase);
     return next_instruction(instr);
 }
 
 /// ORIGIN - get transaction originator.
 fn op_origin(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const origin = primitives.U256.from_le_bytes(state.vm.env.tx.caller.data ++ [_]u8{0} ** 12);
+    const origin = primitives.Address.to_u256(state.vm.env.tx.caller);
     state.stack.append_unsafe(origin);
     return next_instruction(instr);
 }
@@ -1423,7 +1127,7 @@ fn op_gas(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
 
 /// PC - get program counter.
 fn op_pc(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(@as(u256, instr.pc));
+    state.stack.append_unsafe(@as(u256, instr.arg.data));
     return next_instruction(instr);
 }
 
@@ -1672,10 +1376,7 @@ fn op_codecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*cons
         const len = @as(usize, @intCast(size));
         
         // Gas cost for memory expansion
-        const memory_cost = state.memory.expansion_cost(dest + len) catch {
-            state.exit_status = ExecutionError.Error.OutOfGas;
-            return null;
-        };
+        const memory_cost = state.memory.get_expansion_cost(dest + len);
         
         state.gas_left.* -= @as(i64, @intCast(memory_cost));
         if (state.gas_left.* < 0) {
@@ -1684,7 +1385,7 @@ fn op_codecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*cons
         }
         
         // Copy data
-        state.memory.set_data(dest, src, len, state.frame.contract.input) catch {
+        state.memory.set_data_bounded(dest, state.frame.contract.input, src, len) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -1742,10 +1443,7 @@ fn op_extcodecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*c
         const len = @as(usize, @intCast(size));
         
         // Gas cost for memory expansion
-        const memory_cost = state.memory.expansion_cost(dest + len) catch {
-            state.exit_status = ExecutionError.Error.OutOfGas;
-            return null;
-        };
+        const memory_cost = state.memory.get_expansion_cost(dest + len);
         
         state.gas_left.* -= @as(i64, @intCast(memory_cost));
         if (state.gas_left.* < 0) {
@@ -1754,7 +1452,7 @@ fn op_extcodecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*c
         }
         
         // Copy data
-        state.memory.set_data(dest, src, len, code) catch {
+        state.memory.set_data_bounded(dest, code, src, len) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -1788,10 +1486,7 @@ fn op_returndatacopy(instr: *const Instruction, state: *AdvancedExecutionState) 
         const len = @as(usize, @intCast(size));
         
         // Gas cost for memory expansion
-        const memory_cost = state.memory.expansion_cost(dest + len) catch {
-            state.exit_status = ExecutionError.Error.OutOfGas;
-            return null;
-        };
+        const memory_cost = state.memory.get_expansion_cost(dest + len);
         
         state.gas_left.* -= @as(i64, @intCast(memory_cost));
         if (state.gas_left.* < 0) {
@@ -1800,7 +1495,7 @@ fn op_returndatacopy(instr: *const Instruction, state: *AdvancedExecutionState) 
         }
         
         // Copy data
-        state.memory.set_data(dest, src, len, state.frame.return_data) catch {
+        state.memory.set_data_bounded(dest, state.frame.return_data.get(), src, len) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -1949,7 +1644,7 @@ fn op_tstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const 
 
 /// LOG - emit log event.
 fn op_log(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const topic_count = opcode.get_log_topic_count(instr.opcode);
+    const topic_count = @as(u8, @intCast(instr.arg.data));
     const offset = state.stack.pop_unsafe();
     const size = state.stack.pop_unsafe();
     
@@ -1966,7 +1661,10 @@ fn op_log(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
     var i: u8 = 0;
     while (i < topic_count) : (i += 1) {
         const topic = state.stack.pop_unsafe();
-        try topics.append(primitives.U256.to_be_bytes(topic));
+        topics.append(primitives.U256.to_be_bytes(topic)) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
     }
     
     // Get log data from memory
@@ -1975,18 +1673,27 @@ fn op_log(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
-        break :blk try state.vm.allocator.dupe(u8, log_data);
+        break :blk state.vm.allocator.dupe(u8, log_data) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
     } else &[_]u8{};
     
     // Create log entry
     const log_entry = Log{
         .address = state.frame.contract.target_address,
-        .topics = try topics.toOwnedSlice(),
+        .topics = topics.toOwnedSlice() catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        },
         .data = data,
     };
     
     // Add to frame logs
-    try state.frame.logs.append(log_entry);
+    state.frame.logs.append(log_entry) catch {
+        state.exit_status = ExecutionError.Error.OutOfMemory;
+        return null;
+    };
     
     return next_instruction(instr);
 }
@@ -2157,7 +1864,7 @@ fn op_returndataload(instr: *const Instruction, state: *AdvancedExecutionState) 
     var data: [32]u8 = [_]u8{0} ** 32;
     @memcpy(&data, state.frame.return_data.get()[@intCast(offset)..][0..32]);
     
-    state.stack.append_unsafe(primitives.U256.from_be_bytes(data));
+    state.stack.append_unsafe(primitives.B256.to_u256(data));
     return next_instruction(instr);
 }
 
@@ -2209,137 +1916,6 @@ fn op_extstaticcall(_: *const Instruction, state: *AdvancedExecutionState) ?*con
     return null;
 }
 
-// ============================================================================
-// Superinstruction Implementations
-// ============================================================================
-
-/// PUSH + PUSH + ADD superinstruction
-fn op_push_push_add(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    // Values are packed in arg.data as two u32s
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = v1 +% v2;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + SUB superinstruction
-fn op_push_push_sub(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = v1 -% v2;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + MUL superinstruction
-fn op_push_push_mul(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = v1 *% v2;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + DIV superinstruction
-fn op_push_push_div(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = if (v2 == 0) 0 else v1 / v2;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + EQ superinstruction
-fn op_push_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = if (v1 == v2) 1 else 0;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + LT superinstruction
-fn op_push_push_lt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = if (v1 < v2) 1 else 0;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + GT superinstruction
-fn op_push_push_gt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = if (v1 > v2) 1 else 0;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// DUP + PUSH + EQ superinstruction
-fn op_dup_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const top = state.stack.peek_unsafe(0);
-    const push_value = instr.arg.small_push;
-    const result = if (top == push_value) 1 else 0;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + MLOAD superinstruction
-fn op_push_mload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const offset = instr.arg.small_push;
-    const data = state.memory.get_u256(@intCast(offset)) catch {
-        state.exit_status = ExecutionError.Error.OutOfMemory;
-        return null;
-    };
-    state.stack.append_unsafe(data);
-    return next_instruction(instr);
-}
-
-/// PUSH + MSTORE superinstruction
-fn op_push_mstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const offset = instr.arg.small_push;
-    const value = state.stack.pop_unsafe();
-    state.memory.set_u256(@intCast(offset), value) catch {
-        state.exit_status = ExecutionError.Error.OutOfMemory;
-        return null;
-    };
-    return next_instruction(instr);
-}
-
-/// ISZERO + PUSH + JUMPI superinstruction
-fn op_iszero_push_jumpi(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const value = state.stack.pop_unsafe();
-    const is_zero = (value == 0);
-    
-    if (is_zero) {
-        // Jump to destination stored in arg
-        const dest = instr.arg.jump_target;
-        state.frame.pc = dest;
-        return null; // Re-enter at jump target
-    }
-    
-    return next_instruction(instr);
-}
-
-/// DUP + ISZERO superinstruction
-fn op_dup_iszero(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const value = state.stack.peek_unsafe(0);
-    const result = if (value == 0) 1 else 0;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
-/// PUSH + PUSH + AND superinstruction
-fn op_push_push_and(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
-    const v2 = @as(u256, (instr.arg.data >> 32));
-    const result = v1 & v2;
-    state.stack.append_unsafe(result);
-    return next_instruction(instr);
-}
-
 // Tests
 test "instruction stream generation" {
     const testing = std.testing;
@@ -2380,20 +1956,19 @@ test "instruction stream generation" {
     try testing.expectEqual(@as(usize, 5), stream.instructions.len);
     
     // First should be BEGINBLOCK
-    try testing.expectEqual(@as(u8, @intFromEnum(opcode.Enum.JUMPDEST)), stream.instructions[0].opcode);
-    try testing.expectEqual(@as(u32, 9), stream.instructions[0].arg.block.gas_cost);
+    try testing.expectEqual(&opx_beginblock, stream.instructions[0].fn_ptr);
     
     // Then PUSH1 0x02
-    try testing.expectEqual(@as(u8, 0x60), stream.instructions[1].opcode);
-    try testing.expectEqual(@as(u256, 2), stream.instructions[1].arg.push.value);
+    try testing.expectEqual(&op_push, stream.instructions[1].fn_ptr);
+    try testing.expectEqual(@as(u64, 2), stream.instructions[1].arg.small_push);
     
     // Then PUSH1 0x03
-    try testing.expectEqual(@as(u8, 0x60), stream.instructions[2].opcode);
-    try testing.expectEqual(@as(u256, 3), stream.instructions[2].arg.push.value);
+    try testing.expectEqual(&op_push, stream.instructions[2].fn_ptr);
+    try testing.expectEqual(@as(u64, 3), stream.instructions[2].arg.small_push);
     
     // Then ADD
-    try testing.expectEqual(@as(u8, 0x01), stream.instructions[3].opcode);
+    try testing.expectEqual(&op_add, stream.instructions[3].fn_ptr);
     
     // Finally STOP
-    try testing.expectEqual(@as(u8, 0x00), stream.instructions[4].opcode);
+    try testing.expectEqual(&op_stop, stream.instructions[4].fn_ptr);
 }
