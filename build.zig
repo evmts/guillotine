@@ -614,6 +614,21 @@ pub fn build(b: *std.Build) void {
     const jump_table_bench_step = b.step("bench-jump-table", "Run jump table AoS vs SoA benchmarks");
     jump_table_bench_step.dependOn(&run_jump_table_bench_cmd.step);
 
+    // Add block metadata benchmark executable
+    const block_metadata_bench_exe = b.addExecutable(.{
+        .name = "block-metadata-bench",
+        .root_source_file = b.path("bench/block_metadata_benchmark.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    block_metadata_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+    b.installArtifact(block_metadata_bench_exe);
+    
+    const run_block_metadata_bench_cmd = b.addRunArtifact(block_metadata_bench_exe);
+    run_block_metadata_bench_cmd.step.dependOn(b.getInstallStep());
+    const block_metadata_bench_step = b.step("bench-block-metadata", "Run block metadata AoS vs SoA benchmarks");
+    block_metadata_bench_step.dependOn(&run_block_metadata_bench_cmd.step);
+
     // Add precompile optimization benchmark executable
     const precompile_opt_bench_exe = b.addExecutable(.{
         .name = "precompile-opt-bench",
@@ -840,6 +855,22 @@ pub fn build(b: *std.Build) void {
     evm_runner_exe.root_module.addImport("primitives", primitives_mod);
 
     b.installArtifact(evm_runner_exe);
+
+    // Memory leak test executable
+    const memory_leak_test_exe = b.addExecutable(.{
+        .name = "memory-leak-test",
+        .root_source_file = b.path("src/memory_leak_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    memory_leak_test_exe.root_module.addImport("evm", evm_mod);
+    memory_leak_test_exe.root_module.addImport("primitives", primitives_mod);
+
+    b.installArtifact(memory_leak_test_exe);
+
+    const run_memory_leak_test_cmd = b.addRunArtifact(memory_leak_test_exe);
+    const memory_leak_snailtracer_step = b.step("test-memory-leak-snailtracer", "Run memory leak test with snailtracer");
+    memory_leak_snailtracer_step.dependOn(&run_memory_leak_test_cmd.step);
 
     const run_evm_runner_cmd = b.addRunArtifact(evm_runner_exe);
     if (b.args) |args| {

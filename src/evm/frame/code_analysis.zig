@@ -63,6 +63,109 @@ comptime {
 /// using the `deinit` method to prevent memory leaks.
 const CodeAnalysis = @This();
 
+/// Structure of Arrays implementation for block metadata.
+/// 
+/// This optimized layout separates the BlockMetadata fields into separate arrays
+/// for better cache efficiency. Instead of loading 8 bytes per block access
+/// (with only partial field usage), this allows loading only the needed data.
+///
+/// ## Cache Benefits
+/// - Gas validation loads only gas_costs array (4 bytes per block)
+/// - Stack validation loads only stack arrays (2-4 bytes per block)
+/// - 50% less memory bandwidth for common operations
+///
+/// ## Memory Layout
+/// All arrays have the same length (block_count) and share indices.
+/// Block N's data is at index N in each array.
+pub const BlockMetadataSoA = struct {
+    /// Total gas cost for each block (hot data - accessed for gas validation)
+    gas_costs: []u32,
+    
+    /// Minimum stack items required at block entry (hot data - accessed for stack validation)
+    /// Can be negative to indicate stack consumption
+    stack_reqs: []i16,
+    
+    /// Maximum stack growth during block execution (cold data - only for overflow checks)
+    stack_max_growths: []i16,
+    
+    /// Number of blocks
+    count: u16,
+    
+    /// Allocate arrays for the given number of blocks
+    pub fn init(allocator: std.mem.Allocator, block_count: u16) !BlockMetadataSoA {
+        if (block_count == 0) {
+            return BlockMetadataSoA{
+                .gas_costs = &[_]u32{},
+                .stack_reqs = &[_]i16{},
+                .stack_max_growths = &[_]i16{},
+                .count = 0,
+            };
+        }
+        
+        const gas_costs = try allocator.alloc(u32, block_count);
+        errdefer allocator.free(gas_costs);
+        
+        const stack_reqs = try allocator.alloc(i16, block_count);
+        errdefer allocator.free(stack_reqs);
+        
+        const stack_max_growths = try allocator.alloc(i16, block_count);
+        errdefer allocator.free(stack_max_growths);
+        
+        return BlockMetadataSoA{
+            .gas_costs = gas_costs,
+            .stack_reqs = stack_reqs,
+            .stack_max_growths = stack_max_growths,
+            .count = block_count,
+        };
+    }
+    
+    /// Free all allocated arrays
+    pub fn deinit(self: *BlockMetadataSoA, allocator: std.mem.Allocator) void {
+        if (self.count > 0) {
+            allocator.free(self.gas_costs);
+            allocator.free(self.stack_reqs);
+            allocator.free(self.stack_max_growths);
+        }
+        self.* = undefined;
+    }
+    
+    /// Set metadata for a specific block
+    pub fn setBlock(self: *BlockMetadataSoA, index: u16, gas_cost: u32, stack_req: i16, stack_max_growth: i16) void {
+        std.debug.assert(index < self.count);
+        self.gas_costs[index] = gas_cost;
+        self.stack_reqs[index] = stack_req;
+        self.stack_max_growths[index] = stack_max_growth;
+    }
+    
+    /// Get gas cost for a block (optimized for hot path)
+    pub inline fn getGasCost(self: *const BlockMetadataSoA, index: u16) u32 {
+        std.debug.assert(index < self.count);
+        return self.gas_costs[index];
+    }
+    
+    /// Get stack requirement for a block (optimized for hot path)
+    pub inline fn getStackReq(self: *const BlockMetadataSoA, index: u16) i16 {
+        std.debug.assert(index < self.count);
+        return self.stack_reqs[index];
+    }
+    
+    /// Get stack max growth for a block
+    pub inline fn getStackMaxGrowth(self: *const BlockMetadataSoA, index: u16) i16 {
+        std.debug.assert(index < self.count);
+        return self.stack_max_growths[index];
+    }
+    
+    /// Get all metadata for a block (when all fields are needed)
+    pub fn getBlock(self: *const BlockMetadataSoA, index: u16) BlockMetadata {
+        std.debug.assert(index < self.count);
+        return BlockMetadata{
+            .gas_cost = self.gas_costs[index],
+            .stack_req = self.stack_reqs[index],
+            .stack_max = self.stack_max_growths[index],
+        };
+    }
+};
+
 /// Bit vector marking which bytes in the bytecode are executable code vs data.
 ///
 /// Each bit corresponds to a byte in the contract bytecode:
@@ -134,7 +237,12 @@ block_starts: BitVec64,
 /// Each entry contains the gas cost and stack requirements for one block,
 /// indexed by block number. This enables the interpreter to validate entire
 /// blocks at once instead of per-instruction validation.
+/// @deprecated Use block_metadata_soa for better cache efficiency
 block_metadata: []BlockMetadata,
+
+/// Structure of Arrays version of block metadata for better cache efficiency.
+/// This separates hot (gas, stack) and cold (max growth) data into different arrays.
+block_metadata_soa: BlockMetadataSoA,
 
 /// Maps each bytecode position (PC) to its containing block index.
 ///
@@ -182,6 +290,9 @@ pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
     if (self.block_metadata.len > 0) {
         allocator.free(self.block_metadata);
     }
+    // Free SoA structure
+    self.block_metadata_soa.deinit(allocator);
+    
     if (self.pc_to_block.len > 0) {
         allocator.free(self.pc_to_block);
     }
@@ -200,6 +311,37 @@ test "BlockMetadata is exactly 8 bytes and properly aligned" {
     try std.testing.expectEqual(@as(u32, 100), block.gas_cost);
     try std.testing.expectEqual(@as(i16, -5), block.stack_req);
     try std.testing.expectEqual(@as(i16, 10), block.stack_max);
+}
+
+test "BlockMetadataSoA initialization and access" {
+    const allocator = std.testing.allocator;
+    
+    // Test normal initialization
+    var soa = try BlockMetadataSoA.init(allocator, 100);
+    defer soa.deinit(allocator);
+    
+    try std.testing.expectEqual(@as(u16, 100), soa.count);
+    try std.testing.expectEqual(@as(usize, 100), soa.gas_costs.len);
+    try std.testing.expectEqual(@as(usize, 100), soa.stack_reqs.len);
+    try std.testing.expectEqual(@as(usize, 100), soa.stack_max_growths.len);
+    
+    // Test setBlock and individual getters
+    soa.setBlock(50, 1000, -10, 20);
+    try std.testing.expectEqual(@as(u32, 1000), soa.getGasCost(50));
+    try std.testing.expectEqual(@as(i16, -10), soa.getStackReq(50));
+    try std.testing.expectEqual(@as(i16, 20), soa.getStackMaxGrowth(50));
+    
+    // Test getBlock (all fields)
+    const block = soa.getBlock(50);
+    try std.testing.expectEqual(@as(u32, 1000), block.gas_cost);
+    try std.testing.expectEqual(@as(i16, -10), block.stack_req);
+    try std.testing.expectEqual(@as(i16, 20), block.stack_max);
+    
+    // Test empty initialization
+    var empty = try BlockMetadataSoA.init(allocator, 0);
+    defer empty.deinit(allocator);
+    try std.testing.expectEqual(@as(u16, 0), empty.count);
+    try std.testing.expectEqual(@as(usize, 0), empty.gas_costs.len);
 }
 
 test "BlockMetadata handles extreme values" {
@@ -228,6 +370,7 @@ test "CodeAnalysis with block data initializes and deinits correctly" {
         .jumpdest_bitmap = try BitVec64.init(allocator, 100),
         .block_starts = try BitVec64.init(allocator, 100),
         .block_metadata = try allocator.alloc(BlockMetadata, 10),
+        .block_metadata_soa = try BlockMetadataSoA.init(allocator, 10),
         .pc_to_block = try allocator.alloc(u16, 100),
         .block_count = 10,
         .max_stack_depth = 0,
@@ -263,6 +406,12 @@ test "CodeAnalysis deinit handles partially initialized state" {
             .cached_ptr = undefined,
         }, // Empty
         .block_metadata = &[_]BlockMetadata{},
+        .block_metadata_soa = BlockMetadataSoA{
+            .gas_costs = &[_]u32{},
+            .stack_reqs = &[_]i16{},
+            .stack_max_growths = &[_]i16{},
+            .count = 0,
+        },
         .pc_to_block = &[_]u16{},
         .block_count = 0,
         .max_stack_depth = 0,
@@ -458,6 +607,12 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         .jumpdest_bitmap = try BitVec64.init(allocator, code.len),
         .block_starts = try BitVec64.init(allocator, code.len),
         .block_metadata = &[_]BlockMetadata{},
+        .block_metadata_soa = BlockMetadataSoA{
+            .gas_costs = &[_]u32{},
+            .stack_reqs = &[_]i16{},
+            .stack_max_growths = &[_]i16{},
+            .count = 0,
+        },
         .pc_to_block = &[_]u16{},
         .block_count = 0,
         .max_stack_depth = 0,
@@ -532,11 +687,15 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     analysis.block_metadata = try allocator.alloc(BlockMetadata, block_count);
     errdefer allocator.free(analysis.block_metadata);
     
+    // Allocate SoA structure
+    analysis.block_metadata_soa = try BlockMetadataSoA.init(allocator, block_count);
+    errdefer analysis.block_metadata_soa.deinit(allocator);
+    
     analysis.pc_to_block = try allocator.alloc(u16, code.len);
     errdefer allocator.free(analysis.pc_to_block);
     
     // Initialize jump table for gas cost lookup
-    const table = jump_table.JumpTable.init();
+    const table = jump_table.JumpTable.DEFAULT;
     
     // Second pass: analyze each block
     var current_block: u16 = 0;
@@ -555,11 +714,14 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         // Check if this starts a new block (except at 0)
         if (i > 0 and analysis.block_starts.isSetUnchecked(i)) {
             // Save metadata for completed block
-            analysis.block_metadata[current_block] = BlockMetadata{
+            const metadata = BlockMetadata{
                 .gas_cost = gas_cost,
                 .stack_req = @max(0, block_stack_start + min_stack_in_block),
                 .stack_max = max_stack_in_block - block_stack_start,
             };
+            analysis.block_metadata[current_block] = metadata;
+            // Also populate SoA structure
+            analysis.block_metadata_soa.setBlock(current_block, metadata.gas_cost, metadata.stack_req, metadata.stack_max);
             
             // Start new block
             current_block += 1;
@@ -580,7 +742,7 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         }
         
         // Get operation from jump table
-        const operation_ptr = table.get(@enumFromInt(op));
+        const operation_ptr = table.get_operation(op);
         
         // Add constant gas cost
         gas_cost = @min(gas_cost + @as(u32, @intCast(operation_ptr.constant_gas)), std.math.maxInt(u32));
@@ -678,11 +840,14 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     
     // Save metadata for final block
     if (current_block < block_count) {
-        analysis.block_metadata[current_block] = BlockMetadata{
+        const metadata = BlockMetadata{
             .gas_cost = gas_cost,
             .stack_req = @max(0, block_stack_start + min_stack_in_block),
             .stack_max = max_stack_in_block - block_stack_start,
         };
+        analysis.block_metadata[current_block] = metadata;
+        // Also populate SoA structure
+        analysis.block_metadata_soa.setBlock(current_block, metadata.gas_cost, metadata.stack_req, metadata.stack_max);
     }
     
     return analysis;
@@ -747,6 +912,7 @@ test "BlockMetadata with contract deployment scenarios" {
             .jumpdest_bitmap = try BitVec64.init(allocator, tc.size),
             .block_starts = try BitVec64.init(allocator, tc.size),
             .block_metadata = if (tc.blocks > 0) try allocator.alloc(BlockMetadata, tc.blocks) else &[_]BlockMetadata{},
+            .block_metadata_soa = try BlockMetadataSoA.init(allocator, tc.blocks),
             .pc_to_block = if (tc.size > 0) try allocator.alloc(u16, tc.size) else &[_]u16{},
             .block_count = tc.blocks,
             .max_stack_depth = 0,

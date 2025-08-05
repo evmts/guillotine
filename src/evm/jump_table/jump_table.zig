@@ -3,6 +3,9 @@ const builtin = @import("builtin");
 const Opcode = @import("../opcodes/opcode.zig");
 const operation_module = @import("../opcodes/operation.zig");
 const Operation = operation_module.Operation;
+const ExecutionFunc = operation_module.ExecutionFunc;
+const GasFunc = operation_module.GasFunc;
+const MemorySizeFunc = operation_module.MemorySizeFunc;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
@@ -24,24 +27,23 @@ const operation_config = @import("operation_config.zig");
 /// The jump table is a critical performance optimization that maps opcodes
 /// to their execution handlers. Instead of using a switch statement with
 /// 256 cases, the jump table provides O(1) dispatch by indexing directly
-/// into an array of function pointers.
+/// into arrays of function pointers and metadata.
 ///
 /// ## Design Rationale
-/// - Array indexing is faster than switch statement branching
+/// - Parallel arrays provide better cache locality than array-of-structs
+/// - Hot data (execute functions, gas costs) are in contiguous memory
 /// - Cache-line alignment improves memory access patterns
-/// - Hardfork-specific tables allow for efficient versioning
-/// - Null entries default to UNDEFINED operation
-///
-/// ## Hardfork Evolution
-/// The jump table evolves with each hardfork:
-/// - New opcodes are added (e.g., PUSH0 in Shanghai)
-/// - Gas costs change (e.g., SLOAD in Berlin)
-/// - Opcodes are removed or modified
-///
-/// ## Performance Considerations
-/// - 64-byte cache line alignment reduces cache misses
 /// - Direct indexing eliminates branch prediction overhead
-/// - Operation structs are immutable for thread safety
+///
+/// ## Memory Layout (Struct-of-Arrays)
+/// - execute_funcs: 256 * 8 bytes = 2KB (hot path)
+/// - constant_gas: 256 * 8 bytes = 2KB (hot path)
+/// - min_stack: 256 * 4 bytes = 1KB (validation)
+/// - max_stack: 256 * 4 bytes = 1KB (validation)
+/// - dynamic_gas: 256 * 8 bytes = 2KB (cold path)
+/// - memory_size: 256 * 8 bytes = 2KB (cold path)
+/// - undefined_flags: 256 * 1 byte = 256 bytes (cold path)
+/// Total: ~10.25KB with better cache utilization
 ///
 /// Example:
 /// ```zig
@@ -56,10 +58,18 @@ pub const JumpTable = @This();
 /// Most modern x86/ARM processors use 64-byte cache lines.
 const CACHE_LINE_SIZE = 64;
 
-/// Array of operation handlers indexed by opcode value.
-/// Aligned to cache line boundaries for optimal performance.
-/// Null entries are treated as undefined opcodes.
-table: [256]?*const Operation align(CACHE_LINE_SIZE),
+/// Hot path arrays - accessed every opcode execution
+execute_funcs: [256]ExecutionFunc align(CACHE_LINE_SIZE),
+constant_gas: [256]u64 align(CACHE_LINE_SIZE),
+
+/// Validation arrays - accessed for stack checks
+min_stack: [256]u32 align(CACHE_LINE_SIZE),
+max_stack: [256]u32 align(CACHE_LINE_SIZE),
+
+/// Cold path arrays - rarely accessed
+dynamic_gas: [256]?GasFunc align(CACHE_LINE_SIZE),
+memory_size: [256]?MemorySizeFunc align(CACHE_LINE_SIZE),
+undefined_flags: [256]bool align(CACHE_LINE_SIZE),
 
 /// CANCUN jump table, pre-generated at compile time.
 /// This is the latest hardfork configuration.
@@ -70,7 +80,7 @@ pub const CANCUN = init_from_hardfork(.CANCUN);
 /// This is what gets used when no jump table is specified.
 pub const DEFAULT = CANCUN;
 
-/// Create an empty jump table with all entries set to null.
+/// Create an empty jump table with all entries set to defaults.
 ///
 /// This creates a blank jump table that must be populated with
 /// operations before use. Typically, you'll want to use
@@ -78,54 +88,66 @@ pub const DEFAULT = CANCUN;
 ///
 /// @return An empty jump table
 pub fn init() JumpTable {
+    const undefined_execute = operation_module.NULL_OPERATION.execute;
     return JumpTable{
-        .table = [_]?*const Operation{null} ** 256,
+        .execute_funcs = [_]ExecutionFunc{undefined_execute} ** 256,
+        .constant_gas = [_]u64{0} ** 256,
+        .min_stack = [_]u32{0} ** 256,
+        .max_stack = [_]u32{Stack.CAPACITY} ** 256,
+        .dynamic_gas = [_]?GasFunc{null} ** 256,
+        .memory_size = [_]?MemorySizeFunc{null} ** 256,
+        .undefined_flags = [_]bool{true} ** 256,
     };
 }
 
+/// Temporary struct returned by get_operation for API compatibility
+pub const OperationView = struct {
+    execute: ExecutionFunc,
+    constant_gas: u64,
+    min_stack: u32,
+    max_stack: u32,
+    dynamic_gas: ?GasFunc,
+    memory_size: ?MemorySizeFunc,
+    undefined: bool,
+};
+
 /// Get the operation handler for a given opcode.
 ///
-/// Returns the operation associated with the opcode, or the NULL
-/// operation if the opcode is undefined in this jump table.
+/// Returns a view of the operation data for the opcode.
+/// This maintains API compatibility while using parallel arrays internally.
 ///
 /// @param self The jump table
 /// @param opcode The opcode byte value (0x00-0xFF)
-/// @return Operation handler (never null)
+/// @return Operation view struct
 ///
 /// Example:
 /// ```zig
 /// const op = table.get_operation(0x01); // Get ADD operation
 /// ```
-pub inline fn get_operation(self: *const JumpTable, opcode: u8) *const Operation {
-    return self.table[opcode] orelse &operation_module.NULL_OPERATION;
+pub inline fn get_operation(self: *const JumpTable, opcode: u8) OperationView {
+    return OperationView{
+        .execute = self.execute_funcs[opcode],
+        .constant_gas = self.constant_gas[opcode],
+        .min_stack = self.min_stack[opcode],
+        .max_stack = self.max_stack[opcode],
+        .dynamic_gas = self.dynamic_gas[opcode],
+        .memory_size = self.memory_size[opcode],
+        .undefined = self.undefined_flags[opcode],
+    };
 }
 
 /// Execute an opcode using the jump table.
 ///
 /// This is the main dispatch function that:
-/// 1. Looks up the operation for the opcode
-/// 2. Validates stack requirements (CRITICAL: This enables size optimization!)
+/// 1. Looks up the operation data for the opcode
+/// 2. Validates stack requirements
 /// 3. Consumes gas
 /// 4. Executes the operation
 ///
-/// ## SIZE OPTIMIZATION SAFETY GUARANTEE
-///
-/// The `validate_stack_requirements()` call at line 139 provides comprehensive
-/// stack validation for ALL operations using the min_stack/max_stack metadata
-/// from operation_config.zig. This validation ensures:
-///
-/// - Operations requiring 2 stack items (ADD, SUB, etc.) have >= 2 items
-/// - Operations requiring 3 stack items (ADDMOD, etc.) have >= 3 items
-/// - Operations that push have sufficient capacity (stack.size <= max_stack)
-///
-/// BECAUSE of this validation, individual operations can safely use:
-/// - `stack.pop_unsafe()` without size checks
-/// - `stack.append_unsafe()` without capacity checks
-/// - `stack.dup_unsafe()` without bounds checks
-/// - `stack.swap_unsafe()` without bounds checks
-///
-/// This eliminates redundant size checks in hot paths, reducing binary size
-/// while maintaining EVM correctness and safety.
+/// The parallel array structure provides better cache locality:
+/// - execute_funcs and constant_gas are accessed together (hot path)
+/// - Stack validation data is in separate cache lines
+/// - Cold path data (dynamic_gas, memory_size) doesn't pollute hot cache
 ///
 /// @param self The jump table
 /// @param pc Current program counter
@@ -143,12 +165,11 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) *const Operation
 /// ```
 pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_module.Interpreter, frame: operation_module.State, opcode: u8) ExecutionError.Error!operation_module.ExecutionResult {
     @branchHint(.likely);
-    const operation = self.get_operation(opcode);
-
+    
     Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size });
 
     // Handle undefined opcodes (cold path)
-    if (operation.undefined) {
+    if (self.undefined_flags[opcode]) {
         @branchHint(.cold);
         Log.debug("JumpTable.execute: Invalid opcode 0x{x:0>2}", .{opcode});
         frame.gas_remaining = 0;
@@ -161,22 +182,33 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
         try stack_height_changes.validate_stack_requirements_fast(
             @intCast(frame.stack.size),
             opcode,
-            operation.min_stack,
-            operation.max_stack,
+            self.min_stack[opcode],
+            self.max_stack[opcode],
         );
     } else {
+        // Create temporary operation view for stack validation
+        const op_view = OperationView{
+            .execute = self.execute_funcs[opcode],
+            .constant_gas = self.constant_gas[opcode],
+            .min_stack = self.min_stack[opcode],
+            .max_stack = self.max_stack[opcode],
+            .dynamic_gas = self.dynamic_gas[opcode],
+            .memory_size = self.memory_size[opcode],
+            .undefined = self.undefined_flags[opcode],
+        };
         const stack_validation = @import("../stack/stack_validation.zig");
-        try stack_validation.validate_stack_requirements(&frame.stack, operation);
+        try stack_validation.validate_stack_requirements(&frame.stack, &op_view);
     }
 
-    // Gas consumption (likely path)
-    if (operation.constant_gas > 0) {
+    // Gas consumption - most opcodes have non-zero gas cost
+    const gas_cost = self.constant_gas[opcode];
+    if (gas_cost > 0) {
         @branchHint(.likely);
-        Log.debug("JumpTable.execute: Consuming {} gas for opcode 0x{x:0>2}", .{ operation.constant_gas, opcode });
-        try frame.consume_gas(operation.constant_gas);
+        Log.debug("JumpTable.execute: Consuming {} gas for opcode 0x{x:0>2}", .{ gas_cost, opcode });
+        try frame.consume_gas(gas_cost);
     }
 
-    const res = try operation.execute(pc, interpreter, frame);
+    const res = try self.execute_funcs[opcode](pc, interpreter, frame);
     Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed, gas_remaining={}", .{ opcode, frame.gas_remaining });
     return res;
 }
@@ -184,9 +216,8 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
 /// Validate and fix the jump table.
 ///
 /// Ensures all entries are valid:
-/// - Null entries are replaced with UNDEFINED operation
 /// - Operations with memory_size must have dynamic_gas
-/// - Invalid operations are logged and replaced
+/// - Invalid operations are logged and marked as undefined
 ///
 /// This should be called after manually constructing a jump table
 /// to ensure it's safe for execution.
@@ -194,21 +225,14 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
 /// @param self The jump table to validate
 pub fn validate(self: *JumpTable) void {
     for (0..256) |i| {
-        // Handle null entries (less common)
-        if (self.table[i] == null) {
-            @branchHint(.cold);
-            self.table[i] = &operation_module.NULL_OPERATION;
-            continue;
-        }
-
         // Check for invalid operation configuration (error path)
-        const operation = self.table[i].?;
-        if (operation.memory_size != null and operation.dynamic_gas == null) {
+        if (self.memory_size[i] != null and self.dynamic_gas[i] == null) {
             @branchHint(.cold);
             // Log error instead of panicking
             Log.debug("Warning: Operation 0x{x} has memory size but no dynamic gas calculation", .{i});
-            // Set to NULL to prevent issues
-            self.table[i] = &operation_module.NULL_OPERATION;
+            // Mark as undefined to prevent issues
+            self.undefined_flags[i] = true;
+            self.execute_funcs[i] = operation_module.NULL_OPERATION.execute;
         }
     }
 }
@@ -216,7 +240,13 @@ pub fn validate(self: *JumpTable) void {
 pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
     _ = allocator;
     return JumpTable{
-        .table = self.table,
+        .execute_funcs = self.execute_funcs,
+        .constant_gas = self.constant_gas,
+        .min_stack = self.min_stack,
+        .max_stack = self.max_stack,
+        .dynamic_gas = self.dynamic_gas,
+        .memory_size = self.memory_size,
+        .undefined_flags = self.undefined_flags,
     };
 }
 
@@ -249,69 +279,69 @@ pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
 pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     @setEvalBranchQuota(10000);
     var jt = JumpTable.init();
+    
     // With ALL_OPERATIONS sorted by hardfork, we can iterate once.
     // Each opcode will be set to the latest active version for the target hardfork.
     inline for (operation_config.ALL_OPERATIONS) |spec| {
         const op_hardfork = spec.variant orelse Hardfork.FRONTIER;
         // Most operations are included in hardforks (likely path)
         if (@intFromEnum(op_hardfork) <= @intFromEnum(hardfork)) {
-            const op = struct {
-                pub const operation = operation_config.generate_operation(spec);
-            };
-            jt.table[spec.opcode] = &op.operation;
+            const op = operation_config.generate_operation(spec);
+            const idx = spec.opcode;
+            jt.execute_funcs[idx] = op.execute;
+            jt.constant_gas[idx] = op.constant_gas;
+            jt.min_stack[idx] = op.min_stack;
+            jt.max_stack[idx] = op.max_stack;
+            jt.dynamic_gas[idx] = op.dynamic_gas;
+            jt.memory_size[idx] = op.memory_size;
+            jt.undefined_flags[idx] = op.undefined;
         }
     }
+    
     // 0x60s & 0x70s: Push operations
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use static const operations to avoid memory corruption in ReleaseSmall
-        const static_push_op = struct {
-            const op = Operation{
-                .execute = stack_ops.push_n,
-                .constant_gas = execution.GasConstants.GasFastestStep,
-                .min_stack = 0,
-                .max_stack = Stack.CAPACITY - 1,
-            };
-        };
-
         for (0..32) |i| {
-            jt.table[0x60 + i] = &static_push_op.op;
+            jt.execute_funcs[0x60 + i] = stack_ops.push_n;
+            jt.constant_gas[0x60 + i] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[0x60 + i] = 0;
+            jt.max_stack[0x60 + i] = Stack.CAPACITY - 1;
+            jt.undefined_flags[0x60 + i] = false;
         }
     } else {
         // Optimized implementations for common small PUSH operations
         // PUSH1 - most common, optimized with direct byte access
-        jt.table[0x60] = &Operation{
-            .execute = stack_ops.op_push1,
-            .constant_gas = execution.gas_constants.GasFastestStep,
-            .min_stack = 0,
-            .max_stack = Stack.CAPACITY - 1,
-        };
+        jt.execute_funcs[0x60] = stack_ops.op_push1;
+        jt.constant_gas[0x60] = execution.gas_constants.GasFastestStep;
+        jt.min_stack[0x60] = 0;
+        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH8 - optimized with u64 arithmetic
         inline for (1..8) |i| {
             const n = i + 1;
-            jt.table[0x60 + i] = &Operation{
-                .execute = stack_ops.make_push_small(n),
-                .constant_gas = execution.gas_constants.GasFastestStep,
-                .min_stack = 0,
-                .max_stack = Stack.CAPACITY - 1,
-            };
+            jt.execute_funcs[0x60 + i] = stack_ops.make_push_small(n);
+            jt.constant_gas[0x60 + i] = execution.gas_constants.GasFastestStep;
+            jt.min_stack[0x60 + i] = 0;
+            jt.max_stack[0x60 + i] = Stack.CAPACITY - 1;
+            jt.undefined_flags[0x60 + i] = false;
         }
 
         // PUSH9-PUSH32 - use generic implementation
         inline for (8..32) |i| {
             const n = i + 1;
-            jt.table[0x60 + i] = &Operation{
-                .execute = stack_ops.make_push(n),
-                .constant_gas = execution.GasConstants.GasFastestStep,
-                .min_stack = 0,
-                .max_stack = Stack.CAPACITY - 1,
-            };
+            jt.execute_funcs[0x60 + i] = stack_ops.make_push(n);
+            jt.constant_gas[0x60 + i] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[0x60 + i] = 0;
+            jt.max_stack[0x60 + i] = Stack.CAPACITY - 1;
+            jt.undefined_flags[0x60 + i] = false;
         }
     }
+    
     // 0x80s: Duplication Operations
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each DUP operation to avoid opcode detection issues
-        const dup_functions = [_]fn (usize, operation_module.Interpreter, operation_module.State) ExecutionError.Error!operation_module.ExecutionResult{
+        const dup_functions = [_]ExecutionFunc{
             stack_ops.dup_1,  stack_ops.dup_2,  stack_ops.dup_3,  stack_ops.dup_4,
             stack_ops.dup_5,  stack_ops.dup_6,  stack_ops.dup_7,  stack_ops.dup_8,
             stack_ops.dup_9,  stack_ops.dup_10, stack_ops.dup_11, stack_ops.dup_12,
@@ -319,30 +349,28 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         };
 
         inline for (1..17) |n| {
-            const dup_op = struct {
-                const op = Operation{
-                    .execute = dup_functions[n - 1],
-                    .constant_gas = execution.GasConstants.GasFastestStep,
-                    .min_stack = @intCast(n),
-                    .max_stack = Stack.CAPACITY - 1,
-                };
-            };
-            jt.table[0x80 + n - 1] = &dup_op.op;
+            const idx = 0x80 + n - 1;
+            jt.execute_funcs[idx] = dup_functions[n - 1];
+            jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[idx] = @intCast(n);
+            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.undefined_flags[idx] = false;
         }
     } else {
         inline for (1..17) |n| {
-            jt.table[0x80 + n - 1] = &Operation{
-                .execute = stack_ops.make_dup(n),
-                .constant_gas = execution.GasConstants.GasFastestStep,
-                .min_stack = @intCast(n),
-                .max_stack = Stack.CAPACITY - 1,
-            };
+            const idx = 0x80 + n - 1;
+            jt.execute_funcs[idx] = stack_ops.make_dup(n);
+            jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[idx] = @intCast(n);
+            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.undefined_flags[idx] = false;
         }
     }
+    
     // 0x90s: Exchange Operations
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each SWAP operation to avoid opcode detection issues
-        const swap_functions = [_]fn (usize, operation_module.Interpreter, operation_module.State) ExecutionError.Error!operation_module.ExecutionResult{
+        const swap_functions = [_]ExecutionFunc{
             stack_ops.swap_1,  stack_ops.swap_2,  stack_ops.swap_3,  stack_ops.swap_4,
             stack_ops.swap_5,  stack_ops.swap_6,  stack_ops.swap_7,  stack_ops.swap_8,
             stack_ops.swap_9,  stack_ops.swap_10, stack_ops.swap_11, stack_ops.swap_12,
@@ -350,54 +378,50 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         };
 
         inline for (1..17) |n| {
-            const swap_op = struct {
-                const op = Operation{
-                    .execute = swap_functions[n - 1],
-                    .constant_gas = execution.GasConstants.GasFastestStep,
-                    .min_stack = @intCast(n + 1),
-                    .max_stack = Stack.CAPACITY,
-                };
-            };
-            jt.table[0x90 + n - 1] = &swap_op.op;
+            const idx = 0x90 + n - 1;
+            jt.execute_funcs[idx] = swap_functions[n - 1];
+            jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[idx] = @intCast(n + 1);
+            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.undefined_flags[idx] = false;
         }
     } else {
         inline for (1..17) |n| {
-            jt.table[0x90 + n - 1] = &Operation{
-                .execute = stack_ops.make_swap(n),
-                .constant_gas = execution.GasConstants.GasFastestStep,
-                .min_stack = @intCast(n + 1),
-                .max_stack = Stack.CAPACITY,
-            };
+            const idx = 0x90 + n - 1;
+            jt.execute_funcs[idx] = stack_ops.make_swap(n);
+            jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[idx] = @intCast(n + 1);
+            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.undefined_flags[idx] = false;
         }
     }
+    
     // 0xa0s: Logging Operations
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each LOG operation to avoid opcode detection issues
-        const log_functions = [_]fn (usize, operation_module.Interpreter, operation_module.State) ExecutionError.Error!operation_module.ExecutionResult{
+        const log_functions = [_]ExecutionFunc{
             log.log_0, log.log_1, log.log_2, log.log_3, log.log_4,
         };
 
         inline for (0..5) |n| {
-            const log_op = struct {
-                const op = Operation{
-                    .execute = log_functions[n],
-                    .constant_gas = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n,
-                    .min_stack = @intCast(n + 2),
-                    .max_stack = Stack.CAPACITY,
-                };
-            };
-            jt.table[0xa0 + n] = &log_op.op;
+            const idx = 0xa0 + n;
+            jt.execute_funcs[idx] = log_functions[n];
+            jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
+            jt.min_stack[idx] = @intCast(n + 2);
+            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.undefined_flags[idx] = false;
         }
     } else {
         inline for (0..5) |n| {
-            jt.table[0xa0 + n] = &Operation{
-                .execute = log.make_log(n),
-                .constant_gas = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n,
-                .min_stack = @intCast(n + 2),
-                .max_stack = Stack.CAPACITY,
-            };
+            const idx = 0xa0 + n;
+            jt.execute_funcs[idx] = log.make_log(n);
+            jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
+            jt.min_stack[idx] = @intCast(n + 2);
+            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.undefined_flags[idx] = false;
         }
     }
+    
     jt.validate();
     return jt;
 }

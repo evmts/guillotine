@@ -93,7 +93,8 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         @branchHint(.likely);
         const opcode = contract.get_op(frame.pc);
 
-        const result = self.table.execute(frame.pc, interpreter, state, opcode) catch |err| {
+        const inline_hot_ops = @import("../jump_table/jump_table.zig").execute_with_inline_hot_ops;
+        const result = inline_hot_ops(&self.table, frame.pc, interpreter, state, opcode) catch |err| {
             contract.gas = frame.gas_remaining;
 
             var output: ?[]const u8 = null;
@@ -114,14 +115,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             if (err == ExecutionError.Error.STOP) {
                 @branchHint(.likely);
                 // Handle normal termination inline
-                // Free memory early since execution is done
-                frame.memory.deinit();
-                // Reinitialize with minimal memory to keep struct valid
-                frame.memory = Memory.init_default(self.allocator) catch {
-                    // If we can't allocate minimal memory, just continue without it
-                    return RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
-                };
-
+                // No need to reinit memory since frame is about to be destroyed
                 Log.debug("VM.interpret_with_context: STOP opcode, output_size={}, creating RunResult", .{if (output) |o| o.len else 0});
                 const result = RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
                 Log.debug("VM.interpret_with_context: RunResult created, output={any}", .{result.output});
@@ -137,14 +131,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
                     return RunResult.init(initial_gas, 0, .Invalid, err, output);
                 },
                 ExecutionError.Error.REVERT => {
-                    // Free memory early since execution is done
-                    frame.memory.deinit();
-                    // Reinitialize with minimal memory to keep struct valid
-                    frame.memory = Memory.init_default(self.allocator) catch {
-                        // If we can't allocate minimal memory, just continue without it
-                        return RunResult.init(initial_gas, frame.gas_remaining, .Revert, err, output);
-                    };
-
+                    // No need to reinit memory since frame is about to be destroyed
                     return RunResult.init(initial_gas, frame.gas_remaining, .Revert, err, output);
                 },
                 ExecutionError.Error.OutOfGas => {
@@ -165,12 +152,18 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             };
         };
 
+        // Optimize for common case where PC advances normally
+        // Only JUMP/JUMPI/CALL family opcodes modify PC directly
         const old_pc = frame.pc;
         if (frame.pc == old_pc) {
-            Log.debug("interpret: PC unchanged by opcode - pc={}, frame.pc={}, advancing by {} bytes", .{ old_pc, frame.pc, result.bytes_consumed });
+            @branchHint(.likely);
+            // Normal case - PC unchanged by opcode, advance by bytes consumed
             frame.pc += result.bytes_consumed;
+            Log.debug("interpret: PC advanced by {} bytes to {}", .{ result.bytes_consumed, frame.pc });
         } else {
-            Log.debug("interpret: PC changed by opcode - old_pc={}, frame.pc={}, jumping to frame.pc", .{ old_pc, frame.pc });
+            @branchHint(.cold);
+            // PC was modified by a jump instruction
+            Log.debug("interpret: PC jumped from {} to {}", .{ old_pc, frame.pc });
         }
     }
 
