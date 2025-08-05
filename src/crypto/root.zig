@@ -48,5 +48,9 @@ pub const Keccak256_Accel = @import("keccak256_accel.zig");
 // KZG commitments for EIP-4844
 pub const c_kzg = @import("c_kzg");
 
+// Re-export commonly used hash constants
+pub const ZERO_HASH = Hash.ZERO_HASH;
+pub const EMPTY_KECCAK256 = Hash.EMPTY_KECCAK256;
+
 // BN254 for precompiles
 pub const bn254 = @import("bn254.zig");
