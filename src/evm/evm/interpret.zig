@@ -54,12 +54,13 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         .is_static = self.read_only,
         .depth = @as(u32, @intCast(self.depth)),
         .cost = 0,
+        .current_block_cost = 0,
         .err = null,
         .input = input,
         .output = &[_]u8{},
         .op = &.{},
         .memory = try Memory.init_default(self.allocator),
-        .stack = .{},
+        .stack = Stack.init(),
         .return_data = ReturnData.init(self.allocator),
     };
     defer frame.deinit();
@@ -278,6 +279,9 @@ fn execute_block(self: *Vm, frame: *Frame, block_idx: u16) !BlockResult {
     }
     
     // Pre-validate stack requirements
+    // SAFETY: After these checks, all stack operations in the block are guaranteed safe:
+    // - We have at least stack_req items, so all pops will succeed
+    // - We won't exceed capacity, so all pushes will succeed
     const stack_size: i16 = @intCast(frame.stack.size());
     if (stack_size < block_meta.stack_req) {
         return BlockResult.error_(ExecutionError.Error.StackUnderflow, 0);
@@ -288,6 +292,9 @@ fn execute_block(self: *Vm, frame: *Frame, block_idx: u16) !BlockResult {
     
     // Consume gas for entire block upfront
     frame.gas_remaining -= block_meta.gas_cost;
+    
+    // Store block cost for gas corrections (e.g., GAS opcode)
+    frame.current_block_cost = block_meta.gas_cost;
     
     // Find block boundaries
     const block_start = find_block_start(analysis, block_idx);
@@ -321,23 +328,9 @@ fn execute_block(self: *Vm, frame: *Frame, block_idx: u16) !BlockResult {
 
 /// Find the starting PC of a block.
 fn find_block_start(analysis: *const CodeAnalysis, block_idx: u16) usize {
-    if (block_idx == 0) return 0;
-    
-    // Scan for the block start
-    var pc: usize = 0;
-    var current_block: u16 = 0;
-    
-    while (pc < analysis.pc_to_block.len) {
-        if (analysis.block_starts.isSetUnchecked(pc)) {
-            if (current_block == block_idx) {
-                return pc;
-            }
-            current_block += 1;
-        }
-        pc += 1;
-    }
-    
-    return 0; // Should not reach here
+    // O(1) lookup using pre-computed positions
+    if (block_idx >= analysis.block_count) return 0;
+    return analysis.block_start_positions[block_idx];
 }
 
 /// Find the ending PC of a block (exclusive).
@@ -346,8 +339,8 @@ fn find_block_end(analysis: *const CodeAnalysis, block_idx: u16, code_size: usiz
         return code_size;
     }
     
-    // Find start of next block
-    return find_block_start(analysis, block_idx + 1);
+    // O(1) lookup of next block's start position
+    return analysis.block_start_positions[block_idx + 1];
 }
 
 /// Result of executing a single opcode in unsafe mode.
@@ -369,6 +362,21 @@ const UnsafeExecutionResult = struct {
 ///
 /// This function is only safe to call within execute_block after validation.
 fn execute_opcode_unsafe(vm: *Vm, frame: *Frame, op: u8) !UnsafeExecutionResult {
+    const intrinsic = @import("../opcodes/intrinsic.zig");
+    
+    // Check for BEGINBLOCK intrinsic
+    if (op == @intFromEnum(intrinsic.IntrinsicOpcodes.BEGINBLOCK)) {
+        // BEGINBLOCK is handled by execute_block, should not reach here
+        unreachable;
+    }
+    
+    // Debug assertions to catch validation errors during development
+    if (std.debug.runtime_safety) {
+        // These checks should never fail if block validation is correct
+        std.debug.assert(frame.stack.size() <= Stack.CAPACITY);
+        std.debug.assert(frame.gas_remaining >= 0);
+    }
+    
     // Handle common hot opcodes inline for better performance
     switch (op) {
         // Stack operations
@@ -947,6 +955,23 @@ fn execute_opcode_unsafe(vm: *Vm, frame: *Frame, op: u8) !UnsafeExecutionResult 
         },
         0x56 => { // JUMP
             const dest = frame.stack.pop_unsafe();
+            
+            // In block execution mode, jumps should be pre-validated
+            // But we add validation for safety and for dynamic jumps
+            if (frame.contract.analysis) |analysis| {
+                if (analysis.jump_analysis) |jump_analysis| {
+                    // Use optimized validation with PC information
+                    const jump_module = @import("../frame/jump_analysis.zig");
+                    if (!jump_module.optimize_jump_validation(jump_analysis, frame.pc, dest)) {
+                        return UnsafeExecutionResult{
+                            .bytes_consumed = 1,
+                            .exits_block = true,
+                            .block_result = BlockResult.error_(ExecutionError.Error.InvalidJump, 0),
+                        };
+                    }
+                }
+            }
+            
             frame.pc = @intCast(dest);
             return UnsafeExecutionResult{
                 .bytes_consumed = 1,
@@ -958,6 +983,20 @@ fn execute_opcode_unsafe(vm: *Vm, frame: *Frame, op: u8) !UnsafeExecutionResult 
             const dest = frame.stack.pop_unsafe();
             const condition = frame.stack.pop_unsafe();
             if (condition != 0) {
+                // Validate jump destination using optimized validation
+                if (frame.contract.analysis) |analysis| {
+                    if (analysis.jump_analysis) |jump_analysis| {
+                        const jump_module = @import("../frame/jump_analysis.zig");
+                        if (!jump_module.optimize_jump_validation(jump_analysis, frame.pc, dest)) {
+                            return UnsafeExecutionResult{
+                                .bytes_consumed = 1,
+                                .exits_block = true,
+                                .block_result = BlockResult.error_(ExecutionError.Error.InvalidJump, 0),
+                            };
+                        }
+                    }
+                }
+                
                 frame.pc = @intCast(dest);
                 return UnsafeExecutionResult{
                     .bytes_consumed = 1,
@@ -978,6 +1017,7 @@ fn execute_opcode_unsafe(vm: *Vm, frame: *Frame, op: u8) !UnsafeExecutionResult 
             
             if (size > 0) {
                 const mem_data = try frame.memory.get_slice(@intCast(offset), @intCast(size));
+                // Note: Memory allocated here is owned by the RunResult and must be freed by the caller
                 const data = try vm.allocator.alloc(u8, @intCast(size));
                 @memcpy(data, mem_data);
                 frame.output = data;
@@ -995,6 +1035,7 @@ fn execute_opcode_unsafe(vm: *Vm, frame: *Frame, op: u8) !UnsafeExecutionResult 
             
             if (size > 0) {
                 const mem_data = try frame.memory.get_slice(@intCast(offset), @intCast(size));
+                // Note: Memory allocated here is owned by the RunResult and must be freed by the caller
                 const data = try vm.allocator.alloc(u8, @intCast(size));
                 @memcpy(data, mem_data);
                 frame.output = data;
@@ -1031,6 +1072,37 @@ fn execute_opcode_unsafe(vm: *Vm, frame: *Frame, op: u8) !UnsafeExecutionResult 
             const n = swap_op - 0x90 + 1;
             frame.stack.swap_unsafe(n);
             return UnsafeExecutionResult{ .bytes_consumed = 1 };
+        },
+        
+        // LOG operations
+        0xa0...0xa4 => |log_op| {
+            const n = log_op - 0xa0;
+            _ = frame.stack.pop_unsafe(); // offset
+            _ = frame.stack.pop_unsafe(); // size
+            
+            // Pop topics
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                _ = frame.stack.pop_unsafe();
+            }
+            
+            // LOG operations are terminal for the block since they access memory
+            // and may have side effects that need proper gas accounting
+            return UnsafeExecutionResult{
+                .bytes_consumed = 1,
+                .exits_block = true,
+                .block_result = BlockResult.continue_sequential(frame.pc + 1, 0),
+            };
+        },
+        
+        // INVALID opcode - consumes all gas and halts
+        0xfe => { // INVALID
+            frame.gas_remaining = 0;
+            return UnsafeExecutionResult{
+                .bytes_consumed = 1,
+                .exits_block = true,
+                .block_result = BlockResult.error_(ExecutionError.Error.InvalidOpcode, frame.gas_remaining),
+            };
         },
         
         // For other opcodes, fall back to regular execution
