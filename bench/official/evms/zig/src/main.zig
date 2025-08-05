@@ -126,7 +126,7 @@ pub fn main() !void {
         const run_zone = tracy.zone(@src(), "single_run");
         defer run_zone.end();
         
-        var timer = std.time.Timer.start() catch unreachable;
+        // var timer = std.time.Timer.start() catch unreachable;
         
         // Create contract using Contract.init()
         const code = vm.state.get_code(contract_address);
