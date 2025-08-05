@@ -224,9 +224,12 @@ fn get_opcode_size(op: u8, bytecode: []const u8, pc: usize) usize {
     };
 }
 
+/// Struct to hold extracted push values
+pub const PushValues = struct { v1: u256, v2: u256 };
+
 /// Extract push values from bytecode for superinstruction
-pub fn extract_push_values(bytecode: []const u8, pc: usize, count: usize) struct { v1: u256, v2: u256 } {
-    var values = struct { v1: u256 = 0, v2: u256 = 0 }{};
+pub fn extract_push_values(bytecode: []const u8, pc: usize, count: usize) PushValues {
+    var values = PushValues{ .v1 = 0, .v2 = 0 };
     var pos = pc;
     var idx: usize = 0;
     
