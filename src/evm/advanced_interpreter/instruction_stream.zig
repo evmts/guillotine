@@ -314,7 +314,7 @@ pub fn generate_instruction_stream(
             },
             
             // DUP operations
-            .DUP1...opcode.Enum.DUP16 => Instruction{
+            .DUP1...DUP16 => Instruction{
                 .fn_ptr = &op_dup,
                 .arg = .none,
                 .pc = @intCast(pc),
@@ -322,7 +322,7 @@ pub fn generate_instruction_stream(
             },
             
             // SWAP operations
-            .SWAP1...opcode.Enum.SWAP16 => Instruction{
+            .SWAP1...SWAP16 => Instruction{
                 .fn_ptr = &op_swap,
                 .arg = .none,
                 .pc = @intCast(pc),
