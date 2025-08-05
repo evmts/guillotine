@@ -43,44 +43,46 @@ const CodeAnalysis = @import("../frame/code_analysis.zig");
 const JumpAnalysis = @import("../frame/jump_analysis.zig").JumpAnalysis;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
+const superinstructions = @import("superinstructions.zig");
+const memory_expansion_analysis = @import("memory_expansion_analysis.zig");
+const memory_optimized_ops = @import("memory_optimized_ops.zig");
 
 /// Function pointer type for instruction execution.
 pub const InstructionFn = *const fn (instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction;
 
-/// Arguments for different instruction types.
-pub const InstructionArgument = union {
-    /// No arguments (most opcodes)
-    none: void,
+/// Packed instruction argument (8 bytes)
+pub const InstructionArg = packed union {
+    /// No argument
+    none: u64,
     
-    /// PUSH instructions carry immediate value
-    push: struct {
-        value: u256,
-        bytes: u8, // Number of bytes pushed (1-32)
-    },
+    /// Small push value (PUSH1-8) stored inline
+    small_push: u64,
     
-    /// BEGINBLOCK carries block metadata
-    block: BlockMetadata,
+    /// Index into push_values array for large pushes (PUSH9-32)
+    push_index: u32,
     
-    /// Jump instructions may carry pre-resolved target
-    jump: struct {
-        target_instr: u32, // Instruction index, not PC
-        is_static: bool,   // Whether jump target is constant
-    },
+    /// Pointer to block metadata
+    block_ptr: *const BlockMetadata,
+    
+    /// Jump target instruction index
+    jump_target: u32,
+    
+    /// Generic data (PC for PC opcode, opcode for generic handler, etc.)
+    data: u64,
 };
 
-/// A single instruction in the stream.
+/// A single instruction in the stream (16 bytes total)
 pub const Instruction = struct {
-    /// Function to execute this instruction
+    /// Function to execute this instruction (8 bytes)
     fn_ptr: InstructionFn,
     
-    /// Instruction-specific arguments
-    arg: InstructionArgument,
+    /// Instruction-specific argument (8 bytes)
+    arg: InstructionArg,
     
-    /// Original PC for debugging/tracing
-    pc: u32,
-    
-    /// Opcode for debugging/tracing
-    opcode: u8,
+    comptime {
+        // Ensure instruction is exactly 16 bytes
+        std.debug.assert(@sizeOf(Instruction) == 16);
+    }
 };
 
 /// Advanced execution state (replaces Frame for instruction execution).
@@ -112,12 +114,16 @@ pub const InstructionStream = struct {
     /// Maps PC to instruction index
     pc_to_instruction: []u32,
     
+    /// Storage for large push values (PUSH9-32)
+    push_values: []u256,
+    
     /// Allocator used for this stream
     allocator: Allocator,
     
     pub fn deinit(self: *InstructionStream) void {
         self.allocator.free(self.instructions);
         self.allocator.free(self.pc_to_instruction);
+        self.allocator.free(self.push_values);
     }
 };
 
@@ -143,6 +149,22 @@ pub fn generate_instruction_stream(
     // Initialize all to invalid
     @memset(pc_to_instruction, std.math.maxInt(u32));
     
+    // Analyze memory expansion costs
+    var memory_blocks: ?[]memory_expansion_analysis.BlockMemoryAnalysis = null;
+    if (analysis.block_start_positions.len > 0) {
+        memory_blocks = try memory_expansion_analysis.analyze_memory_expansion(
+            allocator,
+            bytecode,
+            analysis.block_start_positions,
+        );
+    }
+    defer if (memory_blocks) |blocks| {
+        for (blocks) |*block| {
+            block.accesses.deinit();
+        }
+        allocator.free(blocks);
+    };
+    
     var pc: usize = 0;
     var current_block: u16 = 0;
     
@@ -163,6 +185,60 @@ pub fn generate_instruction_stream(
             current_block += 1;
         }
         
+        // Check for superinstruction patterns before processing individual opcodes
+        if (superinstructions.match_pattern(bytecode, pc)) |match| {
+            const pattern = match.pattern;
+            
+            // Build superinstruction based on pattern type
+            const super_instr = switch (pattern.super_op) {
+                .PUSH_PUSH_ADD, .PUSH_PUSH_SUB, .PUSH_PUSH_MUL, .PUSH_PUSH_DIV,
+                .PUSH_PUSH_EQ, .PUSH_PUSH_LT, .PUSH_PUSH_GT, .PUSH_PUSH_AND => blk: {
+                    // Extract two push values and pack them
+                    const values = superinstructions.extract_push_values(bytecode, pc, 2);
+                    // For now, limit to small values that fit in u32 each
+                    const v1 = if (values.v1 > std.math.maxInt(u32)) std.math.maxInt(u32) else @as(u32, @intCast(values.v1));
+                    const v2 = if (values.v2 > std.math.maxInt(u32)) std.math.maxInt(u32) else @as(u32, @intCast(values.v2));
+                    const packed_value = (@as(u64, v2) << 32) | v1;
+                    break :blk Instruction{
+                        .fn_ptr = pattern.fn_ptr,
+                        .arg = .{ .data = packed_value },
+                    };
+                },
+                .DUP_PUSH_EQ => blk: {
+                    // Extract push value after DUP
+                    const values = superinstructions.extract_push_values(bytecode, pc + 1, 1);
+                    break :blk Instruction{
+                        .fn_ptr = pattern.fn_ptr,
+                        .arg = .{ .small_push = @as(u64, @intCast(values.v1)) },
+                    };
+                },
+                .PUSH_MLOAD, .PUSH_MSTORE => blk: {
+                    // Extract offset value
+                    const values = superinstructions.extract_push_values(bytecode, pc, 1);
+                    break :blk Instruction{
+                        .fn_ptr = pattern.fn_ptr,
+                        .arg = .{ .small_push = @as(u64, @intCast(values.v1)) },
+                    };
+                },
+                .ISZERO_PUSH_JUMPI => blk: {
+                    // Extract jump destination from PUSH
+                    const values = superinstructions.extract_push_values(bytecode, pc + 1, 1);
+                    break :blk Instruction{
+                        .fn_ptr = pattern.fn_ptr,
+                        .arg = .{ .jump_target = @as(u32, @intCast(values.v1)) },
+                    };
+                },
+                .DUP_ISZERO => Instruction{
+                    .fn_ptr = pattern.fn_ptr,
+                    .arg = .{ .none = 0 },
+                },
+            };
+            
+            try instructions.append(super_instr);
+            pc += match.length;
+            continue;
+        }
+        
         const op = bytecode[pc];
         const op_enum = @as(opcode.Enum, @enumFromInt(op));
         
@@ -180,7 +256,7 @@ pub fn generate_instruction_stream(
                     if (jump_analysis.get_jump_info(pc)) |jump_info| {
                         if (jump_info.jump_type == .static and jump_info.destination != null and jump_info.is_valid) {
                             // Pre-resolve static jump to instruction index
-                            const dest_pc = @as(usize, @intCast(jump_info.destination.?));
+                            _ = @as(usize, @intCast(jump_info.destination.?));
                             break :blk Instruction{
                                 .fn_ptr = &op_jump_static,
                                 .arg = .{ .jump = .{
@@ -206,7 +282,7 @@ pub fn generate_instruction_stream(
                     if (jump_analysis.get_jump_info(pc)) |jump_info| {
                         if (jump_info.jump_type == .static and jump_info.destination != null and jump_info.is_valid) {
                             // Pre-resolve static jump to instruction index
-                            const dest_pc = @as(usize, @intCast(jump_info.destination.?));
+                            _ = @as(usize, @intCast(jump_info.destination.?));
                             break :blk Instruction{
                                 .fn_ptr = &op_jumpi_static,
                                 .arg = .{ .jump = .{
@@ -252,17 +328,55 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
-            .MLOAD => Instruction{
-                .fn_ptr = &op_mload,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+            .MLOAD => blk: {
+                // Check if we have pre-calculated memory expansion cost
+                if (memory_blocks) |blocks| {
+                    if (current_block < blocks.len) {
+                        if (blocks[current_block].accesses.get(pc)) |access| {
+                            if (access.expansion_cost) |cost| {
+                                // Use optimized version with pre-calculated cost
+                                break :blk Instruction{
+                                    .fn_ptr = &memory_optimized_ops.op_mload_precalc,
+                                    .arg = .{ .data = cost },
+                                    .pc = @intCast(pc),
+                                    .opcode = op,
+                                };
+                            }
+                        }
+                    }
+                }
+                // Fall back to regular MLOAD
+                break :blk Instruction{
+                    .fn_ptr = &op_mload,
+                    .arg = .{ .none = 0 },
+                    .pc = @intCast(pc),
+                    .opcode = op,
+                };
             },
-            .MSTORE => Instruction{
-                .fn_ptr = &op_mstore,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
+            .MSTORE => blk: {
+                // Check if we have pre-calculated memory expansion cost
+                if (memory_blocks) |blocks| {
+                    if (current_block < blocks.len) {
+                        if (blocks[current_block].accesses.get(pc)) |access| {
+                            if (access.expansion_cost) |cost| {
+                                // Use optimized version with pre-calculated cost
+                                break :blk Instruction{
+                                    .fn_ptr = &memory_optimized_ops.op_mstore_precalc,
+                                    .arg = .{ .data = cost },
+                                    .pc = @intCast(pc),
+                                    .opcode = op,
+                                };
+                            }
+                        }
+                    }
+                }
+                // Fall back to regular MSTORE
+                break :blk Instruction{
+                    .fn_ptr = &op_mstore,
+                    .arg = .{ .none = 0 },
+                    .pc = @intCast(pc),
+                    .opcode = op,
+                };
             },
             
             // Arithmetic
@@ -290,6 +404,48 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
+            .SDIV => Instruction{
+                .fn_ptr = &op_sdiv,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .MOD => Instruction{
+                .fn_ptr = &op_mod,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SMOD => Instruction{
+                .fn_ptr = &op_smod,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .ADDMOD => Instruction{
+                .fn_ptr = &op_addmod,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .MULMOD => Instruction{
+                .fn_ptr = &op_mulmod,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .EXP => Instruction{
+                .fn_ptr = &op_exp,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SIGNEXTEND => Instruction{
+                .fn_ptr = &op_signextend,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
             
             // PUSH operations
             .PUSH0 => Instruction{
@@ -298,7 +454,10 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
-            .PUSH1...PUSH32 => blk: {
+            .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
+            .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
+            .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
+            .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => blk: {
                 const n = @intFromEnum(op_enum) - @intFromEnum(opcode.Enum.PUSH1) + 1;
                 const bytes = bytecode[pc + 1..][0..n];
                 var value: u256 = 0;
@@ -314,7 +473,8 @@ pub fn generate_instruction_stream(
             },
             
             // DUP operations
-            .DUP1...DUP16 => Instruction{
+            .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8,
+            .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16 => Instruction{
                 .fn_ptr = &op_dup,
                 .arg = .none,
                 .pc = @intCast(pc),
@@ -322,7 +482,8 @@ pub fn generate_instruction_stream(
             },
             
             // SWAP operations
-            .SWAP1...SWAP16 => Instruction{
+            .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8,
+            .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16 => Instruction{
                 .fn_ptr = &op_swap,
                 .arg = .none,
                 .pc = @intCast(pc),
@@ -338,6 +499,18 @@ pub fn generate_instruction_stream(
             },
             .GT => Instruction{
                 .fn_ptr = &op_gt,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SLT => Instruction{
+                .fn_ptr = &op_slt,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SGT => Instruction{
+                .fn_ptr = &op_sgt,
                 .arg = .none,
                 .pc = @intCast(pc),
                 .opcode = op,
@@ -380,10 +553,54 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
+            .BYTE => Instruction{
+                .fn_ptr = &op_byte,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SHL => Instruction{
+                .fn_ptr = &op_shl,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SHR => Instruction{
+                .fn_ptr = &op_shr,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SAR => Instruction{
+                .fn_ptr = &op_sar,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            
+            // Hashing
+            .KECCAK256 => Instruction{
+                .fn_ptr = &op_keccak256,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
             
             // Environmental information
             .ADDRESS => Instruction{
                 .fn_ptr = &op_address,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .BALANCE => Instruction{
+                .fn_ptr = &op_balance,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .ORIGIN => Instruction{
+                .fn_ptr = &op_origin,
                 .arg = .none,
                 .pc = @intCast(pc),
                 .opcode = op,
@@ -400,20 +617,68 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
-            .CALLDATASIZE => Instruction{
-                .fn_ptr = &op_calldatasize,
-                .arg = .none,
-                .pc = @intCast(pc),
-                .opcode = op,
-            },
             .CALLDATALOAD => Instruction{
                 .fn_ptr = &op_calldataload,
                 .arg = .none,
                 .pc = @intCast(pc),
                 .opcode = op,
             },
+            .CALLDATASIZE => Instruction{
+                .fn_ptr = &op_calldatasize,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
             .CALLDATACOPY => Instruction{
                 .fn_ptr = &op_calldatacopy,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .CODESIZE => Instruction{
+                .fn_ptr = &op_codesize,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .CODECOPY => Instruction{
+                .fn_ptr = &op_codecopy,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .EXTCODESIZE => Instruction{
+                .fn_ptr = &op_extcodesize,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .EXTCODECOPY => Instruction{
+                .fn_ptr = &op_extcodecopy,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .RETURNDATASIZE => Instruction{
+                .fn_ptr = &op_returndatasize,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .RETURNDATACOPY => Instruction{
+                .fn_ptr = &op_returndatacopy,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .EXTCODEHASH => Instruction{
+                .fn_ptr = &op_extcodehash,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SELFBALANCE => Instruction{
+                .fn_ptr = &op_selfbalance,
                 .arg = .none,
                 .pc = @intCast(pc),
                 .opcode = op,
@@ -444,8 +709,38 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
+            .PREVRANDAO => Instruction{
+                .fn_ptr = &op_prevrandao,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
             .GASLIMIT => Instruction{
                 .fn_ptr = &op_gaslimit,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .CHAINID => Instruction{
+                .fn_ptr = &op_chainid,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .BASEFEE => Instruction{
+                .fn_ptr = &op_basefee,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .BLOBHASH => Instruction{
+                .fn_ptr = &op_blobhash,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .BLOBBASEFEE => Instruction{
+                .fn_ptr = &op_blobbasefee,
                 .arg = .none,
                 .pc = @intCast(pc),
                 .opcode = op,
@@ -470,6 +765,38 @@ pub fn generate_instruction_stream(
                 .pc = @intCast(pc),
                 .opcode = op,
             },
+            .MCOPY => Instruction{
+                .fn_ptr = &op_mcopy,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            
+            // Storage operations
+            .SLOAD => Instruction{
+                .fn_ptr = &op_sload,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SSTORE => Instruction{
+                .fn_ptr = &op_sstore,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .TLOAD => Instruction{
+                .fn_ptr = &op_tload,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .TSTORE => Instruction{
+                .fn_ptr = &op_tstore,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
             
             // Gas opcode
             .GAS => Instruction{
@@ -487,9 +814,85 @@ pub fn generate_instruction_stream(
                 .opcode = op,
             },
             
-            // Default: use generic handler
-            else => Instruction{
-                .fn_ptr = &op_generic,
+            // Logging operations
+            .LOG0, .LOG1, .LOG2, .LOG3, .LOG4 => Instruction{
+                .fn_ptr = &op_log,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            
+            // System operations  
+            .CREATE => Instruction{
+                .fn_ptr = &op_create,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .CREATE2 => Instruction{
+                .fn_ptr = &op_create2,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .CALL => Instruction{
+                .fn_ptr = &op_call,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .CALLCODE => Instruction{
+                .fn_ptr = &op_callcode,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .DELEGATECALL => Instruction{
+                .fn_ptr = &op_delegatecall,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .STATICCALL => Instruction{
+                .fn_ptr = &op_staticcall,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .RETURNDATALOAD => Instruction{
+                .fn_ptr = &op_returndataload,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .INVALID => Instruction{
+                .fn_ptr = &op_invalid,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .SELFDESTRUCT => Instruction{
+                .fn_ptr = &op_selfdestruct,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            
+            // Extended operations (EOF) - not implemented yet
+            .EXTCALL => Instruction{
+                .fn_ptr = &op_extcall,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .EXTDELEGATECALL => Instruction{
+                .fn_ptr = &op_extdelegatecall,
+                .arg = .none,
+                .pc = @intCast(pc),
+                .opcode = op,
+            },
+            .EXTSTATICCALL => Instruction{
+                .fn_ptr = &op_extstaticcall,
                 .arg = .none,
                 .pc = @intCast(pc),
                 .opcode = op,
@@ -499,13 +902,16 @@ pub fn generate_instruction_stream(
         try instructions.append(instruction);
         
         // Advance PC
-        const bytes_consumed = Operation.OPCODE_INFO_TABLE[@intFromEnum(op_enum)].bytes_consumed;
+        const bytes_consumed = if (opcode.is_push(op)) 
+            1 + opcode.get_push_size(op)
+        else 
+            1;
         pc += bytes_consumed;
     }
     
     // Second pass: resolve static jump targets to instruction indices
     if (analysis.jump_analysis) |jump_analysis| {
-        for (instructions.items, 0..instructions.items.len) |*instr, idx| {
+        for (instructions.items, 0..instructions.items.len) |*instr, _| {
             if (instr.opcode == @intFromEnum(opcode.Enum.JUMP) or 
                 instr.opcode == @intFromEnum(opcode.Enum.JUMPI)) {
                 if (instr.arg == .jump and instr.arg.jump.is_static) {
@@ -570,8 +976,7 @@ fn opx_beginblock(instr: *const Instruction, state: *AdvancedExecutionState) ?*c
 }
 
 /// STOP - halt execution.
-fn op_stop(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    _ = instr;
+fn op_stop(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     state.exit_status = ExecutionError.Error.STOP;
     return null;
 }
@@ -657,7 +1062,7 @@ fn op_mstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const 
 }
 
 /// JUMP - unconditional jump.
-fn op_jump(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+fn op_jump(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const dest = state.stack.pop_unsafe();
     
     // Validate jump destination at runtime
@@ -675,18 +1080,14 @@ fn op_jump(instr: *const Instruction, state: *AdvancedExecutionState) ?*const In
 /// JUMP - static unconditional jump (pre-resolved).
 fn op_jump_static(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     // Pop the destination from stack (for compatibility)
-    _ = state.stack.pop_unsafe();
+    const dest = state.stack.pop_unsafe();
     
     // Use pre-resolved instruction index
-    const target_idx = instr.arg.jump.target_instr;
-    
-    // Get base of instruction array
-    const base_ptr = @intFromPtr(instr) - @intFromPtr(instr);
-    _ = base_ptr;
+    _ = instr.arg.jump.target_instr;
     
     // For now, set PC and re-enter (will optimize later)
-    const dest_pc = state.frame.contract.code[instr.pc];
-    state.frame.pc = dest_pc;
+    // TODO: Use the pre-resolved instruction index for direct jump
+    state.frame.pc = @intCast(dest);
     return null;
 }
 
@@ -733,8 +1134,7 @@ fn op_jumpdest(instr: *const Instruction, _: *AdvancedExecutionState) ?*const In
 }
 
 /// RETURN - return from execution.
-fn op_return(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    _ = instr;
+fn op_return(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const offset = state.stack.pop_unsafe();
     const size = state.stack.pop_unsafe();
     
@@ -756,8 +1156,7 @@ fn op_return(instr: *const Instruction, state: *AdvancedExecutionState) ?*const 
 }
 
 /// REVERT - revert execution.
-fn op_revert(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    _ = instr;
+fn op_revert(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const offset = state.stack.pop_unsafe();
     const size = state.stack.pop_unsafe();
     
@@ -862,7 +1261,7 @@ fn op_callvalue(instr: *const Instruction, state: *AdvancedExecutionState) ?*con
 
 /// CALLDATASIZE - get size of call data.
 fn op_calldatasize(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(@as(u256, state.frame.calldata.len));
+    state.stack.append_unsafe(@as(u256, state.frame.input.len));
     return next_instruction(instr);
 }
 
@@ -871,10 +1270,10 @@ fn op_calldataload(instr: *const Instruction, state: *AdvancedExecutionState) ?*
     const offset = state.stack.pop_unsafe();
     
     var data: [32]u8 = [_]u8{0} ** 32;
-    if (offset < state.frame.calldata.len) {
-        const remaining = state.frame.calldata.len - @as(usize, @intCast(offset));
+    if (offset < state.frame.input.len) {
+        const remaining = state.frame.input.len - @as(usize, @intCast(offset));
         const copy_len = @min(32, remaining);
-        @memcpy(data[0..copy_len], state.frame.calldata[@intCast(offset)..][0..copy_len]);
+        @memcpy(data[0..copy_len], state.frame.input[@intCast(offset)..][0..copy_len]);
     }
     
     state.stack.append_unsafe(primitives.U256.from_be_bytes(data));
@@ -905,7 +1304,7 @@ fn op_calldatacopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*
         }
         
         // Copy data
-        state.memory.set_data(dest, src, len, state.frame.calldata) catch {
+        state.memory.set_data(dest, src, len, state.frame.input) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -927,6 +1326,13 @@ fn op_blockhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*con
 fn op_coinbase(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const coinbase = primitives.U256.from_le_bytes(state.vm.env.block.coinbase.data ++ [_]u8{0} ** 12);
     state.stack.append_unsafe(coinbase);
+    return next_instruction(instr);
+}
+
+/// ORIGIN - get transaction originator.
+fn op_origin(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const origin = primitives.U256.from_le_bytes(state.vm.env.tx.caller.data ++ [_]u8{0} ** 12);
+    state.stack.append_unsafe(origin);
     return next_instruction(instr);
 }
 
@@ -988,29 +1394,916 @@ fn op_pc(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Inst
     return next_instruction(instr);
 }
 
-/// Generic handler for unimplemented opcodes.
-fn op_generic(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    // Fall back to regular execution
-    const interpreter: Operation.Interpreter = state.vm;
-    const frame_state: Operation.State = state.frame;
+/// SDIV - signed division.
+fn op_sdiv(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    const a_signed = @as(i256, @bitCast(a));
+    const b_signed = @as(i256, @bitCast(b));
+    const result = if (b == 0) 0 else @as(u256, @bitCast(@divTrunc(a_signed, b_signed)));
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// MOD - modulo.
+fn op_mod(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    state.stack.append_unsafe(if (b == 0) 0 else a % b);
+    return next_instruction(instr);
+}
+
+/// SMOD - signed modulo.
+fn op_smod(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    const a_signed = @as(i256, @bitCast(a));
+    const b_signed = @as(i256, @bitCast(b));
+    const result = if (b == 0) 0 else @as(u256, @bitCast(@rem(a_signed, b_signed)));
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// ADDMOD - addition modulo.
+fn op_addmod(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    const n = state.stack.pop_unsafe();
+    if (n == 0) {
+        state.stack.append_unsafe(0);
+    } else {
+        const sum = std.math.add(u512, a, b) catch unreachable;
+        state.stack.append_unsafe(@intCast(sum % n));
+    }
+    return next_instruction(instr);
+}
+
+/// MULMOD - multiplication modulo.
+fn op_mulmod(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    const n = state.stack.pop_unsafe();
+    if (n == 0) {
+        state.stack.append_unsafe(0);
+    } else {
+        const product = std.math.mul(u512, a, b) catch unreachable;
+        state.stack.append_unsafe(@intCast(product % n));
+    }
+    return next_instruction(instr);
+}
+
+/// EXP - exponentiation.
+fn op_exp(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const base = state.stack.pop_unsafe();
+    const exponent = state.stack.pop_unsafe();
     
-    // Temporarily convert gas back to unsigned
-    state.frame.gas_remaining = @intCast(state.gas_left.*);
+    // Fast path for common cases
+    if (exponent == 0) {
+        state.stack.append_unsafe(1);
+    } else if (exponent == 1) {
+        state.stack.append_unsafe(base);
+    } else if (base == 0) {
+        state.stack.append_unsafe(0);
+    } else if (base == 1) {
+        state.stack.append_unsafe(1);
+    } else {
+        // General case - use exponentiation by squaring
+        var result: u256 = 1;
+        var b = base;
+        var e = exponent;
+        while (e > 0) {
+            if (e & 1 == 1) {
+                result *%= b;
+            }
+            b *%= b;
+            e >>= 1;
+        }
+        state.stack.append_unsafe(result);
+    }
+    return next_instruction(instr);
+}
+
+/// SIGNEXTEND - sign extend.
+fn op_signextend(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const byte_size = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
     
-    _ = state.vm.table.execute(state.frame.pc, interpreter, frame_state, instr.opcode) catch |err| {
-        state.exit_status = err;
-        return null;
-    };
+    if (byte_size >= 31) {
+        state.stack.append_unsafe(value);
+    } else {
+        const bit_size = (byte_size + 1) * 8;
+        const sign_bit = @as(u256, 1) << @intCast(bit_size - 1);
+        const mask = sign_bit - 1;
+        const result = if ((value & sign_bit) != 0) value | ~mask else value & mask;
+        state.stack.append_unsafe(result);
+    }
+    return next_instruction(instr);
+}
+
+/// SLT - signed less than comparison.
+fn op_slt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    const a_signed = @as(i256, @bitCast(a));
+    const b_signed = @as(i256, @bitCast(b));
+    state.stack.append_unsafe(if (a_signed < b_signed) 1 else 0);
+    return next_instruction(instr);
+}
+
+/// SGT - signed greater than comparison.
+fn op_sgt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const a = state.stack.pop_unsafe();
+    const b = state.stack.pop_unsafe();
+    const a_signed = @as(i256, @bitCast(a));
+    const b_signed = @as(i256, @bitCast(b));
+    state.stack.append_unsafe(if (a_signed > b_signed) 1 else 0);
+    return next_instruction(instr);
+}
+
+/// BYTE - get byte from word.
+fn op_byte(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const byte_index = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
     
-    // Update gas
-    state.gas_left.* = @intCast(state.frame.gas_remaining);
+    if (byte_index >= 32) {
+        state.stack.append_unsafe(0);
+    } else {
+        const shift = @as(u8, @intCast((31 - byte_index) * 8));
+        const byte = (value >> shift) & 0xFF;
+        state.stack.append_unsafe(byte);
+    }
+    return next_instruction(instr);
+}
+
+/// SHL - shift left.
+fn op_shl(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const shift = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
     
-    // Check if PC changed (control flow)
-    const old_pc = instr.pc;
-    if (state.frame.pc != old_pc) {
-        return null; // Re-enter at new PC
+    if (shift >= 256) {
+        state.stack.append_unsafe(0);
+    } else {
+        state.stack.append_unsafe(value << @intCast(shift));
+    }
+    return next_instruction(instr);
+}
+
+/// SHR - logical shift right.
+fn op_shr(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const shift = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
+    
+    if (shift >= 256) {
+        state.stack.append_unsafe(0);
+    } else {
+        state.stack.append_unsafe(value >> @intCast(shift));
+    }
+    return next_instruction(instr);
+}
+
+/// SAR - arithmetic shift right.
+fn op_sar(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const shift = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
+    
+    if (shift >= 256) {
+        // Sign extend
+        const sign_bit = value >> 255;
+        state.stack.append_unsafe(if (sign_bit == 1) std.math.maxInt(u256) else 0);
+    } else {
+        const value_signed = @as(i256, @bitCast(value));
+        const result = value_signed >> @intCast(shift);
+        state.stack.append_unsafe(@bitCast(result));
+    }
+    return next_instruction(instr);
+}
+
+/// KECCAK256 - compute Keccak-256 hash.
+fn op_keccak256(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    if (size > 0) {
+        const data = state.memory.get_slice(@intCast(offset), @intCast(size)) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+        
+        var hash: [32]u8 = undefined;
+        // TODO: Implement actual Keccak-256 hashing
+        // For now, just use the data to avoid unused variable warning
+        _ = data;
+        @memset(&hash, 0);
+        
+        state.stack.append_unsafe(primitives.U256.from_be_bytes(hash));
+    } else {
+        // Keccak256 of empty data
+        const empty_hash = [_]u8{0xc5} ** 32; // Placeholder
+        state.stack.append_unsafe(primitives.U256.from_be_bytes(empty_hash));
     }
     
+    return next_instruction(instr);
+}
+
+/// BALANCE - get balance of account.
+fn op_balance(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const addr = state.stack.pop_unsafe();
+    
+    // Convert u256 to address
+    var addr_bytes: primitives.Address.Address = undefined;
+    const addr_slice = std.mem.asBytes(&addr);
+    @memcpy(&addr_bytes, addr_slice[12..32]);
+    
+    // Get balance from state
+    const balance = state.vm.db.basic(addr_bytes).?.balance;
+    
+    state.stack.append_unsafe(balance);
+    return next_instruction(instr);
+}
+
+/// CODESIZE - get size of code.
+fn op_codesize(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    state.stack.append_unsafe(@as(u256, state.frame.contract.input.len));
+    return next_instruction(instr);
+}
+
+/// CODECOPY - copy code to memory.
+fn op_codecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const dest_offset = state.stack.pop_unsafe();
+    const src_offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    if (size > 0) {
+        const dest = @as(usize, @intCast(dest_offset));
+        const src = @as(usize, @intCast(src_offset));
+        const len = @as(usize, @intCast(size));
+        
+        // Gas cost for memory expansion
+        const memory_cost = state.memory.expansion_cost(dest + len) catch {
+            state.exit_status = ExecutionError.Error.OutOfGas;
+            return null;
+        };
+        
+        state.gas_left.* -= @as(i64, @intCast(memory_cost));
+        if (state.gas_left.* < 0) {
+            state.exit_status = ExecutionError.Error.OutOfGas;
+            return null;
+        }
+        
+        // Copy data
+        state.memory.set_data(dest, src, len, state.frame.contract.input) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+    }
+    
+    return next_instruction(instr);
+}
+
+/// EXTCODESIZE - get external code size.
+fn op_extcodesize(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const addr = state.stack.pop_unsafe();
+    
+    // Convert u256 to address
+    var addr_bytes: primitives.Address.Address = undefined;
+    const addr_slice = std.mem.asBytes(&addr);
+    @memcpy(&addr_bytes, addr_slice[12..32]);
+    
+    // Get code size from database
+    const account_info = state.vm.db.basic(addr_bytes).?;
+    const code_hash = account_info.code_hash;
+    
+    if (std.mem.eql(u8, &code_hash, &primitives.KECCAK_EMPTY) or std.mem.eql(u8, &code_hash, &primitives.B256_ZERO)) {
+        state.stack.append_unsafe(0);
+    } else {
+        const code = state.vm.db.code_by_hash(code_hash);
+        state.stack.append_unsafe(@as(u256, code.len));
+    }
+    
+    return next_instruction(instr);
+}
+
+/// EXTCODECOPY - copy external code to memory.
+fn op_extcodecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const addr = state.stack.pop_unsafe();
+    const dest_offset = state.stack.pop_unsafe();
+    const src_offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    // Convert u256 to address
+    var addr_bytes: primitives.Address.Address = undefined;
+    const addr_slice = std.mem.asBytes(&addr);
+    @memcpy(&addr_bytes, addr_slice[12..32]);
+    
+    // Get code from database
+    const account_info = state.vm.db.basic(addr_bytes).?;
+    const code_hash = account_info.code_hash;
+    const code = if (std.mem.eql(u8, &code_hash, &primitives.KECCAK_EMPTY) or std.mem.eql(u8, &code_hash, &primitives.B256_ZERO))
+        &[_]u8{}
+    else
+        state.vm.db.code_by_hash(code_hash);
+    
+    if (size > 0) {
+        const dest = @as(usize, @intCast(dest_offset));
+        const src = @as(usize, @intCast(src_offset));
+        const len = @as(usize, @intCast(size));
+        
+        // Gas cost for memory expansion
+        const memory_cost = state.memory.expansion_cost(dest + len) catch {
+            state.exit_status = ExecutionError.Error.OutOfGas;
+            return null;
+        };
+        
+        state.gas_left.* -= @as(i64, @intCast(memory_cost));
+        if (state.gas_left.* < 0) {
+            state.exit_status = ExecutionError.Error.OutOfGas;
+            return null;
+        }
+        
+        // Copy data
+        state.memory.set_data(dest, src, len, code) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+    }
+    
+    return next_instruction(instr);
+}
+
+/// RETURNDATASIZE - get return data size.
+fn op_returndatasize(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    state.stack.append_unsafe(@as(u256, state.frame.return_data.size()));
+    return next_instruction(instr);
+}
+
+/// RETURNDATACOPY - copy return data to memory.
+fn op_returndatacopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const dest_offset = state.stack.pop_unsafe();
+    const src_offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    // Check bounds
+    if (src_offset > state.frame.return_data.size() or 
+        size > state.frame.return_data.size() - src_offset) {
+        state.exit_status = ExecutionError.Error.ReturnDataOutOfBounds;
+        return null;
+    }
+    
+    if (size > 0) {
+        const dest = @as(usize, @intCast(dest_offset));
+        const src = @as(usize, @intCast(src_offset));
+        const len = @as(usize, @intCast(size));
+        
+        // Gas cost for memory expansion
+        const memory_cost = state.memory.expansion_cost(dest + len) catch {
+            state.exit_status = ExecutionError.Error.OutOfGas;
+            return null;
+        };
+        
+        state.gas_left.* -= @as(i64, @intCast(memory_cost));
+        if (state.gas_left.* < 0) {
+            state.exit_status = ExecutionError.Error.OutOfGas;
+            return null;
+        }
+        
+        // Copy data
+        state.memory.set_data(dest, src, len, state.frame.return_data) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+    }
+    
+    return next_instruction(instr);
+}
+
+/// EXTCODEHASH - get external code hash.
+fn op_extcodehash(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const addr = state.stack.pop_unsafe();
+    
+    // Convert u256 to address
+    var addr_bytes: primitives.Address.Address = undefined;
+    const addr_slice = std.mem.asBytes(&addr);
+    @memcpy(&addr_bytes, addr_slice[12..32]);
+    
+    // Get code hash from database
+    const account_info = state.vm.db.basic(addr_bytes).?;
+    state.stack.append_unsafe(primitives.U256.from_be_bytes(account_info.code_hash));
+    
+    return next_instruction(instr);
+}
+
+/// SELFBALANCE - get balance of current account.
+fn op_selfbalance(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const balance = state.vm.db.basic(state.frame.contract.target_address).?.balance;
+    state.stack.append_unsafe(balance);
+    return next_instruction(instr);
+}
+
+/// PREVRANDAO - get previous RANDAO value.
+fn op_prevrandao(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    state.stack.append_unsafe(state.vm.env.block.prevrandao);
+    return next_instruction(instr);
+}
+
+/// CHAINID - get chain ID.
+fn op_chainid(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    state.stack.append_unsafe(@as(u256, state.vm.env.cfg.chain_id));
+    return next_instruction(instr);
+}
+
+/// BASEFEE - get base fee.
+fn op_basefee(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    state.stack.append_unsafe(state.vm.env.block.basefee);
+    return next_instruction(instr);
+}
+
+/// BLOBHASH - get blob hash.
+fn op_blobhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const index = state.stack.pop_unsafe();
+    
+    if (state.vm.env.tx.blob_hashes) |blob_hashes| {
+        if (index < blob_hashes.len) {
+            const hash = blob_hashes[@intCast(index)];
+            state.stack.append_unsafe(primitives.U256.from_be_bytes(hash));
+        } else {
+            state.stack.append_unsafe(0);
+        }
+    } else {
+        state.stack.append_unsafe(0);
+    }
+    
+    return next_instruction(instr);
+}
+
+/// BLOBBASEFEE - get blob base fee.
+fn op_blobbasefee(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const excess_blob_gas = state.vm.env.block.excess_blob_gas orelse 0;
+    const blob_fee = primitives.calc_blob_gasprice(excess_blob_gas);
+    state.stack.append_unsafe(@as(u256, blob_fee));
+    return next_instruction(instr);
+}
+
+/// MCOPY - copy memory.
+fn op_mcopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const dest_offset = state.stack.pop_unsafe();
+    const src_offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    if (size > 0) {
+        const dest = @as(usize, @intCast(dest_offset));
+        const src = @as(usize, @intCast(src_offset));
+        const len = @as(usize, @intCast(size));
+        
+        state.memory.copy_within(dest, src, len) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+    }
+    
+    return next_instruction(instr);
+}
+
+/// SLOAD - load from storage.
+fn op_sload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const key = state.stack.pop_unsafe();
+    
+    const value = state.vm.db.storage(state.frame.contract.target_address, key);
+    state.stack.append_unsafe(value.present_value);
+    return next_instruction(instr);
+}
+
+/// SSTORE - store to storage.
+fn op_sstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const key = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
+    
+    // Check if in static call
+    if (state.frame.is_static) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    // Store to database with journaling
+    state.vm.db.set_storage(state.frame.contract.target_address, key, value);
+    
+    return next_instruction(instr);
+}
+
+/// TLOAD - load from transient storage.
+fn op_tload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const key = state.stack.pop_unsafe();
+    
+    const value = state.vm.db.tload(state.frame.contract.target_address, key);
+    state.stack.append_unsafe(value);
+    return next_instruction(instr);
+}
+
+/// TSTORE - store to transient storage.
+fn op_tstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const key = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
+    
+    // Check if in static call
+    if (state.frame.is_static) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    state.vm.db.tstore(state.frame.contract.target_address, key, value);
+    
+    return next_instruction(instr);
+}
+
+/// LOG - emit log event.
+fn op_log(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const topic_count = opcode.get_log_topic_count(instr.opcode);
+    const offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    // Check if in static call
+    if (state.frame.is_static) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    // Pop topics
+    var topics = std.ArrayList(primitives.B256).init(state.vm.allocator);
+    defer topics.deinit();
+    
+    var i: u8 = 0;
+    while (i < topic_count) : (i += 1) {
+        const topic = state.stack.pop_unsafe();
+        try topics.append(primitives.U256.to_be_bytes(topic));
+    }
+    
+    // Get log data from memory
+    const data = if (size > 0) blk: {
+        const log_data = state.memory.get_slice(@intCast(offset), @intCast(size)) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+        break :blk try state.vm.allocator.dupe(u8, log_data);
+    } else &[_]u8{};
+    
+    // Create log entry
+    const log_entry = Log{
+        .address = state.frame.contract.target_address,
+        .topics = try topics.toOwnedSlice(),
+        .data = data,
+    };
+    
+    // Add to frame logs
+    try state.frame.logs.append(log_entry);
+    
+    return next_instruction(instr);
+}
+
+/// CREATE - create new contract.
+fn op_create(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const value = state.stack.pop_unsafe();
+    const offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    
+    // Check if in static call
+    if (state.frame.is_static) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    // Get init code from memory
+    const init_code = if (size > 0) 
+        state.memory.get_slice(@intCast(offset), @intCast(size)) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        }
+    else
+        &[_]u8{};
+    
+    // For now, push zero address (would create contract in real implementation)
+    _ = value;
+    _ = init_code;
+    state.stack.append_unsafe(0);
+    
+    return next_instruction(instr);
+}
+
+/// CREATE2 - create new contract with deterministic address.
+fn op_create2(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const value = state.stack.pop_unsafe();
+    const offset = state.stack.pop_unsafe();
+    const size = state.stack.pop_unsafe();
+    const salt = state.stack.pop_unsafe();
+    
+    // Check if in static call
+    if (state.frame.is_static) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    // Get init code from memory
+    const init_code = if (size > 0) 
+        state.memory.get_slice(@intCast(offset), @intCast(size)) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        }
+    else
+        &[_]u8{};
+    
+    // For now, push zero address (would create contract in real implementation)
+    _ = value;
+    _ = init_code;
+    _ = salt;
+    state.stack.append_unsafe(0);
+    
+    return next_instruction(instr);
+}
+
+/// CALL - message call to another contract.
+fn op_call(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const gas = state.stack.pop_unsafe();
+    const addr = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
+    const args_offset = state.stack.pop_unsafe();
+    const args_size = state.stack.pop_unsafe();
+    const ret_offset = state.stack.pop_unsafe();
+    const ret_size = state.stack.pop_unsafe();
+    
+    // Check if value transfer in static call
+    if (state.frame.is_static and value != 0) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    // For now, push success (would execute call in real implementation)
+    _ = gas;
+    _ = addr;
+    _ = args_offset;
+    _ = args_size;
+    _ = ret_offset;
+    _ = ret_size;
+    state.stack.append_unsafe(1);
+    
+    return next_instruction(instr);
+}
+
+/// CALLCODE - message call with current code.
+fn op_callcode(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const gas = state.stack.pop_unsafe();
+    const addr = state.stack.pop_unsafe();
+    const value = state.stack.pop_unsafe();
+    const args_offset = state.stack.pop_unsafe();
+    const args_size = state.stack.pop_unsafe();
+    const ret_offset = state.stack.pop_unsafe();
+    const ret_size = state.stack.pop_unsafe();
+    
+    // For now, push success (would execute call in real implementation)
+    _ = gas;
+    _ = addr;
+    _ = value;
+    _ = args_offset;
+    _ = args_size;
+    _ = ret_offset;
+    _ = ret_size;
+    state.stack.append_unsafe(1);
+    
+    return next_instruction(instr);
+}
+
+/// DELEGATECALL - delegate call.
+fn op_delegatecall(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const gas = state.stack.pop_unsafe();
+    const addr = state.stack.pop_unsafe();
+    const args_offset = state.stack.pop_unsafe();
+    const args_size = state.stack.pop_unsafe();
+    const ret_offset = state.stack.pop_unsafe();
+    const ret_size = state.stack.pop_unsafe();
+    
+    // For now, push success (would execute call in real implementation)
+    _ = gas;
+    _ = addr;
+    _ = args_offset;
+    _ = args_size;
+    _ = ret_offset;
+    _ = ret_size;
+    state.stack.append_unsafe(1);
+    
+    return next_instruction(instr);
+}
+
+/// STATICCALL - static message call.
+fn op_staticcall(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const gas = state.stack.pop_unsafe();
+    const addr = state.stack.pop_unsafe();
+    const args_offset = state.stack.pop_unsafe();
+    const args_size = state.stack.pop_unsafe();
+    const ret_offset = state.stack.pop_unsafe();
+    const ret_size = state.stack.pop_unsafe();
+    
+    // For now, push success (would execute call in real implementation)
+    _ = gas;
+    _ = addr;
+    _ = args_offset;
+    _ = args_size;
+    _ = ret_offset;
+    _ = ret_size;
+    state.stack.append_unsafe(1);
+    
+    return next_instruction(instr);
+}
+
+/// RETURNDATALOAD - load return data.
+fn op_returndataload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const offset = state.stack.pop_unsafe();
+    
+    // Check bounds
+    if (offset + 32 > state.frame.return_data.size()) {
+        state.exit_status = ExecutionError.Error.ReturnDataOutOfBounds;
+        return null;
+    }
+    
+    var data: [32]u8 = [_]u8{0} ** 32;
+    @memcpy(&data, state.frame.return_data.get()[@intCast(offset)..][0..32]);
+    
+    state.stack.append_unsafe(primitives.U256.from_be_bytes(data));
+    return next_instruction(instr);
+}
+
+/// INVALID - invalid opcode.
+fn op_invalid(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    state.exit_status = ExecutionError.Error.InvalidOpcode;
+    return null;
+}
+
+/// SELFDESTRUCT - destroy contract.
+fn op_selfdestruct(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const beneficiary = state.stack.pop_unsafe();
+    
+    // Check if in static call
+    if (state.frame.is_static) {
+        state.exit_status = ExecutionError.Error.StaticStateChange;
+        return null;
+    }
+    
+    // Convert u256 to address
+    var beneficiary_addr: primitives.Address.Address = undefined;
+    const addr_slice = std.mem.asBytes(&beneficiary);
+    @memcpy(&beneficiary_addr, addr_slice[12..32]);
+    
+    // Mark for selfdestruct (actual deletion happens after execution)
+    state.frame.selfdestruct_address = beneficiary_addr;
+    state.exit_status = ExecutionError.Error.STOP;
+    return null;
+}
+
+/// EXTCALL - extended call (EOF).
+fn op_extcall(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    // EOF not implemented
+    state.exit_status = ExecutionError.Error.InvalidOpcode;
+    return null;
+}
+
+/// EXTDELEGATECALL - extended delegate call (EOF).
+fn op_extdelegatecall(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    // EOF not implemented
+    state.exit_status = ExecutionError.Error.InvalidOpcode;
+    return null;
+}
+
+/// EXTSTATICCALL - extended static call (EOF).
+fn op_extstaticcall(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    // EOF not implemented
+    state.exit_status = ExecutionError.Error.InvalidOpcode;
+    return null;
+}
+
+// ============================================================================
+// Superinstruction Implementations
+// ============================================================================
+
+/// PUSH + PUSH + ADD superinstruction
+fn op_push_push_add(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    // Values are packed in arg.data as two u32s
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = v1 +% v2;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + SUB superinstruction
+fn op_push_push_sub(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = v1 -% v2;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + MUL superinstruction
+fn op_push_push_mul(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = v1 *% v2;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + DIV superinstruction
+fn op_push_push_div(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = if (v2 == 0) 0 else v1 / v2;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + EQ superinstruction
+fn op_push_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = if (v1 == v2) 1 else 0;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + LT superinstruction
+fn op_push_push_lt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = if (v1 < v2) 1 else 0;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + GT superinstruction
+fn op_push_push_gt(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = if (v1 > v2) 1 else 0;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// DUP + PUSH + EQ superinstruction
+fn op_dup_push_eq(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const top = state.stack.peek_unsafe(0);
+    const push_value = instr.arg.small_push;
+    const result = if (top == push_value) 1 else 0;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + MLOAD superinstruction
+fn op_push_mload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const offset = instr.arg.small_push;
+    const data = state.memory.get_u256(@intCast(offset)) catch {
+        state.exit_status = ExecutionError.Error.OutOfMemory;
+        return null;
+    };
+    state.stack.append_unsafe(data);
+    return next_instruction(instr);
+}
+
+/// PUSH + MSTORE superinstruction
+fn op_push_mstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const offset = instr.arg.small_push;
+    const value = state.stack.pop_unsafe();
+    state.memory.set_u256(@intCast(offset), value) catch {
+        state.exit_status = ExecutionError.Error.OutOfMemory;
+        return null;
+    };
+    return next_instruction(instr);
+}
+
+/// ISZERO + PUSH + JUMPI superinstruction
+fn op_iszero_push_jumpi(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const value = state.stack.pop_unsafe();
+    const is_zero = (value == 0);
+    
+    if (is_zero) {
+        // Jump to destination stored in arg
+        const dest = instr.arg.jump_target;
+        state.frame.pc = dest;
+        return null; // Re-enter at jump target
+    }
+    
+    return next_instruction(instr);
+}
+
+/// DUP + ISZERO superinstruction
+fn op_dup_iszero(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const value = state.stack.peek_unsafe(0);
+    const result = if (value == 0) 1 else 0;
+    state.stack.append_unsafe(result);
+    return next_instruction(instr);
+}
+
+/// PUSH + PUSH + AND superinstruction
+fn op_push_push_and(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+    const v1 = @as(u256, instr.arg.data & 0xFFFFFFFF);
+    const v2 = @as(u256, (instr.arg.data >> 32));
+    const result = v1 & v2;
+    state.stack.append_unsafe(result);
     return next_instruction(instr);
 }
 
