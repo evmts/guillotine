@@ -42,10 +42,12 @@ const BlockMetadata = @import("../frame/code_analysis.zig").BlockMetadata;
 const CodeAnalysis = @import("../frame/code_analysis.zig");
 const JumpAnalysis = @import("../frame/jump_analysis.zig").JumpAnalysis;
 const primitives = @import("primitives");
-const Log = @import("../log.zig");
+const EvmLog = @import("../state/evm_log.zig");
+const log = @import("../log.zig");
 const superinstructions = @import("superinstructions.zig");
 const memory_expansion_analysis = @import("memory_expansion_analysis.zig");
 const memory_optimized_ops = @import("memory_optimized_ops.zig");
+const BlobGasMarket = @import("../blob/blob_gas_market.zig").BlobGasMarket;
 
 /// Function pointer type for instruction execution.
 pub const InstructionFn = *const fn (instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction;
@@ -131,9 +133,15 @@ pub const InstructionStream = struct {
 };
 
 /// Helper to get next instruction pointer.
-inline fn next_instruction(instr: *const Instruction) ?*const Instruction {
+pub inline fn next_instruction(instr: *const Instruction) ?*const Instruction {
     const next_ptr = @intFromPtr(instr) + @sizeOf(Instruction);
     return @as(*const Instruction, @ptrFromInt(next_ptr));
+}
+
+/// Calculate blob fee from excess blob gas according to EIP-4844.
+/// This function implements the blob gas fee calculation for the BLOBBASEFEE opcode.
+fn calc_blob_fee(excess_blob_gas: u64) u256 {
+    return BlobGasMarket.calculate_blob_base_fee_from_excess_gas(excess_blob_gas);
 }
 
 /// Generate instruction stream from bytecode.
@@ -142,7 +150,7 @@ pub fn generate_instruction_stream(
     bytecode: []const u8,
     analysis: *const CodeAnalysis,
 ) !InstructionStream {
-    Log.debug("Generating instruction stream for bytecode of length {}", .{bytecode.len});
+    log.debug("Generating instruction stream for bytecode of length {}", .{bytecode.len});
     var instructions = std.ArrayList(Instruction).init(allocator);
     defer instructions.deinit();
     
@@ -981,21 +989,21 @@ fn op_not(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
 
 /// ADDRESS - get address of current account.
 fn op_address(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const addr = primitives.Address.to_u256(state.frame.contract.target_address);
+    const addr = primitives.Address.to_u256(state.frame.contract.address);
     state.stack.append_unsafe(addr);
     return next_instruction(instr);
 }
 
 /// CALLER - get caller address.
 fn op_caller(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const caller = primitives.Address.to_u256(state.frame.msg_sender);
+    const caller = primitives.Address.to_u256(state.frame.contract.caller);
     state.stack.append_unsafe(caller);
     return next_instruction(instr);
 }
 
 /// CALLVALUE - get call value.
 fn op_callvalue(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(state.frame.msg_value);
+    state.stack.append_unsafe(state.frame.contract.value);
     return next_instruction(instr);
 }
 
@@ -1016,7 +1024,7 @@ fn op_calldataload(instr: *const Instruction, state: *AdvancedExecutionState) ?*
         @memcpy(data[0..copy_len], state.frame.input[@intCast(offset)..][0..copy_len]);
     }
     
-    state.stack.append_unsafe(primitives.B256.to_u256(data));
+    state.stack.append_unsafe(std.mem.readInt(u256, &data, .big));
     return next_instruction(instr);
 }
 
@@ -1061,39 +1069,39 @@ fn op_blockhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*con
 
 /// COINBASE - get block coinbase.
 fn op_coinbase(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const coinbase = primitives.Address.to_u256(state.vm.env.block.coinbase);
+    const coinbase = primitives.Address.to_u256(state.vm.context.block_coinbase);
     state.stack.append_unsafe(coinbase);
     return next_instruction(instr);
 }
 
 /// ORIGIN - get transaction originator.
 fn op_origin(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const origin = primitives.Address.to_u256(state.vm.env.tx.caller);
+    const origin = primitives.Address.to_u256(state.vm.context.tx_origin);
     state.stack.append_unsafe(origin);
     return next_instruction(instr);
 }
 
 /// TIMESTAMP - get block timestamp.
 fn op_timestamp(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(@as(u256, state.vm.env.block.timestamp));
+    state.stack.append_unsafe(@as(u256, state.vm.context.block_timestamp));
     return next_instruction(instr);
 }
 
 /// NUMBER - get block number.
 fn op_number(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(@as(u256, state.vm.env.block.number));
+    state.stack.append_unsafe(@as(u256, state.vm.context.block_number));
     return next_instruction(instr);
 }
 
 /// GASLIMIT - get block gas limit.
 fn op_gaslimit(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(@as(u256, state.vm.env.block.gas_limit));
+    state.stack.append_unsafe(@as(u256, state.vm.context.block_gas_limit));
     return next_instruction(instr);
 }
 
 /// GASPRICE - get gas price.
 fn op_gasprice(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(state.vm.env.tx.gas_price);
+    state.stack.append_unsafe(state.vm.context.gas_price);
     return next_instruction(instr);
 }
 
@@ -1102,7 +1110,9 @@ fn op_mstore8(instr: *const Instruction, state: *AdvancedExecutionState) ?*const
     const offset = state.stack.pop_unsafe();
     const value = state.stack.pop_unsafe();
     
-    state.memory.set_byte(@intCast(offset), @truncate(value)) catch {
+    const byte_value = @as(u8, @truncate(value));
+    const bytes = [_]u8{byte_value};
+    state.memory.set_data(@intCast(offset), &bytes) catch {
         state.exit_status = ExecutionError.Error.OutOfMemory;
         return null;
     };
@@ -1112,7 +1122,7 @@ fn op_mstore8(instr: *const Instruction, state: *AdvancedExecutionState) ?*const
 
 /// MSIZE - get memory size.
 fn op_msize(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const size = state.memory.len();
+    const size = state.memory.size();
     state.stack.append_unsafe(@as(u256, size));
     return next_instruction(instr);
 }
@@ -1332,11 +1342,11 @@ fn op_keccak256(instr: *const Instruction, state: *AdvancedExecutionState) ?*con
         _ = data;
         @memset(&hash, 0);
         
-        state.stack.append_unsafe(primitives.U256.from_be_bytes(hash));
+        state.stack.append_unsafe(std.mem.readInt(u256, &hash, .big));
     } else {
         // Keccak256 of empty data
         const empty_hash = [_]u8{0xc5} ** 32; // Placeholder
-        state.stack.append_unsafe(primitives.U256.from_be_bytes(empty_hash));
+        state.stack.append_unsafe(std.mem.readInt(u256, &empty_hash, .big));
     }
     
     return next_instruction(instr);
@@ -1352,7 +1362,8 @@ fn op_balance(instr: *const Instruction, state: *AdvancedExecutionState) ?*const
     @memcpy(&addr_bytes, addr_slice[12..32]);
     
     // Get balance from state
-    const balance = state.vm.db.basic(addr_bytes).?.balance;
+    const account = state.vm.state.database.get_account(addr_bytes) catch return null;
+    const balance = if (account) |acc| acc.balance else 0;
     
     state.stack.append_unsafe(balance);
     return next_instruction(instr);
@@ -1404,13 +1415,15 @@ fn op_extcodesize(instr: *const Instruction, state: *AdvancedExecutionState) ?*c
     @memcpy(&addr_bytes, addr_slice[12..32]);
     
     // Get code size from database
-    const account_info = state.vm.db.basic(addr_bytes).?;
+    const account = state.vm.state.database.get_account(addr_bytes) catch return null;
+    const account_info = account orelse return null;
     const code_hash = account_info.code_hash;
     
-    if (std.mem.eql(u8, &code_hash, &primitives.KECCAK_EMPTY) or std.mem.eql(u8, &code_hash, &primitives.B256_ZERO)) {
+    const crypto = @import("crypto");
+    if (std.mem.eql(u8, &code_hash, &crypto.EMPTY_KECCAK256) or std.mem.eql(u8, &code_hash, &crypto.ZERO_HASH)) {
         state.stack.append_unsafe(0);
     } else {
-        const code = state.vm.db.code_by_hash(code_hash);
+        const code = state.vm.state.database.get_code(code_hash) catch &[_]u8{};
         state.stack.append_unsafe(@as(u256, code.len));
     }
     
@@ -1430,12 +1443,14 @@ fn op_extcodecopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*c
     @memcpy(&addr_bytes, addr_slice[12..32]);
     
     // Get code from database
-    const account_info = state.vm.db.basic(addr_bytes).?;
+    const account = state.vm.state.database.get_account(addr_bytes) catch return null;
+    const account_info = account orelse return null;
     const code_hash = account_info.code_hash;
-    const code = if (std.mem.eql(u8, &code_hash, &primitives.KECCAK_EMPTY) or std.mem.eql(u8, &code_hash, &primitives.B256_ZERO))
+    const crypto = @import("crypto");
+    const code = if (std.mem.eql(u8, &code_hash, &crypto.EMPTY_KECCAK256) or std.mem.eql(u8, &code_hash, &crypto.ZERO_HASH))
         &[_]u8{}
     else
-        state.vm.db.code_by_hash(code_hash);
+        state.vm.state.database.get_code(code_hash) catch &[_]u8{};
     
     if (size > 0) {
         const dest = @as(usize, @intCast(dest_offset));
@@ -1514,34 +1529,36 @@ fn op_extcodehash(instr: *const Instruction, state: *AdvancedExecutionState) ?*c
     @memcpy(&addr_bytes, addr_slice[12..32]);
     
     // Get code hash from database
-    const account_info = state.vm.db.basic(addr_bytes).?;
-    state.stack.append_unsafe(primitives.U256.from_be_bytes(account_info.code_hash));
+    const account = state.vm.state.database.get_account(addr_bytes) catch return null;
+    const account_info = account orelse return null;
+    state.stack.append_unsafe(std.mem.readInt(u256, &account_info.code_hash, .big));
     
     return next_instruction(instr);
 }
 
 /// SELFBALANCE - get balance of current account.
 fn op_selfbalance(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const balance = state.vm.db.basic(state.frame.contract.target_address).?.balance;
+    const account = state.vm.state.database.get_account(state.frame.contract.address) catch return null;
+    const balance = if (account) |acc| acc.balance else 0;
     state.stack.append_unsafe(balance);
     return next_instruction(instr);
 }
 
 /// PREVRANDAO - get previous RANDAO value.
 fn op_prevrandao(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(state.vm.env.block.prevrandao);
+    state.stack.append_unsafe(state.vm.context.block_difficulty);
     return next_instruction(instr);
 }
 
 /// CHAINID - get chain ID.
 fn op_chainid(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(@as(u256, state.vm.env.cfg.chain_id));
+    state.stack.append_unsafe(state.vm.context.chain_id);
     return next_instruction(instr);
 }
 
 /// BASEFEE - get base fee.
 fn op_basefee(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    state.stack.append_unsafe(state.vm.env.block.basefee);
+    state.stack.append_unsafe(state.vm.context.block_base_fee);
     return next_instruction(instr);
 }
 
@@ -1549,10 +1566,10 @@ fn op_basefee(instr: *const Instruction, state: *AdvancedExecutionState) ?*const
 fn op_blobhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const index = state.stack.pop_unsafe();
     
-    if (state.vm.env.tx.blob_hashes) |blob_hashes| {
-        if (index < blob_hashes.len) {
-            const hash = blob_hashes[@intCast(index)];
-            state.stack.append_unsafe(primitives.U256.from_be_bytes(hash));
+    if (state.vm.context.blob_hashes.len > 0) {
+        if (index < state.vm.context.blob_hashes.len) {
+            const hash = state.vm.context.blob_hashes[@intCast(index)];
+            state.stack.append_unsafe(hash);
         } else {
             state.stack.append_unsafe(0);
         }
@@ -1565,8 +1582,8 @@ fn op_blobhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*cons
 
 /// BLOBBASEFEE - get blob base fee.
 fn op_blobbasefee(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const excess_blob_gas = state.vm.env.block.excess_blob_gas orelse 0;
-    const blob_fee = primitives.calc_blob_gasprice(excess_blob_gas);
+    const excess_blob_gas = 0; // TODO: Add excess_blob_gas to context
+    const blob_fee = calc_blob_fee(excess_blob_gas);
     state.stack.append_unsafe(@as(u256, blob_fee));
     return next_instruction(instr);
 }
@@ -1582,7 +1599,12 @@ fn op_mcopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*const I
         const src = @as(usize, @intCast(src_offset));
         const len = @as(usize, @intCast(size));
         
-        state.memory.copy_within(dest, src, len) catch {
+        // Read from source and write to destination
+        const data = state.memory.get_slice(src, len) catch {
+            state.exit_status = ExecutionError.Error.OutOfMemory;
+            return null;
+        };
+        state.memory.set_data(dest, data) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -1595,8 +1617,8 @@ fn op_mcopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*const I
 fn op_sload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const key = state.stack.pop_unsafe();
     
-    const value = state.vm.db.storage(state.frame.contract.target_address, key);
-    state.stack.append_unsafe(value.present_value);
+    const value = state.vm.state.database.get_storage(state.frame.contract.address, key) catch 0;
+    state.stack.append_unsafe(value);
     return next_instruction(instr);
 }
 
@@ -1612,7 +1634,7 @@ fn op_sstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const 
     }
     
     // Store to database with journaling
-    state.vm.db.set_storage(state.frame.contract.target_address, key, value);
+    state.vm.state.database.set_storage(state.frame.contract.address, key, value) catch {};
     
     return next_instruction(instr);
 }
@@ -1621,7 +1643,7 @@ fn op_sstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const 
 fn op_tload(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     const key = state.stack.pop_unsafe();
     
-    const value = state.vm.db.tload(state.frame.contract.target_address, key);
+    const value = state.vm.state.get_transient_storage(state.frame.contract.address, key);
     state.stack.append_unsafe(value);
     return next_instruction(instr);
 }
@@ -1637,7 +1659,10 @@ fn op_tstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const 
         return null;
     }
     
-    state.vm.db.tstore(state.frame.contract.target_address, key, value);
+    state.vm.state.set_transient_storage(state.frame.contract.address, key, value) catch {
+        state.exit_status = ExecutionError.Error.OutOfMemory;
+        return null;
+    };
     
     return next_instruction(instr);
 }
@@ -1655,13 +1680,13 @@ fn op_log(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
     }
     
     // Pop topics
-    var topics = std.ArrayList(primitives.B256).init(state.vm.allocator);
+    var topics = std.ArrayList(u256).init(state.vm.allocator);
     defer topics.deinit();
     
     var i: u8 = 0;
     while (i < topic_count) : (i += 1) {
         const topic = state.stack.pop_unsafe();
-        topics.append(primitives.U256.to_be_bytes(topic)) catch {
+        topics.append(topic) catch {
             state.exit_status = ExecutionError.Error.OutOfMemory;
             return null;
         };
@@ -1679,18 +1704,14 @@ fn op_log(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
         };
     } else &[_]u8{};
     
-    // Create log entry
-    const log_entry = Log{
-        .address = state.frame.contract.target_address,
-        .topics = topics.toOwnedSlice() catch {
-            state.exit_status = ExecutionError.Error.OutOfMemory;
-            return null;
-        },
-        .data = data,
+    // Emit log via VM
+    const topics_slice = topics.toOwnedSlice() catch {
+        state.exit_status = ExecutionError.Error.OutOfMemory;
+        return null;
     };
+    defer state.vm.allocator.free(topics_slice);
     
-    // Add to frame logs
-    state.frame.logs.append(log_entry) catch {
+    state.vm.emit_log(state.frame.contract.address, topics_slice, data) catch {
         state.exit_status = ExecutionError.Error.OutOfMemory;
         return null;
     };
@@ -1864,7 +1885,7 @@ fn op_returndataload(instr: *const Instruction, state: *AdvancedExecutionState) 
     var data: [32]u8 = [_]u8{0} ** 32;
     @memcpy(&data, state.frame.return_data.get()[@intCast(offset)..][0..32]);
     
-    state.stack.append_unsafe(primitives.B256.to_u256(data));
+    state.stack.append_unsafe(std.mem.readInt(u256, &data, .big));
     return next_instruction(instr);
 }
 
@@ -1876,21 +1897,24 @@ fn op_invalid(_: *const Instruction, state: *AdvancedExecutionState) ?*const Ins
 
 /// SELFDESTRUCT - destroy contract.
 fn op_selfdestruct(_: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const beneficiary = state.stack.pop_unsafe();
+    const beneficiary_u256 = state.stack.pop_unsafe();
     
     // Check if in static call
     if (state.frame.is_static) {
-        state.exit_status = ExecutionError.Error.StaticStateChange;
+        state.exit_status = ExecutionError.Error.WriteProtection;
         return null;
     }
     
-    // Convert u256 to address
-    var beneficiary_addr: primitives.Address.Address = undefined;
-    const addr_slice = std.mem.asBytes(&beneficiary);
-    @memcpy(&beneficiary_addr, addr_slice[12..32]);
+    // Convert u256 to address using the same logic as system.zig
+    const beneficiary_address = primitives.Address.from_u256(beneficiary_u256);
     
-    // Mark for selfdestruct (actual deletion happens after execution)
-    state.frame.selfdestruct_address = beneficiary_addr;
+    // Mark contract for destruction with recipient (same as system.zig)
+    state.vm.state.mark_for_destruction(state.frame.contract.address, beneficiary_address) catch {
+        state.exit_status = ExecutionError.Error.OutOfMemory;
+        return null;
+    };
+    
+    // SELFDESTRUCT halts execution immediately
     state.exit_status = ExecutionError.Error.STOP;
     return null;
 }
@@ -1971,4 +1995,21 @@ test "instruction stream generation" {
     
     // Finally STOP
     try testing.expectEqual(&op_stop, stream.instructions[4].fn_ptr);
+}
+
+test "calc_blob_fee function" {
+    const testing = std.testing;
+    
+    // Test with zero excess blob gas - should return minimum fee (1)
+    const fee_zero = calc_blob_fee(0);
+    try testing.expectEqual(@as(u256, 1), fee_zero);
+    
+    // Test with some excess blob gas - should be greater than minimum
+    const fee_nonzero = calc_blob_fee(1000);
+    try testing.expect(fee_nonzero >= 1);
+    
+    // Test that increasing excess blob gas increases fee
+    const fee_low = calc_blob_fee(1000);
+    const fee_high = calc_blob_fee(10000);
+    try testing.expect(fee_high >= fee_low);
 }
