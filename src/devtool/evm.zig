@@ -464,19 +464,19 @@ test "DevtoolEvm step execution modifies stack correctly" {
     const frame = devtool_evm.current_frame.?;
     
     // Initially stack should be empty
-    try testing.expectEqual(@as(usize, 0), frame.stack.size();
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
     
     // Execute PUSH1 42
     const step1 = try devtool_evm.stepExecute();
     try testing.expectEqualStrings("PUSH1", step1.opcode_name);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size();
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
     const value1 = try frame.stack.peek();
     try testing.expectEqual(@as(u256, 42), value1);
     
     // Execute PUSH1 100 
     const step2 = try devtool_evm.stepExecute();
     try testing.expectEqualStrings("PUSH1", step2.opcode_name);
-    try testing.expectEqual(@as(usize, 2), frame.stack.size();
+    try testing.expectEqual(@as(usize, 2), frame.stack.size());
     const value2 = try frame.stack.peek(); // Top of stack
     try testing.expectEqual(@as(u256, 100), value2);
     const value3 = try frame.stack.peek_n(1); // Second from top
