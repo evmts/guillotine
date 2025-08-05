@@ -5,6 +5,7 @@ const primitives = @import("primitives");
 const Address = primitives.Address;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
+const Context = Evm.Context;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
 
@@ -62,12 +63,7 @@ test "GASLIMIT (0x45): Get block gas limit" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withEvm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
         defer frame.deinit();
 
         const interpreter = &evm;
@@ -134,12 +130,7 @@ test "CHAINID (0x46): Get chain ID" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withEvm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
         defer frame.deinit();
 
         const interpreter = &evm;
@@ -191,12 +182,8 @@ test "SELFBALANCE (0x47): Get contract's own balance" {
         // Set the contract's balance directly in the state
         try evm.state.set_balance(contract.address, balance);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withEvm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        const context = Context.init();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
         defer frame.deinit();
 
         const interpreter = &evm;
@@ -261,12 +248,7 @@ test "BASEFEE (0x48): Get block base fee" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withEvm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
         defer frame.deinit();
 
         const interpreter = &evm;
@@ -327,12 +309,7 @@ test "BLOBHASH (0x49): Get blob versioned hash" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(10000)
-        .build();
+    var frame = try Frame.init(allocator, &evm, 10000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
@@ -347,20 +324,10 @@ test "BLOBHASH (0x49): Get blob versioned hash" {
     // Test 2: Get second blob hash
     try frame.stack_push(1);
     _ = try evm.table.execute(interpreter, state, 0x49);
-    const result2 = try frame.pop();
-    try testing.expectEqual(blob_hashes[1], result2);
-
-    // Test 3: Get third blob hash
-    try frame.push(2);
-    _ = try evm.table.execute(0, interpreter, state, 0x49);
-    const result3 = try frame.pop();
-    try testing.expectEqual(blob_hashes[2], result3);
-
-    // Test 4: Index out of bounds (should return 0)
-    try frame.push(3);
     const result2 = try frame.stack_pop();
     try testing.expectEqual(blob_hashes[1], result2);
 
+    // Test 3: Get third blob hash
     // Test 3: Get third blob hash
     try frame.stack_push(2);
     _ = try evm.table.execute(interpreter, state, 0x49);
@@ -431,12 +398,7 @@ test "BLOBBASEFEE (0x4A): Get blob base fee" {
         );
         defer contract.deinit(allocator, null);
 
-        var frame_builder = Frame.builder(allocator);
-        var frame = try frame_builder
-            .withEvm(&evm)
-            .withContract(&contract)
-            .withGas(1000)
-            .build();
+        var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
         defer frame.deinit();
 
         const interpreter = &evm;
@@ -497,12 +459,7 @@ test "Block info opcodes: Gas consumption" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(10000)
-        .build();
+    var frame = try Frame.init(allocator, &evm, 10000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
@@ -568,12 +525,7 @@ test "Invalid opcodes 0x4B-0x4E: Should revert" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
@@ -626,12 +578,8 @@ test "SELFBALANCE: Balance changes during execution" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(10000)
-        .build();
+    const context = Context.init();
+    var frame = try Frame.init(allocator, &evm, 10000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
@@ -696,12 +644,7 @@ test "BLOBHASH: Empty blob list" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
@@ -756,12 +699,7 @@ test "CHAINID: EIP-1344 behavior" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
+    var frame = try Frame.init(allocator, &evm, 1000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
@@ -818,12 +756,7 @@ test "Stack operations: All opcodes push exactly one value" {
     );
     defer contract.deinit(allocator, null);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withEvm(&evm)
-        .withContract(&contract)
-        .withGas(10000)
-        .build();
+    var frame = try Frame.init(allocator, &evm, 10000, &contract, caller, &.{}, context);
     defer frame.deinit();
 
     const interpreter = &evm;
