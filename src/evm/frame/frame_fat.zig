@@ -237,7 +237,7 @@ test "FrameFat initialization" {
     const allocator = std.testing.allocator;
     
     // Mock VM context
-    var context = Context{
+    const context = Context{
         .tx_origin = primitives.Address.ZERO_ADDRESS,
         .gas_price = 1000,
         .block_number = 100,
@@ -294,7 +294,7 @@ test "FrameFat child frame initialization" {
     const allocator = std.testing.allocator;
     
     // Setup parent frame
-    var context = Context{
+    const context = Context{
         .tx_origin = primitives.Address.ZERO_ADDRESS,
         .gas_price = 1000,
         .block_number = 100,
