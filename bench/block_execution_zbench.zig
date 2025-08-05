@@ -456,7 +456,7 @@ fn generateManyBlocksBytecode(allocator: Allocator) ![]u8 {
     }
     
     // Second pass: add jumps between blocks
-    for (destinations.items, 0..) |dest, i| {
+    for (destinations.items, 0..) |_, i| {
         if (i + 1 < destinations.items.len) {
             try bytecode.appendSlice(&[_]u8{ 0x61 }); // PUSH2
             try bytecode.append(@intCast(destinations.items[i + 1] >> 8));
