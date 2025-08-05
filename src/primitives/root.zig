@@ -122,5 +122,21 @@ pub const EventLog = @import("event_log.zig");
 // Standards
 pub const Siwe = @import("siwe.zig");
 
+// JSON utilities
+pub const JsonUtils = @import("json_utils.zig");
+pub const parseHexU8 = JsonUtils.parseHexU8;
+pub const parseHexU16 = JsonUtils.parseHexU16;
+pub const parseHexU32 = JsonUtils.parseHexU32;
+pub const parseHexU64 = JsonUtils.parseHexU64;
+pub const parseHexU256 = JsonUtils.parseHexU256;
+pub const parseHexBytes = JsonUtils.parseHexBytes;
+pub const parseHexHash = JsonUtils.parseHexHash;
+pub const parseHexAddress = JsonUtils.parseHexAddress;
+pub const parseOptionalHexU64 = JsonUtils.parseOptionalHexU64;
+pub const parseOptionalHexBytes = JsonUtils.parseOptionalHexBytes;
+pub const parseOptionalHexAddress = JsonUtils.parseOptionalHexAddress;
+pub const validateHexString = JsonUtils.validateHexString;
+pub const JsonParseError = JsonUtils.JsonParseError;
+
 // Export common constants
 pub const ZERO_ADDRESS = Address.ZERO_ADDRESS;
