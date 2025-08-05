@@ -51,10 +51,10 @@ pub inline fn execute_with_inline_hot_ops(
             
             // Execute inline
             if (pc + 1 >= frame.contract.code_size) {
-                try frame.stack.push_unsafe(0);
+                frame.stack.append_unsafe(0);
             } else {
                 const value = frame.contract.get_op(pc + 1);
-                try frame.stack.push_unsafe(value);
+                frame.stack.append_unsafe(value);
             }
             
             return .{ .bytes_consumed = 2 };
@@ -75,7 +75,7 @@ pub inline fn execute_with_inline_hot_ops(
             
             // Execute inline
             const value = try frame.stack.peek();
-            try frame.stack.push_unsafe(value);
+            frame.stack.append_unsafe(value);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -91,10 +91,10 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasFastestStep
             
             // Execute inline
-            const b = try frame.stack.pop_unsafe();
-            const a = try frame.stack.pop_unsafe();
+            const b = frame.stack.pop_unsafe();
+            const a = frame.stack.pop_unsafe();
             const result = a +% b; // Wrapping addition
-            try frame.stack.push_unsafe(result);
+            frame.stack.append_unsafe(result);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -110,8 +110,8 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasFastestStep
             
             // Execute inline - delegate to memory operation for complexity
-            const offset = try frame.stack.pop_unsafe();
-            const value = try frame.stack.pop_unsafe();
+            const offset = frame.stack.pop_unsafe();
+            const value = frame.stack.pop_unsafe();
             
             // Memory expansion gas is handled by memory.write
             try frame.memory.write(offset, value, frame);
@@ -133,11 +133,11 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasFastestStep
             
             // Execute inline
-            const offset = try frame.stack.pop_unsafe();
+            const offset = frame.stack.pop_unsafe();
             
             // Memory expansion gas is handled by memory.read
             const value = try frame.memory.read(offset, frame);
-            try frame.stack.push_unsafe(value);
+            frame.stack.append_unsafe(value);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -153,7 +153,7 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(2); // GasQuickStep
             
             // Execute inline
-            _ = try frame.stack.pop_unsafe();
+            _ = frame.stack.pop_unsafe();
             
             return .{ .bytes_consumed = 1 };
         },
@@ -174,11 +174,11 @@ pub inline fn execute_with_inline_hot_ops(
                 if (pc + 1 < frame.contract.code_size) {
                     value = @as(u256, frame.contract.get_op(pc + 1)) << 8;
                 }
-                try frame.stack.push_unsafe(value);
+                frame.stack.append_unsafe(value);
             } else {
                 const value = (@as(u256, frame.contract.get_op(pc + 1)) << 8) | 
                               @as(u256, frame.contract.get_op(pc + 2));
-                try frame.stack.push_unsafe(value);
+                frame.stack.append_unsafe(value);
             }
             
             return .{ .bytes_consumed = 3 };
@@ -195,7 +195,7 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasFastestStep
             
             // Execute inline
-            try frame.stack.swap_unsafe(1);
+            frame.stack.swap_unsafe(1);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -215,7 +215,7 @@ pub inline fn execute_with_inline_hot_ops(
             
             // Execute inline
             const value = try frame.stack.peek_n(1);
-            try frame.stack.push_unsafe(value);
+            frame.stack.append_unsafe(value);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -231,9 +231,9 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasFastestStep
             
             // Execute inline
-            const value = try frame.stack.pop_unsafe();
+            const value = frame.stack.pop_unsafe();
             const result: u256 = if (value == 0) 1 else 0;
-            try frame.stack.push_unsafe(result);
+            frame.stack.append_unsafe(result);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -281,8 +281,8 @@ test "inline hot ops maintains correctness" {
     // Test ADD
     {
         var stack = Stack{};
-        try stack.push(10);
-        try stack.push(20);
+        try stack.append(10);
+        try stack.append(20);
         
         var mock_frame = struct {
             stack: *Stack,

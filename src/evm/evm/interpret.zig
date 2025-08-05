@@ -10,6 +10,7 @@ const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 const tracy = @import("../tracy_support.zig");
+const inline_hot_ops = @import("../jump_table/inline_hot_ops.zig");
 
 /// Execute contract bytecode and return the result.
 ///
@@ -124,7 +125,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             };
         }
 
-        const result = self.table.execute(frame.pc, interpreter, state, opcode) catch |err| {
+        const result = inline_hot_ops.execute_with_inline_hot_ops(&self.table, frame.pc, interpreter, state, opcode) catch |err| {
             contract.gas = frame.gas_remaining;
 
             var output: ?[]const u8 = null;
