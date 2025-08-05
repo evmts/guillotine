@@ -56,7 +56,7 @@ pub fn validate_stack_requirements(
     stack: *const Stack,
     operation: *const Operation,
 ) ExecutionError.Error!void {
-    const stack_size = stack.size;
+    const stack_size = stack.size();
 
     // Check minimum stack requirement
     if (stack_size < operation.min_stack) {
@@ -337,7 +337,7 @@ Use `std.debug.assert` for safety checks that are compiled out in release builds
 ```zig
 // Debug builds: Validates assumption
 // Release builds: No code generated
-std.debug.assert(frame.stack.size >= 2);
+std.debug.assert(frame.stack.size() >= 2);
 ```
 
 #### 7. **Direct Memory Access** (Avoid Copies)
@@ -370,7 +370,7 @@ pub fn op_add(pc: usize, interpreter: *Operation.Interpreter, state: *Operation.
     const frame = @as(*Frame, @ptrCast(@alignCast(state)));
     
     // Debug assertion (compiled out in release)
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     
     // Batch pop and in-place modification
     const b = frame.stack.pop_unsafe();      // Pop top
