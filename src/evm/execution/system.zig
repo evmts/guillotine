@@ -442,7 +442,11 @@ pub fn gas_op(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
 
     const frame = state;
 
-    try frame.stack.append(@as(u256, @intCast(frame.gas_remaining)));
+    // In block-based execution, we need to add back the current block's cost
+    // since it was deducted upfront but not yet consumed by individual opcodes
+    const gas_available = frame.gas_remaining + frame.current_block_cost;
+    
+    try frame.stack.append(@as(u256, @intCast(gas_available)));
 
     return Operation.ExecutionResult{};
 }
