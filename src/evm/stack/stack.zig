@@ -65,11 +65,11 @@ pub const Error = error{
 /// Architecture-appropriate alignment for optimal access
 data: [CAPACITY]u256 align(@alignOf(u256)) = undefined,
 
-/// Pointer to the stack end (1 slot above the stack top item).
-/// When stack is empty, this points to data[0].
-/// When stack has n items, this points to data[n].
-/// Invariant: data.ptr <= end <= data.ptr + CAPACITY
-end: [*]u256 = undefined,
+/// Number of elements currently on the stack.
+/// When stack is empty, this is 0.
+/// When stack has n items, this is n.
+/// Invariant: 0 <= len <= CAPACITY
+len: usize = 0,
 
 // Compile-time validations for stack design assumptions
 comptime {
@@ -80,23 +80,15 @@ comptime {
 /// Initialize a new stack.
 /// Must be called before using the stack.
 pub fn init() Stack {
-    var stack = Stack{};
-    stack.end = stack.data[0..].ptr;
-    return stack;
+    return Stack{
+        .data = undefined,
+        .len = 0,
+    };
 }
 
 /// Get the current number of elements on the stack.
 pub fn size(self: *const Stack) usize {
-    const end_addr = @intFromPtr(self.end);
-    const start_addr = @intFromPtr(&self.data[0]);
-    
-    // Handle uninitialized or corrupted stack
-    if (end_addr < start_addr) {
-        return 0;
-    }
-    
-    const byte_diff = end_addr - start_addr;
-    return byte_diff / @sizeOf(u256);
+    return self.len;
 }
 
 /// Push a value onto the stack (safe version).
@@ -110,15 +102,14 @@ pub fn size(self: *const Stack) usize {
 /// try stack.append(0x1234);
 /// ```
 pub fn append(self: *Stack, value: u256) Error!void {
-    const current_size = self.size();
-    if (current_size >= CAPACITY) {
+    if (self.len >= CAPACITY) {
         @branchHint(.cold);
         // Debug logging removed for fuzz testing compatibility
         return Error.StackOverflow;
     }
     // Debug logging removed for fuzz testing compatibility
-    self.end[0] = value;
-    self.end += 1;
+    self.data[self.len] = value;
+    self.len += 1;
 }
 
 /// Push a value onto the stack (unsafe version).
@@ -130,8 +121,8 @@ pub fn append(self: *Stack, value: u256) Error!void {
 /// @param value The 256-bit value to push
 pub fn append_unsafe(self: *Stack, value: u256) void {
     @branchHint(.likely);
-    self.end[0] = value;
-    self.end += 1;
+    self.data[self.len] = value;
+    self.len += 1;
 }
 
 /// Pop a value from the stack (safe version).
@@ -148,14 +139,14 @@ pub fn append_unsafe(self: *Stack, value: u256) void {
 /// const value = try stack.pop();
 /// ```
 pub fn pop(self: *Stack) Error!u256 {
-    if (self.size() == 0) {
+    if (self.len == 0) {
         @branchHint(.cold);
         // Debug logging removed for fuzz testing compatibility
         return Error.StackUnderflow;
     }
-    self.end -= 1;
-    const value = self.end[0];
-    self.end[0] = 0;
+    self.len -= 1;
+    const value = self.data[self.len];
+    self.data[self.len] = 0;
     // Debug logging removed for fuzz testing compatibility
     return value;
 }
@@ -169,9 +160,9 @@ pub fn pop(self: *Stack) Error!u256 {
 /// @return The popped value
 pub fn pop_unsafe(self: *Stack) u256 {
     @branchHint(.likely);
-    self.end -= 1;
-    const value = self.end[0];
-    self.end[0] = 0;
+    self.len -= 1;
+    const value = self.data[self.len];
+    self.data[self.len] = 0;
     return value;
 }
 
@@ -183,7 +174,7 @@ pub fn pop_unsafe(self: *Stack) u256 {
 /// @return Pointer to the top value
 pub fn peek_unsafe(self: *const Stack) *const u256 {
     @branchHint(.likely);
-    return &(self.end - 1)[0];
+    return &self.data[self.len - 1];
 }
 
 /// Duplicate the nth element onto the top of stack (unsafe version).
@@ -195,16 +186,16 @@ pub fn peek_unsafe(self: *const Stack) *const u256 {
 pub fn dup_unsafe(self: *Stack, n: usize) void {
     @branchHint(.likely);
     @setRuntimeSafety(false);
-    self.append_unsafe((self.end - n)[0]);
+    self.append_unsafe(self.data[self.len - n]);
 }
 
 /// Pop 2 values without pushing (unsafe version)
 pub fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
     @branchHint(.likely); 
     @setRuntimeSafety(false);
-    self.end -= 2;
-    const a = self.end[0];
-    const b = self.end[1];
+    self.len -= 2;
+    const a = self.data[self.len];
+    const b = self.data[self.len + 1];
     return .{ .a = a, .b = b };
 }
 
@@ -212,11 +203,11 @@ pub fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
 pub fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
     @branchHint(.likely);
     @setRuntimeSafety(false);
-    self.end -= 3;
+    self.len -= 3;
     return .{
-        .a = self.end[0],
-        .b = self.end[1],
-        .c = self.end[2],
+        .a = self.data[self.len],
+        .b = self.data[self.len + 1],
+        .c = self.data[self.len + 2],
     };
 }
 
@@ -224,7 +215,7 @@ pub fn set_top_unsafe(self: *Stack, value: u256) void {
     @branchHint(.likely);
     // Assumes stack is not empty; this should be guaranteed by jump_table validation
     // for opcodes that use this pattern (e.g., after a pop and peek on a stack with >= 2 items).
-    (self.end - 1)[0] = value;
+    self.data[self.len - 1] = value;
 }
 
 /// Swap the top element with the nth element below it (unsafe version).
@@ -237,7 +228,7 @@ pub fn set_top_unsafe(self: *Stack, value: u256) void {
 /// @param n Position below top to swap with (1-16)
 pub fn swap_unsafe(self: *Stack, n: usize) void {
     @branchHint(.likely);
-    std.mem.swap(u256, &(self.end - 1)[0], &(self.end - 1 - n)[0]);
+    std.mem.swap(u256, &self.data[self.len - 1], &self.data[self.len - 1 - n]);
 }
 
 /// Peek at the nth element from the top (for test compatibility)
@@ -246,12 +237,12 @@ pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
-    return (self.end - 1 - n)[0];
+    return self.data[self.len - 1 - n];
 }
 
 /// Clear the stack (for test compatibility)
 pub fn clear(self: *Stack) void {
-    self.end = self.data[0..].ptr;
+    self.len = 0;
     // Zero out the data for security
     @memset(self.data[0..CAPACITY], 0);
 }
@@ -262,7 +253,7 @@ pub fn peek(self: *const Stack) Error!u256 {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
-    return (self.end - 1)[0];
+    return self.data[self.len - 1];
 }
 
 // Fuzz testing functions
@@ -1000,7 +991,7 @@ test "performance_benchmarks" {
     while (i < iterations) : (i += 1) {
         stack.append_unsafe(i % 256);
         if (stack.size() >= CAPACITY) {
-            stack.end = stack.data[0..].ptr;
+            stack.clear();
         }
     }
     const unsafe_append_ns = timer.read();
@@ -1010,7 +1001,7 @@ test "performance_benchmarks" {
     i = 0;
     while (i < iterations) : (i += 1) {
         _ = stack.append(i % 256) catch {
-            stack.end = stack.data[0..].ptr;
+            stack.clear();
             continue;
         };
     }
