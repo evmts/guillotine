@@ -261,20 +261,24 @@ pub fn op_sdiv(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
 
-    const result: u256 = blk: {
-        if (a == 0) {
-            break :blk 0;
+    var result: u256 = undefined;
+    if (a == 0) {
+        @branchHint(.unlikely);
+        result = 0;
+    } else {
+        const a_i256 = @as(i256, @bitCast(a));
+        const b_i256 = @as(i256, @bitCast(b));
+        const min_i256 = std.math.minInt(i256);
+        if (b_i256 == min_i256 and a_i256 == -1) {
+            @branchHint(.unlikely);
+            // MIN_I256 / -1 = MIN_I256 (overflow wraps)
+            // This matches EVM behavior where overflow wraps around
+            result = b;
         } else {
-            const a_i256 = @as(i256, @bitCast(a));
-            const b_i256 = @as(i256, @bitCast(b));
-            // Use std.math.divTrunc which handles overflow for us
-            const result_i256 = std.math.divTrunc(i256, b_i256, a_i256) catch |err| switch (err) {
-                error.Overflow => b_i256, // MIN_I256 / -1 returns MIN_I256
-                error.DivisionByZero => unreachable, // We already checked for zero
-            };
-            break :blk @as(u256, @bitCast(result_i256));
+            const result_i256 = @divTrunc(b_i256, a_i256);
+            result = @as(u256, @bitCast(result_i256));
         }
-    };
+    }
 
     frame.stack.set_top_unsafe(result);
 

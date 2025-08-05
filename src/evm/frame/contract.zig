@@ -47,7 +47,6 @@ const CodeAnalysis = @import("code_analysis.zig");
 const AnalysisLRUCache = @import("analysis_lru_cache.zig").AnalysisLRUCache;
 const AnalysisCacheConfig = @import("analysis_lru_cache.zig").AnalysisCacheConfig;
 const StoragePool = @import("storage_pool.zig");
-const tracy = @import("../tracy_support.zig");
 const Log = @import("../log.zig");
 const build_options = @import("build_options");
 
@@ -729,9 +728,6 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
 /// // Analysis is now cached for future use
 /// ```
 pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [32]u8) CodeAnalysisError!?*const CodeAnalysis {
-    const zone = tracy.zone(@src(), "analyze_code");
-    defer zone.end();
-    
     if (code.len == 0) {
         return null;
     }
@@ -807,10 +803,8 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
 
 /// Direct bytecode analysis without caching (for size-optimized builds)
 fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnalysisError!*const CodeAnalysis {
-    const zone = tracy.zone(@src(), "analyze_code_direct");
-    defer zone.end();
-    
-    // For now, create a simple analysis without block support until we fix the import issue
+    // When caching is disabled, we still need to manage memory properly
+    // The caller (ensure_analysis) is responsible for cleanup
     const analysis = allocator.create(CodeAnalysis) catch |err| {
         Log.debug("Failed to allocate CodeAnalysis: {any}", .{err});
         return error.OutOfMemory;

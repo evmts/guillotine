@@ -7,6 +7,3 @@
 [submodule "bench/official/evms/evmone/evmone"]
 	path = bench/official/evms/evmone/evmone
 	url = https://github.com/ethereum/evmone
-[submodule "libs/tracy"]
-	path = libs/tracy
-	url = https://github.com/wolfpld/tracy.git
