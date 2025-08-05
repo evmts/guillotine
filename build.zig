@@ -592,7 +592,7 @@ pub fn build(b: *std.Build) void {
     const minimal_build_options = b.addOptions();
     minimal_build_options.addOption(bool, "no_bn254", true);
     minimal_build_options.addOption(bool, "tests_enabled", false);
-    minimal_build_options.addOption(bool, "enable_tracy", tracy_enabled);
+    minimal_build_options.addOption(bool, "enable_tracy", false);
     const minimal_build_options_mod = minimal_build_options.createModule();
     
     minimal_evm_mod.addImport("build_options", minimal_build_options_mod);
@@ -625,7 +625,7 @@ pub fn build(b: *std.Build) void {
     const precompile_opt_build_options = b.addOptions();
     precompile_opt_build_options.addOption(bool, "no_precompiles", false);
     precompile_opt_build_options.addOption(bool, "no_bn254", true); // Disable BN254 to avoid conflicts
-    precompile_opt_build_options.addOption(bool, "enable_tracy", tracy_enabled);
+    precompile_opt_build_options.addOption(bool, "enable_tracy", false);
     const precompile_opt_build_options_mod = precompile_opt_build_options.createModule();
     
     const precompile_opt_evm_mod = b.createModule(.{
