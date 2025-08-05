@@ -199,6 +199,7 @@ test "optimized memory operations - pre-calculated expansion" {
         .vm = &vm_instance,
         .frame = &frame_instance,
         .exit_status = null,
+        .push_values = &.{},
     };
     
     // Test MSTORE with pre-calculated cost
