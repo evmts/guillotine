@@ -166,7 +166,7 @@ pub fn zbench_aos_random(allocator: std.mem.Allocator) void {
     const aos_table = Evm.JumpTable.DEFAULT;
     
     // Create deterministic "random" sequence
-    var prng = std.rand.DefaultPrng.init(0x12345678);
+    var prng = std.Random.DefaultPrng.init(0x12345678);
     const random = prng.random();
     
     // Pre-generate random opcodes
@@ -197,7 +197,7 @@ pub fn zbench_soa_random(allocator: std.mem.Allocator) void {
     const soa_table = Evm.SoaJumpTable.init_from_aos(&aos_table);
     
     // Create deterministic "random" sequence
-    var prng = std.rand.DefaultPrng.init(0x12345678);
+    var prng = std.Random.DefaultPrng.init(0x12345678);
     const random = prng.random();
     
     // Pre-generate random opcodes
