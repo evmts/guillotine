@@ -41,6 +41,7 @@ pub fn execute_advanced(
         .vm = vm,
         .frame = frame,
         .exit_status = null,
+        .push_values = stream.push_values,
     };
     
     // Main execution loop
