@@ -256,7 +256,12 @@ test "CodeAnalysis deinit handles partially initialized state" {
     var analysis = CodeAnalysis{
         .code_segments = try BitVec64.init(allocator, 10),
         .jumpdest_bitmap = try BitVec64.init(allocator, 10),
-        .block_starts = BitVec64{}, // Empty
+        .block_starts = BitVec64{
+            .bits = &[_]u64{},
+            .size = 0,
+            .owned = false,
+            .cached_ptr = undefined,
+        }, // Empty
         .block_metadata = &[_]BlockMetadata{},
         .pc_to_block = &[_]u16{},
         .block_count = 0,
@@ -270,4 +275,81 @@ test "CodeAnalysis deinit handles partially initialized state" {
     
     // Should not crash on deinit
     analysis.deinit(allocator);
+}
+
+test "BlockMetadata array operations" {
+    const allocator = std.testing.allocator;
+    
+    // Test dynamic allocation and access
+    const blocks = try allocator.alloc(BlockMetadata, 100);
+    defer allocator.free(blocks);
+    
+    // Fill with test data
+    for (blocks, 0..) |*block, i| {
+        block.* = BlockMetadata{
+            .gas_cost = @intCast(i * 100),
+            .stack_req = @intCast(i),
+            .stack_max = @intCast(i * 2),
+        };
+    }
+    
+    // Verify data integrity
+    try std.testing.expectEqual(@as(u32, 5000), blocks[50].gas_cost);
+    try std.testing.expectEqual(@as(i16, 50), blocks[50].stack_req);
+    try std.testing.expectEqual(@as(i16, 100), blocks[50].stack_max);
+}
+
+test "pc_to_block mapping edge cases" {
+    const allocator = std.testing.allocator;
+    
+    // Test large bytecode mapping
+    const mapping = try allocator.alloc(u16, 24576); // Max contract size
+    defer allocator.free(mapping);
+    
+    // Simulate block assignments
+    var current_block: u16 = 0;
+    for (mapping, 0..) |*pc_block, i| {
+        if (i % 100 == 0) current_block += 1; // New block every 100 bytes
+        pc_block.* = current_block;
+    }
+    
+    // Test boundary conditions
+    try std.testing.expectEqual(@as(u16, 1), mapping[0]);
+    try std.testing.expectEqual(@as(u16, 2), mapping[100]);
+    try std.testing.expectEqual(@as(u16, 246), mapping[24500]);
+}
+
+test "BlockMetadata with contract deployment scenarios" {
+    const allocator = std.testing.allocator;
+    
+    // Simulate analysis for different contract types
+    const test_cases = .{
+        .{ .size = 0, .blocks = 0 },      // Empty contract
+        .{ .size = 1, .blocks = 1 },      // Minimal contract (STOP)
+        .{ .size = 100, .blocks = 5 },    // Small contract
+        .{ .size = 24576, .blocks = 1000 }, // Max size contract
+    };
+    
+    inline for (test_cases) |tc| {
+        var analysis = CodeAnalysis{
+            .code_segments = try BitVec64.init(allocator, tc.size),
+            .jumpdest_bitmap = try BitVec64.init(allocator, tc.size),
+            .block_starts = try BitVec64.init(allocator, tc.size),
+            .block_metadata = if (tc.blocks > 0) try allocator.alloc(BlockMetadata, tc.blocks) else &[_]BlockMetadata{},
+            .pc_to_block = if (tc.size > 0) try allocator.alloc(u16, tc.size) else &[_]u16{},
+            .block_count = tc.blocks,
+            .max_stack_depth = 0,
+            .has_dynamic_jumps = false,
+            .has_static_jumps = false,
+            .has_selfdestruct = false,
+            .has_create = false,
+            .block_gas_costs = null,
+        };
+        defer analysis.deinit(allocator);
+        
+        // Verify fields are correctly set
+        try std.testing.expectEqual(tc.blocks, analysis.block_count);
+        try std.testing.expectEqual(tc.blocks, analysis.block_metadata.len);
+        try std.testing.expectEqual(tc.size, analysis.pc_to_block.len);
+    }
 }
