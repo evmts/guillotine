@@ -480,6 +480,43 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     return analysis.jumpdest_bitmap.isSetUnchecked(pos);
 }
 
+/// Optimized jump validation using pre-computed analysis.
+///
+/// This function provides O(1) validation for static jumps that were
+/// pre-validated during analysis, falling back to bitmap lookup for
+/// dynamic jumps.
+///
+/// ## Parameters
+/// - `self`: Contract instance with analysis
+/// - `allocator`: Allocator for lazy analysis
+/// - `pc`: Current program counter (where JUMP/JUMPI is located)
+/// - `dest`: Jump destination to validate
+///
+/// ## Returns
+/// true if the jump is valid, false otherwise
+pub fn valid_jumpdest_optimized(self: *Contract, allocator: std.mem.Allocator, pc: usize, dest: u256) bool {
+    // Fast path: empty code or out of bounds
+    if (self.is_empty or dest >= self.code_size) return false;
+    // Fast path: no JUMPDESTs in code
+    if (!self.has_jumpdests) return false;
+    
+    // Perform analysis if not already done
+    if (self.analysis == null) {
+        self.analysis = analyze_code(allocator, self.code, self.code_hash) catch return false;
+    }
+    const analysis = self.analysis orelse return false;
+    
+    // Use optimized jump validation if available
+    if (analysis.jump_analysis) |jump_analysis| {
+        const jump_analysis_mod = @import("jump_analysis.zig");
+        return jump_analysis_mod.optimize_jump_validation(jump_analysis, pc, dest);
+    }
+    
+    // Fall back to bitmap check
+    const pos: u32 = @intCast(@min(dest, std.math.maxInt(u32)));
+    return analysis.jumpdest_bitmap.isSetUnchecked(pos);
+}
+
 /// Check if position is code (not data)
 pub fn is_code(self: *const Contract, pos: u64) bool {
     if (self.analysis) |analysis| {
