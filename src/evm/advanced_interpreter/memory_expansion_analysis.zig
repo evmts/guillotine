@@ -96,31 +96,48 @@ pub fn analyze_memory_expansion(
             // Memory read operations
             .MLOAD => {
                 if (push_stack.items.len > 0) {
-                    const static_offset = push_stack.pop();
-                    if (static_offset) |offset| {
-                        // Static offset - pre-calculate expansion
-                        const required_size = offset + 32;
-                        const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
-                        
-                        try blocks[current_block].accesses.put(pc, .{
-                            .access_type = .read,
-                            .static_offset = @as(u64, @intCast(offset)),
-                            .static_size = 32,
-                            .expansion_cost = expansion_cost,
-                            .max_memory_size = @as(u64, @intCast(required_size)),
-                        });
-                        
-                        blocks[current_block].total_static_expansion_cost += expansion_cost;
-                        current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
-                    } else {
-                        // Dynamic offset
-                        blocks[current_block].has_dynamic_access = true;
-                        try blocks[current_block].accesses.put(pc, .{
-                            .access_type = .read,
-                        });
+                    const static_offset_opt_opt = push_stack.pop();
+                    if (static_offset_opt_opt) |static_offset_opt| {
+                        if (static_offset_opt) |static_offset| {
+                            // Static offset - pre-calculate expansion
+                            // SAFETY: We convert u256 to u64 here because:
+                            // 1. Memory offsets beyond 2^64 are impractical due to gas costs
+                            // 2. The EVM would run out of gas long before reaching such offsets
+                            // 3. Memory expansion costs grow quadratically, making large offsets prohibitively expensive
+                            // If the offset doesn't fit in u64, we treat it as a dynamic access
+                            const max_u64 = std.math.maxInt(u64);
+                                // Offset too large for u64 - treat as dynamic access
+                                blocks[current_block].has_dynamic_access = true;
+                                try blocks[current_block].accesses.put(pc, .{
+                                    .access_type = .read,
+                                });
+                                continue;
+                            }
+                            const offset_u64 = @as(u64, static_offset);
+                            
+                            const required_size = offset_u64 + 32;
+                            const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
+                            
+                            try blocks[current_block].accesses.put(pc, .{
+                                .access_type = .read,
+                                .static_offset = offset_u64,
+                                .static_size = 32,
+                                .expansion_cost = expansion_cost,
+                                .max_memory_size = required_size,
+                            });
+                            
+                            blocks[current_block].total_static_expansion_cost += expansion_cost;
+                            current_memory_size = @max(current_memory_size, required_size);
+                        } else {
+                            // Dynamic offset (inner optional is null)
+                            blocks[current_block].has_dynamic_access = true;
+                            try blocks[current_block].accesses.put(pc, .{
+                                .access_type = .read,
+                            });
+                        }
                     }
                 } else {
-                    // Dynamic offset
+                    // No value on stack to analyze
                     blocks[current_block].has_dynamic_access = true;
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .read,
@@ -139,19 +156,29 @@ pub fn analyze_memory_expansion(
                 
                 if (offset) |static_offset| {
                     // Static offset - pre-calculate expansion
-                    const required_size = static_offset + 32;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
+                    // SAFETY: See MLOAD for rationale on u256 to u64 conversion
+                    if (static_offset > std.math.maxInt(u64)) {
+                        // Offset too large - treat as dynamic
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .write,
+                        });
+                        continue;
+                    }
+                    const offset_u64 = @as(u64, static_offset);
+                    const required_size = offset_u64 + 32;
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .write,
-                        .static_offset = @as(u64, @intCast(static_offset)),
+                        .static_offset = offset_u64,
                         .static_size = 32,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = @as(u64, @intCast(required_size)),
+                        .max_memory_size = required_size,
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
+                    current_memory_size = @max(current_memory_size, required_size);
                 } else {
                     // Dynamic offset
                     blocks[current_block].has_dynamic_access = true;
@@ -168,19 +195,29 @@ pub fn analyze_memory_expansion(
                 
                 if (offset) |static_offset| {
                     // Static offset - pre-calculate expansion
-                    const required_size = static_offset + 1;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
+                    // SAFETY: See MLOAD for rationale on u256 to u64 conversion
+                    if (static_offset > std.math.maxInt(u64)) {
+                        // Offset too large - treat as dynamic
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .write,
+                        });
+                        continue;
+                    }
+                    const offset_u64 = @as(u64, static_offset);
+                    const required_size = offset_u64 + 1;
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .write,
-                        .static_offset = @as(u64, @intCast(static_offset)),
+                        .static_offset = offset_u64,
                         .static_size = 1,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = @as(u64, @intCast(required_size)),
+                        .max_memory_size = required_size,
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
+                    current_memory_size = @max(current_memory_size, required_size);
                 } else {
                     // Dynamic offset
                     blocks[current_block].has_dynamic_access = true;
@@ -199,19 +236,38 @@ pub fn analyze_memory_expansion(
                 
                 if (dest_offset != null and size != null) {
                     // Static copy - pre-calculate expansion
-                    const required_size = dest_offset.? + size.?;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
+                    // SAFETY: See MLOAD for rationale on u256 to u64 conversion
+                    if (dest_offset.? > std.math.maxInt(u64)) {
+                        // Values too large - treat as dynamic
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .copy_write,
+                        });
+                        continue;
+                    }
+                    const dest_u64 = @as(u64, dest_offset.?);
+                    if (size.? > std.math.maxInt(u64)) {
+                        // Size too large - treat as dynamic
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .copy_write,
+                        });
+                        continue;
+                    }
+                    const size_u64 = @as(u64, size.?);
+                    const required_size = dest_u64 + size_u64;
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .copy_write,
-                        .static_offset = if (dest_offset) |off| @as(u64, @intCast(off)) else null,
-                        .static_size = if (size) |sz| @as(u64, @intCast(sz)) else null,
+                        .static_offset = dest_u64,
+                        .static_size = size_u64,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = @as(u64, @intCast(required_size)),
+                        .max_memory_size = required_size,
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
+                    current_memory_size = @max(current_memory_size, required_size);
                 } else {
                     // Dynamic copy
                     blocks[current_block].has_dynamic_access = true;
@@ -226,22 +282,45 @@ pub fn analyze_memory_expansion(
                 const size = if (push_stack.items.len > 0) push_stack.pop() else null;
                 const offset = if (push_stack.items.len > 0) push_stack.pop() else null;
                 
-                if (offset != null and size != null and size.? > 0) {
+                if (offset != null and size != null) {
+                    // Skip zero-size returns as they don't expand memory
+                    if (size.? == 0) {
+                        continue;
+                    }
                     // Static return data
-                    const required_size = offset.? + size.?;
-                    const expansion_cost = calculate_expansion_cost(current_memory_size, @as(u64, @intCast(required_size)));
+                    // SAFETY: See MLOAD for rationale on u256 to u64 conversion
+                    if (offset.? > std.math.maxInt(u64)) {
+                        // Values too large - treat as dynamic
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .return_data,
+                        });
+                        continue;
+                    }
+                    const offset_u64 = @as(u64, offset.?);
+                    if (size.? > std.math.maxInt(u64)) {
+                        // Size too large - treat as dynamic
+                        blocks[current_block].has_dynamic_access = true;
+                        try blocks[current_block].accesses.put(pc, .{
+                            .access_type = .return_data,
+                        });
+                        continue;
+                    }
+                    const size_u64 = @as(u64, size.?);
+                    const required_size = offset_u64 + size_u64;
+                    const expansion_cost = calculate_expansion_cost(current_memory_size, required_size);
                     
                     try blocks[current_block].accesses.put(pc, .{
                         .access_type = .return_data,
-                        .static_offset = offset,
-                        .static_size = if (size) |sz| @as(u64, @intCast(sz)) else null,
+                        .static_offset = offset_u64,
+                        .static_size = size_u64,
                         .expansion_cost = expansion_cost,
-                        .max_memory_size = @as(u64, @intCast(required_size)),
+                        .max_memory_size = required_size,
                     });
                     
                     blocks[current_block].total_static_expansion_cost += expansion_cost;
-                    current_memory_size = @max(current_memory_size, @as(u64, @intCast(required_size)));
-                } else if (size == null or size.? > 0) {
+                    current_memory_size = @max(current_memory_size, required_size);
+                } else if (size == null or (size != null and size.? > 0)) {
                     // Dynamic return data
                     blocks[current_block].has_dynamic_access = true;
                     try blocks[current_block].accesses.put(pc, .{
