@@ -69,17 +69,97 @@ pub fn make_push_small(comptime n: u8) fn (usize, Operation.Interpreter, Operati
                 unreachable;
             }
 
-            var value: u64 = 0;
             const code = frame.contract.code;
-
-            for (0..n) |i| {
-                if (pc + 1 + i < code.len) {
-                    @branchHint(.likely);
-                    value = (value << 8) | code[pc + 1 + i];
-                } else {
-                    value = value << 8;
-                }
-            }
+            const start = pc + 1;
+            
+            // Optimized path using std.mem.readInt for direct big-endian reads
+            const value = switch (n) {
+                1 => blk: {
+                    if (start < code.len) {
+                        break :blk @as(u64, code[start]);
+                    } else {
+                        break :blk @as(u64, 0);
+                    }
+                },
+                2 => blk: {
+                    if (start + 1 < code.len) {
+                        break :blk @as(u64, std.mem.readInt(u16, code[start..][0..2], .big));
+                    } else if (start < code.len) {
+                        break :blk @as(u64, code[start]) << 8;
+                    } else {
+                        break :blk @as(u64, 0);
+                    }
+                },
+                3 => blk: {
+                    if (start + 2 < code.len) {
+                        var buf: [4]u8 = .{0} ** 4;
+                        @memcpy(buf[1..4], code[start..start + 3]);
+                        break :blk @as(u64, std.mem.readInt(u32, &buf, .big));
+                    } else {
+                        // Fallback to byte-by-byte for partial reads
+                        var v: u64 = 0;
+                        for (0..n) |i| {
+                            if (start + i < code.len) {
+                                v = (v << 8) | code[start + i];
+                            } else {
+                                v = v << 8;
+                            }
+                        }
+                        break :blk v;
+                    }
+                },
+                4 => blk: {
+                    if (start + 3 < code.len) {
+                        break :blk @as(u64, std.mem.readInt(u32, code[start..][0..4], .big));
+                    } else {
+                        // Fallback to byte-by-byte for partial reads
+                        var v: u64 = 0;
+                        for (0..n) |i| {
+                            if (start + i < code.len) {
+                                v = (v << 8) | code[start + i];
+                            } else {
+                                v = v << 8;
+                            }
+                        }
+                        break :blk v;
+                    }
+                },
+                5, 6, 7 => blk: {
+                    if (start + n - 1 < code.len) {
+                        var buf: [8]u8 = .{0} ** 8;
+                        @memcpy(buf[8 - n..], code[start..start + n]);
+                        break :blk std.mem.readInt(u64, &buf, .big);
+                    } else {
+                        // Fallback to byte-by-byte for partial reads
+                        var v: u64 = 0;
+                        for (0..n) |i| {
+                            if (start + i < code.len) {
+                                v = (v << 8) | code[start + i];
+                            } else {
+                                v = v << 8;
+                            }
+                        }
+                        break :blk v;
+                    }
+                },
+                8 => blk: {
+                    if (start + 7 < code.len) {
+                        break :blk std.mem.readInt(u64, code[start..][0..8], .big);
+                    } else {
+                        // Fallback to byte-by-byte for partial reads
+                        var v: u64 = 0;
+                        for (0..n) |i| {
+                            if (start + i < code.len) {
+                                v = (v << 8) | code[start + i];
+                            } else {
+                                v = v << 8;
+                            }
+                        }
+                        break :blk v;
+                    }
+                },
+                else => unreachable,
+            };
 
             frame.stack.append_unsafe(@as(u256, value));
 
@@ -99,14 +179,59 @@ pub fn make_push(comptime n: u8) fn (usize, Operation.Interpreter, Operation.Sta
             if (frame.stack.size >= Stack.CAPACITY) {
                 unreachable;
             }
-            var value: u256 = 0;
+            
             const code = frame.contract.code;
-
-            for (0..n) |i| {
-                if (pc + 1 + i < code.len) {
-                    value = (value << 8) | code[pc + 1 + i];
+            const start = pc + 1;
+            
+            // Optimized implementation using buffer-based loading
+            var value: u256 = 0;
+            
+            if (start + n - 1 < code.len) {
+                // Fast path: All bytes are available, use optimized loading
+                if (n <= 16) {
+                    // For PUSH9-PUSH16, load into two u64s
+                    var high: u64 = 0;
+                    var low: u64 = 0;
+                    
+                    if (n > 8) {
+                        // Read high bytes (up to 8 bytes)
+                        const high_bytes = n - 8;
+                        var buf_high: [8]u8 = .{0} ** 8;
+                        @memcpy(buf_high[8 - high_bytes..], code[start..start + high_bytes]);
+                        high = std.mem.readInt(u64, &buf_high, .big);
+                        
+                        // Read low 8 bytes
+                        low = std.mem.readInt(u64, code[start + high_bytes..][0..8], .big);
+                    } else {
+                        // n <= 8, use existing optimization from make_push_small
+                        var buf: [8]u8 = .{0} ** 8;
+                        @memcpy(buf[8 - n..], code[start..start + n]);
+                        low = std.mem.readInt(u64, &buf, .big);
+                    }
+                    
+                    value = (@as(u256, high) << 64) | @as(u256, low);
                 } else {
-                    value = value << 8;
+                    // For PUSH17-PUSH32, use a 32-byte buffer
+                    var buf: [32]u8 = .{0} ** 32;
+                    @memcpy(buf[32 - n..], code[start..start + n]);
+                    
+                    // Read as four u64 values
+                    const q1 = std.mem.readInt(u64, buf[0..8], .big);
+                    const q2 = std.mem.readInt(u64, buf[8..16], .big);
+                    const q3 = std.mem.readInt(u64, buf[16..24], .big);
+                    const q4 = std.mem.readInt(u64, buf[24..32], .big);
+                    
+                    value = (@as(u256, q1) << 192) | (@as(u256, q2) << 128) | 
+                            (@as(u256, q3) << 64) | @as(u256, q4);
+                }
+            } else {
+                // Slow path: Partial read at end of code, fall back to byte-by-byte
+                for (0..n) |i| {
+                    if (start + i < code.len) {
+                        value = (value << 8) | code[start + i];
+                    } else {
+                        value = value << 8;
+                    }
                 }
             }
 
@@ -144,14 +269,49 @@ pub fn push_n(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
         return ExecutionError.Error.StackOverflow;
     }
 
-    var value: u256 = 0;
     const code = frame.contract.code;
-
-    for (0..n) |i| {
-        if (pc + 1 + i < code.len) {
-            value = (value << 8) | code[pc + 1 + i];
+    const start = pc + 1;
+    
+    // Optimized implementation using buffer-based loading
+    var value: u256 = 0;
+    
+    if (start + n - 1 < code.len) {
+        // Fast path: All bytes are available
+        if (n <= 8) {
+            // For PUSH1-PUSH8, use optimized u64 loading
+            var buf: [8]u8 = .{0} ** 8;
+            @memcpy(buf[8 - n..], code[start..start + n]);
+            value = std.mem.readInt(u64, &buf, .big);
+        } else if (n <= 16) {
+            // For PUSH9-PUSH16, load into two u64s
+            const high_bytes = n - 8;
+            var buf_high: [8]u8 = .{0} ** 8;
+            @memcpy(buf_high[8 - high_bytes..], code[start..start + high_bytes]);
+            const high = std.mem.readInt(u64, &buf_high, .big);
+            const low = std.mem.readInt(u64, code[start + high_bytes..][0..8], .big);
+            value = (@as(u256, high) << 64) | @as(u256, low);
         } else {
-            value = value << 8;
+            // For PUSH17-PUSH32, use a 32-byte buffer
+            var buf: [32]u8 = .{0} ** 32;
+            @memcpy(buf[32 - n..], code[start..start + n]);
+            
+            // Read as four u64 values
+            const q1 = std.mem.readInt(u64, buf[0..8], .big);
+            const q2 = std.mem.readInt(u64, buf[8..16], .big);
+            const q3 = std.mem.readInt(u64, buf[16..24], .big);
+            const q4 = std.mem.readInt(u64, buf[24..32], .big);
+            
+            value = (@as(u256, q1) << 192) | (@as(u256, q2) << 128) | 
+                    (@as(u256, q3) << 64) | @as(u256, q4);
+        }
+    } else {
+        // Slow path: Partial read at end of code
+        for (0..n) |i| {
+            if (start + i < code.len) {
+                value = (value << 8) | code[start + i];
+            } else {
+                value = value << 8;
+            }
         }
     }
 
