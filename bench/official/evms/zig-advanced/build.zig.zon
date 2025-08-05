@@ -1,0 +1,16 @@
+.{
+    .name = .zigadvanced,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.14.0",
+    .fingerprint = 0xbb56cf54b1726b28,
+    .dependencies = .{
+        .guillotine = .{
+            .path = "../../../..",
+        },
+    },
+    .paths = .{
+        "src",
+        "build.zig",
+        "build.zig.zon",
+    },
+}
