@@ -448,16 +448,17 @@ test "Integration: Complex ADDMOD and MULMOD calculations" {
     // ADDMOD pops a, pops b, then peeks n (and overwrites n with result)
     // So we need stack: [n, b, a] (a on top)
     // a = MAX_U256 - 10, b = 20, n = 100
-    // a + b wraps to 9, so result should be 9 % 100 = 9
+    // Correct: a + b = 2^256 + 9, and (2^256 + 9) % 100 = 45
     try frame_ptr.stack.append(n); // modulus (bottom)
     try frame_ptr.stack.append(b); // second addend (middle)
     try frame_ptr.stack.append(a); // first addend (top)
     _ = try evm.table.execute(0, interpreter, state, 0x08); // ADDMOD
 
     const addmod_result = try frame_ptr.stack.peek_n(0);
-    // We calculated that (a + b) % n should be 9
-    // With overflow: (MAX_U256 - 10 + 20) wraps to 9, and 9 % 100 = 9
-    try testing.expectEqual(@as(u256, 9), addmod_result);
+    // Correct calculation: (a + b) % n should be 45
+    // a = 2^256 - 11, b = 20, so a + b = 2^256 + 9
+    // 2^256 ≡ 36 (mod 100), so (2^256 + 9) ≡ 45 (mod 100)
+    try testing.expectEqual(@as(u256, 45), addmod_result);
 
     // Test MULMOD with large values
     frame_ptr.stack.clear();

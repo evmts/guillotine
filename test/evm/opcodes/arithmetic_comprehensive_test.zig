@@ -1155,10 +1155,11 @@ test "ADDMOD: No intermediate overflow" {
     _ = try evm.table.execute(0, interpreter, state, 0x08);
 
     const value = try frame.stack.pop();
-    // (MAX + MAX) % 10 = 4
-    // MAX + MAX in u256 wraps to: 2^256 - 2 (since MAX = 2^256 - 1)
-    // (2^256 - 2) % 10 = 4 (since 2^256 % 10 = 6)
-    try testing.expectEqual(@as(u256, 4), value);
+    // (MAX + MAX) % 10 = 0 (correct calculation)
+    // MAX = 2^256 - 1, so MAX + MAX = 2^257 - 2
+    // 2^256 ≡ 6 (mod 10), so 2^257 ≡ 2 (mod 10)
+    // Therefore (2^257 - 2) ≡ 0 (mod 10)
+    try testing.expectEqual(@as(u256, 0), value);
 }
 
 // ============================

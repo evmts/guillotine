@@ -432,9 +432,9 @@ pub fn op_smod(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 /// Stack: [50, 50, 0] => [0] (modulo by zero)
 ///
 /// ## Note
-/// This operation is atomic - the addition and modulo are
-/// performed as one operation to handle cases where a + b
-/// exceeds 2^256.
+/// This operation correctly computes (a + b) mod n even when
+/// a + b exceeds 2^256, using specialized algorithms to avoid
+/// intermediate overflow.
 pub fn op_addmod(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
@@ -450,9 +450,12 @@ pub fn op_addmod(pc: usize, interpreter: Operation.Interpreter, state: Operation
     if (n == 0) {
         result = 0;
     } else {
-        // Add the two numbers, then take modulo n
-        const sum = a +% b;
-        result = sum % n;
+        // Use U256 add_mod to properly handle overflow
+        const a_u256 = U256.from_u256_unsafe(a);
+        const b_u256 = U256.from_u256_unsafe(b);
+        const n_u256 = U256.from_u256_unsafe(n);
+        const result_u256 = a_u256.add_mod(b_u256, n_u256);
+        result = result_u256.to_u256_unsafe();
     }
 
     frame.stack.set_top_unsafe(result);
@@ -1538,4 +1541,89 @@ test "arithmetic_benchmarks" {
 
     std.log.debug("  Gas calculation throughput ({} calcs): {} ns", .{ gas_iterations, gas_calculation_ns });
     std.log.debug("  Average gas calculation: {} ns/calc", .{gas_calculation_ns / gas_iterations});
+}
+
+// Tests for ADDMOD overflow bug fix (Issue #331)
+test "ADDMOD: Issue #331 overflow test case 1" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x08}, .{ .address = [_]u8{0} ** 20 });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+    defer frame.deinit();
+
+    // Test case from issue: a = 2^255, b = 2^255, n = 7
+    // Expected: (2^255 + 2^255) mod 7 = 2^256 mod 7 = 1
+    // With buggy implementation: 0 mod 7 = 0 (WRONG)
+    
+    const a: u256 = (@as(u256, 1) << 255); // 2^255
+    const b: u256 = (@as(u256, 1) << 255); // 2^255
+    const n: u256 = 7;
+
+    // ADDMOD pops in order: n (first), b (second), a (third)
+    try frame.stack.append(n);
+    try frame.stack.append(b);
+    try frame.stack.append(a);
+
+    const interpreter: *Operation.Interpreter = @ptrCast(&vm);
+    const state: *Operation.State = @ptrCast(&frame);
+
+    _ = try op_addmod(0, interpreter, state);
+
+    const result = try frame.stack.pop();
+    
+    // 2^256 mod 7: 2^256 = 2^(6*42 + 4) = (2^6)^42 * 2^4 = 64^42 * 16 (mod 7)
+    // 64 ≡ 1 (mod 7), so 64^42 ≡ 1 (mod 7)
+    // Therefore 2^256 ≡ 1 * 16 ≡ 2 (mod 7)
+    try testing.expectEqual(@as(u256, 2), result);
+}
+
+test "ADDMOD: Issue #331 overflow test case 2" {
+    const testing = std.testing;
+    const allocator = testing.allocator;
+
+    var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Vm.init(allocator, db_interface, null, null);
+    defer vm.deinit();
+
+    var contract = try @import("../frame/contract.zig").Contract.init(allocator, &[_]u8{0x08}, .{ .address = [_]u8{0} ** 20 });
+    defer contract.deinit(allocator, null);
+
+    var frame = try Frame.init(allocator, &vm, 1000000, contract, [_]u8{0} ** 20, &.{});
+    defer frame.deinit();
+
+    // Test case: MAX_U256 + 1 mod 17
+    // Expected: (2^256 - 1 + 1) mod 17 = 2^256 mod 17 
+    
+    const a: u256 = std.math.maxInt(u256); // 2^256 - 1
+    const b: u256 = 1;
+    const n: u256 = 17;
+
+    // ADDMOD pops in order: n (first), b (second), a (third)
+    try frame.stack.append(n);
+    try frame.stack.append(b);
+    try frame.stack.append(a);
+
+    const interpreter: *Operation.Interpreter = @ptrCast(&vm);
+    const state: *Operation.State = @ptrCast(&frame);
+
+    _ = try op_addmod(0, interpreter, state);
+
+    const result = try frame.stack.pop();
+    
+    // 2^256 mod 17: Using Fermat's little theorem or direct calculation
+    // 2^16 ≡ 1 (mod 17), so 2^256 = 2^(16*16) ≡ 1 (mod 17)
+    try testing.expectEqual(@as(u256, 1), result);
 }
