@@ -2,6 +2,7 @@ const std = @import("std");
 const primitives = @import("primitives");
 const CallResult = @import("call_result.zig").CallResult;
 const precompiles = @import("../precompiles/precompiles.zig");
+const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const Contract = @import("../frame/contract.zig");
@@ -29,9 +30,9 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     Log.debug("VM.call_contract: Call from {any} to {any}, gas={}, static={}", .{ caller, to, gas, is_static });
 
     // Check if this is a precompile call
-    if (precompiles.is_precompile(to)) {
-        Log.debug("VM.call_contract: Detected precompile call to {any}", .{to});
-        return self.execute_precompile_call(to, input, gas, is_static);
+    if (precompile_addresses.get_precompile_id_checked(to)) |precompile_id| {
+        Log.debug("VM.call_contract: Detected precompile call to {any} (ID {})", .{ to, precompile_id });
+        return self.execute_precompile_call_by_id(precompile_id, input, gas, is_static);
     }
 
     // Regular contract call

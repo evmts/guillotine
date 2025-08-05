@@ -1,6 +1,7 @@
 const std = @import("std");
 const Stack = @import("stack.zig");
 const Operation = @import("../opcodes/operation.zig").Operation;
+const OperationView = @import("../jump_table/jump_table.zig").OperationView;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Log = @import("../log.zig");
 
@@ -34,7 +35,7 @@ pub const ValidationPatterns = @import("validation_patterns.zig");
 /// - max_stack: Maximum allowed before operation (to prevent overflow)
 ///
 /// @param stack The stack to validate
-/// @param operation The operation with stack requirements
+/// @param operation The operation with stack requirements (can be Operation or OperationView)
 /// @throws StackUnderflow if stack has fewer than min_stack elements
 /// @throws StackOverflow if stack has more than max_stack elements
 ///
@@ -47,7 +48,7 @@ pub const ValidationPatterns = @import("validation_patterns.zig");
 /// ```
 pub fn validate_stack_requirements(
     stack: *const Stack,
-    operation: *const Operation,
+    operation: anytype,
 ) ExecutionError.Error!void {
     const stack_size = stack.size;
     Log.debug("StackValidation.validate_stack_requirements: Validating stack, size={}, min_required={}, max_allowed={}", .{ stack_size, operation.min_stack, operation.max_stack });
@@ -257,11 +258,14 @@ test "validate_stack_requirements" {
     var stack = Stack{};
 
     // Test underflow
-    const op_needs_2 = Operation{
+    const op_needs_2 = OperationView{
         .execute = undefined,
         .constant_gas = 3,
         .min_stack = 2,
         .max_stack = Stack.CAPACITY - 1,
+        .dynamic_gas = null,
+        .memory_size = null,
+        .undefined = false,
     };
 
     try testing.expectError(ExecutionError.Error.StackUnderflow, validate_stack_requirements(&stack, &op_needs_2));
@@ -272,11 +276,14 @@ test "validate_stack_requirements" {
     try validate_stack_requirements(&stack, &op_needs_2);
 
     // Test overflow
-    const op_max_10 = Operation{
+    const op_max_10 = OperationView{
         .execute = undefined,
         .constant_gas = 3,
         .min_stack = 0,
         .max_stack = 10,
+        .dynamic_gas = null,
+        .memory_size = null,
+        .undefined = false,
     };
 
     // Fill stack beyond max_stack

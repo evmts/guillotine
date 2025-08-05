@@ -200,13 +200,10 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
         try stack_validation.validate_stack_requirements(&frame.stack, &op_view);
     }
 
-    // Gas consumption - most opcodes have non-zero gas cost
+    // Gas consumption - consume_gas already handles zero cost efficiently
     const gas_cost = self.constant_gas[opcode];
-    if (gas_cost > 0) {
-        @branchHint(.likely);
-        Log.debug("JumpTable.execute: Consuming {} gas for opcode 0x{x:0>2}", .{ gas_cost, opcode });
-        try frame.consume_gas(gas_cost);
-    }
+    Log.debug("JumpTable.execute: Consuming {} gas for opcode 0x{x:0>2}", .{ gas_cost, opcode });
+    try frame.consume_gas(gas_cost);
 
     const res = try self.execute_funcs[opcode](pc, interpreter, frame);
     Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed, gas_remaining={}", .{ opcode, frame.gas_remaining });

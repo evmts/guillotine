@@ -36,22 +36,23 @@ test "JumpTable basic operations" {
 
 test "JumpTable initialization and validation" {
     const jt = JumpTable.init();
-    try std.testing.expectEqual(@as(usize, 256), jt.table.len);
+    try std.testing.expectEqual(@as(usize, 256), jt.execute_funcs.len);
 
-    // Check that all entries are initially null
+    // Check that all entries are initially set to undefined
     for (0..256) |i| {
-        try std.testing.expectEqual(@as(?*const Operation.Operation, null), jt.table[i]);
+        try std.testing.expectEqual(true, jt.undefined_flags[i]);
     }
 
-    // Validate should fill all nulls with UNDEFINED
+    // Validate should check consistency
     var mutable_jt = jt;
     mutable_jt.validate();
 
-    // Now check that all entries have been filled
+    // Check that all entries still have consistent state
     for (0..256) |i| {
-        const entry = mutable_jt.table[i];
-        try std.testing.expect(entry != null);
-        try std.testing.expectEqual(true, entry.?.undefined);
+        const is_undefined = mutable_jt.undefined_flags[i];
+        if (is_undefined) {
+            try std.testing.expectEqual(@as(u64, 0), mutable_jt.constant_gas[i]);
+        }
     }
 }
 
@@ -73,7 +74,7 @@ test "JumpTable basic initialization" {
     const jt = JumpTable.init_from_hardfork(.FRONTIER);
 
     // Verify the jump table was created
-    try std.testing.expect(jt.table.len == 256);
+    try std.testing.expectEqual(@as(usize, 256), jt.execute_funcs.len);
 
     // Test a basic operation lookup
     const add_op = jt.get_operation(0x01);

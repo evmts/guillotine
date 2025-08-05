@@ -838,6 +838,12 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
             .cached_ptr = undefined,
         },
         .block_metadata = &.{}, // Empty slice
+        .block_metadata_soa = CodeAnalysis.BlockMetadataSoA{
+            .gas_costs = &[_]u32{},
+            .stack_reqs = &[_]i16{},
+            .stack_max_growths = &[_]i16{},
+            .count = 0,
+        },
         .pc_to_block = &.{}, // Empty slice
         .block_count = 0,
     };
