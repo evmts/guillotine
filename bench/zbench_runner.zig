@@ -12,6 +12,7 @@ const memory_benchmark = @import("memory_benchmark.zig");
 const hardfork_benchmark = @import("hardfork_benchmark.zig");
 const uint_benchmark = @import("uint_benchmark.zig");
 const jump_table_benchmarks = @import("jump_table_benchmarks.zig");
+const inline_hot_ops_benchmarks = @import("inline_hot_ops_zbench.zig");
 
 pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     var benchmark = zbench.Benchmark.init(allocator, .{});
@@ -209,6 +210,12 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     try benchmark.add("Jump Table SoA Sequential", jump_table_benchmarks.zbench_soa_sequential, .{});
     try benchmark.add("Jump Table AoS Random", jump_table_benchmarks.zbench_aos_random, .{});
     try benchmark.add("Jump Table SoA Random", jump_table_benchmarks.zbench_soa_random, .{});
+
+    // Inline Hot Operations Benchmarks - Compare dispatch methods
+    try benchmark.add("Hot Ops Regular Dispatch", inline_hot_ops_benchmarks.zbench_regular_dispatch, .{});
+    try benchmark.add("Hot Ops Inline Dispatch", inline_hot_ops_benchmarks.zbench_inline_hot_ops, .{});
+    try benchmark.add("Hot Opcode Workload", inline_hot_ops_benchmarks.zbench_hot_opcode_workload, .{});
+    try benchmark.add("Cold Opcode Workload", inline_hot_ops_benchmarks.zbench_cold_opcode_workload, .{});
 
     // Run all benchmarks
     const stdout = std.io.getStdOut().writer();
