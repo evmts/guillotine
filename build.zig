@@ -645,6 +645,21 @@ pub fn build(b: *std.Build) void {
     jump_table_bench_step.dependOn(&run_jump_table_bench_cmd.step);
 
     // Add precompile optimization benchmark executable
+    // Add memory optimization benchmark executable
+    const memory_opt_bench_exe = b.addExecutable(.{
+        .name = "memory-opt-bench",
+        .root_source_file = b.path("bench/memory_optimization_bench.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    memory_opt_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+    b.installArtifact(memory_opt_bench_exe);
+    
+    const run_memory_opt_bench_cmd = b.addRunArtifact(memory_opt_bench_exe);
+    run_memory_opt_bench_cmd.step.dependOn(b.getInstallStep());
+    const memory_opt_bench_step = b.step("bench-memory-opt", "Run memory optimization benchmarks");
+    memory_opt_bench_step.dependOn(&run_memory_opt_bench_cmd.step);
+
     const precompile_opt_bench_exe = b.addExecutable(.{
         .name = "precompile-opt-bench",
         .root_source_file = b.path("bench/precompile_optimized_benchmark.zig"),
