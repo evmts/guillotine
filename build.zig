@@ -1134,6 +1134,21 @@ pub fn build(b: *std.Build) void {
     const gas_test_step = b.step("test-gas", "Run Gas Accounting tests");
     gas_test_step.dependOn(&run_gas_test.step);
 
+    // Add GAS opcode tests
+    const gas_opcode_test = b.addTest(.{
+        .name = "gas-opcode-test",
+        .root_source_file = b.path("test/evm/gas_opcode_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    gas_opcode_test.root_module.stack_check = false;
+    gas_opcode_test.root_module.addImport("primitives", primitives_mod);
+    gas_opcode_test.root_module.addImport("evm", evm_mod);
+
+    const run_gas_opcode_test = b.addRunArtifact(gas_opcode_test);
+    const gas_opcode_test_step = b.step("test-gas-opcode", "Run GAS opcode tests");
+    gas_opcode_test_step.dependOn(&run_gas_opcode_test.step);
+
     // Add Static Call Protection tests
     const static_protection_test = b.addTest(.{
         .name = "static-protection-test",
@@ -1622,6 +1637,7 @@ pub fn build(b: *std.Build) void {
     
     test_step.dependOn(&run_integration_test.step);
     test_step.dependOn(&run_gas_test.step);
+    test_step.dependOn(&run_gas_opcode_test.step);
     test_step.dependOn(&run_static_protection_test.step);
     test_step.dependOn(&run_blake2f_test.step);
     if (run_bn254_rust_test) |bn254_test| {
