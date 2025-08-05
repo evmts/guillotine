@@ -20,7 +20,6 @@ pub fn op_stop(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 }
 
 pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
     _ = interpreter;
 
     const frame = state;
@@ -30,8 +29,8 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     // Use unsafe pop since bounds checking is done by jump_table
     const dest = frame.stack.pop_unsafe();
 
-    // Check if destination is a valid JUMPDEST (pass u256 directly)
-    if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
+    // Use optimized jump validation with PC information
+    if (!frame.contract.valid_jumpdest_optimized(frame.allocator, pc, dest)) {
         @branchHint(.unlikely);
         return ExecutionError.Error.InvalidJump;
     }
