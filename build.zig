@@ -561,7 +561,7 @@ pub fn build(b: *std.Build) void {
 
     const bn254_zig_bench_step = b.step("bench-bn254-zig", "Run BN254 Zig native benchmarks");
     bn254_zig_bench_step.dependOn(&run_bn254_zig_bench_cmd.step);
-    
+
     // Add inline ops benchmark executable
     const inline_ops_bench_exe = b.addExecutable(.{
         .name = "inline-ops-bench",
@@ -572,7 +572,7 @@ pub fn build(b: *std.Build) void {
     inline_ops_bench_exe.root_module.addImport("evm", evm_mod);
     inline_ops_bench_exe.root_module.addImport("primitives", primitives_mod);
     b.installArtifact(inline_ops_bench_exe);
-    
+
     const run_inline_ops_bench_cmd = b.addRunArtifact(inline_ops_bench_exe);
     run_inline_ops_bench_cmd.step.dependOn(b.getInstallStep());
     const inline_ops_bench_step = b.step("bench-inline-ops", "Run inline hot operations benchmarks");
@@ -587,17 +587,17 @@ pub fn build(b: *std.Build) void {
     });
     minimal_evm_mod.addImport("primitives", primitives_mod);
     minimal_evm_mod.addImport("crypto", crypto_mod);
-    
+
     // Create build options with no_bn254 set to avoid missing header
     const minimal_build_options = b.addOptions();
     minimal_build_options.addOption(bool, "no_bn254", true);
     minimal_build_options.addOption(bool, "tests_enabled", false);
     minimal_build_options.addOption(bool, "enable_tracy", false);
     const minimal_build_options_mod = minimal_build_options.createModule();
-    
+
     minimal_evm_mod.addImport("build_options", minimal_build_options_mod);
     // Note: NOT linking bn254_lib or adding c_kzg to avoid conflicts
-    
+
     const jump_table_bench_exe = b.addExecutable(.{
         .name = "jump-table-bench",
         .root_source_file = b.path("bench/minimal_jump_table_bench.zig"),
@@ -608,7 +608,7 @@ pub fn build(b: *std.Build) void {
     jump_table_bench_exe.root_module.addImport("primitives", primitives_mod);
     jump_table_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
     b.installArtifact(jump_table_bench_exe);
-    
+
     const run_jump_table_bench_cmd = b.addRunArtifact(jump_table_bench_exe);
     run_jump_table_bench_cmd.step.dependOn(b.getInstallStep());
     const jump_table_bench_step = b.step("bench-jump-table", "Run jump table AoS vs SoA benchmarks");
@@ -623,7 +623,7 @@ pub fn build(b: *std.Build) void {
     });
     block_metadata_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
     b.installArtifact(block_metadata_bench_exe);
-    
+
     const run_block_metadata_bench_cmd = b.addRunArtifact(block_metadata_bench_exe);
     run_block_metadata_bench_cmd.step.dependOn(b.getInstallStep());
     const block_metadata_bench_step = b.step("bench-block-metadata", "Run block metadata AoS vs SoA benchmarks");
@@ -642,7 +642,7 @@ pub fn build(b: *std.Build) void {
     precompile_opt_build_options.addOption(bool, "no_bn254", true); // Disable BN254 to avoid conflicts
     precompile_opt_build_options.addOption(bool, "enable_tracy", false);
     const precompile_opt_build_options_mod = precompile_opt_build_options.createModule();
-    
+
     const precompile_opt_evm_mod = b.createModule(.{
         .root_source_file = b.path("src/evm/root.zig"),
         .imports = &.{
@@ -654,7 +654,7 @@ pub fn build(b: *std.Build) void {
     precompile_opt_bench_exe.root_module.addImport("evm", precompile_opt_evm_mod);
     precompile_opt_bench_exe.root_module.addImport("primitives", primitives_mod);
     b.installArtifact(precompile_opt_bench_exe);
-    
+
     const run_precompile_opt_bench_cmd = b.addRunArtifact(precompile_opt_bench_exe);
     run_precompile_opt_bench_cmd.step.dependOn(b.getInstallStep());
     const precompile_opt_bench_step = b.step("bench-precompile-opt", "Run precompile optimization benchmarks");
@@ -856,22 +856,6 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(evm_runner_exe);
 
-    // Memory leak test executable
-    const memory_leak_test_exe = b.addExecutable(.{
-        .name = "memory-leak-test",
-        .root_source_file = b.path("src/memory_leak_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    memory_leak_test_exe.root_module.addImport("evm", evm_mod);
-    memory_leak_test_exe.root_module.addImport("primitives", primitives_mod);
-
-    b.installArtifact(memory_leak_test_exe);
-
-    const run_memory_leak_test_cmd = b.addRunArtifact(memory_leak_test_exe);
-    const memory_leak_snailtracer_step = b.step("test-memory-leak-snailtracer", "Run memory leak test with snailtracer");
-    memory_leak_snailtracer_step.dependOn(&run_memory_leak_test_cmd.step);
-
     const run_evm_runner_cmd = b.addRunArtifact(evm_runner_exe);
     if (b.args) |args| {
         run_evm_runner_cmd.addArgs(args);
@@ -917,16 +901,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseFast, // Always use ReleaseFast for benchmarks
     });
-    
-    
+
     b.installArtifact(poop_runner_exe);
-    
+
     const run_poop_cmd = b.addRunArtifact(poop_runner_exe);
     run_poop_cmd.step.dependOn(build_evm_runner_step); // Ensure evm-runner is built
     if (b.args) |args| {
         run_poop_cmd.addArgs(args);
     }
-    
+
     const poop_step = b.step("poop", "Run poop benchmark on snailtracer (Linux only)");
     poop_step.dependOn(&run_poop_cmd.step);
 
@@ -1624,7 +1607,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_jump_table_test.step);
     test_step.dependOn(&run_opcodes_test.step);
     test_step.dependOn(&run_vm_opcode_test.step);
-    
+
     // Add inline ops test
     const inline_ops_test = b.addTest(.{
         .name = "inline-ops-test",
@@ -1640,7 +1623,7 @@ pub fn build(b: *std.Build) void {
     const inline_ops_test_step = b.step("test-inline-ops", "Run inline ops performance tests");
     inline_ops_test_step.dependOn(&run_inline_ops_test.step);
     test_step.dependOn(&run_inline_ops_test.step);
-    
+
     test_step.dependOn(&run_integration_test.step);
     test_step.dependOn(&run_gas_test.step);
     test_step.dependOn(&run_static_protection_test.step);
