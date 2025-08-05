@@ -1,146 +1,78 @@
 const std = @import("std");
-const builtin = @import("builtin");
-const evm = @import("evm");
-const primitives = @import("primitives");
+const root = @import("root.zig");
+const Evm = root.Evm;
+const primitives = root.primitives;
+const Allocator = std.mem.Allocator;
 
-pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    const stdout = std.io.getStdOut().writer();
+/// Benchmark arithmetic loop with block execution disabled
+pub fn zbench_arithmetic_no_blocks(allocator: Allocator) void {
+    // Use GPA for the benchmark
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
     
-    if (builtin.mode != .ReleaseFast) {
-        try stdout.print("Warning: Run with -O ReleaseFast for accurate benchmarks\n", .{});
-    }
-    
-    try stdout.print("\n=== Block-Based Execution Performance Benchmark ===\n\n", .{});
-    
-    // Benchmark simple arithmetic loop
-    try benchmarkArithmeticLoop(allocator);
-    
-    // Benchmark memory-intensive operations
-    try benchmarkMemoryOperations(allocator);
-    
-    // Benchmark control flow heavy code
-    try benchmarkControlFlow(allocator);
-}
-
-// Benchmark a simple arithmetic loop
-fn benchmarkArithmeticLoop(allocator: std.mem.Allocator) !void {
-    const stdout = std.io.getStdOut().writer();
-    
-    try stdout.print("Arithmetic Loop Benchmark (1000 iterations of ADD/MUL/SUB):\n", .{});
-    
-    // Bytecode for a loop that does arithmetic operations
-    // This creates blocks of straight-line arithmetic
-    const bytecode = try generateArithmeticLoopBytecode(allocator);
-    defer allocator.free(bytecode);
-    
-    const iterations = 1000;
-    const warmup = 100;
+    // Generate bytecode
+    const bytecode = generateArithmeticLoopBytecode(gpa_allocator) catch return;
+    defer gpa_allocator.free(bytecode);
     
     // Create VM and contract
-    var memory_db = evm.MemoryDatabase.init(allocator);
+    var memory_db = Evm.MemoryDatabase.init(gpa_allocator);
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
+    var vm = Evm.Evm.init(gpa_allocator, db_interface, null, null, null, 0, false, null) catch return;
+    defer vm.deinit();
     
-    // Test with block execution disabled
-    {
-        var total_time: u64 = 0;
-        for (0..warmup) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            // Force disable block execution
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            contract.analysis = null; // Disable block execution
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        
-        var timer = try std.time.Timer.start();
-        for (0..iterations) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            contract.analysis = null; // Disable block execution
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        total_time = timer.read();
-        
-        try stdout.print("  Without block execution: {d:.2} ms\n", .{@as(f64, @floatFromInt(total_time)) / 1_000_000});
-    }
+    var contract = Evm.Contract.init(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        1000000,
+        bytecode,
+        [_]u8{0} ** 32,
+        &.{},
+        false
+    );
+    defer contract.deinit(gpa_allocator, null);
+    contract.analysis = null; // Disable block execution
     
-    // Test with block execution enabled
-    {
-        var total_time: u64 = 0;
-        for (0..warmup) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        
-        var timer = try std.time.Timer.start();
-        for (0..iterations) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        total_time = timer.read();
-        
-        try stdout.print("  With block execution: {d:.2} ms\n\n", .{@as(f64, @floatFromInt(total_time)) / 1_000_000});
-    }
+    const result = vm.interpret(&contract, &.{}, false) catch return;
+    defer if (result.output) |output| gpa_allocator.free(output);
+}
+
+/// Benchmark arithmetic loop with block execution enabled
+pub fn zbench_arithmetic_with_blocks(allocator: Allocator) void {
+    // Use GPA for the benchmark
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
+    
+    // Generate bytecode
+    const bytecode = generateArithmeticLoopBytecode(gpa_allocator) catch return;
+    defer gpa_allocator.free(bytecode);
+    
+    // Create VM and contract
+    var memory_db = Evm.MemoryDatabase.init(gpa_allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    var vm = Evm.Evm.init(gpa_allocator, db_interface, null, null, null, 0, false, null) catch return;
+    defer vm.deinit();
+    
+    var contract = Evm.Contract.init(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        1000000,
+        bytecode,
+        [_]u8{0} ** 32,
+        &.{},
+        false
+    );
+    defer contract.deinit(gpa_allocator, null);
+    
+    const result = vm.interpret(&contract, &.{}, false) catch return;
+    defer if (result.output) |output| gpa_allocator.free(output);
 }
 
 // Generate bytecode for arithmetic loop
@@ -192,77 +124,75 @@ fn generateArithmeticLoopBytecode(allocator: std.mem.Allocator) ![]u8 {
     return result;
 }
 
-// Benchmark memory-intensive operations
-fn benchmarkMemoryOperations(allocator: std.mem.Allocator) !void {
-    const stdout = std.io.getStdOut().writer();
+/// Benchmark memory operations with block execution disabled
+pub fn zbench_memory_no_blocks(allocator: Allocator) void {
+    // Use GPA for the benchmark
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
     
-    try stdout.print("Memory Operations Benchmark (MSTORE/MLOAD patterns):\n", .{});
+    // Generate bytecode
+    const bytecode = generateMemoryBytecode(gpa_allocator) catch return;
+    defer gpa_allocator.free(bytecode);
     
-    // Bytecode that does repeated memory operations
-    const bytecode = try generateMemoryBytecode(allocator);
-    defer allocator.free(bytecode);
-    
-    const iterations = 1000;
-    
-    var memory_db = evm.MemoryDatabase.init(allocator);
+    // Create VM and contract
+    var memory_db = Evm.MemoryDatabase.init(gpa_allocator);
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
+    var vm = Evm.Evm.init(gpa_allocator, db_interface, null, null, null, 0, false, null) catch return;
+    defer vm.deinit();
     
-    // Without block execution
-    {
-        var timer = try std.time.Timer.start();
-        for (0..iterations) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            contract.analysis = null;
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        const time = timer.read();
-        
-        try stdout.print("  Without block execution: {d:.2} ms\n", .{@as(f64, @floatFromInt(time)) / 1_000_000});
-    }
+    var contract = Evm.Contract.init(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        1000000,
+        bytecode,
+        [_]u8{0} ** 32,
+        &.{},
+        false
+    );
+    defer contract.deinit(gpa_allocator, null);
+    contract.analysis = null; // Disable block execution
     
-    // With block execution
-    {
-        var timer = try std.time.Timer.start();
-        for (0..iterations) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        const time = timer.read();
-        
-        try stdout.print("  With block execution: {d:.2} ms\n\n", .{@as(f64, @floatFromInt(time)) / 1_000_000});
-    }
+    const result = vm.interpret(&contract, &.{}, false) catch return;
+    defer if (result.output) |output| gpa_allocator.free(output);
+}
+
+/// Benchmark memory operations with block execution enabled
+pub fn zbench_memory_with_blocks(allocator: Allocator) void {
+    // Use GPA for the benchmark
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
+    
+    // Generate bytecode
+    const bytecode = generateMemoryBytecode(gpa_allocator) catch return;
+    defer gpa_allocator.free(bytecode);
+    
+    // Create VM and contract
+    var memory_db = Evm.MemoryDatabase.init(gpa_allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    var vm = Evm.Evm.init(gpa_allocator, db_interface, null, null, null, 0, false, null) catch return;
+    defer vm.deinit();
+    
+    var contract = Evm.Contract.init(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        1000000,
+        bytecode,
+        [_]u8{0} ** 32,
+        &.{},
+        false
+    );
+    defer contract.deinit(gpa_allocator, null);
+    
+    const result = vm.interpret(&contract, &.{}, false) catch return;
+    defer if (result.output) |output| gpa_allocator.free(output);
 }
 
 // Generate bytecode for memory operations
@@ -296,77 +226,75 @@ fn generateMemoryBytecode(allocator: std.mem.Allocator) ![]u8 {
     return try allocator.dupe(u8, bytecode.items);
 }
 
-// Benchmark control flow heavy code
-fn benchmarkControlFlow(allocator: std.mem.Allocator) !void {
-    const stdout = std.io.getStdOut().writer();
+/// Benchmark control flow with block execution disabled
+pub fn zbench_control_flow_no_blocks(allocator: Allocator) void {
+    // Use GPA for the benchmark
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
     
-    try stdout.print("Control Flow Benchmark (many small blocks with jumps):\n", .{});
+    // Generate bytecode
+    const bytecode = generateControlFlowBytecode(gpa_allocator) catch return;
+    defer gpa_allocator.free(bytecode);
     
-    // Bytecode with many conditional jumps
-    const bytecode = try generateControlFlowBytecode(allocator);
-    defer allocator.free(bytecode);
-    
-    const iterations = 1000;
-    
-    var memory_db = evm.MemoryDatabase.init(allocator);
+    // Create VM and contract
+    var memory_db = Evm.MemoryDatabase.init(gpa_allocator);
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
+    var vm = Evm.Evm.init(gpa_allocator, db_interface, null, null, null, 0, false, null) catch return;
+    defer vm.deinit();
     
-    // Without block execution
-    {
-        var timer = try std.time.Timer.start();
-        for (0..iterations) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            contract.analysis = null;
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        const time = timer.read();
-        
-        try stdout.print("  Without block execution: {d:.2} ms\n", .{@as(f64, @floatFromInt(time)) / 1_000_000});
-    }
+    var contract = Evm.Contract.init(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        1000000,
+        bytecode,
+        [_]u8{0} ** 32,
+        &.{},
+        false
+    );
+    defer contract.deinit(gpa_allocator, null);
+    contract.analysis = null; // Disable block execution
     
-    // With block execution
-    {
-        var timer = try std.time.Timer.start();
-        for (0..iterations) |_| {
-            var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-            defer vm.deinit();
-            
-            var contract = evm.Contract.init(
-                primitives.Address.ZERO,
-                primitives.Address.ZERO,
-                0,
-                1000000,
-                bytecode,
-                [_]u8{0} ** 32,
-                &.{},
-                false
-            );
-            defer contract.deinit(allocator, null);
-            
-            const result = try vm.interpret(&contract, &.{}, false);
-            defer if (result.output) |output| allocator.free(output);
-        }
-        const time = timer.read();
-        
-        try stdout.print("  With block execution: {d:.2} ms\n\n", .{@as(f64, @floatFromInt(time)) / 1_000_000});
-    }
+    const result = vm.interpret(&contract, &.{}, false) catch return;
+    defer if (result.output) |output| gpa_allocator.free(output);
+}
+
+/// Benchmark control flow with block execution enabled
+pub fn zbench_control_flow_with_blocks(allocator: Allocator) void {
+    // Use GPA for the benchmark
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const gpa_allocator = gpa.allocator();
+    
+    // Generate bytecode
+    const bytecode = generateControlFlowBytecode(gpa_allocator) catch return;
+    defer gpa_allocator.free(bytecode);
+    
+    // Create VM and contract
+    var memory_db = Evm.MemoryDatabase.init(gpa_allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    var vm = Evm.Evm.init(gpa_allocator, db_interface, null, null, null, 0, false, null) catch return;
+    defer vm.deinit();
+    
+    var contract = Evm.Contract.init(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        1000000,
+        bytecode,
+        [_]u8{0} ** 32,
+        &.{},
+        false
+    );
+    defer contract.deinit(gpa_allocator, null);
+    
+    const result = vm.interpret(&contract, &.{}, false) catch return;
+    defer if (result.output) |output| gpa_allocator.free(output);
 }
 
 // Generate bytecode with control flow
@@ -400,6 +328,3 @@ fn generateControlFlowBytecode(allocator: std.mem.Allocator) ![]u8 {
     return try allocator.dupe(u8, bytecode.items);
 }
 
-test "block execution benchmark" {
-    try main();
-}
