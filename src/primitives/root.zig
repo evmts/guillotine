@@ -118,6 +118,8 @@ pub const Blob = @import("blob.zig");
 
 // Contract utilities
 pub const EventLog = @import("event_log.zig");
+pub const TransactionReceipt = @import("receipt.zig").TransactionReceipt;
+pub const BlockWithTransactions = @import("block.zig").BlockWithTransactions;
 
 // Standards
 pub const Siwe = @import("siwe.zig");
