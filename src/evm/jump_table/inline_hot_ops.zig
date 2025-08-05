@@ -113,8 +113,20 @@ pub inline fn execute_with_inline_hot_ops(
             const offset = frame.stack.pop_unsafe();
             const value = frame.stack.pop_unsafe();
             
-            // Memory expansion gas is handled by memory.write
-            try frame.memory.write(offset, value, frame);
+            // Check offset bounds
+            if (offset > std.math.maxInt(usize)) {
+                return ExecutionError.Error.OutOfOffset;
+            }
+            const offset_usize = @as(usize, @intCast(offset));
+            const new_size = offset_usize + 32; // MSTORE writes 32 bytes
+            
+            // Calculate and consume memory expansion gas
+            const new_size_u64 = @as(u64, @intCast(new_size));
+            const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
+            try frame.consume_gas(gas_cost);
+            
+            // Write to memory
+            try frame.memory.set_u256(offset_usize, value);
             
             return .{ .bytes_consumed = 1 };
         },
@@ -135,8 +147,20 @@ pub inline fn execute_with_inline_hot_ops(
             // Execute inline
             const offset = frame.stack.pop_unsafe();
             
-            // Memory expansion gas is handled by memory.read
-            const value = try frame.memory.read(offset, frame);
+            // Check offset bounds
+            if (offset > std.math.maxInt(usize)) {
+                return ExecutionError.Error.OutOfOffset;
+            }
+            const offset_usize = @as(usize, @intCast(offset));
+            const new_size = offset_usize + 32; // MLOAD reads 32 bytes
+            
+            // Calculate and consume memory expansion gas
+            const new_size_u64 = @as(u64, @intCast(new_size));
+            const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
+            try frame.consume_gas(gas_cost);
+            
+            // Read from memory
+            const value = try frame.memory.get_u256(offset_usize);
             frame.stack.append_unsafe(value);
             
             return .{ .bytes_consumed = 1 };
