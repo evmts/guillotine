@@ -84,8 +84,8 @@ test "SnailShellBenchmark EVM execution" {
     
     // Check frame.stack pointer before accessing it
     std.debug.print("Step 8: Checking frame.stack pointer: {*}\n", .{&frame.stack});
-    std.debug.print("Step 8: About to access frame.stack.size...\n", .{});
-    const stack_size = frame.stack.size;
+    std.debug.print("Step 8: About to access frame.stack.size()...\n", .{});
+    const stack_size = frame.stack.size();
     std.debug.print("Step 8: ✓ Successfully read stack.size: {}\n", .{stack_size});
     
     std.debug.print("Step 9: About to access frame.memory.context_size()...\n", .{});
