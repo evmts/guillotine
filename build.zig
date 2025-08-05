@@ -578,6 +578,22 @@ pub fn build(b: *std.Build) void {
     const inline_ops_bench_step = b.step("bench-inline-ops", "Run inline hot operations benchmarks");
     inline_ops_bench_step.dependOn(&run_inline_ops_bench_cmd.step);
 
+    // Add block execution benchmark executable
+    const block_execution_bench_exe = b.addExecutable(.{
+        .name = "block-execution-bench",
+        .root_source_file = b.path("bench/block_execution_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    block_execution_bench_exe.root_module.addImport("evm", evm_mod);
+    block_execution_bench_exe.root_module.addImport("primitives", primitives_mod);
+    b.installArtifact(block_execution_bench_exe);
+    
+    const run_block_execution_bench_cmd = b.addRunArtifact(block_execution_bench_exe);
+    run_block_execution_bench_cmd.step.dependOn(b.getInstallStep());
+    const block_execution_bench_step = b.step("bench-block-execution", "Run block-based execution benchmarks");
+    block_execution_bench_step.dependOn(&run_block_execution_bench_cmd.step);
+
     // Add frame cache benchmark executable
     const frame_cache_bench_exe = b.addExecutable(.{
         .name = "frame-cache-bench",
