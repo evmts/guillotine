@@ -119,6 +119,12 @@ pub const Blob = @import("blob.zig");
 // Contract utilities
 pub const EventLog = @import("event_log.zig");
 
+// Trace utilities
+pub const ExecutionTrace = @import("trace.zig").ExecutionTrace;
+pub const StructLog = @import("trace.zig").StructLog;
+pub const createEmptyTrace = @import("trace.zig").createEmptyTrace;
+pub const createEmptyStructLog = @import("trace.zig").createEmptyStructLog;
+
 // Standards
 pub const Siwe = @import("siwe.zig");
 
