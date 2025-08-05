@@ -13,6 +13,8 @@ const hardfork_benchmark = @import("hardfork_benchmark.zig");
 const uint_benchmark = @import("uint_benchmark.zig");
 const jump_table_benchmarks = @import("jump_table_benchmarks.zig");
 const inline_hot_ops_benchmarks = @import("inline_hot_ops_zbench.zig");
+const block_execution_benchmarks = @import("block_execution_zbench.zig");
+const jump_optimization_benchmarks = @import("jump_optimization_zbench.zig");
 
 pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     var benchmark = zbench.Benchmark.init(allocator, .{});
@@ -216,6 +218,27 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     try benchmark.add("Hot Ops Inline Dispatch", inline_hot_ops_benchmarks.zbench_inline_hot_ops, .{});
     try benchmark.add("Hot Opcode Workload", inline_hot_ops_benchmarks.zbench_hot_opcode_workload, .{});
     try benchmark.add("Cold Opcode Workload", inline_hot_ops_benchmarks.zbench_cold_opcode_workload, .{});
+
+    // Block Execution Benchmarks - Compare block-based vs single-opcode execution
+    try benchmark.add("Block Execution: Arithmetic", block_execution_benchmarks.zbench_block_arithmetic, .{});
+    try benchmark.add("Single Opcode: Arithmetic", block_execution_benchmarks.zbench_single_opcode_arithmetic, .{});
+    try benchmark.add("Block Execution: Static Jumps", block_execution_benchmarks.zbench_static_jumps, .{});
+    try benchmark.add("Block Execution: Dynamic Jumps", block_execution_benchmarks.zbench_dynamic_jumps, .{});
+    try benchmark.add("Block Execution: Unsafe Opcodes", block_execution_benchmarks.zbench_unsafe_opcodes, .{});
+    try benchmark.add("Block Execution: Memory Ops", block_execution_benchmarks.zbench_block_memory_ops, .{});
+    try benchmark.add("Block Execution: Stack Ops", block_execution_benchmarks.zbench_stack_operations, .{});
+    try benchmark.add("Block Execution: Many Blocks", block_execution_benchmarks.zbench_block_boundaries, .{});
+    try benchmark.add("Block Execution: Gas Validation", block_execution_benchmarks.zbench_block_gas_validation, .{});
+
+    // Jump Optimization Benchmarks - Test pre-computed jump validation
+    try benchmark.add("Jump Opt: Prevalidated Static", jump_optimization_benchmarks.zbench_prevalidated_static_jumps, .{});
+    try benchmark.add("Jump Opt: Dynamic Validation", jump_optimization_benchmarks.zbench_dynamic_jump_validation, .{});
+    try benchmark.add("Jump Opt: Mixed Patterns", jump_optimization_benchmarks.zbench_mixed_jump_patterns, .{});
+    try benchmark.add("Jump Opt: Deep Call Stack", jump_optimization_benchmarks.zbench_deep_call_stack_jumps, .{});
+    try benchmark.add("Jump Opt: Static Conditional", jump_optimization_benchmarks.zbench_static_conditional_jumps, .{});
+    try benchmark.add("Jump Opt: Jump Table", jump_optimization_benchmarks.zbench_jump_table_pattern, .{});
+    try benchmark.add("Jump Opt: Loop Pattern", jump_optimization_benchmarks.zbench_loop_static_jumps, .{});
+    try benchmark.add("Jump Opt: Function Calls", jump_optimization_benchmarks.zbench_function_call_pattern, .{});
 
     // Run all benchmarks
     const stdout = std.io.getStdOut().writer();
