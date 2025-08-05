@@ -578,6 +578,20 @@ pub fn build(b: *std.Build) void {
     const inline_ops_bench_step = b.step("bench-inline-ops", "Run inline hot operations benchmarks");
     inline_ops_bench_step.dependOn(&run_inline_ops_bench_cmd.step);
 
+    // Add frame cache benchmark executable
+    const frame_cache_bench_exe = b.addExecutable(.{
+        .name = "frame-cache-bench",
+        .root_source_file = b.path("bench/frame_cache_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    b.installArtifact(frame_cache_bench_exe);
+    
+    const run_frame_cache_bench_cmd = b.addRunArtifact(frame_cache_bench_exe);
+    run_frame_cache_bench_cmd.step.dependOn(b.getInstallStep());
+    const frame_cache_bench_step = b.step("bench-frame-cache", "Run Frame struct cache optimization benchmarks");
+    frame_cache_bench_step.dependOn(&run_frame_cache_bench_cmd.step);
+
     // Add minimal jump table benchmark executable
     // Create a minimal EVM module without Rust dependencies for jump table benchmark
     const minimal_evm_mod = b.createModule(.{

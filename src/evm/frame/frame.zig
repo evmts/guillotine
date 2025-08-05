@@ -45,65 +45,85 @@ const Vm = @import("../evm.zig");
 /// ```
 const Frame = @This();
 
-// Hot fields (frequently accessed, placed first for optimal cache performance)
-/// Remaining gas for this execution.
-/// Decremented by each operation; execution fails at 0.
-gas_remaining: u64 = 0,
+// ========================================================================
+// HOT FIELDS - First cache line (64 bytes)
+// These fields are accessed on every instruction
+// ========================================================================
 
 /// Current position in contract bytecode.
 /// Incremented by opcode size, modified by JUMP/JUMPI.
-pc: usize = 0,
+pc: usize = 0, // 8 bytes
 
-/// Contract being executed in this frame.
-/// Contains code, address, and contract metadata.
-contract: *Contract,
-
-/// Allocator for dynamic memory allocations.
-allocator: std.mem.Allocator,
-
-// Medium-hot fields (moderately accessed)
-/// Flag indicating execution should halt.
-/// Set by STOP, RETURN, REVERT, or errors.
-stop: bool = false,
-
-/// Whether this is a STATICCALL context.
-/// Prohibits state modifications (SSTORE, CREATE, SELFDESTRUCT).
-is_static: bool = false,
-
-/// Current call depth in the call stack.
-/// Limited to 1024 to prevent stack overflow attacks.
-depth: u32 = 0,
-
-/// Gas cost of current operation.
-cost: u64 = 0,
-
-/// Error that occurred during execution, if any.
-err: ?ExecutionError.Error = null,
-
-// Data fields (less frequently accessed)
-/// Input data for this call (calldata).
-/// Accessed by CALLDATALOAD, CALLDATASIZE, CALLDATACOPY.
-input: []const u8 = &[_]u8{},
-
-/// Output data to be returned from this frame.
-/// Set by RETURN or REVERT operations.
-output: []const u8 = &[_]u8{},
-
-/// Current opcode being executed (for debugging/tracing).
-op: []const u8 = &.{},
-
-// Large allocations (placed last to avoid increasing offsets of hot fields)
-/// Frame's memory space for temporary data storage.
-/// Grows dynamically and charges gas quadratically.
-memory: Memory,
+/// Remaining gas for this execution.
+/// Decremented by each operation; execution fails at 0.
+gas_remaining: u64 = 0, // 8 bytes
 
 /// Operand stack for the stack machine.
 /// Limited to 1024 elements per EVM rules.
-stack: Stack,
+/// Note: Stack is a struct with ptr + size, fits in 16 bytes
+stack: Stack, // 16 bytes
+
+/// Frame's memory space for temporary data storage.
+/// Grows dynamically and charges gas quadratically.
+/// Note: Memory struct contains ptr + size + capacity, ~24 bytes
+memory: Memory, // 24 bytes
+
+/// Contract being executed in this frame.
+/// Contains code, address, and contract metadata.
+contract: *Contract, // 8 bytes
+
+// Total: 64 bytes - fits in one cache line!
+
+// ========================================================================
+// WARM FIELDS - Second cache line (64 bytes)
+// These fields are accessed per block or call, not per instruction
+// ========================================================================
+
+/// Current call depth in the call stack.
+/// Limited to 1024 to prevent stack overflow attacks.
+depth: u32 = 0, // 4 bytes
+
+/// Whether this is a STATICCALL context.
+/// Prohibits state modifications (SSTORE, CREATE, SELFDESTRUCT).
+is_static: bool = false, // 1 byte
+
+/// Flag indicating execution should halt.
+/// Set by STOP, RETURN, REVERT, or errors.
+stop: bool = false, // 1 byte
+
+/// Padding for alignment
+_padding: [2]u8 = .{ 0, 0 }, // 2 bytes
+
+/// Allocator for dynamic memory allocations.
+allocator: std.mem.Allocator, // 8 bytes
+
+/// Gas cost of current operation.
+cost: u64 = 0, // 8 bytes
+
+/// Error that occurred during execution, if any.
+err: ?ExecutionError.Error = null, // 16 bytes (optional enum)
+
+// Subtotal: 40 bytes, leaves room for growth
+
+// ========================================================================
+// COLD FIELDS - Rarely accessed
+// These fields are accessed only on specific operations
+// ========================================================================
+
+/// Input data for this call (calldata).
+/// Accessed by CALLDATALOAD, CALLDATASIZE, CALLDATACOPY.
+input: []const u8 = &[_]u8{}, // 16 bytes (ptr + len)
+
+/// Output data to be returned from this frame.
+/// Set by RETURN or REVERT operations.
+output: []const u8 = &[_]u8{}, // 16 bytes (ptr + len)
+
+/// Current opcode being executed (for debugging/tracing).
+op: []const u8 = &.{}, // 16 bytes (ptr + len)
 
 /// Return data from child calls.
 /// Used by RETURNDATASIZE and RETURNDATACOPY opcodes.
-return_data: ReturnData,
+return_data: ReturnData, // Variable size
 
 /// Create a new execution frame with default settings.
 ///
@@ -127,20 +147,21 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
     errdefer memory.deinit();
 
     return Frame{
-        .gas_remaining = 0,
         .pc = 0,
+        .gas_remaining = 0,
+        .stack = Stack{},
+        .memory = memory,
         .contract = contract,
-        .allocator = allocator,
-        .stop = false,
-        .is_static = false,
         .depth = 0,
+        .is_static = false,
+        .stop = false,
+        ._padding = .{ 0, 0 },
+        .allocator = allocator,
         .cost = 0,
         .err = null,
         .input = &[_]u8{},
         .output = &[_]u8{},
         .op = undefined,
-        .memory = memory,
-        .stack = Stack{},
         .return_data = ReturnData.init(allocator),
     };
 }
@@ -176,20 +197,21 @@ pub fn init_full(
     _ = vm; // VM parameter for future use
     _ = caller; // Caller parameter for future use
     return Frame{
-        .gas_remaining = gas_limit,
         .pc = 0,
+        .gas_remaining = gas_limit,
+        .stack = Stack{},
+        .memory = try Memory.init_default(allocator),
         .contract = contract,
-        .allocator = allocator,
-        .stop = false,
-        .is_static = false,
         .depth = 0,
+        .is_static = false,
+        .stop = false,
+        ._padding = .{ 0, 0 },
+        .allocator = allocator,
         .cost = 0,
         .err = null,
         .input = input,
         .output = &[_]u8{},
         .op = &.{},
-        .memory = try Memory.init_default(allocator),
-        .stack = Stack{},
         .return_data = ReturnData.init(allocator),
     };
 }
@@ -248,20 +270,21 @@ pub fn init_with_state(
     const stack_to_use = stack orelse Stack{};
 
     return Frame{
-        .gas_remaining = gas_remaining orelse 0,
         .pc = pc orelse 0,
+        .gas_remaining = gas_remaining orelse 0,
+        .stack = stack_to_use,
+        .memory = memory_to_use,
         .contract = contract,
-        .allocator = allocator,
-        .stop = stop orelse false,
-        .is_static = is_static orelse false,
         .depth = depth orelse 0,
+        .is_static = is_static orelse false,
+        .stop = stop orelse false,
+        ._padding = .{ 0, 0 },
+        .allocator = allocator,
         .cost = cost orelse 0,
         .err = err,
         .input = input orelse &[_]u8{},
         .output = output orelse &[_]u8{},
         .op = op orelse &.{},
-        .memory = memory_to_use,
-        .stack = stack_to_use,
         .return_data = ReturnData.init(allocator),
     };
 }
@@ -416,20 +439,21 @@ pub const FrameBuilder = struct {
         if (self.contract == null) return BuildError.MissingContract;
 
         return Frame{
-            .gas_remaining = self.gas,
             .pc = 0,
+            .gas_remaining = self.gas,
+            .stack = .{},
+            .memory = Memory.init_default(self.allocator) catch return BuildError.OutOfMemory,
             .contract = self.contract.?,
-            .allocator = self.allocator,
-            .stop = false,
-            .is_static = self.is_static,
             .depth = self.depth,
+            .is_static = self.is_static,
+            .stop = false,
+            ._padding = .{ 0, 0 },
+            .allocator = self.allocator,
             .cost = 0,
             .err = null,
             .input = self.input,
             .output = &[_]u8{},
             .op = &.{},
-            .memory = Memory.init_default(self.allocator) catch return BuildError.OutOfMemory,
-            .stack = .{},
             .return_data = ReturnData.init(self.allocator),
         };
     }
