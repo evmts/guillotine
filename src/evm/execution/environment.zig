@@ -537,7 +537,7 @@ fn validate_environment_result(frame: *const Frame, vm: *const Vm, op: FuzzEnvir
     }
     
     // Verify stack has the expected result
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
     
     const stack_result = frame.stack.data[0];
     

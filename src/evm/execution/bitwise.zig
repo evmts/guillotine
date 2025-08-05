@@ -7,7 +7,7 @@ const primitives = @import("primitives");
 
 pub fn op_and(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
     frame.stack.set_top_unsafe(a & b);
@@ -16,7 +16,7 @@ pub fn op_and(_: usize, _: Operation.Interpreter, state: Operation.State) Execut
 
 pub fn op_or(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
     frame.stack.set_top_unsafe(a | b);
@@ -25,7 +25,7 @@ pub fn op_or(_: usize, _: Operation.Interpreter, state: Operation.State) Executi
 
 pub fn op_xor(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
     frame.stack.set_top_unsafe(a ^ b);
@@ -34,7 +34,7 @@ pub fn op_xor(_: usize, _: Operation.Interpreter, state: Operation.State) Execut
 
 pub fn op_not(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 1);
+    std.debug.assert(frame.stack.size() >= 1);
     const a = frame.stack.peek_unsafe().*;
     frame.stack.set_top_unsafe(~a);
     return Operation.ExecutionResult{};
@@ -42,7 +42,7 @@ pub fn op_not(_: usize, _: Operation.Interpreter, state: Operation.State) Execut
 
 pub fn op_byte(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const i = frame.stack.pop_unsafe();
     const val = frame.stack.peek_unsafe().*;
 
@@ -58,7 +58,7 @@ pub fn op_byte(_: usize, _: Operation.Interpreter, state: Operation.State) Execu
 
 pub fn op_shl(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const shift = frame.stack.pop_unsafe();
     const value = frame.stack.peek_unsafe().*;
 
@@ -70,7 +70,7 @@ pub fn op_shl(_: usize, _: Operation.Interpreter, state: Operation.State) Execut
 
 pub fn op_shr(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const shift = frame.stack.pop_unsafe();
     const value = frame.stack.peek_unsafe().*;
 
@@ -82,7 +82,7 @@ pub fn op_shr(_: usize, _: Operation.Interpreter, state: Operation.State) Execut
 
 pub fn op_sar(_: usize, _: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     const frame = state;
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
     const shift = frame.stack.pop_unsafe();
     const value = frame.stack.peek_unsafe().*;
 

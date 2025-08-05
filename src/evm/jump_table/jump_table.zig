@@ -145,7 +145,7 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
     @branchHint(.likely);
     const operation = self.get_operation(opcode);
 
-    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size });
+    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size() });
 
     // Handle undefined opcodes (cold path)
     if (operation.undefined) {
@@ -159,7 +159,7 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
     if (comptime builtin.mode == .ReleaseFast) {
         const stack_height_changes = @import("../opcodes/stack_height_changes.zig");
         try stack_height_changes.validate_stack_requirements_fast(
-            @intCast(frame.stack.size),
+            @intCast(frame.stack.size()),
             opcode,
             operation.min_stack,
             operation.max_stack,

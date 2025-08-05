@@ -1072,13 +1072,13 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
     // Validate stack results for operations
     switch (op.op_type) {
         .gas => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack.size());
             // Gas value should be less than or equal to initial gas limit
             const gas_value = frame.stack.data[0];
             try testing.expect(gas_value <= op.gas_limit);
         },
         .create, .create2 => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack.size());
             // Result is either 0 (failure) or an address
             const result_value = frame.stack.data[0];
             if (!op.expect_success) {
@@ -1086,7 +1086,7 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
             }
         },
         .call, .callcode, .delegatecall, .staticcall => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack.size());
             // Result is 1 (success) or 0 (failure)
             const result_value = frame.stack.data[0];
             if (op.expect_success) {
@@ -1097,7 +1097,7 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
         },
         .selfdestruct => {
             // SELFDESTRUCT doesn't push to stack
-            try testing.expectEqual(@as(usize, 0), frame.stack.size);
+            try testing.expectEqual(@as(usize, 0), frame.stack.size());
         },
     }
 }
