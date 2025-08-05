@@ -5,8 +5,13 @@ const primitives = root.primitives;
 const Allocator = std.mem.Allocator;
 
 /// Benchmark arithmetic loop with block execution disabled
+// WARNING: This function is NEVER called! zbench_runner.zig expects different function names
+// TODO: Either rename to match zbench_block_arithmetic OR update zbench_runner.zig
 pub fn zbench_arithmetic_no_blocks(allocator: Allocator) void {
     // Use GPA for the benchmark
+    // FIXME: We're ignoring the provided allocator parameter and creating our own GPA
+    // This is inefficient and not how zbench is meant to be used
+    // Should use: const gpa_allocator = allocator; instead
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const gpa_allocator = gpa.allocator();

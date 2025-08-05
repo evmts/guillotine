@@ -214,12 +214,20 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
 
 
     // Block Execution Benchmarks - Compare block-based vs single-opcode execution
+    // WARNING: These function calls work but the benchmarks create their own GPA instead of using provided allocator
+    // TODO: Fix the benchmark implementations to use the allocator parameter
     try benchmark.add("Arithmetic No Blocks", block_execution_benchmarks.zbench_arithmetic_no_blocks, .{});
     try benchmark.add("Arithmetic With Blocks", block_execution_benchmarks.zbench_arithmetic_with_blocks, .{});
     try benchmark.add("Memory No Blocks", block_execution_benchmarks.zbench_memory_no_blocks, .{});
     try benchmark.add("Memory With Blocks", block_execution_benchmarks.zbench_memory_with_blocks, .{});
     try benchmark.add("Control Flow No Blocks", block_execution_benchmarks.zbench_control_flow_no_blocks, .{});
     try benchmark.add("Control Flow With Blocks", block_execution_benchmarks.zbench_control_flow_with_blocks, .{});
+    
+    // TODO: Add frame_cache_benchmark.zig functions here:
+    // const frame_cache_benchmarks = @import("frame_cache_benchmark.zig");
+    // try benchmark.add("Frame Hot Field Old", frame_cache_benchmarks.zbench_hot_field_old_layout, .{});
+    // try benchmark.add("Frame Hot Field New", frame_cache_benchmarks.zbench_hot_field_new_layout, .{});
+    // etc...
 
     // Jump Optimization Benchmarks - Test pre-computed jump validation
     try benchmark.add("Jump Opt: Prevalidated Static", jump_optimization_benchmarks.zbench_prevalidated_static_jumps, .{});

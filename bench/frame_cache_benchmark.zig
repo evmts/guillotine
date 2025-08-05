@@ -1,3 +1,9 @@
+// WARNING: This entire file is DISCONNECTED from the build system!
+// It's not imported in zbench_runner.zig at all
+// FIX NEEDED: Add to zbench_runner.zig:
+//   const frame_cache_benchmarks = @import("frame_cache_benchmark.zig");
+// Then add benchmark.add() calls for all 6 functions
+
 const std = @import("std");
 const root = @import("root.zig");
 const Allocator = std.mem.Allocator;
