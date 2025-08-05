@@ -50,8 +50,8 @@ const memory_optimized_ops = @import("memory_optimized_ops.zig");
 /// Function pointer type for instruction execution.
 pub const InstructionFn = *const fn (instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction;
 
-/// Packed instruction argument (8 bytes)
-pub const InstructionArg = packed union {
+/// Instruction argument
+pub const InstructionArg = union(enum) {
     /// No argument
     none: u64,
     
@@ -61,28 +61,41 @@ pub const InstructionArg = packed union {
     /// Index into push_values array for large pushes (PUSH9-32)
     push_index: u32,
     
-    /// Pointer to block metadata
-    block_ptr: *const BlockMetadata,
+    /// Block metadata
+    block: BlockMetadata,
     
-    /// Jump target instruction index
+    /// Jump info
+    jump: struct {
+        target_instr: u32,
+        is_static: bool,
+    },
+    
+    /// Jump target
     jump_target: u32,
+    
+    /// Push info
+    push: struct {
+        value: u256,
+        bytes: u8,
+    },
     
     /// Generic data (PC for PC opcode, opcode for generic handler, etc.)
     data: u64,
 };
 
-/// A single instruction in the stream (16 bytes total)
+/// A single instruction in the stream
 pub const Instruction = struct {
-    /// Function to execute this instruction (8 bytes)
+    /// Function to execute this instruction
     fn_ptr: InstructionFn,
     
-    /// Instruction-specific argument (8 bytes)
+    /// Instruction-specific argument
     arg: InstructionArg,
     
-    comptime {
-        // Ensure instruction is exactly 16 bytes
-        std.debug.assert(@sizeOf(Instruction) == 16);
-    }
+    /// Program counter where this instruction came from
+    pc: u32 = 0,
+    
+    /// Original opcode (for debugging/fallback)
+    opcode: u8 = 0,
 };
 
 /// Advanced execution state (replaces Frame for instruction execution).
@@ -958,6 +971,7 @@ pub fn generate_instruction_stream(
     return InstructionStream{
         .instructions = try instructions.toOwnedSlice(),
         .pc_to_instruction = pc_to_instruction,
+        .push_values = &[_]u256{}, // TODO: implement push value storage for PUSH9-32
         .allocator = allocator,
     };
 }
