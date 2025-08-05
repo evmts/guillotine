@@ -203,8 +203,8 @@ test "optimized memory operations - pre-calculated expansion" {
     };
     
     // Test MSTORE with pre-calculated cost
-    try stack.push(0x12345678); // value
-    try stack.push(64);         // offset (third word)
+    try stack.append(0x12345678); // value
+    try stack.append(64);         // offset (third word)
     
     const expansion_cost: u64 = 9; // Cost for expanding to 96 bytes (3 words)
     const mstore_instr = instruction_stream.Instruction{
