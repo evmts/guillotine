@@ -728,7 +728,7 @@ fn op_jumpi_static(instr: *const Instruction, state: *AdvancedExecutionState) ?*
 }
 
 /// JUMPDEST - mark valid jump destination (no-op).
-fn op_jumpdest(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
+fn op_jumpdest(instr: *const Instruction, _: *AdvancedExecutionState) ?*const Instruction {
     return next_instruction(instr);
 }
 
@@ -916,7 +916,7 @@ fn op_calldatacopy(instr: *const Instruction, state: *AdvancedExecutionState) ?*
 
 /// BLOCKHASH - get block hash.
 fn op_blockhash(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const block_number = state.stack.pop_unsafe();
+    _ = state.stack.pop_unsafe();
     
     // For now, return zero (proper implementation would query state)
     state.stack.append_unsafe(0);
