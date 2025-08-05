@@ -61,6 +61,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         .memory = try Memory.init_default(self.allocator),
         .stack = .{},
         .return_data = ReturnData.init(self.allocator),
+        .block_mode = false, // Normal per-instruction mode
     };
     defer frame.deinit();
 

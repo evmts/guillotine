@@ -92,6 +92,10 @@ output: []const u8 = &[_]u8{},
 /// Current opcode being executed (for debugging/tracing).
 op: []const u8 = &.{},
 
+/// Flag indicating block-based execution mode.
+/// When true, per-instruction validation is skipped.
+block_mode: bool = false,
+
 // Large allocations (placed last to avoid increasing offsets of hot fields)
 /// Frame's memory space for temporary data storage.
 /// Grows dynamically and charges gas quadratically.
@@ -142,6 +146,7 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
         .memory = memory,
         .stack = Stack{},
         .return_data = ReturnData.init(allocator),
+        .block_mode = false,
     };
 }
 
@@ -191,6 +196,7 @@ pub fn init_full(
         .memory = try Memory.init_default(allocator),
         .stack = Stack{},
         .return_data = ReturnData.init(allocator),
+        .block_mode = false,
     };
 }
 

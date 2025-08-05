@@ -144,7 +144,7 @@ pub fn reset(self: *Evm) void {
 }
 
 pub usingnamespace @import("evm/set_context.zig");
-pub usingnamespace @import("evm/interpret.zig");
+pub usingnamespace @import("evm/interpret_dispatch.zig");
 pub usingnamespace @import("evm/create_contract_internal.zig");
 
 pub usingnamespace @import("evm/create_contract.zig");

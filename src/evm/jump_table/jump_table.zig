@@ -142,7 +142,7 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
     @branchHint(.likely);
     const operation = self.get_operation(opcode);
 
-    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size });
+    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}, block_mode={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size, frame.block_mode });
 
     // Handle undefined opcodes (cold path)
     if (operation.undefined) {
@@ -150,6 +150,15 @@ pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_
         Log.debug("JumpTable.execute: Invalid opcode 0x{x:0>2}", .{opcode});
         frame.gas_remaining = 0;
         return ExecutionError.Error.InvalidOpcode;
+    }
+
+    // Skip validation and gas consumption in block mode
+    if (frame.block_mode) {
+        @branchHint(.likely);
+        Log.debug("JumpTable.execute: Block mode - skipping validation and gas", .{});
+        const res = try operation.execute(pc, interpreter, frame);
+        Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed in block mode", .{opcode});
+        return res;
     }
 
     // Use fast stack validation in ReleaseFast mode, traditional in other modes
