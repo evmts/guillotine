@@ -1419,14 +1419,14 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
 
                     var j: usize = 15 - nibbles_to_skip;
                     while (j < 16) : (j -%= 1) {
-                        const nibble = @as(u8, @intCast((limb >> (j * 4)) & 0xF));
+                        const nibble = @as(u8, @intCast((limb >> @as(u6, @intCast(j * 4))) & 0xF));
                         try writer.print("{c}", .{chars[nibble]});
                         if (j == 0) break;
                     }
                 } else {
                     var j: usize = 15;
                     while (j < 16) : (j -%= 1) {
-                        const nibble = @as(u8, @intCast((limb >> (j * 4)) & 0xF));
+                        const nibble = @as(u8, @intCast((limb >> @as(u6, @intCast(j * 4))) & 0xF));
                         try writer.print("{c}", .{chars[nibble]});
                         if (j == 0) break;
                     }
@@ -1799,7 +1799,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits < 256) {
                 std.debug.assert(value < (@as(u256, 1) << bits));
             }
-            
+
             var result = Self.ZERO;
             const u256_limbs = 4; // u256 has 4 64-bit limbs
             const copy_limbs = @min(limbs, u256_limbs);
@@ -1813,7 +1813,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
             if (comptime bits == 256) {
                 return result;
             }
-            
+
             return result.masked();
         }
 
@@ -1849,7 +1849,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                     std.debug.assert(self.limbs[i] == 0);
                 }
             }
-            
+
             var result: u256 = 0;
             const u256_limbs = @min(limbs, 4);
 
@@ -3844,4 +3844,19 @@ test "performance stress tests from intx" {
         const check = result.quotient.wrapping_mul(divisor).wrapping_add(result.remainder);
         try testing.expectEqual(dividend, check);
     }
+}
+
+test "wrapping_mul" {
+    const U256 = Uint(256, 4);
+
+    const a = U256.from_limbs(.{ 0x1234567890ABCDEF, 0xFEDCBA9876543210, 0x0, 0x4000000000000000 });
+    const b = U256.from_limbs(.{ 0x1234567890ABCDEF, 0xFEDCBA9876543210, 0x0, 0x4000000000000000 });
+
+    const a_native = a.to_u256().?;
+    const b_native = b.to_u256().?;
+    const ab_native = a_native *% b_native;
+
+    const ab: U256 = a.wrapping_mul(b);
+
+    try testing.expectEqual(ab_native, ab.to_u256().?);
 }
