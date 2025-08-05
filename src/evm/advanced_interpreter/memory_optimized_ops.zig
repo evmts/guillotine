@@ -43,8 +43,8 @@ pub fn op_mload_precalc(instr: *const Instruction, state: *AdvancedExecutionStat
 
 /// MSTORE with pre-calculated expansion cost
 pub fn op_mstore_precalc(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const offset = state.stack.pop_unsafe();
     const value = state.stack.pop_unsafe();
+    const offset = state.stack.pop_unsafe();
     
     // Use pre-calculated expansion cost from instruction arg
     const expansion_cost = instr.arg.data;
@@ -64,8 +64,8 @@ pub fn op_mstore_precalc(instr: *const Instruction, state: *AdvancedExecutionSta
 
 /// MSTORE8 with pre-calculated expansion cost
 pub fn op_mstore8_precalc(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
-    const offset = state.stack.pop_unsafe();
     const value = state.stack.pop_unsafe();
+    const offset = state.stack.pop_unsafe();
     
     // Use pre-calculated expansion cost from instruction arg
     const expansion_cost = instr.arg.data;
@@ -118,10 +118,10 @@ pub fn op_calldatacopy_precalc(instr: *const Instruction, state: *AdvancedExecut
 pub fn op_push_push_mstore(instr: *const Instruction, state: *AdvancedExecutionState) ?*const Instruction {
     // Extract both push values and expansion cost from packed arg
     // Layout: [expansion_cost:16][offset:24][value:24]
-    const packed = instr.arg.data;
-    const expansion_cost = packed >> 48;
-    const offset = (packed >> 24) & 0xFFFFFF;
-    const value = packed & 0xFFFFFF;
+    const packed_value = instr.arg.data;
+    const expansion_cost = packed_value >> 48;
+    const offset = (packed_value >> 24) & 0xFFFFFF;
+    const value = packed_value & 0xFFFFFF;
     
     // Apply expansion cost
     state.gas_left.* -= @as(i64, @intCast(expansion_cost));
@@ -220,6 +220,7 @@ pub fn can_precalculate_expansion(
     static_size: ?u64,
     current_memory_size: u64,
 ) bool {
+    _ = current_memory_size; // May be used in future
     if (static_offset == null or static_size == null) return false;
     
     // Can pre-calculate if we know the exact memory requirement
@@ -236,8 +237,6 @@ test "pre-calculated memory expansion" {
     const testing = std.testing;
     const Memory = @import("../memory/memory.zig");
     const Stack = @import("../stack/stack.zig");
-    const Frame = @import("../frame/frame.zig");
-    const Vm = @import("../evm.zig");
     
     // Create test state
     const allocator = testing.allocator;
@@ -255,6 +254,7 @@ test "pre-calculated memory expansion" {
         .vm = undefined,
         .frame = undefined,
         .exit_status = null,
+        .push_values = &.{},
     };
     
     // Test MSTORE with pre-calculated cost
@@ -266,8 +266,6 @@ test "pre-calculated memory expansion" {
     const instr = Instruction{
         .fn_ptr = &op_mstore_precalc,
         .arg = .{ .data = expansion_cost },
-        .pc = 0,
-        .opcode = 0x52, // MSTORE
     };
     
     const next = op_mstore_precalc(&instr, &state);
