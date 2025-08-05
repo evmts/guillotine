@@ -27,3 +27,23 @@ services:
     volumes:
       - .:/workspace
     command: bash -c "zig build && zig build test && zig build bench"
+
+  poop-benchmark:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.ubuntu
+    container_name: guillotine-poop-benchmark
+    volumes:
+      - .:/workspace
+    command: >
+      bash -c "
+      cd /tmp &&
+      git clone https://github.com/andrewrk/poop &&
+      cd poop &&
+      zig build &&
+      cp zig-out/bin/poop /usr/local/bin/ &&
+      cd /workspace &&
+      zig build build-evm-runner &&
+      echo 'Running poop benchmark on snailtracer...' &&
+      zig build poop
+      "

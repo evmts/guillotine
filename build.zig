@@ -975,6 +975,26 @@ pub fn build(b: *std.Build) void {
     const build_orchestrator_step = b.step("build-orchestrator", "Build the benchmark orchestrator");
     build_orchestrator_step.dependOn(&b.addInstallArtifact(orchestrator_exe, .{}).step);
 
+    // Add poop benchmark runner and step
+    const poop_runner_exe = b.addExecutable(.{
+        .name = "poop-runner",
+        .root_source_file = b.path("bench/poop_runner.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Always use ReleaseFast for benchmarks
+    });
+    
+    
+    b.installArtifact(poop_runner_exe);
+    
+    const run_poop_cmd = b.addRunArtifact(poop_runner_exe);
+    run_poop_cmd.step.dependOn(build_evm_runner_step); // Ensure evm-runner is built
+    if (b.args) |args| {
+        run_poop_cmd.addArgs(args);
+    }
+    
+    const poop_step = b.step("poop", "Run poop benchmark on snailtracer (Linux only)");
+    poop_step.dependOn(&run_poop_cmd.step);
+
     // Add a comparison step with default --js-runs=1 and --js-internal-runs=1
     const run_comparison_cmd = b.addRunArtifact(orchestrator_exe);
     run_comparison_cmd.addArg("--compare");
