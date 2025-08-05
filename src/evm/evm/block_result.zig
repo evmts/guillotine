@@ -1,6 +1,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const RunResult = @import("run_result.zig").RunResult;
+const ExecutionError = @import("../execution/execution_error.zig");
 
 /// Result of executing a basic block of EVM bytecode.
 ///
@@ -55,7 +56,7 @@ pub const BlockResult = struct {
     call_params: ?CallParams = null,
 
     /// For errors: the specific error
-    err: ?anyerror = null,
+    err: ?ExecutionError.Error = null,
 
     /// Gas consumed by the block
     gas_used: u64 = 0,
@@ -155,7 +156,7 @@ pub const BlockResult = struct {
     }
 
     /// Create a result for error
-    pub fn error_(err: anyerror, gas_used: u64) BlockResult {
+    pub fn error_(err: ExecutionError.Error, gas_used: u64) BlockResult {
         return .{
             .exit_type = .error_,
             .err = err,
@@ -165,7 +166,7 @@ pub const BlockResult = struct {
 
     /// Convert block result to RunResult for final execution result
     pub fn to_run_result(self: BlockResult, initial_gas: u64, gas_remaining: u64) RunResult {
-        const total_gas_used = initial_gas - gas_remaining + self.gas_used;
+        _ = initial_gas - gas_remaining + self.gas_used; // total gas used
         
         return switch (self.exit_type) {
             .stop => RunResult.init(
