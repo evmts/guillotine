@@ -76,6 +76,15 @@ pub const ExecutionResult = @import("execution/execution_result.zig");
 /// Execution frame/context management
 pub const Frame = @import("frame/frame.zig");
 
+/// Frame module namespace for additional frame utilities
+pub const frame = struct {
+    pub const Frame = @import("frame/frame.zig");
+    pub const Contract = @import("frame/contract.zig");
+    pub const CodeAnalysis = @import("frame/code_analysis.zig");
+    pub const JumpAnalysis = @import("frame/jump_analysis.zig");
+    pub const advanced_code_analysis = @import("frame/advanced_code_analysis.zig");
+};
+
 /// Execution context providing transaction and block information
 pub const Context = @import("access_list/context.zig");
 
@@ -111,11 +120,26 @@ pub const StoragePool = @import("frame/storage_pool.zig");
 /// Main virtual machine implementation
 pub const Evm = @import("evm.zig");
 
+/// EVM module namespace for EVM utilities
+pub const evm = struct {
+    pub const Vm = @import("evm.zig");
+    pub const RunResult = @import("evm/run_result.zig").RunResult;
+    pub const interpret = @import("evm/interpret.zig");
+    pub const beginblock = @import("evm/beginblock.zig");
+};
+
 /// Builder pattern for constructing EVM instances
 pub const EvmBuilder = @import("evm_builder.zig").EvmBuilder;
 
 /// EVM state management (accounts, storage, logs)
 pub const EvmState = @import("state/state.zig");
+
+/// State module namespace for state utilities
+pub const state = struct {
+    pub const EvmState = @import("state/state.zig");
+    pub const MemoryDatabase = @import("state/memory_database.zig");
+    pub const DatabaseInterface = @import("state/database_interface.zig");
+};
 
 /// Database interface for pluggable state storage
 pub const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
@@ -197,6 +221,12 @@ pub const Tracer = @import("tracer.zig").Tracer;
 
 /// EIP-7702 EOA delegation bytecode format
 pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");
+
+/// Advanced interpreter with instruction stream architecture
+pub const advanced_interpreter = struct {
+    pub const instruction_stream = @import("advanced_interpreter/instruction_stream.zig");
+    pub const execute_advanced = @import("advanced_interpreter/execute_advanced.zig");
+};
 
 /// Fee market calculations (EIP-1559)
 pub const fee_market = @import("primitives").FeeMarket;
