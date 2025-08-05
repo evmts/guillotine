@@ -27,10 +27,13 @@ const no_precompiles = if (@hasDecl(build_options, "no_precompiles")) build_opti
 /// All precompiles now use the same signature, simplifying dispatch
 pub const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
 
+/// Maximum number of precompiles (IDs 1-10)
+const MAX_PRECOMPILES = 10;
+
 /// Compile-time function table for O(1) precompile dispatch
 /// Direct function pointers, no union overhead
 const PRECOMPILE_TABLE = blk: {
-    var table: [10]?PrecompileFn = .{null} ** 10;
+    var table: [MAX_PRECOMPILES]?PrecompileFn = .{null} ** MAX_PRECOMPILES;
     
     // All precompiles now use uniform interface
     table[0] = &uniform_wrappers.ecrecover_uniform; // ID 1: ECRECOVER
@@ -95,7 +98,7 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
     const precompile_id = addresses.get_precompile_id(address);
 
     // Use table lookup for O(1) dispatch
-    if (precompile_id < 1 or precompile_id > 10) {
+    if (precompile_id < 1 or precompile_id > MAX_PRECOMPILES) {
         @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }

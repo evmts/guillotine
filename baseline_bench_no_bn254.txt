@@ -1,5 +1,0 @@
-info: Downloading blst library...
-error: invalid option: -Dno_bn254
-error:   access the help menu with 'zig build -h'
-error: the following build command failed with exit code 1:
-/Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache/o/51628d15034c6fade6925d1494fee212/build /opt/homebrew/Cellar/zig/0.14.1/bin/zig /opt/homebrew/Cellar/zig/0.14.1/lib/zig /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline /Users/williamcory/Guillotine/worktrees/perf-338-memory-inline/.zig-cache /Users/williamcory/.cache/zig --seed 0xecb4ef7b -Z172c54df5c8c2f7c bench -Doptimize=ReleaseFast -Dno_bn254=true

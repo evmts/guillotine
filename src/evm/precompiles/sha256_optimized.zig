@@ -84,7 +84,8 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
     }
     
     // Direct hash to output buffer - no intermediate copy (Issue #332)
-    crypto.SHA256_Accel.SHA256_Accel.hash(input, output[0..SHA256_OUTPUT_SIZE]);
+    const output_array: *[SHA256_OUTPUT_SIZE]u8 = output[0..SHA256_OUTPUT_SIZE];
+    crypto.SHA256_Accel.SHA256_Accel.hash(input, output_array);
     
     return PrecompileOutput.success_result(gas_cost, SHA256_OUTPUT_SIZE);
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const crypto = @import("crypto");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const GasConstants = @import("primitives").GasConstants;
@@ -88,9 +89,8 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: Cha
     
     // Direct hash to output buffer starting at byte 12 (Issue #332)
     // RIPEMD160 produces 20 bytes, which fits in bytes 12-31
-    var hasher = std.crypto.hash.Ripemd160.init(.{});
-    hasher.update(input);
-    hasher.final(output[12..32]);
+    const hash_result = crypto.Ripemd160.unaudited_hash(input);
+    @memcpy(output[12..32], &hash_result);
     
     return PrecompileOutput.success_result(gas_cost, RIPEMD160_OUTPUT_SIZE);
 }
