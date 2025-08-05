@@ -74,7 +74,7 @@ test "advanced interpreter with static jumps" {
     
     // Stack should have 0xAA (0xFF should be skipped)
     try testing.expectEqual(@as(usize, 1), frame.stack.size());
-    const value = try frame.stack.pop();
+    const value = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, 0xAA), value);
 }
 
@@ -137,7 +137,7 @@ test "advanced interpreter with conditional static jump" {
     
     // Stack should have 0xBB
     try testing.expectEqual(@as(usize, 1), frame.stack.size());
-    const value = try frame.stack.pop();
+    const value = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, 0xBB), value);
 }
 
@@ -204,7 +204,7 @@ test "advanced interpreter with dynamic jump" {
     
     // Stack should have 0xCC
     try testing.expectEqual(@as(usize, 1), frame.stack.size());
-    const value = try frame.stack.pop();
+    const value = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, 0xCC), value);
 }
 
@@ -262,9 +262,9 @@ test "advanced interpreter gas opcode with block correction" {
     try testing.expectEqual(@as(usize, 3), frame.stack.size());
     
     // The gas values should reflect the block correction
-    const gas2 = try frame.stack.pop();
-    const push_value = try frame.stack.pop();
-    const gas1 = try frame.stack.pop();
+    const gas2 = frame.stack.pop_unsafe();
+    const push_value = frame.stack.pop_unsafe();
+    const gas1 = frame.stack.pop_unsafe();
     
     try testing.expectEqual(@as(u256, 0x02), push_value);
     
@@ -337,7 +337,7 @@ test "advanced interpreter performance comparison" {
     
     // Final result should be 1 + 2 + 3 = 6
     try testing.expectEqual(@as(usize, 1), frame.stack.size());
-    const value = try frame.stack.pop();
+    const value = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, 6), value);
     
     // Gas usage should be optimized (block-based deduction)

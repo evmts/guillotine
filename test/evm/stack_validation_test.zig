@@ -44,7 +44,10 @@ test "Stack validation: PUSH operations" {
     var stack = Stack.init();
 
     // Fill stack to capacity
-    stack.size = Stack.CAPACITY;
+    var i: usize = 0;
+    while (i < Stack.CAPACITY) : (i += 1) {
+        try stack.append(i);
+    }
 
     // Should fail due to overflow
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, push1_op));
@@ -68,7 +71,12 @@ test "Stack validation: DUP operations" {
     try stack_validation.validate_stack_requirements(&stack, dup1_op);
 
     // Test overflow - fill stack to capacity
-    stack.size = Stack.CAPACITY;
+    // Need to reinitialize stack as we can't directly set size
+    stack = Stack.init();
+    var j: usize = 0;
+    while (j < Stack.CAPACITY) : (j += 1) {
+        stack.append_unsafe(@as(u256, j));
+    }
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, dup1_op));
 }
 
@@ -150,7 +158,12 @@ test "Stack validation: jump table stack requirements verification" {
     try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), push1_op.max_stack);
 
     // Test at capacity
-    stack.size = Stack.CAPACITY;
+    // Need to reinitialize stack as we can't directly set size
+    stack = Stack.init();
+    var k: usize = 0;
+    while (k < Stack.CAPACITY) : (k += 1) {
+        stack.append_unsafe(@as(u256, k));
+    }
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, push1_op));
 }
 
