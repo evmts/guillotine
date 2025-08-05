@@ -670,7 +670,7 @@ test "MCOPY: zero length copy" {
     _ = try evm.table.execute(0, interpreter, state, 0x5E);
 
     // Should succeed without doing anything
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 }
 
 // Test gas consumption

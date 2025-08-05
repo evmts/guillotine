@@ -608,13 +608,13 @@ test "KECCAK256: Stack behavior" {
     try frame.stack.append(0x55); // size [top]
 
     // Stack before: [0x12345678, 0xABCDEF, 0x0, 0x55] (size and offset are on top)
-    try testing.expectEqual(@as(usize, 4), frame.stack.size);
+    try testing.expectEqual(@as(usize, 4), frame.stack.size();
 
     // Execute KECCAK256
     _ = try evm.table.execute(0, interpreter, state, 0x20);
 
     // Stack after: [0x12345678, 0xABCDEF, hash_result] (consumed 2, produced 1)
-    try testing.expectEqual(@as(usize, 3), frame.stack.size);
+    try testing.expectEqual(@as(usize, 3), frame.stack.size();
 
     // Bottom values should remain unchanged
     const bottom1 = try frame.stack.peek_n(2);

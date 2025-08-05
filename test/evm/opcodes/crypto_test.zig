@@ -54,7 +54,7 @@ test "Crypto: KECCAK256 (SHA3) basic operations" {
     const empty_hash = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
     const result1 = try frame.stack.peek_n(0);
     try testing.expectEqual(empty_hash, result1);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
 
     // Test 2: Hash single byte
     frame.stack.clear();

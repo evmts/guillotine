@@ -1378,7 +1378,7 @@ test "INVALID: No stack manipulation" {
     try frame.stack.append(0x12345678);
     try frame.stack.append(0x87654321);
 
-    const stack_size_before = frame.stack.size;
+    const stack_size_before = frame.stack.size()
 
     // Execute INVALID
     const interpreter: Evm.Operation.Interpreter = &evm;
@@ -1387,7 +1387,7 @@ test "INVALID: No stack manipulation" {
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result);
 
     // Stack should remain unchanged
-    try testing.expectEqual(stack_size_before, frame.stack.size);
+    try testing.expectEqual(stack_size_before, frame.stack.size());
 }
 
 // ============================

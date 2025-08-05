@@ -838,7 +838,7 @@ test "Stack operations: All opcodes push exactly one value" {
             try frame.stack.append(0); // Input for BLOBHASH
         }
 
-        const initial_stack_len = frame.stack.size;
+        const initial_stack_len = frame.stack.size();
 
         _ = try evm.table.execute(0, interpreter, state, op.opcode);
 
@@ -847,6 +847,6 @@ test "Stack operations: All opcodes push exactly one value" {
             initial_stack_len // BLOBHASH: pop 1, push 1 = net 0
         else
             initial_stack_len + 1; // Others: just push 1 = net +1
-        try testing.expectEqual(expected_len, frame.stack.size);
+        try testing.expectEqual(expected_len, frame.stack.size());
     }
 }

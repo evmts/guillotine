@@ -313,7 +313,7 @@ test "PUSH0 (0x5F): Push zero onto stack" {
     for (0..5) |_| {
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x5F);
     }
-    try testing.expectEqual(@as(usize, 5), frame.stack.size);
+    try testing.expectEqual(@as(usize, 5), frame.stack.size());
 
     // All values should be 0
     for (0..5) |_| {

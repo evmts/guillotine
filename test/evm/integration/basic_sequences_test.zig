@@ -77,7 +77,7 @@ test "Integration: arithmetic calculation sequence" {
     // Final result
     const final_result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 15), final_result);
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 }
 
 // Test stack manipulation sequences
@@ -621,7 +621,7 @@ test "Integration: error handling in sequences" {
     try testing.expectError(ExecutionError.Error.OutOfGas, result);
 
     // Stack should still be valid
-    try testing.expectEqual(@as(usize, 3), frame.stack.size); // Result from ADD + 2 values for SHA3
+    try testing.expectEqual(@as(usize, 3), frame.stack.size()); // Result from ADD + 2 values for SHA3
 }
 
 // Test transient storage workflow (EIP-1153)

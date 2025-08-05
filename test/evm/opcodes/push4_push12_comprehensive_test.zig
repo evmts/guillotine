@@ -840,12 +840,12 @@ test "PUSH operations: Sequential pushes filling stack" {
         try testing.expectEqual(@as(usize, 5), result.bytes_consumed);
     }
 
-    try testing.expectEqual(@as(usize, 1023), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1023), frame.stack.size());
 
     // One more should succeed (reaching stack limit of 1024)
     frame.pc = 1023 * 5;
     _ = try evm.table.execute(frame.pc, interpreter, state, 0x63);
-    try testing.expectEqual(@as(usize, 1024), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1024), frame.stack.size());
 
     // Next one should fail with stack overflow
     frame.pc = 1024 * 5;

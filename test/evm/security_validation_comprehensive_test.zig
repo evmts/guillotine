@@ -225,7 +225,7 @@ test "Security: SWAP operations at stack capacity should succeed" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     _ = try evm.table.execute(0, interpreter, state, 0x90);
-    try testing.expectEqual(@as(u32, 1024), frame.stack.size);
+    try testing.expectEqual(@as(u32, 1024), frame.stack.size());
 }
 
 test "Security: Stack boundary conditions at exactly 1024 elements" {
@@ -271,7 +271,7 @@ test "Security: Stack boundary conditions at exactly 1024 elements" {
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
     _ = try evm.table.execute(0, interpreter, state, 0x80);
-    try testing.expectEqual(@as(u32, 1024), frame.stack.size);
+    try testing.expectEqual(@as(u32, 1024), frame.stack.size());
 
     // Now DUP1 should fail (would exceed 1024)
     const result = evm.table.execute(0, interpreter, state, 0x80);
@@ -1597,7 +1597,7 @@ test "Security: Combined boundary conditions stress test" {
     defer frame.deinit();
 
     // Set multiple boundary conditions
-    frame.stack.size = 1020; // Near stack limit
+    frame.stack.size()= 1020; // Near stack limit
     frame.depth = 1020; // Near call depth limit
     frame.is_static = true; // Static context
 

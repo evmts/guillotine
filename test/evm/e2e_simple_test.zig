@@ -408,7 +408,7 @@ test "E2E: Stack operations" {
     const dup_result = try evm_instance.table.execute(0, interpreter, state, 0x80); // DUP1
     try testing.expect(dup_result.output.len == 0);
 
-    try testing.expectEqual(@as(usize, 4), frame.stack.size);
+    try testing.expectEqual(@as(usize, 4), frame.stack.size());
 
     // Top two elements should be the same
     const top1 = try frame.stack.pop();

@@ -51,25 +51,25 @@ test "POP (0x50): Remove top stack item" {
 
     // Test 1: Pop single value
     try frame.stack.append(42);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
 
     _ = try evm.table.execute(0, interpreter, state, 0x50);
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test 2: Pop multiple values in sequence
     try frame.stack.append(10);
     try frame.stack.append(20);
     try frame.stack.append(30);
-    try testing.expectEqual(@as(usize, 3), frame.stack.size);
+    try testing.expectEqual(@as(usize, 3), frame.stack.size());
 
     _ = try evm.table.execute(0, interpreter, state, 0x50);
-    try testing.expectEqual(@as(usize, 2), frame.stack.size);
+    try testing.expectEqual(@as(usize, 2), frame.stack.size());
 
     _ = try evm.table.execute(0, interpreter, state, 0x50);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
 
     _ = try evm.table.execute(0, interpreter, state, 0x50);
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test 3: Pop from empty stack should fail
     const result = evm.table.execute(0, interpreter, state, 0x50);
@@ -116,7 +116,7 @@ test "MLOAD (0x51): Load word from memory" {
     // Test 1: Load from uninitialized memory (should return 0)
     try frame.stack.append(0); // offset
     _ = try evm.table.execute(0, interpreter, state, 0x51);
-    try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]);
+    try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size() - 1]);
     _ = try frame.stack.pop();
 
     // Test 2: Store and load a value
@@ -125,7 +125,7 @@ test "MLOAD (0x51): Load word from memory" {
 
     try frame.stack.append(32); // offset
     _ = try evm.table.execute(0, interpreter, state, 0x51);
-    try testing.expectEqual(test_value, frame.stack.data[frame.stack.size - 1]);
+    try testing.expectEqual(test_value, frame.stack.data[frame.stack.size() - 1]);
     _ = try frame.stack.pop();
 
     // Test 3: Load from offset with partial overlap
@@ -317,7 +317,7 @@ test "SLOAD (0x54): Load from storage" {
     // Test 1: Load from empty slot (should return 0)
     try frame.stack.append(42); // slot
     _ = try evm.table.execute(0, interpreter, state, 0x54);
-    try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]);
+    try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size() - 1]);
     _ = try frame.stack.pop();
 
     // Test 2: Load from populated slot
@@ -328,7 +328,7 @@ test "SLOAD (0x54): Load from storage" {
 
     try frame.stack.append(slot);
     _ = try evm.table.execute(0, interpreter, state, 0x54);
-    try testing.expectEqual(value, frame.stack.data[frame.stack.size - 1]);
+    try testing.expectEqual(value, frame.stack.data[frame.stack.size() - 1]);
     _ = try frame.stack.pop();
 
     // Test 3: Load multiple different slots
@@ -346,7 +346,7 @@ test "SLOAD (0x54): Load from storage" {
         _ = try evm.table.execute(0, interpreter, state, 0x54);
         const stack_value = try frame.stack.peek();
         _ = stack_value;
-        try testing.expectEqual(ts.value, frame.stack.data[frame.stack.size - 1]);
+        try testing.expectEqual(ts.value, frame.stack.data[frame.stack.size() - 1]);
         _ = try frame.stack.pop();
     }
 }
@@ -601,13 +601,13 @@ test "PC (0x58): Get program counter" {
     // Test 1: PC at position 0
     frame.pc = 0;
     _ = try evm.table.execute(0, interpreter, state, 0x58);
-    try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size - 1]);
+    try testing.expectEqual(@as(u256, 0), frame.stack.data[frame.stack.size() - 1]);
     _ = try frame.stack.pop();
 
     // Test 2: PC at position 1
     frame.pc = 1;
     _ = try evm.table.execute(1, interpreter, state, 0x58);
-    try testing.expectEqual(@as(u256, 1), frame.stack.data[frame.stack.size - 1]);
+    try testing.expectEqual(@as(u256, 1), frame.stack.data[frame.stack.size() - 1]);
     _ = try frame.stack.pop();
 
     // Test 3: PC at various positions
@@ -615,7 +615,7 @@ test "PC (0x58): Get program counter" {
     for (test_positions) |pos| {
         frame.pc = pos;
         _ = try evm.table.execute(pos, interpreter, state, 0x58);
-        try testing.expectEqual(@as(u256, pos), frame.stack.data[frame.stack.size - 1]);
+        try testing.expectEqual(@as(u256, pos), frame.stack.data[frame.stack.size() - 1]);
         _ = try frame.stack.pop();
     }
 }

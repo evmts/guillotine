@@ -400,7 +400,7 @@ test "VMCore: Frame initialization and cleanup" {
     try testing.expectEqual(@as(usize, 0), frame.output.len);
 
     // Stack should be empty
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Memory should be initialized
     try testing.expectEqual(@as(usize, 0), frame.memory.size());
@@ -475,7 +475,7 @@ test "VMCore: Frame state inheritance and context switching" {
     try testing.expectEqual(&child_contract, child_frame.contract);
 
     // Verify independence (separate memory/stack)
-    try testing.expectEqual(@as(usize, 0), child_frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), child_frame.stack.size());
     try testing.expectEqual(@as(usize, 0), child_frame.memory.size());
 }
 
@@ -592,7 +592,7 @@ test "VMCore: Frame stack and memory integration" {
     // Test stack operations
     try frame.stack.append(42);
     try frame.stack.append(100);
-    try testing.expectEqual(@as(usize, 2), frame.stack.size);
+    try testing.expectEqual(@as(usize, 2), frame.stack.size());
     try testing.expectEqual(@as(u256, 100), try frame.stack.peek_n(0));
     try testing.expectEqual(@as(u256, 42), try frame.stack.peek_n(1));
 
@@ -604,7 +604,7 @@ test "VMCore: Frame stack and memory integration" {
     // Verify stack and memory are independent
     const popped = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 100), popped);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
 
     // Memory should be unchanged
     try testing.expectEqual(@as(u256, 0x123456789abcdef), try frame.memory.load_word(0));

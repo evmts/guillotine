@@ -1015,7 +1015,7 @@ test "Large PUSH operations with stack near limit" {
     // One more PUSH32 should succeed (reaching limit of 1024)
     const result = try evm.table.execute(frame.pc, interpreter, state, 0x7F);
     try testing.expectEqual(@as(usize, 33), result.bytes_consumed);
-    try testing.expectEqual(@as(usize, 1024), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1024), frame.stack.size());
 
     // Clear one item to test overflow
     _ = try frame.stack.pop();
@@ -1106,5 +1106,5 @@ test "PUSH operations sequence verification" {
     const top3_2 = try frame.stack.peek_n(2);
     try testing.expectEqual(@as(u256, 1), top3_2);
 
-    try testing.expectEqual(@as(usize, 3), frame.stack.size);
+    try testing.expectEqual(@as(usize, 3), frame.stack.size());
 }

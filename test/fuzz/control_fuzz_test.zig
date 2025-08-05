@@ -117,12 +117,12 @@ test "fuzz_control_jumpdest_operations" {
     defer frame.deinit();
     
     // Test JUMPDEST operation (should be a no-op)
-    const initial_stack_size = frame.stack.size;
+    const initial_stack_size = frame.stack.size()
     
     var interpreter = evm.Operation.Interpreter = &vm;
     var state = evm.Operation.State = &frame;
     _ = try vm.table.execute(0, interpreter, state, 0x5B); // JUMPDEST opcode
     
     // Stack size should be unchanged
-    try testing.expectEqual(initial_stack_size, frame.stack.size);
+    try testing.expectEqual(initial_stack_size, frame.stack.size();
 }

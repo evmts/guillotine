@@ -1069,7 +1069,7 @@ test "Performance: Rapid successive operations" {
         _ = try evm.table.execute(0, interpreter, state, 0x19); // NOT
 
         // Verify stack has one result
-        try testing.expectEqual(@as(usize, 1), frame.stack.size);
+        try testing.expectEqual(@as(usize, 1), frame.stack.size());
         _ = try frame.stack.pop();
     }
 }

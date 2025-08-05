@@ -49,9 +49,9 @@ test "SIGNEXTEND direct test" {
     try frame_ptr.stack.append(0);     // byte_index
     
     std.debug.print("\nBefore SIGNEXTEND: stack size={}, values=[{}, {}]\n", .{
-        frame_ptr.stack.size,
-        if (frame_ptr.stack.size > 0) frame_ptr.stack.data[0] else 0,
-        if (frame_ptr.stack.size > 1) frame_ptr.stack.data[1] else 0,
+        frame_ptr.stack.size()
+        if (frame_ptr.stack.size()> 0) frame_ptr.stack.data[0] else 0,
+        if (frame_ptr.stack.size()> 1) frame_ptr.stack.data[1] else 0,
     });
     
     // Execute SIGNEXTEND
@@ -60,12 +60,12 @@ test "SIGNEXTEND direct test" {
     _ = try arithmetic.op_signextend(0, interpreter, state);
     
     std.debug.print("After SIGNEXTEND: stack size={}, top=0x{x}\n", .{
-        frame_ptr.stack.size,
-        if (frame_ptr.stack.size > 0) frame_ptr.stack.peek_n(0) catch 0 else 0,
+        frame_ptr.stack.size()
+        if (frame_ptr.stack.size()> 0) frame_ptr.stack.peek_n(0) catch 0 else 0,
     });
     
     // Check result
-    try testing.expectEqual(@as(usize, 1), frame_ptr.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame_ptr.stack.size();
     const result = try frame_ptr.stack.peek_n(0);
     try testing.expectEqual(std.math.maxInt(u256), result);
 }

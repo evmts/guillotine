@@ -79,7 +79,7 @@ test "Integration: Complex arithmetic calculation" {
 
     const result = try frame_ptr.stack.peek_n(0);
     try testing.expectEqual(@as(u256, 75), result);
-    try testing.expectEqual(@as(usize, 1), frame_ptr.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame_ptr.stack.size());
 }
 
 test "Integration: Modular arithmetic with overflow" {

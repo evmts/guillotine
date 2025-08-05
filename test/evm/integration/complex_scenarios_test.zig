@@ -569,7 +569,7 @@ test "complex: call depth limit enforcement" {
     //
     // // Now test at depth 1024 (should fail)
     // evm.last_frame.?.depth = 1024;
-    // evm.last_frame.?.stack.size = 0; // Reset stack
+    // evm.last_frame.?.stack.size()= 0; // Reset stack
     //
     // const result2 = try test_helpers.runBytecode(vm, &bytecode, Address.ZERO, 100000, null);
     // defer if (result2.output) |output| allocator.free(output);

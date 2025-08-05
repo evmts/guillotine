@@ -98,7 +98,7 @@ test "Control: JUMP basic operations" {
     try frame.stack.append(5);
     _ = try evm.table.execute(0, interpreter, state, 0x56);
     try testing.expectEqual(@as(usize, 5), frame.pc);
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test 2: Invalid jump (not a JUMPDEST)
     frame.pc = 0; // Reset PC
@@ -166,7 +166,7 @@ test "Control: JUMPI conditional jump" {
     try frame.stack.append(5);
     _ = try evm.table.execute(0, interpreter, state, 0x57);
     try testing.expectEqual(@as(usize, 5), frame.pc);
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test 2: No jump when condition is zero
     frame.pc = 0; // Reset PC
@@ -174,7 +174,7 @@ test "Control: JUMPI conditional jump" {
     try frame.stack.append(5);
     _ = try evm.table.execute(0, interpreter, state, 0x57);
     try testing.expectEqual(@as(usize, 0), frame.pc); // PC unchanged
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test 3: Invalid jump with non-zero condition
     frame.pc = 0;
@@ -294,7 +294,7 @@ test "Control: JUMPDEST is a no-op" {
     _ = try evm.table.execute(0, interpreter, state, 0x5B);
 
     // Stack should be unchanged
-    try testing.expectEqual(@as(usize, 2), frame.stack.size);
+    try testing.expectEqual(@as(usize, 2), frame.stack.size());
     const val1 = try frame.stack.pop();
     const val2 = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 100), val1);
@@ -488,7 +488,7 @@ test "Control: INVALID always fails" {
     try frame.stack.append(42);
     const result2 = evm.table.execute(0, interpreter, state, 0xFE);
     try testing.expectError(ExecutionError.Error.InvalidOpcode, result2);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
 }
 
 test "Control: SELFDESTRUCT basic operation" {

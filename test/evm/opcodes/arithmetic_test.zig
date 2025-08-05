@@ -51,7 +51,7 @@ test "Arithmetic: ADD basic operations" {
     _ = try evm.table.execute(0, interpreter, state, 0x01);
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 15), result);
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test 2: Addition with overflow
     frame.stack.clear();

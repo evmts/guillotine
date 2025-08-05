@@ -964,7 +964,7 @@ test "JUMPDEST (0x5B): Basic operation" {
     defer frame.deinit();
 
     // JUMPDEST should be a no-op
-    const stack_size_before = frame.stack.size;
+    const stack_size_before = frame.stack.size();
     const gas_before = frame.gas_remaining;
 
     const interpreter: Evm.Operation.Interpreter = &evm;
@@ -972,7 +972,7 @@ test "JUMPDEST (0x5B): Basic operation" {
     _ = try evm.table.execute(0, interpreter, state, 0x5B);
 
     // Stack should be unchanged
-    try testing.expectEqual(stack_size_before, frame.stack.size);
+    try testing.expectEqual(stack_size_before, frame.stack.size());
 
     // Should consume only JUMPDEST gas (1)
     try testing.expectEqual(@as(u64, gas_before - 1), frame.gas_remaining);
@@ -1645,12 +1645,12 @@ test "Control Flow: Stack operations edge cases" {
 
     for (stack_ops) |opcode| {
         frame.stack.clear();
-        const initial_size = frame.stack.size;
+        const initial_size = frame.stack.size();
 
         _ = try evm.table.execute(0, interpreter, state, opcode);
 
         // Should push exactly one value
-        try testing.expectEqual(initial_size + 1, frame.stack.size);
+        try testing.expectEqual(initial_size + 1, frame.stack.size());
         _ = try frame.stack.pop(); // Clean up
     }
 
@@ -1658,19 +1658,19 @@ test "Control Flow: Stack operations edge cases" {
     frame.stack.clear();
     try frame.stack.append(0); // Only one value for JUMP
     _ = try evm.table.execute(0, interpreter, state, 0x56); // JUMP
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     frame.stack.clear();
     try frame.stack.append(0); // condition=0
     try frame.stack.append(0); // dest=0
     _ = try evm.table.execute(0, interpreter, state, 0x57); // JUMPI
-    try testing.expectEqual(@as(usize, 0), frame.stack.size);
+    try testing.expectEqual(@as(usize, 0), frame.stack.size());
 
     // Test JUMPDEST doesn't affect stack
     frame.stack.clear();
     try frame.stack.append(42);
     _ = try evm.table.execute(0, interpreter, state, 0x5B); // JUMPDEST
-    try testing.expectEqual(@as(usize, 1), frame.stack.size);
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
     const val = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 42), val);
 }

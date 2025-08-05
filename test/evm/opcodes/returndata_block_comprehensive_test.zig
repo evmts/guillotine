@@ -845,7 +845,7 @@ test "Block opcodes: Gas consumption" {
         try testing.expectEqual(op.expected_gas, gas_used);
 
         // Pop result if needed
-        if (frame.stack.size > 0) {
+        if (frame.stack.size() > 0) {
             _ = try frame.stack.pop();
         }
     }
