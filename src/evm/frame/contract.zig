@@ -808,6 +808,17 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
     analysis.has_static_jumps = false;
     analysis.has_selfdestruct = contains_op(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
+    
+    // Initialize new block-related fields to safe defaults
+    analysis.block_starts = bitvec.BitVec64{
+        .bits = &[_]u64{},
+        .size = 0,
+        .owned = false,
+        .cached_ptr = undefined,
+    };
+    analysis.block_metadata = &[_]CodeAnalysis.BlockMetadata{};
+    analysis.pc_to_block = &[_]u16{};
+    analysis.block_count = 0;
 
     // Cache the analysis in appropriate cache
     if (comptime !AnalysisCacheConfig.ENABLE_CACHE) {
@@ -875,6 +886,17 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
     analysis.has_static_jumps = false;
     analysis.has_selfdestruct = contains_op(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
+    
+    // Initialize new block-related fields to safe defaults
+    analysis.block_starts = bitvec.BitVec64{
+        .bits = &[_]u64{},
+        .size = 0,
+        .owned = false,
+        .cached_ptr = undefined,
+    };
+    analysis.block_metadata = &[_]CodeAnalysis.BlockMetadata{};
+    analysis.pc_to_block = &[_]u16{};
+    analysis.block_count = 0;
 
     return analysis;
 }
@@ -971,6 +993,17 @@ fn analyze_code_simd(allocator: std.mem.Allocator, code: []const u8, code_hash: 
     analysis.has_dynamic_jumps = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.JUMP), @intFromEnum(opcode.Enum.JUMPI) });
     analysis.has_selfdestruct = contains_op_simd(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
+    
+    // Initialize new block-related fields to safe defaults
+    analysis.block_starts = bitvec.BitVec64{
+        .bits = &[_]u64{},
+        .size = 0,
+        .owned = false,
+        .cached_ptr = undefined,
+    };
+    analysis.block_metadata = &[_]CodeAnalysis.BlockMetadata{};
+    analysis.pc_to_block = &[_]u16{};
+    analysis.block_count = 0;
 
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
@@ -1063,6 +1096,17 @@ fn analyze_code_simd_direct(allocator: std.mem.Allocator, code: []const u8) Code
     analysis.has_dynamic_jumps = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.JUMP), @intFromEnum(opcode.Enum.JUMPI) });
     analysis.has_selfdestruct = contains_op_simd(code, &[_]u8{@intFromEnum(opcode.Enum.SELFDESTRUCT)});
     analysis.has_create = contains_op_simd(code, &[_]u8{ @intFromEnum(opcode.Enum.CREATE), @intFromEnum(opcode.Enum.CREATE2) });
+    
+    // Initialize new block-related fields to safe defaults
+    analysis.block_starts = bitvec.BitVec64{
+        .bits = &[_]u64{},
+        .size = 0,
+        .owned = false,
+        .cached_ptr = undefined,
+    };
+    analysis.block_metadata = &[_]CodeAnalysis.BlockMetadata{};
+    analysis.pc_to_block = &[_]u16{};
+    analysis.block_count = 0;
 
     analysis.max_stack_depth = 0;
     analysis.block_gas_costs = null;
