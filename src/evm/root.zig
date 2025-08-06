@@ -204,6 +204,10 @@ pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");
 pub const Instruction = @import("instruction.zig").Instruction;
 const instruction_module = @import("instruction.zig");
 
+/// Instruction translator for bytecode to instruction conversion
+pub const InstructionTranslator = @import("instruction_translator.zig").InstructionTranslator;
+const translator_module = @import("instruction_translator.zig");
+
 /// Fee market calculations (EIP-1559)
 pub const fee_market = @import("primitives").FeeMarket;
 
@@ -341,4 +345,7 @@ test "Execution module" {
 }
 test "Instruction module" {
     std.testing.refAllDecls(instruction_module);
+}
+test "InstructionTranslator module" {
+    std.testing.refAllDecls(translator_module);
 }
