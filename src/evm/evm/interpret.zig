@@ -28,7 +28,6 @@ const primitives = @import("primitives");
 /// defer if (result.output) |output| vm.allocator.free(output);
 /// ```
 pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
-    @branchHint(.likely);
     Log.debug("VM.interpret: Starting execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
     self.depth += 1;
@@ -65,8 +64,17 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const interpreter: Operation.Interpreter = self;
     const state: Operation.State = &frame;
 
+    var loop_iterations: usize = 0;
     while (frame.pc < contract.code_size) {
         @branchHint(.likely);
+
+        // Debug infinite loops
+        loop_iterations += 1;
+        if (loop_iterations > 1_000_000) {
+            Log.err("interpret: Possible infinite loop detected after {} iterations at pc={}, code_size={}", .{ loop_iterations, frame.pc, contract.code_size });
+            return ExecutionError.Error.InvalidOpcode;
+        }
+
         const opcode = contract.get_op(frame.pc);
 
         const inline_hot_ops = @import("../jump_table/jump_table.zig").execute_with_inline_hot_ops;

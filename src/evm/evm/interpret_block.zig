@@ -23,27 +23,22 @@ const CodeAnalysis = @import("../frame/code_analysis.zig");
 /// Time complexity: O(n) where n is the number of opcodes executed.
 /// Memory: Allocates instruction buffer upfront, may allocate for return data.
 pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
-    @branchHint(.likely);
-    Log.debug("VM.interpret_block: Starting block execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ 
-        self.depth, contract.gas, is_static, contract.code_size, input.len 
-    });
+    Log.debug("VM.interpret_block: Starting block execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
     // For very small contracts, fall back to regular interpretation
+    // TODO we need to benchmark and tune this
     if (contract.code_size < 32) {
         Log.debug("VM.interpret_block: Contract too small for block execution, falling back to regular", .{});
+        // TODO we need to rename this
         return self.interpret(contract, input, is_static);
     }
 
-    // We can now handle contracts with jumps thanks to jump resolution
-
+    // We track depth simply on the instance because the EVM can be expected to be syncronous
     self.depth += 1;
     defer self.depth -= 1;
-
     const prev_read_only = self.read_only;
     defer self.read_only = prev_read_only;
-
     self.read_only = self.read_only or is_static;
-
     const initial_gas = contract.gas;
 
     // Analyze the bytecode
@@ -55,7 +50,6 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
     defer analysis.deinit(self.allocator);
     Log.debug("VM.interpret_block: Code analysis complete", .{});
 
-    // Allocate instruction buffer
     const max_instructions = contract.code_size * 2; // Conservative estimate
     const instructions = self.allocator.alloc(Instruction, max_instructions + 1) catch {
         Log.debug("VM.interpret_block: Instruction allocation failed, falling back to regular", .{});

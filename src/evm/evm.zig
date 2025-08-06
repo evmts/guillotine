@@ -23,6 +23,7 @@ pub const CallResult = @import("evm/call_result.zig").CallResult;
 pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
+const builtin = @import("builtin");
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -56,8 +57,14 @@ tracer: ?std.io.AnyWriter = null,
 // Large state structures (placed last to minimize offset impact)
 /// World state including accounts, storage, and code
 state: EvmState,
+
 /// Warm/cold access tracking for EIP-2929 gas costs
 access_list: AccessList,
+
+/// As of now the EVM assumes we are only running on a single thread
+/// All places in code that make this assumption are commented and must be handled
+/// Before we can remove this restriction
+initial_thread_id: std.Thread.Id,
 
 // Compile-time validation and optimizations
 comptime {
@@ -113,7 +120,7 @@ pub fn init(
     errdefer access_list.deinit();
 
     // No frame pool initialization needed - frames are stack-allocated
-    
+
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
         .allocator = allocator,
@@ -122,6 +129,7 @@ pub fn init(
         .state = state,
         .access_list = access_list,
         .context = ctx,
+        .initial_thread_id = std.Thread.getCurrentId(),
         .depth = depth,
         .read_only = read_only,
         .tracer = tracer,
@@ -134,7 +142,7 @@ pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
     Contract.clear_analysis_cache(self.allocator);
-    
+
     // No frame pool to clean up - frames are stack-allocated and cleaned up in their respective functions
 }
 
@@ -148,7 +156,6 @@ pub fn reset(self: *Evm) void {
     self.depth = 0;
     self.read_only = false;
 }
-
 
 pub usingnamespace @import("evm/set_context.zig");
 pub usingnamespace @import("evm/interpret.zig");
@@ -851,8 +858,8 @@ test "fuzz_evm_initialization_states" {
 
             // Test initialization with various state combinations
             const jump_table = JumpTable.init(hardfork);
-        const chain_rules = ChainRules.from_hardfork(hardfork);
-        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+            const chain_rules = ChainRules.from_hardfork(hardfork);
+            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();
 
             // Verify initial state
@@ -1039,8 +1046,8 @@ test "fuzz_evm_hardfork_configurations" {
             const hardfork = hardforks[hardfork_idx];
 
             const jump_table = JumpTable.init(hardfork);
-        const chain_rules = ChainRules.from_hardfork(hardfork);
-        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+            const chain_rules = ChainRules.from_hardfork(hardfork);
+            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();
 
             // Verify EVM was configured for the specified hardfork

@@ -115,8 +115,9 @@ pub fn main() !void {
     // Set up caller account with max balance
     try vm.state.set_balance(caller_address, std.math.maxInt(u256));
 
+    std.debug.print("DEBUG: About to deploy contract with code_size={}\n", .{contract_code.len});
     const contract_address = try deployContract(allocator, &vm, caller_address, contract_code);
-    // std.debug.print("Deployed contract to address: {any}\n", .{contract_address});
+    std.debug.print("DEBUG: Contract deployed successfully\n", .{});
 
     // Run benchmarks
     var run: u8 = 0;
@@ -137,12 +138,15 @@ pub fn main() !void {
 
         // Execute the contract
 
-        const result = if (use_block_execution)
-            vm.interpret_block(&contract, calldata, false) catch |err| {
+        const result = if (use_block_execution) blk: {
+            std.debug.print("DEBUG: Starting block execution with code_size={}, calldata_len={}\n", .{contract.code_size, calldata.len});
+            const res = vm.interpret_block(&contract, calldata, false) catch |err| {
                 std.debug.print("Contract execution error: {}\n", .{err});
                 std.process.exit(1);
-            }
-        else
+            };
+            std.debug.print("DEBUG: Block execution completed\n", .{});
+            break :blk res;
+        } else
             vm.interpret(&contract, calldata, false) catch |err| {
                 std.debug.print("Contract execution error: {}\n", .{err});
                 std.process.exit(1);
