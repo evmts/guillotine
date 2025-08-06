@@ -42,18 +42,34 @@ pub const InstructionTranslator = struct {
     /// Translate bytecode into instruction stream.
     /// Returns the number of instructions created.
     pub fn translate_bytecode(self: *InstructionTranslator) !usize {
+        const log = std.log.scoped(.translator);
         var pc: usize = 0;
+        
+        log.debug("Starting translation, code_len={}", .{self.code.len});
         
         while (pc < self.code.len) {
             if (self.instruction_count >= self.instructions.len) {
+                log.err("Instruction limit exceeded at pc={}", .{pc});
                 return error.InstructionLimitExceeded;
             }
             
             const opcode_byte = self.code[pc];
-            const opcode = @as(Opcode.Enum, @enumFromInt(opcode_byte));
+            log.debug("PC={}: opcode_byte=0x{x:0>2}", .{pc, opcode_byte});
+            
+            const opcode = std.meta.intToEnum(Opcode.Enum, opcode_byte) catch {
+                // Invalid opcode - add it as a regular instruction
+                self.instructions[self.instruction_count] = .{
+                    .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                    .arg = .none,
+                };
+                self.instruction_count += 1;
+                pc += 1;
+                continue;
+            };
             
             switch (opcode) {
                 .STOP => {
+                    log.debug("PC={}: STOP instruction", .{pc});
                     self.instructions[self.instruction_count] = .{
                         .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
                         .arg = .none,
@@ -62,6 +78,7 @@ pub const InstructionTranslator = struct {
                     pc += 1;
                 },
                 .PUSH0 => {
+                    log.debug("PC={}: PUSH0 instruction", .{pc});
                     self.instructions[self.instruction_count] = .{
                         .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
                         .arg = .{ .push_value = 0 },
@@ -75,6 +92,7 @@ pub const InstructionTranslator = struct {
                 .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
                     // Calculate how many bytes to read
                     const push_size = Opcode.get_push_size(opcode_byte);
+                    log.debug("PC={}: PUSH{} instruction", .{pc, push_size});
                     
                     // Make sure we have enough bytes
                     if (pc + 1 + push_size > self.code.len) {
@@ -94,6 +112,7 @@ pub const InstructionTranslator = struct {
                                 value = value << (8 * missing_bytes);
                             }
                         }
+                        log.debug("PC={}: PUSH with padded value={}", .{pc, value});
                         self.instructions[self.instruction_count] = .{
                             .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
                             .arg = .{ .push_value = value },
@@ -108,6 +127,7 @@ pub const InstructionTranslator = struct {
                             value = (value << 8) | self.code[pc + 1 + i];
                         }
                         
+                        log.debug("PC={}: PUSH with value={}", .{pc, value});
                         self.instructions[self.instruction_count] = .{
                             .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
                             .arg = .{ .push_value = value },

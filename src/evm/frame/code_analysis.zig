@@ -640,8 +640,12 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
             }
         }
         
-        // Handle opcodes that end blocks
-        switch (@as(opcode.Enum, @enumFromInt(op))) {
+        // Handle opcodes that end blocks - skip invalid opcodes
+        const maybe_opcode = std.meta.intToEnum(opcode.Enum, op) catch {
+            // Invalid opcode, skip it
+            continue;
+        };
+        switch (maybe_opcode) {
             .JUMP, .JUMPI => {
                 analysis.has_static_jumps = true;
                 // Next instruction starts new block (if exists)

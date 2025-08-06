@@ -856,12 +856,18 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
             analysis.jumpdest_bitmap.setUnchecked(i);
         }
         
-        // Track opcodes
-        switch (@as(opcode.Enum, @enumFromInt(op))) {
-            .JUMP, .JUMPI => analysis.has_static_jumps = true,
-            .SELFDESTRUCT => analysis.has_selfdestruct = true,
-            .CREATE, .CREATE2 => analysis.has_create = true,
-            else => {},
+        // Track opcodes - skip invalid opcodes
+        if (op <= 0xFF) {
+            const maybe_opcode = std.meta.intToEnum(opcode.Enum, op) catch {
+                // Invalid opcode, skip it
+                continue;
+            };
+            switch (maybe_opcode) {
+                .JUMP, .JUMPI => analysis.has_static_jumps = true,
+                .SELFDESTRUCT => analysis.has_selfdestruct = true,
+                .CREATE, .CREATE2 => analysis.has_create = true,
+                else => {},
+            }
         }
         
         // Advance PC

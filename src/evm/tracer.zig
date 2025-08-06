@@ -21,7 +21,7 @@ pub const Tracer = struct {
         depth: u32,
     ) !void {
         // Get opcode name
-        const op_enum: opcodes.Enum = @enumFromInt(opcode);
+        const op_enum = std.meta.intToEnum(opcodes.Enum, opcode) catch opcodes.Enum.INVALID;
         const op_name = opcodes.get_name(op_enum);
         
         // Format gas values as hex strings to match REVM
