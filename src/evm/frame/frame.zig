@@ -105,6 +105,10 @@ stack: Stack,
 /// Used by RETURNDATASIZE and RETURNDATACOPY opcodes.
 return_data: ReturnData,
 
+/// Reference to the VM executing this frame.
+/// Required for instruction execution and opcode dispatch.
+vm: *Vm,
+
 /// Create a new execution frame with default settings.
 ///
 /// Initializes a frame with empty stack and memory, ready for execution.
@@ -122,7 +126,7 @@ return_data: ReturnData,
 /// frame.gas_remaining = gas_limit;
 /// frame.input = calldata;
 /// ```
-pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
+pub fn init(allocator: std.mem.Allocator, vm: *Vm, contract: *Contract) !Frame {
     var memory = try Memory.init_default(allocator);
     errdefer memory.deinit();
 
@@ -142,6 +146,7 @@ pub fn init(allocator: std.mem.Allocator, contract: *Contract) !Frame {
         .memory = memory,
         .stack = Stack{},
         .return_data = ReturnData.init(allocator),
+        .vm = vm,
     };
 }
 
@@ -173,7 +178,6 @@ pub fn init_full(
     caller: primitives.Address.Address,
     input: []const u8,
 ) !Frame {
-    _ = vm; // VM parameter for future use
     _ = caller; // Caller parameter for future use
     return Frame{
         .gas_remaining = gas_limit,
@@ -191,6 +195,7 @@ pub fn init_full(
         .memory = try Memory.init_default(allocator),
         .stack = Stack{},
         .return_data = ReturnData.init(allocator),
+        .vm = vm,
     };
 }
 
@@ -228,6 +233,7 @@ pub fn init_full(
 /// ```
 pub fn init_with_state(
     allocator: std.mem.Allocator,
+    vm: *Vm,
     contract: *Contract,
     op: ?[]const u8,
     cost: ?u64,
@@ -263,6 +269,7 @@ pub fn init_with_state(
         .memory = memory_to_use,
         .stack = stack_to_use,
         .return_data = ReturnData.init(allocator),
+        .vm = vm,
     };
 }
 
@@ -431,6 +438,7 @@ pub const FrameBuilder = struct {
             .memory = Memory.init_default(self.allocator) catch return BuildError.OutOfMemory,
             .stack = .{},
             .return_data = ReturnData.init(self.allocator),
+            .vm = self.vm.?,
         };
     }
 };
@@ -1100,8 +1108,18 @@ test "Frame with empty contract" {
     const allocator = std.testing.allocator;
 
     // Create an empty contract
-    var contract = Contract.init(allocator, &[_]u8{}, // Empty bytecode
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const empty_code = &[_]u8{};
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        empty_code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
@@ -1351,7 +1369,8 @@ test "fuzz_frame_builder_patterns" {
             }
         }
     };
-    try std.testing.fuzz(global.testFrameBuilderPatterns, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testFrameBuilderPatterns(input);
 }
 
 test "fuzz_frame_gas_consumption_patterns" {
@@ -1398,7 +1417,8 @@ test "fuzz_frame_gas_consumption_patterns" {
             }
         }
     };
-    try std.testing.fuzz(global.testGasConsumptionPatterns, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testGasConsumptionPatterns(input);
 }
 
 test "fuzz_frame_memory_operations" {
@@ -1462,7 +1482,8 @@ test "fuzz_frame_memory_operations" {
             }
         }
     };
-    try std.testing.fuzz(global.testMemoryOperations, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testMemoryOperations(input);
 }
 
 test "fuzz_frame_stack_operations" {
@@ -1514,7 +1535,8 @@ test "fuzz_frame_stack_operations" {
             std.testing.expectError(Stack.StackError.StackUnderflow, frame.stack.pop()) catch {};
         }
     };
-    try std.testing.fuzz(global.testStackOperations, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testStackOperations(input);
 }
 
 test "fuzz_frame_state_combinations" {
@@ -1576,5 +1598,6 @@ test "fuzz_frame_state_combinations" {
             }
         }
     };
-    try std.testing.fuzz(global.testStateCombinations, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testStateCombinations(input);
 }

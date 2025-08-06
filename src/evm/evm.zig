@@ -156,6 +156,7 @@ pub fn init(
             .memory = try Memory.init_default(allocator),
             .stack = .{},
             .return_data = ReturnData.init(allocator),
+            .vm = undefined, // Will be set when frame is allocated from pool
         };
     }
     

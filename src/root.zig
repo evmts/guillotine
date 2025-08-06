@@ -374,8 +374,9 @@ export fn guillotine_vm_execute(
     var contract = evm_root.Contract.init(from_addr, to_addr, value_u256, gas_limit, &[_]u8{}, code_hash, input_slice, false);
     defer contract.deinit(state.allocator, null);
     
-    // Create frame
-    var frame = evm_root.Frame.init(state.allocator, &contract) catch return result;
+    // Create frame (vm parameter is required but not used in benchmark)
+    var dummy_vm: evm_root.Evm = undefined;
+    var frame = evm_root.Frame.init(state.allocator, &dummy_vm, &contract) catch return result;
     defer frame.deinit();
     
     // Execute

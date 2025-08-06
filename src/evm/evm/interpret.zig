@@ -65,6 +65,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
             .memory = undefined,
             .stack = .{},
             .return_data = ReturnData.init(self.allocator),
+            .vm = self, // Set vm to the current Evm instance
         };
         heap_frame_storage.memory = try Memory.init_default(self.allocator);
         break :blk &heap_frame_storage;
@@ -77,6 +78,7 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     frame.is_static = self.read_only;
     frame.depth = @as(u32, @intCast(self.depth));
     frame.input = input;
+    frame.vm = self; // Set vm reference for pooled frames too
     
     defer {
         if (pooled_frame != null) {
