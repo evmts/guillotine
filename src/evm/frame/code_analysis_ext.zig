@@ -62,14 +62,15 @@ pub fn deinit(self: *CodeAnalysisExt, allocator: std.mem.Allocator) void {
 
 test "CodeAnalysisExt initialization" {
     const allocator = std.testing.allocator;
-    const BitVec64 = @import("bitvec.zig").BitVec64;
+    const limits = @import("../constants/code_analysis_limits.zig");
+    const StaticBitSet = std.bit_set.StaticBitSet;
     const BlockMetadataSoA = @import("block_metadata_soa.zig");
     
     // Create a minimal base CodeAnalysis
     var base = CodeAnalysis{
-        .code_segments = try BitVec64.init(allocator, 10),
-        .jumpdest_bitmap = try BitVec64.init(allocator, 10),
-        .block_starts = try BitVec64.init(allocator, 10),
+        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
         .block_metadata = undefined,
         .block_metadata_soa = BlockMetadataSoA.init(),
         .pc_to_block = undefined,
@@ -89,15 +90,16 @@ test "CodeAnalysisExt initialization" {
 
 test "CodeAnalysisExt add and get instructions" {
     const allocator = std.testing.allocator;
-    const BitVec64 = @import("bitvec.zig").BitVec64;
+    const limits = @import("../constants/code_analysis_limits.zig");
+    const StaticBitSet = std.bit_set.StaticBitSet;
     const BlockMetadataSoA = @import("block_metadata_soa.zig");
     const opcodes = @import("../opcodes/opcode.zig");
     
     // Create a minimal base CodeAnalysis
     var base = CodeAnalysis{
-        .code_segments = try BitVec64.init(allocator, 10),
-        .jumpdest_bitmap = try BitVec64.init(allocator, 10),
-        .block_starts = try BitVec64.init(allocator, 10),
+        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
         .block_metadata = undefined,
         .block_metadata_soa = BlockMetadataSoA.init(),
         .pc_to_block = undefined,
@@ -148,14 +150,15 @@ test "CodeAnalysisExt add and get instructions" {
 
 test "CodeAnalysisExt instruction limit" {
     const allocator = std.testing.allocator;
-    const BitVec64 = @import("bitvec.zig").BitVec64;
+    const limits = @import("../constants/code_analysis_limits.zig");
+    const StaticBitSet = std.bit_set.StaticBitSet;
     const BlockMetadataSoA = @import("block_metadata_soa.zig");
     
     // Create a minimal base CodeAnalysis
     var base = CodeAnalysis{
-        .code_segments = try BitVec64.init(allocator, 10),
-        .jumpdest_bitmap = try BitVec64.init(allocator, 10),
-        .block_starts = try BitVec64.init(allocator, 10),
+        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
         .block_metadata = undefined,
         .block_metadata_soa = BlockMetadataSoA.init(),
         .pc_to_block = undefined,
@@ -195,14 +198,15 @@ test "CodeAnalysisExt instruction limit" {
 
 test "CodeAnalysisExt finalize sets null terminator" {
     const allocator = std.testing.allocator;
-    const BitVec64 = @import("bitvec.zig").BitVec64;
+    const limits = @import("../constants/code_analysis_limits.zig");
+    const StaticBitSet = std.bit_set.StaticBitSet;
     const BlockMetadataSoA = @import("block_metadata_soa.zig");
     
     // Create a minimal base CodeAnalysis
     var base = CodeAnalysis{
-        .code_segments = try BitVec64.init(allocator, 10),
-        .jumpdest_bitmap = try BitVec64.init(allocator, 10),
-        .block_starts = try BitVec64.init(allocator, 10),
+        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
         .block_metadata = undefined,
         .block_metadata_soa = BlockMetadataSoA.init(),
         .pc_to_block = undefined,
