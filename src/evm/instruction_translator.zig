@@ -4,6 +4,8 @@ const Operation = @import("opcodes/operation.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const Opcode = @import("opcodes/opcode.zig");
 const CodeAnalysis = @import("frame/code_analysis.zig");
+const JumpTable = @import("jump_table/jump_table.zig").JumpTable;
+const execution = @import("execution/package.zig");
 
 /// Translates EVM bytecode into an instruction stream for block-based execution.
 /// This is the core of the block-based execution model, converting traditional
@@ -15,6 +17,7 @@ pub const InstructionTranslator = struct {
     analysis: *const CodeAnalysis,
     instructions: []Instruction,
     instruction_count: usize,
+    jump_table: *const JumpTable,
     
     const MAX_INSTRUCTIONS = @import("constants/instruction_limits.zig").MAX_INSTRUCTIONS;
     
@@ -24,6 +27,7 @@ pub const InstructionTranslator = struct {
         code: []const u8,
         analysis: *const CodeAnalysis,
         instructions: []Instruction,
+        jump_table: *const JumpTable,
     ) InstructionTranslator {
         return .{
             .allocator = allocator,
@@ -31,6 +35,7 @@ pub const InstructionTranslator = struct {
             .analysis = analysis,
             .instructions = instructions,
             .instruction_count = 0,
+            .jump_table = jump_table,
         };
     }
     
@@ -45,21 +50,137 @@ pub const InstructionTranslator = struct {
             }
             
             const opcode_byte = self.code[pc];
-            const opcode = @as(Opcode.Opcode, @enumFromInt(opcode_byte));
+            const opcode = @as(Opcode.Enum, @enumFromInt(opcode_byte));
             
-            // For now, just handle STOP as a simple case
             switch (opcode) {
                 .STOP => {
                     self.instructions[self.instruction_count] = .{
-                        .opcode_fn = get_opcode_function(opcode),
+                        .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
                         .arg = .none,
                     };
                     self.instruction_count += 1;
                     pc += 1;
                 },
+                .PUSH0 => {
+                    self.instructions[self.instruction_count] = .{
+                        .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                        .arg = .{ .push_value = 0 },
+                    };
+                    self.instruction_count += 1;
+                    pc += 1;
+                },
+                .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
+                .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
+                .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
+                .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
+                    // Calculate how many bytes to read
+                    const push_size = Opcode.get_push_size(opcode_byte);
+                    
+                    // Make sure we have enough bytes
+                    if (pc + 1 + push_size > self.code.len) {
+                        // If not enough bytes, pad with zeros (EVM behavior)
+                        var value: u256 = 0;
+                        const available = self.code.len - (pc + 1);
+                        if (available > 0) {
+                            // Read what we can
+                            const bytes_to_read = @min(push_size, available);
+                            var i: usize = 0;
+                            while (i < bytes_to_read) : (i += 1) {
+                                value = (value << 8) | self.code[pc + 1 + i];
+                            }
+                            // Shift left for any missing bytes
+                            const missing_bytes = push_size - bytes_to_read;
+                            if (missing_bytes > 0) {
+                                value = value << (8 * missing_bytes);
+                            }
+                        }
+                        self.instructions[self.instruction_count] = .{
+                            .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                            .arg = .{ .push_value = value },
+                        };
+                        self.instruction_count += 1;
+                        pc = self.code.len; // End of code
+                    } else {
+                        // Read the push value from bytecode
+                        var value: u256 = 0;
+                        var i: usize = 0;
+                        while (i < push_size) : (i += 1) {
+                            value = (value << 8) | self.code[pc + 1 + i];
+                        }
+                        
+                        self.instructions[self.instruction_count] = .{
+                            .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                            .arg = .{ .push_value = value },
+                        };
+                        self.instruction_count += 1;
+                        pc += 1 + push_size;
+                    }
+                },
+                // Arithmetic and comparison operations
+                .ADD, .MUL, .SUB, .DIV, .SDIV, .MOD, .SMOD, 
+                .ADDMOD, .MULMOD, .EXP, .SIGNEXTEND,
+                .LT, .GT, .SLT, .SGT, .EQ, .ISZERO,
+                .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR,
+                // Stack operations
+                .POP, .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8,
+                .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16,
+                .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8,
+                .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16,
+                // Memory operations
+                .MLOAD, .MSTORE, .MSTORE8, .MSIZE,
+                // Storage operations
+                .SLOAD, .SSTORE,
+                // Environmental operations
+                .ADDRESS, .BALANCE, .ORIGIN, .CALLER, .CALLVALUE,
+                .CALLDATALOAD, .CALLDATASIZE, .CALLDATACOPY,
+                .CODESIZE, .CODECOPY, .GASPRICE, .EXTCODESIZE, .EXTCODECOPY,
+                .RETURNDATASIZE, .RETURNDATACOPY, .EXTCODEHASH,
+                // Block operations
+                .BLOCKHASH, .COINBASE, .TIMESTAMP, .NUMBER, .PREVRANDAO, .GASLIMIT,
+                .CHAINID, .SELFBALANCE, .BASEFEE, .BLOBHASH, .BLOBBASEFEE,
+                // Crypto operations
+                .KECCAK256,
+                // Log operations
+                .LOG0, .LOG1, .LOG2, .LOG3, .LOG4,
+                // System operations (except JUMP/JUMPI/CALL variants which need special handling)
+                .RETURN, .REVERT, .INVALID, .PC, .GAS, .JUMPDEST,
+                // Create operations (simple - no special args)
+                .CREATE, .CREATE2, .SELFDESTRUCT,
+                // Call operations (simple - no special args) 
+                .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL,
+                // Other EIPs
+                .MCOPY, .TLOAD, .TSTORE => {
+                    self.instructions[self.instruction_count] = .{
+                        .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                        .arg = .none,
+                    };
+                    self.instruction_count += 1;
+                    pc += 1;
+                },
+                // Jump operations - for now just translate them without resolving targets
+                // Jump target resolution will be done in a second pass
+                .JUMP, .JUMPI => {
+                    self.instructions[self.instruction_count] = .{
+                        .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                        .arg = .none, // Will be updated with .jump_target in second pass
+                    };
+                    self.instruction_count += 1;
+                    pc += 1;
+                },
                 else => {
-                    // Not implemented yet
-                    return error.OpcodeNotImplemented;
+                    // Check if it's an undefined opcode
+                    if (self.jump_table.undefined_flags[opcode_byte]) {
+                        // Treat undefined opcodes as INVALID
+                        self.instructions[self.instruction_count] = .{
+                            .opcode_fn = self.jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
+                            .arg = .none,
+                        };
+                        self.instruction_count += 1;
+                        pc += 1;
+                    } else {
+                        // This should not happen if we've covered all opcodes
+                        return error.OpcodeNotImplemented;
+                    }
                 },
             }
         }
@@ -67,20 +188,6 @@ pub const InstructionTranslator = struct {
         return self.instruction_count;
     }
     
-    fn get_opcode_function(opcode: Opcode.Opcode) Operation.ExecutionFunc {
-        _ = opcode;
-        // This will be filled in with actual opcode functions
-        return dummy_opcode;
-    }
 };
-
-// Dummy opcode for testing
-fn dummy_opcode(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
-    const ExecutionResult = @import("execution/execution_result.zig");
-    return ExecutionResult{};
-}
 
 // Tests moved to test/evm/instruction_test.zig to avoid circular dependencies

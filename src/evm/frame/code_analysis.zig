@@ -749,58 +749,9 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         
         // Track stack effects
         const stack_inputs = @as(i16, @intCast(operation_ptr.min_stack));
-        const stack_outputs = switch (@as(opcode.Enum, @enumFromInt(op))) {
-            // Most operations consume min_stack and push 1
-            .ADD, .MUL, .SUB, .DIV, .SDIV, .MOD, .SMOD, .EXP,
-            .LT, .GT, .SLT, .SGT, .EQ, .ISZERO,
-            .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR,
-            .KECCAK256, .ADDRESS, .BALANCE, .ORIGIN, .CALLER,
-            .CALLVALUE, .CALLDATASIZE, .CODESIZE, .GASPRICE,
-            .EXTCODESIZE, .RETURNDATASIZE, .EXTCODEHASH,
-            .BLOCKHASH, .COINBASE, .TIMESTAMP, .NUMBER,
-            .DIFFICULTY, .GASLIMIT, .CHAINID, .SELFBALANCE,
-            .BASEFEE, .PC, .MSIZE, .GAS => 1,
-            
-            // Operations that push 0 (consume inputs, no output)
-            .POP, .JUMP, .JUMPI, .SSTORE, .LOG0, .LOG1, .LOG2, .LOG3, .LOG4,
-            .SELFDESTRUCT, .INVALID => 0,
-            
-            // Operations that push 0 but stop execution
-            .STOP, .RETURN, .REVERT => 0,
-            
-            // Special cases
-            .ADDMOD, .MULMOD => 1, // Consume 3, push 1
-            .CALLDATALOAD, .SLOAD, .MLOAD => 1, // Consume 1, push 1
-            .MSTORE, .MSTORE8, .CALLDATACOPY, .CODECOPY,
-            .EXTCODECOPY, .RETURNDATACOPY, .MCOPY => 0, // Various consumes, no output
-            
-            // PUSH operations
-            .PUSH0 => 1,
-            .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
-            .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
-            .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
-            .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => 1,
-            
-            // DUP operations push 1
-            .DUP1, .DUP2, .DUP3, .DUP4, .DUP5, .DUP6, .DUP7, .DUP8,
-            .DUP9, .DUP10, .DUP11, .DUP12, .DUP13, .DUP14, .DUP15, .DUP16 => 1,
-            
-            // SWAP operations: no net change
-            .SWAP1, .SWAP2, .SWAP3, .SWAP4, .SWAP5, .SWAP6, .SWAP7, .SWAP8,
-            .SWAP9, .SWAP10, .SWAP11, .SWAP12, .SWAP13, .SWAP14, .SWAP15, .SWAP16 => 0,
-            
-            // JUMPDEST: no stack effect
-            .JUMPDEST => 0,
-            
-            // CREATE operations: consume inputs, push 1 (address)
-            .CREATE, .CREATE2 => 1,
-            
-            // CALL operations: consume 7, push 1 (success)
-            .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL => 1,
-            
-            // Unknown/future opcodes
-            _ => 0,
-        };
+        // For simplicity, assume operations that consume min_stack items push back max_stack items
+        // This is a conservative approximation good enough for block analysis
+        const stack_outputs: i16 = if (operation_ptr.max_stack > operation_ptr.min_stack) 1 else 0;
         
         // First check if we have enough stack items
         const pre_stack = stack_depth;

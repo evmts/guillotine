@@ -8,24 +8,29 @@ const CodeAnalysis = @import("frame/code_analysis.zig");
 pub const BlockMetrics = CodeAnalysis.BlockMetadata;
 
 pub const Instruction = struct {
-    opcode_fn: Operation.ExecutionFunc,  // NOT optional - pointer itself is null at end
+    opcode_fn: ?Operation.ExecutionFunc,  // Optional - null indicates end of stream
     arg: union(enum) {
         none,
         block_metrics: BlockMetrics,
         push_value: u256,
-        jump_target: [*:null]const Instruction,
+        jump_target: *const Instruction,
         gas_cost: u32,
     },
 
-    pub fn execute(instructions: [*:null]const Instruction, frame: *Frame) ExecutionError.Error!?[*:null]const Instruction {
+    pub fn execute(instructions: [*]const Instruction, frame: *Frame) ExecutionError.Error!?[*]const Instruction {
         const self = instructions[0];
+        
+        // Check if we've reached the end
+        if (self.opcode_fn == null) {
+            return null;
+        }
         
         // Get the interpreter and state from the frame
         const interpreter: Operation.Interpreter = frame.vm;
         const state: Operation.State = frame;
         
         // Execute the opcode function
-        const result = try self.opcode_fn(frame.pc, interpreter, state);
+        const result = try self.opcode_fn.?(frame.pc, interpreter, state);
         _ = result;
         
         // Advance to next instruction

@@ -236,6 +236,7 @@ pub fn release_frame(self: *Evm, frame: *Frame) void {
 
 pub usingnamespace @import("evm/set_context.zig");
 pub usingnamespace @import("evm/interpret.zig");
+pub usingnamespace @import("evm/interpret_block.zig");
 pub usingnamespace @import("evm/create_contract_internal.zig");
 
 pub usingnamespace @import("evm/create_contract.zig");

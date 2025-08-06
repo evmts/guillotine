@@ -208,6 +208,10 @@ const instruction_module = @import("instruction.zig");
 pub const InstructionTranslator = @import("instruction_translator.zig").InstructionTranslator;
 const translator_module = @import("instruction_translator.zig");
 
+/// Block executor for instruction stream execution
+pub const BlockExecutor = @import("block_executor.zig").BlockExecutor;
+const block_executor_module = @import("block_executor.zig");
+
 /// Fee market calculations (EIP-1559)
 pub const fee_market = @import("primitives").FeeMarket;
 
@@ -348,4 +352,7 @@ test "Instruction module" {
 }
 test "InstructionTranslator module" {
     std.testing.refAllDecls(translator_module);
+}
+test "BlockExecutor module" {
+    std.testing.refAllDecls(block_executor_module);
 }
