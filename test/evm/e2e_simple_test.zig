@@ -78,15 +78,34 @@ test "E2E: Basic EVM operations" {
     // Set the code for the contract address in EVM state
     try evm_instance.state.set_code(CONTRACT_ADDRESS, &simple_bytecode);
 
-    // Execute the contract
+    // Execute the contract with traditional interpreter
     const result = try evm_instance.interpret(&contract, &[_]u8{}, false);
     defer if (result.output) |output| allocator.free(output);
 
-    // Verify execution success
-    try testing.expect(result.status == .Success);
+    // Execute the contract with block interpreter
+    const result_block = try evm_instance.interpret_block_write(&contract, &[_]u8{});
+    defer if (result_block.output) |output| allocator.free(output);
 
-    // Check if we have output data
+    // Verify execution success for traditional interpreter
+    try testing.expect(result.status == .Success);
+    // Verify execution success for block interpreter
+    try testing.expect(result_block.status == .Success);
+
+    // Check if we have output data for traditional interpreter
     if (result.output) |output| {
+        try testing.expectEqual(@as(usize, 32), output.len);
+
+        // Decode returned value (should be 42 in first 32 bytes)
+        const returned_value = bytes_to_u256(output);
+        try testing.expectEqual(@as(u256, 42), returned_value);
+    } else {
+        // If no output, this test isn't validating return data correctly
+        // No output returned from bytecode execution
+        return error.TestFailed;
+    }
+
+    // Check if we have output data for block interpreter
+    if (result_block.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
 
         // Decode returned value (should be 42 in first 32 bytes)

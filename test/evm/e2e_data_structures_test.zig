@@ -78,12 +78,30 @@ test "E2E: Dynamic arrays - push, pop, and indexing" {
     // Set the code for the contract address in EVM state
     try evm.state.set_code(CONTRACT_ADDRESS, &array_test_bytecode);
 
-    // Execute the contract
+    // Execute the contract with traditional interpreter
     const array_result = try evm.interpret(&contract, &[_]u8{}, false);
     defer if (array_result.output) |output| allocator.free(output);
 
+    // Execute the contract with block interpreter
+    const array_result_block = try evm.interpret_block_write(&contract, &[_]u8{});
+    defer if (array_result_block.output) |output| allocator.free(output);
+
+    // Test traditional interpreter results
     try testing.expect(array_result.status == .Success);
+    // Test block interpreter results
+    try testing.expect(array_result_block.status == .Success);
+    
     if (array_result.output) |output| {
+        try testing.expectEqual(@as(usize, 32), output.len);
+        // Should return the array length (3)
+        var length: u256 = 0;
+        for (output) |byte| {
+            length = (length << 8) | byte;
+        }
+        try testing.expectEqual(@as(u256, 3), length);
+    }
+    
+    if (array_result_block.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the array length (3)
         var length: u256 = 0;
@@ -150,12 +168,30 @@ test "E2E: Mappings - various key types and nested access" {
     // Set the code for the contract address in EVM state
     try evm.state.set_code(CONTRACT_ADDRESS, &mapping_test_bytecode);
 
-    // Execute the contract
+    // Execute the contract with traditional interpreter
     const mapping_result = try evm.interpret(&contract, &[_]u8{}, false);
     defer if (mapping_result.output) |output| allocator.free(output);
 
+    // Execute the contract with block interpreter
+    const mapping_result_block = try evm.interpret_block_write(&contract, &[_]u8{});
+    defer if (mapping_result_block.output) |output| allocator.free(output);
+
+    // Test traditional interpreter results
     try testing.expect(mapping_result.status == .Success);
+    // Test block interpreter results
+    try testing.expect(mapping_result_block.status == .Success);
+    
     if (mapping_result.output) |output| {
+        try testing.expectEqual(@as(usize, 32), output.len);
+        // Should return the stored balance (1000)
+        var balance: u256 = 0;
+        for (output) |byte| {
+            balance = (balance << 8) | byte;
+        }
+        try testing.expectEqual(@as(u256, 1000), balance);
+    }
+    
+    if (mapping_result_block.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the stored balance (1000)
         var balance: u256 = 0;

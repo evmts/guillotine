@@ -54,11 +54,18 @@ test "E2E: Revert conditions - require and revert opcodes" {
     // Set the code for the contract address in EVM state
     try evm.state.set_code(CONTRACT_ADDRESS, &revert_bytecode);
 
-    // Execute the contract
+    // Execute the contract with traditional interpreter
     const revert_result = try evm.interpret(&revert_contract, &[_]u8{}, false);
     defer if (revert_result.output) |output| allocator.free(output);
 
+    // Execute the contract with block interpreter
+    const revert_result_block = try evm.interpret_block_write(&revert_contract, &[_]u8{});
+    defer if (revert_result_block.output) |output| allocator.free(output);
+
+    // Test traditional interpreter result
     try testing.expect(revert_result.status == .Revert);
+    // Test block interpreter result
+    try testing.expect(revert_result_block.status == .Revert);
 
     // Test conditional revert - should succeed if condition is false
     const conditional_bytecode = [_]u8{
@@ -94,12 +101,28 @@ test "E2E: Revert conditions - require and revert opcodes" {
     // Set the code for the contract address in EVM state
     try evm.state.set_code(CONTRACT_ADDRESS, &conditional_bytecode);
 
-    // Execute the contract
+    // Execute the contract with traditional interpreter
     const conditional_result = try evm.interpret(&conditional_contract, &[_]u8{}, false);
     defer if (conditional_result.output) |output| allocator.free(output);
 
+    // Execute the contract with block interpreter
+    const conditional_result_block = try evm.interpret_block_write(&conditional_contract, &[_]u8{});
+    defer if (conditional_result_block.output) |output| allocator.free(output);
+
+    // Test traditional interpreter result
     try testing.expect(conditional_result.status == .Success);
+    // Test block interpreter result
+    try testing.expect(conditional_result_block.status == .Success);
+    
     if (conditional_result.output) |output| {
+        var value: u256 = 0;
+        for (output) |byte| {
+            value = (value << 8) | byte;
+        }
+        try testing.expectEqual(@as(u256, 42), value);
+    }
+    
+    if (conditional_result_block.output) |output| {
         var value: u256 = 0;
         for (output) |byte| {
             value = (value << 8) | byte;
