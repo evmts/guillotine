@@ -4,6 +4,7 @@ const Frame = @import("frame/frame.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const ExecutionResult = @import("execution/execution_result.zig");
 const Log = @import("log.zig");
+const BlockMetrics = @import("block_metrics.zig");
 
 /// Block-based instruction executor.
 /// 
@@ -12,6 +13,8 @@ const Log = @import("log.zig");
 /// sequentially with direct function calls, improving branch prediction
 /// and reducing instruction cache misses.
 pub const BlockExecutor = struct {
+    /// Optional metrics collection
+    metrics: ?*BlockMetrics.BlockExecutionMetrics = null,
     /// Execute a block of instructions.
     /// 
     /// Instructions are executed sequentially until:
@@ -24,12 +27,54 @@ pub const BlockExecutor = struct {
         instructions: [*]const Instruction,
         frame: *Frame,
     ) ExecutionError.Error!void {
+        return execute_block_with_metrics(instructions, frame, null);
+    }
+    
+    /// Execute a block of instructions with optional metrics collection.
+    pub fn execute_block_with_metrics(
+        instructions: [*]const Instruction,
+        frame: *Frame,
+        metrics: ?*BlockMetrics.BlockExecutionMetrics,
+    ) ExecutionError.Error!void {
         var current = instructions;
+        var instruction_count: u32 = 0;
+        
+        // Record block execution start
+        if (metrics) |m| {
+            m.record_block(0); // Will update with actual count later
+        }
         
         // Execute instructions until we hit null or an error
         while (current[0].opcode_fn != null) {
+            instruction_count += 1;
+            
+            // Collect metrics before execution
+            if (metrics) |m| {
+                m.record_instruction();
+                m.update_max_stack(@intCast(frame.stack.size));
+                
+                // Check if this is a jump instruction
+                const execution = @import("execution/package.zig");
+                if (current[0].opcode_fn == execution.control.op_jump) {
+                    m.record_jump(false, true);
+                } else if (current[0].opcode_fn == execution.control.op_jumpi) {
+                    // We'll update the 'taken' status after execution
+                }
+            }
+            
             // Execute the current instruction
+            const prev_ptr = current;
             const maybe_next = try Instruction.execute(current, frame);
+            
+            // Record conditional jump result
+            if (metrics) |m| {
+                const execution = @import("execution/package.zig");
+                if (current[0].opcode_fn == execution.control.op_jumpi) {
+                    // If we advanced normally, jump was not taken
+                    const taken = (maybe_next != prev_ptr + 1);
+                    m.record_jump(true, taken);
+                }
+            }
             
             // If execute returned null, we're done
             if (maybe_next == null) {
@@ -38,6 +83,11 @@ pub const BlockExecutor = struct {
             
             // Move to next instruction
             current = maybe_next.?;
+        }
+        
+        // Update final metrics
+        if (metrics) |m| {
+            m.gas_consumed = frame.cost;
         }
     }
     

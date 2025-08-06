@@ -212,6 +212,11 @@ const translator_module = @import("instruction_translator.zig");
 pub const BlockExecutor = @import("block_executor.zig").BlockExecutor;
 const block_executor_module = @import("block_executor.zig");
 
+/// Block execution metrics and performance analysis
+pub const block_metrics = @import("block_metrics.zig");
+pub const BlockExecutionMetrics = block_metrics.BlockExecutionMetrics;
+pub const BlockCache = block_metrics.BlockCache;
+
 /// Fee market calculations (EIP-1559)
 pub const fee_market = @import("primitives").FeeMarket;
 
