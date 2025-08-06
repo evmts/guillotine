@@ -140,7 +140,7 @@ pub fn main() !void {
 
         const result = if (use_block_execution) blk: {
             std.debug.print("DEBUG: Starting block execution with code_size={}, calldata_len={}\n", .{contract.code_size, calldata.len});
-            const res = vm.interpret_block(&contract, calldata, false) catch |err| {
+            const res = vm.interpret_block_write(&contract, calldata) catch |err| {
                 std.debug.print("Contract execution error: {}\n", .{err});
                 std.process.exit(1);
             };

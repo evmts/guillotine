@@ -192,7 +192,7 @@ fn benchErc20TransferBlock(allocator: std.mem.Allocator) void {
     defer contract.deinit(evm_allocator, null);
     
     // Execute with block mode
-    const result = vm.interpret_block(&contract, calldata, false) catch unreachable;
+    const result = vm.interpret_block_write(&contract, calldata) catch unreachable;
     
     if (result.output) |output| {
         evm_allocator.free(output);
@@ -296,7 +296,7 @@ fn benchErc20MintBlock(allocator: std.mem.Allocator) void {
     defer contract.deinit(evm_allocator, null);
     
     // Execute with block mode
-    const result = vm.interpret_block(&contract, calldata, false) catch unreachable;
+    const result = vm.interpret_block_write(&contract, calldata) catch unreachable;
     
     if (result.output) |output| {
         evm_allocator.free(output);

@@ -107,7 +107,7 @@ fn runBenchmark(
         defer contract.deinit(allocator, null);
         
         const start = std.time.nanoTimestamp();
-        const result = try vm.interpret_block(&contract, &.{}, false);
+        const result = try vm.interpret_block_write(&contract, &.{});
         block_total_ns += @intCast(std.time.nanoTimestamp() - start);
         
         defer if (result.output) |output| allocator.free(output);
