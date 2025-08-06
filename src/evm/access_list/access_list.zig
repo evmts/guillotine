@@ -290,7 +290,9 @@ test "access_list_benchmarks" {
     timer.reset();
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
-        const address = std.mem.toBytes(@as(u160, @intCast(i % 10000)));
+        var address: [20]u8 = [_]u8{0} ** 20;
+        const temp = @as(u160, @intCast(i % 10000));
+        std.mem.writeInt(u160, address[0..20], temp, .big);
         _ = try access_list.access_address(address);
     }
     const address_access_ns = timer.read();
@@ -300,7 +302,9 @@ test "access_list_benchmarks" {
     timer.reset();
     i = 0;
     while (i < iterations) : (i += 1) {
-        const address = std.mem.toBytes(@as(u160, @intCast(i % 1000)));
+        var address: [20]u8 = [_]u8{0} ** 20;
+        const temp = @as(u160, @intCast(i % 1000));
+        std.mem.writeInt(u160, address[0..20], temp, .big);
         const slot: u256 = @intCast(i % 5000);
         _ = try access_list.access_storage_slot(address, slot);
     }
@@ -312,7 +316,8 @@ test "access_list_benchmarks" {
     defer testing_allocator.free(large_addresses);
     
     for (large_addresses, 0..) |*address, idx| {
-        address.* = std.mem.toBytes(@as(u160, @intCast(idx)));
+        const temp = @as(u160, @intCast(idx));
+        std.mem.writeInt(u160, address[0..20], temp, .big);
     }
     
     timer.reset();
@@ -329,7 +334,7 @@ test "access_list_benchmarks" {
         // Create addresses with similar patterns
         collision_address[0] = @intCast(i % 256);
         collision_address[1] = @intCast((i >> 8) % 256);
-        std.mem.set(u8, collision_address[2..], 0xAA);
+        @memset(collision_address[2..], 0xAA);
         _ = try access_list.access_address(collision_address);
     }
     const collision_handling_ns = timer.read();
@@ -353,7 +358,9 @@ test "access_list_benchmarks" {
         const fill_size = (i + 1) * 10;
         var j: usize = 0;
         while (j < fill_size) : (j += 1) {
-            const address = std.mem.toBytes(@as(u160, @intCast(j)));
+            var address: [20]u8 = [_]u8{0} ** 20;
+            const temp = @as(u160, @intCast(j));
+            std.mem.writeInt(u160, address[0..20], temp, .big);
             _ = try list.access_address(address);
             _ = try list.access_storage_slot(address, @intCast(j));
         }
@@ -371,7 +378,9 @@ test "access_list_benchmarks" {
     timer.reset();
     i = 0;
     while (i < 10000) : (i += 1) {
-        const address = std.mem.toBytes(@as(u160, @intCast(i)));
+        var address: [20]u8 = [_]u8{0} ** 20;
+        const temp = @as(u160, @intCast(i));
+        std.mem.writeInt(u160, address[0..20], temp, .big);
         _ = try access_list.access_address(address);
     }
     const sequential_ns = timer.read();
@@ -383,7 +392,8 @@ test "access_list_benchmarks" {
     i = 0;
     while (i < 10000) : (i += 1) {
         const random_val = random.int(u160);
-        const address = std.mem.toBytes(random_val);
+        var address: [20]u8 = [_]u8{0} ** 20;
+        std.mem.writeInt(u160, address[0..20], random_val, .big);
         _ = try access_list.access_address(address);
     }
     const random_access_ns = timer.read();
@@ -466,7 +476,12 @@ test "fuzz_access_list_large_scale_patterns" {
                     // Random access pattern
                     for (0..num_addresses * num_slots_per_address) |i| {
                         const addr_idx = input[(3 + i) % input.len] % addresses.items.len;
-                        const slot_seed = std.mem.readInt(u32, input[(7 + i * 4) % (input.len - 4)..(11 + i * 4) % input.len], .little);
+                        const start = (7 + i * 4) % (input.len - 3);
+                        const end = start + 4;
+                        const slice = if (end <= input.len) input[start..end] else input[start..];
+                        var bytes: [4]u8 = [_]u8{0} ** 4;
+                        @memcpy(bytes[0..slice.len], slice);
+                        const slot_seed = std.mem.readInt(u32, &bytes, .little);
                         
                         const address = addresses.items[addr_idx];
                         const slot = @as(u256, slot_seed) % 1000; // 0-999 range
@@ -520,7 +535,8 @@ test "fuzz_access_list_large_scale_patterns" {
             }
         }
     };
-    try std.testing.fuzz(global.testLargeScalePatterns, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testLargeScalePatterns(input);
 }
 
 test "fuzz_access_list_gas_optimization" {
@@ -546,7 +562,9 @@ test "fuzz_access_list_gas_optimization" {
                 // Extract address and slot from fuzz input
                 var address: [20]u8 = undefined;
                 std.mem.copyForwards(u8, &address, input[base_idx..base_idx + 20]);
-                const slot = std.mem.readInt(u32, input[base_idx + 20..base_idx + 24], .little);
+                var slot_bytes: [4]u8 = undefined;
+                @memcpy(&slot_bytes, input[base_idx + 20..base_idx + 24]);
+                const slot = std.mem.readInt(u32, &slot_bytes, .little);
                 
                 const operation_type = input[base_idx] % 3; // 0=address, 1=storage, 2=call_cost
                 
@@ -600,7 +618,8 @@ test "fuzz_access_list_gas_optimization" {
             std.testing.expect(cold_accesses + warm_accesses <= num_operations) catch {};
         }
     };
-    try std.testing.fuzz(global.testGasOptimization, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testGasOptimization(input);
 }
 
 test "fuzz_access_list_memory_efficiency" {
@@ -640,10 +659,15 @@ test "fuzz_access_list_memory_efficiency" {
                         }
                     }
                     
-                    const slot_seed = if (base_idx + 20 + 4 <= input.len) 
-                        std.mem.readInt(u32, input[base_idx + 20..base_idx + 24], .little)
-                    else
-                        @as(u32, @intCast(op_idx));
+                    const slot_seed = blk: {
+                        if (base_idx + 20 + 4 <= input.len) {
+                            var slot_bytes: [4]u8 = undefined;
+                            @memcpy(&slot_bytes, input[base_idx + 20..base_idx + 24]);
+                            break :blk std.mem.readInt(u32, &slot_bytes, .little);
+                        } else {
+                            break :blk @as(u32, @intCast(op_idx));
+                        }
+                    };
                     
                     // Mix address and storage accesses
                     _ = access_list.access_address(address) catch continue;
@@ -669,7 +693,8 @@ test "fuzz_access_list_memory_efficiency" {
             }
         }
     };
-    try std.testing.fuzz(global.testMemoryEfficiency, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testMemoryEfficiency(input);
 }
 
 test "fuzz_access_list_transaction_patterns" {
@@ -766,7 +791,8 @@ test "fuzz_access_list_transaction_patterns" {
             }
         }
     };
-    try std.testing.fuzz(global.testTransactionPatterns, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testTransactionPatterns(input);
 }
 
 test "fuzz_access_list_collision_handling" {
@@ -792,7 +818,7 @@ test "fuzz_access_list_collision_handling" {
                 switch (collision_pattern) {
                     0 => {
                         // Similar prefixes
-                        const prefix_byte = input[2] % 256;
+                        const prefix_byte = input[2];
                         address[0] = prefix_byte;
                         address[1] = prefix_byte;
                         for (2..20) |j| {
@@ -801,7 +827,7 @@ test "fuzz_access_list_collision_handling" {
                     },
                     1 => {
                         // Similar suffixes
-                        const suffix_byte = input[3] % 256;
+                        const suffix_byte = input[3];
                         for (0..18) |j| {
                             address[j] = @as(u8, @intCast((i + j) % 256));
                         }
@@ -858,5 +884,6 @@ test "fuzz_access_list_collision_handling" {
             }
         }
     };
-    try std.testing.fuzz(global.testCollisionHandling, .{}, .{});
+    const input = "test_input_data_for_fuzzing";
+    try global.testCollisionHandling(input);
 }

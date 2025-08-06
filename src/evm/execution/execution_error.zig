@@ -169,6 +169,7 @@ pub const Error = error{
 /// ```
 pub fn get_description(err: Error) []const u8 {
     return switch (err) {
+        Error.MAX_CONTRACT_SIZE => "Contract size exceeds maximum allowed",
         Error.STOP => "Normal STOP opcode execution",
         Error.REVERT => "REVERT opcode - state reverted",
         Error.INVALID => "INVALID opcode or invalid operation",

@@ -200,6 +200,10 @@ pub const Tracer = @import("tracer.zig").Tracer;
 /// EIP-7702 EOA delegation bytecode format
 pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");
 
+/// Instruction type for block-based execution
+pub const Instruction = @import("instruction.zig").Instruction;
+const instruction_module = @import("instruction.zig");
+
 /// Fee market calculations (EIP-1559)
 pub const fee_market = @import("primitives").FeeMarket;
 
@@ -334,4 +338,7 @@ test "JumpTable module" {
 }
 test "Execution module" {
     std.testing.refAllDecls(execution);
+}
+test "Instruction module" {
+    std.testing.refAllDecls(instruction_module);
 }

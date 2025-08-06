@@ -485,11 +485,25 @@ test "Frame.builder creates frame with default settings" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Test basic frame initialization
@@ -520,8 +534,18 @@ test "Frame.init_with_state creates frame with custom settings" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     const test_input = &[_]u8{ 0x01, 0x02, 0x03, 0x04 };
@@ -548,8 +572,18 @@ test "Frame.init_with_state uses defaults for null parameters" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Test frame initialization with null parameters (should use defaults)
@@ -572,8 +606,18 @@ test "Frame.consume_gas with sufficient gas" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Create frame with initial gas
@@ -595,8 +639,18 @@ test "Frame.consume_gas with insufficient gas returns OutOfGas" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Create frame with limited gas
@@ -621,8 +675,18 @@ test "Frame.consume_gas with zero amount" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Create frame with some gas
@@ -638,11 +702,25 @@ test "Frame.deinit properly cleans up memory" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Create frame and expand memory to test cleanup
@@ -663,11 +741,25 @@ test "Frame stack operations work correctly" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Create frame
@@ -696,11 +788,25 @@ test "Frame memory operations work correctly" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Create frame
@@ -728,8 +834,18 @@ test "Frame static call restrictions" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Create static frame
@@ -745,8 +861,18 @@ test "Frame call depth tracking" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Test different call depths
@@ -768,11 +894,25 @@ test "Frame return data handling" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Create frame
@@ -798,8 +938,18 @@ test "Frame calldata handling" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     const test_calldata = [_]u8{ 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0 };
@@ -816,11 +966,25 @@ test "Frame program counter manipulation" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Test PC manipulation
@@ -846,11 +1010,25 @@ test "Frame error state management" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Test error state
@@ -877,11 +1055,25 @@ test "Frame stop flag management" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Test stop flag
@@ -912,7 +1104,11 @@ test "Frame with empty contract" {
         .{ .address = primitives.Address.zero() }) catch unreachable;
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Test frame with empty contract
@@ -933,8 +1129,18 @@ test "Frame gas consumption edge cases" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Test with maximum u64 gas
@@ -957,11 +1163,25 @@ test "Frame multiple initialization and cleanup cycles" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
-    var vm = Vm.init(allocator, undefined, null, null) catch unreachable;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = Vm.init(allocator, db_interface, null, null, null, 0, false, null) catch unreachable;
     defer vm.deinit();
 
     // Test multiple init/deinit cycles
@@ -985,8 +1205,18 @@ test "Frame memory allocation and stack operations stress test" {
     const allocator = std.testing.allocator;
 
     // Create a minimal contract for testing
-    var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, // PUSH1 16 PUSH1 0 MSTORE
-        .{ .address = primitives.Address.zero() }) catch unreachable;
+    const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }; // PUSH1 16 PUSH1 0 MSTORE
+    const code_hash = [_]u8{0} ** 32;
+    var contract = Contract.init(
+        primitives.Address.zero(), // caller
+        primitives.Address.zero(), // address
+        0, // value
+        1000000, // gas
+        code, // bytecode
+        code_hash, // code_hash
+        &[_]u8{}, // input (call_data)
+        false // is_static
+    );
     defer contract.deinit(allocator, null);
 
     // Test frame with intensive operations
