@@ -36,8 +36,13 @@ pub const BlockExecutor = struct {
         frame: *Frame,
         metrics: ?*BlockMetrics.BlockExecutionMetrics,
     ) ExecutionError.Error!void {
+        const log = std.log.scoped(.block_executor);
         var current = instructions;
         var instruction_count: u32 = 0;
+        
+        log.debug("Starting block execution, frame.pc={}, stack_size={}, gas={}", .{
+            frame.pc, frame.stack.size, frame.gas_remaining
+        });
         
         // Record block execution start
         if (metrics) |m| {
@@ -47,6 +52,14 @@ pub const BlockExecutor = struct {
         // Execute instructions until we hit null or an error
         while (current[0].opcode_fn != null) {
             instruction_count += 1;
+            
+            log.debug("Instruction #{}: opcode_fn={any}, arg={}, frame.pc={}, stack_size={}", .{
+                instruction_count,
+                current[0].opcode_fn,
+                current[0].arg,
+                frame.pc,
+                frame.stack.size
+            });
             
             // Collect metrics before execution
             if (metrics) |m| {
@@ -64,7 +77,12 @@ pub const BlockExecutor = struct {
             
             // Execute the current instruction
             const prev_ptr = current;
+            log.debug("Executing instruction at ptr={*}", .{current});
             const maybe_next = try Instruction.execute(current, frame);
+            
+            log.debug("After execution: maybe_next={any}, prev_ptr={*}, frame.pc={}", .{
+                maybe_next, prev_ptr, frame.pc
+            });
             
             // Record conditional jump result
             if (metrics) |m| {
@@ -78,11 +96,19 @@ pub const BlockExecutor = struct {
             
             // If execute returned null, we're done
             if (maybe_next == null) {
+                log.debug("Instruction returned null, ending execution", .{});
                 break;
+            }
+            
+            // Check for infinite loop (instruction not advancing)
+            if (maybe_next == current) {
+                log.err("INFINITE LOOP DETECTED: Instruction did not advance! ptr={*}", .{current});
+                return ExecutionError.Error.InvalidOpcode;
             }
             
             // Move to next instruction
             current = maybe_next.?;
+            log.debug("Advanced to next instruction at ptr={*}", .{current});
         }
         
         // Update final metrics

@@ -47,11 +47,13 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
     const initial_gas = contract.gas;
 
     // Analyze the bytecode
-    var analysis = CodeAnalysis.analyze_bytecode_blocks(self.allocator, contract.code[0..contract.code_size]) catch {
-        Log.debug("VM.interpret_block: Code analysis failed, falling back to regular", .{});
+    Log.debug("VM.interpret_block: Analyzing bytecode", .{});
+    var analysis = CodeAnalysis.analyze_bytecode_blocks(self.allocator, contract.code[0..contract.code_size]) catch |err| {
+        Log.debug("VM.interpret_block: Code analysis failed with {}, falling back to regular", .{err});
         return self.interpret(contract, input, is_static);
     };
     defer analysis.deinit(self.allocator);
+    Log.debug("VM.interpret_block: Code analysis complete", .{});
 
     // Allocate instruction buffer
     const max_instructions = contract.code_size * 2; // Conservative estimate
@@ -62,6 +64,7 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
     defer self.allocator.free(instructions);
 
     // Translate bytecode to instructions
+    Log.debug("VM.interpret_block: Translating bytecode to instructions", .{});
     var translator = InstructionTranslator.init(
         self.allocator,
         contract.code[0..contract.code_size],
@@ -70,10 +73,11 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
         &self.table,
     );
 
-    const instruction_count = translator.translate_bytecode() catch {
-        Log.debug("VM.interpret_block: Translation failed, falling back to regular", .{});
+    const instruction_count = translator.translate_bytecode() catch |err| {
+        Log.debug("VM.interpret_block: Translation failed with {}, falling back to regular", .{err});
         return self.interpret(contract, input, is_static);
     };
+    Log.debug("VM.interpret_block: Translation complete, {} instructions", .{instruction_count});
 
     // Null-terminate the instruction stream
     instructions[instruction_count] = .{
@@ -131,6 +135,7 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
     }
 
     // Execute the instruction stream
+    Log.debug("VM.interpret_block: Starting block execution", .{});
     const inst_ptr: [*]const Instruction = instructions.ptr;
     BlockExecutor.execute_block(inst_ptr, frame) catch |err| {
         contract.gas = frame.gas_remaining;
