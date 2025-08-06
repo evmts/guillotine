@@ -128,21 +128,21 @@ pub const EvmMemoryAllocator = struct {
         _ = ret_addr;
         const self: *Self = @ptrCast(@alignCast(ctx));
         
-        const alignment = @intFromEnum(ptr_align);
+        // ptr_align is an enum where the value is the log2 of the alignment
+        // So alignment 8 is represented as 3 (because 2^3 = 8)
+        const alignment_log2 = @intFromEnum(ptr_align);
+        const alignment = @as(usize, 1) << alignment_log2;
         
-        // Ensure alignment is a power of 2 and >= 1
-        const safe_alignment = if (alignment == 0 or (alignment & (alignment - 1)) != 0) 
-            1 
-        else 
-            alignment;
+        // No need to check if it's a power of 2 - it always is by construction
+        const safe_alignment = alignment;
         
-        // Calculate aligned offset
+        // Calculate aligned offset (initial calculation for size)
         const current_addr = @intFromPtr(self.base_ptr) + self.allocated_size;
-        const aligned_addr = if (safe_alignment > 1) 
+        const aligned_addr_initial = if (safe_alignment > 1) 
             std.mem.alignForward(usize, current_addr, safe_alignment) 
         else 
             current_addr;
-        const padding = aligned_addr - current_addr;
+        const padding = aligned_addr_initial - current_addr;
         
         const total_size = padding + len;
         const new_size = self.allocated_size + total_size;
@@ -150,7 +150,15 @@ pub const EvmMemoryAllocator = struct {
         // Grow if necessary
         self.ensureCapacity(new_size) catch return null;
         
-        const result = self.base_ptr + self.allocated_size + padding;
+        // Recalculate aligned address after potential growth
+        const final_current_addr = @intFromPtr(self.base_ptr) + self.allocated_size;
+        const final_aligned_addr = if (safe_alignment > 1) 
+            std.mem.alignForward(usize, final_current_addr, safe_alignment) 
+        else 
+            final_current_addr;
+        
+        // Use the final aligned address
+        const result = @as([*]u8, @ptrFromInt(final_aligned_addr));
         self.allocated_size = new_size;
         
         return result;
@@ -275,6 +283,32 @@ test "EvmMemoryAllocator page alignment" {
     try evm_allocator.grow(INITIAL_SIZE * 3);
     const new_addr = @intFromPtr(evm_allocator.base_ptr);
     try std.testing.expectEqual(@as(usize, 0), new_addr % PAGE_SIZE);
+}
+
+test "EvmMemoryAllocator respects alignment for ArrayList" {
+    const allocator = std.testing.allocator;
+    
+    var evm_allocator = try EvmMemoryAllocator.init(allocator);
+    defer evm_allocator.deinit();
+    
+    const evm_alloc = evm_allocator.allocator();
+    
+    // This is what's failing in Memory.init - try to create an ArrayList
+    const array_list_ptr = try evm_alloc.create(std.ArrayList(u8));
+    defer evm_alloc.destroy(array_list_ptr);
+    
+    // Verify alignment
+    const ptr_addr = @intFromPtr(array_list_ptr);
+    const expected_align = @alignOf(std.ArrayList(u8));
+    try std.testing.expectEqual(@as(usize, 0), ptr_addr % expected_align);
+    
+    // Initialize it to make sure it works
+    array_list_ptr.* = std.ArrayList(u8).init(evm_alloc);
+    defer array_list_ptr.deinit();
+    
+    // Try to use it
+    try array_list_ptr.append(42);
+    try std.testing.expectEqual(@as(u8, 42), array_list_ptr.items[0]);
 }
 
 test "EvmMemoryAllocator growth strategies" {
