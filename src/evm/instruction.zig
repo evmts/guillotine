@@ -29,12 +29,44 @@ pub const Instruction = struct {
         const interpreter: Operation.Interpreter = frame.vm;
         const state: Operation.State = frame;
         
-        // Execute the opcode function
-        const result = try self.opcode_fn.?(frame.pc, interpreter, state);
-        _ = result;
-        
-        // Advance to next instruction
-        return instructions + 1;
+        // Check if this is a JUMP or JUMPI with a resolved target
+        const execution = @import("execution/package.zig");
+        if (self.opcode_fn == execution.control.op_jump and self.arg == .jump_target) {
+            // Use block-based jump with pre-resolved target
+            const dest = frame.stack.pop_unsafe();
+            
+            // Validate jump destination
+            if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
+                return ExecutionError.Error.InvalidJump;
+            }
+            
+            // Jump to the pre-resolved target
+            return @ptrCast(self.arg.jump_target);
+        } else if (self.opcode_fn == execution.control.op_jumpi and self.arg == .jump_target) {
+            // Use block-based conditional jump
+            const dest = frame.stack.pop_unsafe();
+            const condition = frame.stack.pop_unsafe();
+            
+            // If condition is false, continue to next instruction
+            if (condition == 0) {
+                return instructions + 1;
+            }
+            
+            // Validate jump destination
+            if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
+                return ExecutionError.Error.InvalidJump;
+            }
+            
+            // Jump to the pre-resolved target
+            return @ptrCast(self.arg.jump_target);
+        } else {
+            // Execute the opcode function normally
+            const result = try self.opcode_fn.?(frame.pc, interpreter, state);
+            _ = result;
+            
+            // Advance to next instruction
+            return instructions + 1;
+        }
     }
 };
 

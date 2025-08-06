@@ -185,7 +185,79 @@ pub const InstructionTranslator = struct {
             }
         }
         
+        // Resolve jump targets after initial translation
+        self.resolve_jump_targets() catch {
+            // If we can't resolve jumps, it's still OK - runtime will handle it
+        };
+        
         return self.instruction_count;
+    }
+    
+    /// Resolve jump targets in the instruction stream.
+    /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
+    pub fn resolve_jump_targets(self: *InstructionTranslator) !void {
+        // Build a map from PC to instruction index
+        var pc_to_instruction = std.AutoHashMap(usize, usize).init(self.allocator);
+        defer pc_to_instruction.deinit();
+        
+        var pc: usize = 0;
+        var inst_idx: usize = 0;
+        
+        // First pass: map PC to instruction indices
+        while (inst_idx < self.instruction_count) : (inst_idx += 1) {
+            try pc_to_instruction.put(pc, inst_idx);
+            
+            // Calculate PC advancement based on the original bytecode
+            if (pc >= self.code.len) break;
+            
+            const opcode_byte = self.code[pc];
+            if (opcode_byte >= 0x60 and opcode_byte <= 0x7F) {
+                // PUSH instruction
+                const push_size = opcode_byte - 0x5F;
+                pc += 1 + push_size;
+            } else {
+                pc += 1;
+            }
+        }
+        
+        // Second pass: update JUMP and JUMPI instructions
+        pc = 0;
+        inst_idx = 0;
+        
+        while (inst_idx < self.instruction_count) : (inst_idx += 1) {
+            if (pc >= self.code.len) break;
+            
+            const opcode_byte = self.code[pc];
+            
+            if (opcode_byte == 0x56 or opcode_byte == 0x57) { // JUMP or JUMPI
+                // Look for the target address in the previous PUSH instruction
+                if (inst_idx > 0 and self.instructions[inst_idx - 1].arg == .push_value) {
+                    const target_pc = self.instructions[inst_idx - 1].arg.push_value;
+                    
+                    // Check if it's within bounds
+                    if (target_pc < self.code.len) {
+                        // Check if the target is a JUMPDEST opcode
+                        if (self.code[@intCast(target_pc)] == 0x5B) {
+                            // Find the instruction index for this PC
+                            if (pc_to_instruction.get(@intCast(target_pc))) |target_idx| {
+                                // Update the JUMP/JUMPI with the target pointer
+                                self.instructions[inst_idx].arg = .{ 
+                                    .jump_target = &self.instructions[target_idx] 
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Calculate PC advancement
+            if (opcode_byte >= 0x60 and opcode_byte <= 0x7F) {
+                const push_size = opcode_byte - 0x5F;
+                pc += 1 + push_size;
+            } else {
+                pc += 1;
+            }
+        }
     }
     
 };

@@ -34,21 +34,7 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
         return self.interpret(contract, input, is_static);
     }
 
-    // Check if we can use block execution
-    // For now, we'll only use it for contracts without dynamic jumps
-    // (this is a simplified heuristic - in production we'd do more analysis)
-    var has_dynamic_jumps = false;
-    for (contract.code[0..contract.code_size]) |byte| {
-        if (byte == 0x56 or byte == 0x57) { // JUMP or JUMPI
-            has_dynamic_jumps = true;
-            break;
-        }
-    }
-
-    if (has_dynamic_jumps) {
-        Log.debug("VM.interpret_block: Contract has dynamic jumps, falling back to regular", .{});
-        return self.interpret(contract, input, is_static);
-    }
+    // We can now handle contracts with jumps thanks to jump resolution
 
     self.depth += 1;
     defer self.depth -= 1;
