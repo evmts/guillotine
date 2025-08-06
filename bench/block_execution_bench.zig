@@ -44,15 +44,16 @@ fn runBenchmark(
     // Warmup
     var i: u32 = 0;
     while (i < config.warmup_iterations) : (i += 1) {
-        var contract = try evm.Contract.init(
-            allocator, 
-            bytecode,
-            null,
-            primitives.Address.ZERO,
-            primitives.Address.ZERO,
-            primitives.Address.ZERO,
-            1000000,
-            false,
+        const code_hash = [_]u8{0} ** 32;
+        var contract = evm.Contract.init(
+            primitives.Address.ZERO, // caller
+            primitives.Address.ZERO, // address
+            0, // value
+            1000000, // gas
+            bytecode, // code
+            code_hash, // code_hash
+            &.{}, // input
+            false // is_static
         );
         defer contract.deinit(allocator, null);
         
@@ -66,15 +67,16 @@ fn runBenchmark(
     
     i = 0;
     while (i < config.iterations) : (i += 1) {
-        var contract = try evm.Contract.init(
-            allocator, 
-            bytecode,
-            null,
-            primitives.Address.ZERO,
-            primitives.Address.ZERO,
-            primitives.Address.ZERO,
-            1000000,
-            false,
+        const code_hash = [_]u8{0} ** 32;
+        var contract = evm.Contract.init(
+            primitives.Address.ZERO, // caller
+            primitives.Address.ZERO, // address
+            0, // value
+            1000000, // gas
+            bytecode, // code
+            code_hash, // code_hash
+            &.{}, // input
+            false // is_static
         );
         defer contract.deinit(allocator, null);
         
@@ -91,15 +93,16 @@ fn runBenchmark(
     
     i = 0;
     while (i < config.iterations) : (i += 1) {
-        var contract = try evm.Contract.init(
-            allocator, 
-            bytecode,
-            null,
-            primitives.Address.ZERO,
-            primitives.Address.ZERO,
-            primitives.Address.ZERO,
-            1000000,
-            false,
+        const code_hash = [_]u8{0} ** 32;
+        var contract = evm.Contract.init(
+            primitives.Address.ZERO, // caller
+            primitives.Address.ZERO, // address
+            0, // value
+            1000000, // gas
+            bytecode, // code
+            code_hash, // code_hash
+            &.{}, // input
+            false // is_static
         );
         defer contract.deinit(allocator, null);
         
