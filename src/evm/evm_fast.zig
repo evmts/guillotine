@@ -52,14 +52,11 @@ pub fn execute(self: *Evm, host: *EvmHost, bytecode: *const []u8, message: Messa
     _ = message;
 
     const boundaries = self.find_block_boundaries(bytecode);
+    const next_instructions = self.translate_bytecode(bytecode, &boundaries);
+    const frame = Frame{};
 
-    const frames: [STACK_SIZE]Frame = [_]Frame{Frame{}};
-
-    var instruction = analysis.next_instruction();
-    var loops = 0;
-
-    while (instruction != null) {
-        instruction = instruction[0].run(instruction, state);
+    while (next_instructions) |instructions| {
+        next_instruction = instructions[0].run(instructions, frame);
     }
 
     // handle execution result
