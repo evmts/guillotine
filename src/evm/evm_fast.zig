@@ -25,6 +25,12 @@ const precompiles = @import("precompiles/precompiles.zig");
 const Message = @import("message_fast.zig");
 const EvmHost = struct {};
 const builtin = @import("builtin");
+const Opcode = @import("../opcodes/opcode.zig").Opcode;
+const OpcodeTable = @import("../opcodes/opcode_table.zig").OpcodeTable;
+const ExecutionError = @import("../execution_error.zig").ExecutionError;
+const operation = @import("../opcodes/operation.zig");
+const Frame = @import("../frame/frame.zig").Frame;
+const opx_beginblock = @import("execution/opx.zig").begin_block;
 
 const MAX_CONTRACT_SIZE = 24_576;
 const MAX_INSTRUCTIONS = MAX_CONTRACT_SIZE * 2; 
@@ -70,91 +76,139 @@ const Instruction = struct { execute: *const fn (*const Instruction, *Frame) ?*c
     push_value: u256,
 } };
 
-fn translate_bytecode(
-self: *const Evm,
-bytecode: []const u8,
-boundaries: *const std.StaticBitSet(MAX_CONTRACT_SIZE),
-) [MAX_INSTRUCTIONS]Instruction {
-    var result = TranslationResult{}; // The buffer to fill.
-        var stream_idx: usize = 0; // The current index in our result.instructions array.
+/// Represents a single translated instruction in the instruction stream.
+const BlockMetrics = struct {
+    stack_required: u16,
+    stack_change: i16,
+
+    pub fn from_block(
+        bytecode: []const u8,
+        table: *const OpcodeTable,
+    ) BlockMetrics {
+        var stack_req: u16 = 0;
+        var stack_change: i16 = 0;
+        var max_stack_req: u16 = 0;
 
         var pc: usize = 0;
         while (pc < bytecode.len) {
-            // --- Step 1: Check for Block Start ---
-            if (boundaries.isSet(pc)) {
-                // TODO:
-                // 1. Find block end.
-                // 2. Get block bytecode slice.
-                // 3. Call BlockMetrics.from_block().
-                // 4. Assign the synthetic `opx_beginblock` to `result.instructions[stream_idx]`.
-                // 5. Increment stream_idx.
+            const op_code = bytecode[pc];
+            const op = &table.metadatas[op_code];
+
+            const req = @intFromEnum(op.stack_read);
+            if (stack_change < req) {
+                stack_req += @intCast(req - stack_change);
+                stack_change = 0;
+            } else {
+                stack_change -= req;
             }
 
-            // --- Step 2: Translate the Current Opcode ---
-            const opcode = bytecode[pc];
+            stack_change += @intFromEnum(op.stack_write);
 
-            // TODO:
-            // 1. Get the function pointer.
-            // 2. If PUSH, get the value.
-            // 3. Assign the real instruction to `result.instructions[stream_idx]`.
-            // 4. Increment stream_idx.
-
-            // --- Step 3: Advance PC ---
-            const instruction_len = // ...
-            pc += instruction_len;
+            if (stack_req > max_stack_req) {
+                max_stack_req = stack_req;
+            }
+            pc += get_instruction_length(op_code);
         }
 
-        result.count = stream_idx;
-        return result;
+        return .{
+            .stack_required = max_stack_req,
+            .stack_change = stack_change,
+        };
+    }
+};
+
+/// The result of translating bytecode into our internal representation.
+const TranslationResult = struct {
+    instructions: [MAX_INSTRUCTIONS]Instruction = undefined,
+    count: usize = 0,
+};
+
+/// Returns the length of an instruction in bytes.
+fn get_instruction_length(opcode: u8) usize {
+    if (opcode >= 0x60 and opcode <= 0x7f) { // PUSH1-PUSH32
+        return @as(usize, opcode - 0x60) + 2;
+    }
+    return 1;
 }
 
-/// Metrics about a given block of opcodes
-const BlockMetrics = struct {
-    gas_cost: i64 = 0,
-    stack_req: u16 = 0,
-    stack_max_growth: u16 = 0,
+// This is your top-level analysis function.
+fn translate_bytecode(
+    self: *const Evm,
+    bytecode: []const u8,
+    boundaries: *const std.StaticBitSet(MAX_CONTRACT_SIZE),
+) TranslationResult {
+    var result = TranslationResult{};
+    var stream_idx: usize = 0;
 
-    fn from_block(bytecode: []const u8, opcode_table: JumpTable) BlockMetrics {
-        std.debug.assert(bytecode.len <= MAX_CONTRACT_SIZE);
-        var metrics = BlockMetrics{};
-
-        var simulated_stack_height: i16 = 0;
-
-        var pc: usize = 0;
-        while (pc < bytecode.len) {
-            const op = bytecode[pc];
-
-            const items_popped = opcode_table.min_stack[opcode];
-
-            if (simulated_stack_height < items_popped) {
-                const deficit: u16 = items_popped - simulated_stack_height;
-                if (metrics.stack_req < deficit) {
-                    metrics.stack_req = deficit;
+    var pc: usize = 0;
+    while (pc < bytecode.len) {
+        // --- Step 1: Check for and Prepend Block Headers ---
+        if (boundaries.isSet(pc)) {
+            // Find the end of this basic block.
+            var block_end = pc;
+            while (block_end < bytecode.len) {
+                block_end += get_instruction_length(bytecode[block_end]);
+                if (block_end >= bytecode.len or boundaries.isSet(block_end)) {
+                    break;
                 }
             }
 
-            const items_pushed = STACK_SIZE - opcode_table.max_stack[opcode];
-            simulated_stack_height += items_pushed - items_popped; // increase stack height must happen before checking max height
-
-            if (simulated_stack_height > metrics.stack_max_growth) {
-                metrics.stack_max_growth = simulated_stack_height;
+            if (block_end > bytecode.len) {
+                block_end = bytecode.len;
             }
 
-            const constant_gas = opcode_table.constant_gas[opcode];
-            metrics.gas_cost += constant_gas;
+            const block_bytecode = bytecode[pc..block_end];
 
-            const next_pc = if (op >= 0x60 and op <= 0x7f) // PUSH
-                // handle push opcodes will have some amount of data based on the push we need to skip
-                1 + (op - 0x60 + 1)
-            else
-                1;
-            std.debug.assert(next_pc > pc); // guarantees no infinite loops
-            pc = next_pc;
+            // Analyze the block to get its metrics.
+            const metrics = BlockMetrics.from_block(block_bytecode, &self.opcode_table);
+
+            // Assign the synthetic `opx_beginblock` to the stream.
+            result.instructions[stream_idx] = .{
+                .fn = opx_beginblock,
+                .arg = .{ .block_metrics = metrics },
+            };
+            stream_idx += 1;
         }
 
-        return metrics;
+        // --- Step 2: Translate the Real Opcode ---
+        const opcode_val = bytecode[pc];
+        var instruction_len = get_instruction_length(opcode_val);
+
+        // Directly get the compatible function pointer from your OpcodeTable.
+        const exec_fn = self.opcode_table.execute_funcs[opcode_val];
+
+        if (opcode_val >= 0x60 and opcode_val <= 0x7f) { // PUSH1 to PUSH32
+            if (pc + instruction_len > bytecode.len) {
+                // Malformed bytecode, push reads past contract end.
+                // We'll let execution handle this as an error.
+                // For translation, we stop here.
+                break;
+            }
+
+            const data_slice = bytecode[pc + 1 .. pc + instruction_len];
+            const push_value = u256.from_slice_be(data_slice);
+
+            // Assign the PUSH instruction with its value argument.
+            result.instructions[stream_idx] = .{
+                .fn = exec_fn,
+                .arg = .{ .push_value = push_value },
+            };
+        } else {
+            // For all other instructions, there is no argument.
+            result.instructions[stream_idx] = .{
+                .fn = exec_fn,
+                .arg = .none,
+            };
+        }
+        stream_idx += 1;
+
+        // --- Step 3: Advance PC ---
+        pc += instruction_len;
     }
-};
+
+    result.count = stream_idx;
+    return result;
+}
 
 ///  Finds block boundaries and returns a StaticBitSet with boundaries set.
 ///  Block boundaries are places in bytecode we can identify a jump happens
