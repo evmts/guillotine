@@ -2,12 +2,10 @@ const std = @import("std");
 const Operation = @import("opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("frame/frame.zig");
+const CodeAnalysis = @import("frame/code_analysis.zig");
 
-pub const BlockMetrics = struct {
-    stack_required: u16,
-    stack_change: i16,
-    gas_cost: u32,
-};
+// Use the existing BlockMetadata from code_analysis.zig
+pub const BlockMetrics = CodeAnalysis.BlockMetadata;
 
 pub const Instruction = struct {
     opcode_fn: ?Operation.ExecutionFunc,
@@ -45,9 +43,9 @@ test "Instruction struct creation" {
 
 test "Instruction with block metrics" {
     const metrics = BlockMetrics{
-        .stack_required = 2,
-        .stack_change = 1,
         .gas_cost = 3,
+        .stack_req = 2,
+        .stack_max = 1,
     };
     
     const inst = Instruction{
@@ -55,9 +53,22 @@ test "Instruction with block metrics" {
         .arg = .{ .block_metrics = metrics },
     };
     
-    try std.testing.expectEqual(@as(u16, 2), inst.arg.block_metrics.stack_required);
-    try std.testing.expectEqual(@as(i16, 1), inst.arg.block_metrics.stack_change);
     try std.testing.expectEqual(@as(u32, 3), inst.arg.block_metrics.gas_cost);
+    try std.testing.expectEqual(@as(i16, 2), inst.arg.block_metrics.stack_req);
+    try std.testing.expectEqual(@as(i16, 1), inst.arg.block_metrics.stack_max);
+}
+
+test "BlockMetrics exists and has correct layout" {
+    // Verify BlockMetrics (BlockMetadata) is 8 bytes as expected
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(BlockMetrics));
+    
+    // Verify it's properly aligned
+    try std.testing.expect(@alignOf(BlockMetrics) >= 4);
+    
+    // Verify field offsets match expected layout
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(BlockMetrics, "gas_cost"));
+    try std.testing.expectEqual(@as(usize, 4), @offsetOf(BlockMetrics, "stack_req"));
+    try std.testing.expectEqual(@as(usize, 6), @offsetOf(BlockMetrics, "stack_max"));
 }
 
 test "Instruction with push value" {
