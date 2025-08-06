@@ -148,6 +148,12 @@ pub const Error = error{
     NoBatchInProgress,
     /// Snapshot not found
     SnapshotNotFound,
+    
+    // Instruction translation errors
+    /// Instruction limit exceeded during translation
+    InstructionLimitExceeded,
+    /// Opcode not implemented in translator
+    OpcodeNotImplemented,
 };
 
 /// Get a human-readable description for an execution error
