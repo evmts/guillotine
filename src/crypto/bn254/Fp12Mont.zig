@@ -138,6 +138,18 @@ pub fn invAssign(self: *Fp12Mont) !void {
     self.* = try self.inv();
 }
 
+// The inverse of a unary field element is it's conjugate
+pub fn unaryInverse(self: *const Fp12Mont) Fp12Mont {
+    return Fp12Mont{
+        .w0 = self.w0,
+        .w1 = self.w1.neg(),
+    };
+}
+
+pub fn unaryInverseAssign(self: *Fp12Mont) void {
+    self.* = self.unaryInverse();
+}
+
 pub fn equal(self: *const Fp12Mont, other: *const Fp12Mont) bool {
     return self.w0.equal(&other.w0) and self.w1.equal(&other.w1);
 }

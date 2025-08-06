@@ -11,7 +11,7 @@ const curve_parameters = @import("curve_parameters.zig");
 const FR_MOD = Fr.FR_MOD;
 const miller_loop_constant_signed = curve_parameters.miller_loop_constant_signed;
 const miller_loop_iterations = curve_parameters.miller_loop_iterations;
-const final_exponentiation_constant_hard_part = curve_parameters.final_exponentiation_constant_hard_part;
+pub const CURVE_PARAM_T = curve_parameters.CURVE_PARAM_T;
 
 pub const MontgomeryPointLine = struct {
     point: G2,
@@ -81,18 +81,49 @@ pub fn final_exponentiation_easy_part(f: *const Fp12Mont) Fp12Mont {
     return result;
 }
 
+//this is algorithm 6 from this paper: https://eprint.iacr.org/2015/192.pdf
 pub fn final_exponentiation_hard_part(f: *const Fp12Mont) Fp12Mont {
-    var result = Fp12Mont.ONE;
-    var base = f.*;
-    var exp: u780 = final_exponentiation_constant_hard_part;
-    while (exp > 0) {
-        if (exp & 1 == 1) {
-            result.mulAssign(&base);
-        }
-        base.mulAssign(&base);
-        exp >>= 1;
-    }
-    return result;
+    var t0 = f.pow(CURVE_PARAM_T).unaryInverse();
+
+    t0.squareAssign();
+
+    var t1 = t0.square();
+    t1.mulAssign(&t0);
+
+    var t2 = t1.pow(CURVE_PARAM_T).unaryInverse();
+    var t3 = t1.unaryInverse();
+
+    t1 = t2;
+    t1.mulAssign(&t3);
+
+    t3 = t2.square();
+    var t4 = t3.pow(CURVE_PARAM_T).unaryInverse();
+
+    t4.unaryInverseAssign();
+    t4.mulAssign(&t1);
+
+    t3 = t4;
+    t3.mulAssign(&t0);
+
+    t0 = t2;
+    t0.mulAssign(&t4);
+
+    t0.mulAssign(f);
+
+    t2 = t3.frobeniusMap();
+
+    t0.mulAssign(&t2);
+    t2 = t4.frobeniusMap().frobeniusMap();
+
+    t0.mulAssign(&t2);
+    t2 = f.unaryInverse();
+
+    t2.mulAssign(&t3);
+    t2 = t2.frobeniusMap().frobeniusMap().frobeniusMap();
+
+    t0.mulAssign(&t2);
+
+    return t0;
 }
 
 // p needs to be in affine form
@@ -220,6 +251,7 @@ pub fn point_add_line_evaluation(p: *const G1, q: *const G2, r: *const G2) Montg
 
 test "final_exponentiation" {
     const test_values = [_]Fp12Mont{
+        Fp12Mont.init_from_int(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
         Fp12Mont.init_from_int(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
         Fp12Mont.init_from_int(123, 456, 789, 1011, 1213, 1415, 1617, 1819, 2021, 2223, 2425, 2627),
         Fp12Mont.init_from_int(999, 888, 777, 666, 555, 444, 333, 222, 111, 100, 99, 88),
