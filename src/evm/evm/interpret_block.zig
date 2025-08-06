@@ -13,27 +13,20 @@ const Instruction = @import("../instruction.zig").Instruction;
 const InstructionTranslator = @import("../instruction_translator.zig").InstructionTranslator;
 const BlockExecutor = @import("../block_executor.zig").BlockExecutor;
 const CodeAnalysis = @import("../frame/code_analysis.zig");
+const instruction_limits = @import("../constants/instruction_limits.zig");
 
 /// Execute contract bytecode using block-based execution.
 ///
 /// This version translates bytecode to an instruction stream before execution,
-/// enabling better branch prediction and cache locality. Falls back to regular
-/// interpretation for edge cases.
+/// enabling better branch prediction and cache locality.
 ///
 /// Time complexity: O(n) where n is the number of opcodes executed.
 /// Memory: Allocates instruction buffer upfront, may allocate for return data.
-pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
+pub inline fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, comptime is_static: bool) ExecutionError.Error!RunResult {
     Log.debug("VM.interpret_block: Starting block execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
     self.require_one_thread();
 
-    // For very small contracts, fall back to regular interpretation
-    // TODO we need to benchmark and tune this
-    if (contract.code_size < 32) {
-        Log.debug("VM.interpret_block: Contract too small for block execution, falling back to regular", .{});
-        // TODO we need to rename this
-        return self.interpret(contract, input, is_static);
-    }
 
     // We track depth simply on the instance because the EVM can be expected to be syncronous
     self.depth += 1;
@@ -43,36 +36,25 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
     self.read_only = self.read_only or is_static;
     const initial_gas = contract.gas;
 
-    // Analyze the bytecode
+    // Analyze the bytecode (returns by value, no allocation)
     Log.debug("VM.interpret_block: Analyzing bytecode", .{});
-    var analysis = CodeAnalysis.analyze_bytecode_blocks(self.allocator, contract.code[0..contract.code_size]) catch |err| {
-        Log.debug("VM.interpret_block: Code analysis failed with {}, falling back to regular", .{err});
-        return self.interpret(contract, input, is_static);
-    };
-    defer analysis.deinit(self.allocator);
+    var analysis = try CodeAnalysis.analyze_bytecode_blocks(self.allocator, contract.code[0..contract.code_size]);
+    defer analysis.deinit(self.allocator); // Only cleans up BitVec allocations
     Log.debug("VM.interpret_block: Code analysis complete", .{});
 
-    const max_instructions = contract.code_size * 2; // Conservative estimate
-    const instructions = self.allocator.alloc(Instruction, max_instructions + 1) catch {
-        Log.debug("VM.interpret_block: Instruction allocation failed, falling back to regular", .{});
-        return self.interpret(contract, input, is_static);
-    };
-    defer self.allocator.free(instructions);
+    // Use fixed-size array for instructions (no allocation)
+    var instructions: [instruction_limits.MAX_INSTRUCTIONS + 1]Instruction = undefined;
 
     // Translate bytecode to instructions
     Log.debug("VM.interpret_block: Translating bytecode to instructions", .{});
     var translator = InstructionTranslator.init(
-        self.allocator,
         contract.code[0..contract.code_size],
         &analysis,
-        instructions[0..max_instructions],
+        instructions[0..instruction_limits.MAX_INSTRUCTIONS],
         &self.table,
     );
 
-    const instruction_count = translator.translate_bytecode() catch |err| {
-        Log.debug("VM.interpret_block: Translation failed with {}, falling back to regular", .{err});
-        return self.interpret(contract, input, is_static);
-    };
+    const instruction_count = try translator.translate_bytecode();
     Log.debug("VM.interpret_block: Translation complete, {} instructions", .{instruction_count});
 
     // Null-terminate the instruction stream
@@ -106,7 +88,7 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
 
     // Execute the instruction stream
     Log.debug("VM.interpret_block: Starting block execution", .{});
-    const inst_ptr: [*]const Instruction = instructions.ptr;
+    const inst_ptr: [*]const Instruction = &instructions;
     BlockExecutor.execute_block(inst_ptr, &frame) catch |err| {
         contract.gas = frame.gas_remaining;
 
@@ -169,4 +151,14 @@ pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_sta
     });
 
     return RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
+}
+
+/// Execute contract bytecode in read-only mode (for STATICCALL and static contexts).
+pub fn interpret_block_readonly(self: *Vm, contract: *Contract, input: []const u8) ExecutionError.Error!RunResult {
+    return interpret_block(self, contract, input, true);
+}
+
+/// Execute contract bytecode with write permissions (for CALL, DELEGATECALL, etc).
+pub fn interpret_block_write(self: *Vm, contract: *Contract, input: []const u8) ExecutionError.Error!RunResult {
+    return interpret_block(self, contract, input, false);
 }

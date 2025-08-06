@@ -12,7 +12,6 @@ const execution = @import("execution/package.zig");
 /// bytecode into a stream of instructions that can be executed sequentially
 /// without opcode dispatch overhead.
 pub const InstructionTranslator = struct {
-    allocator: std.mem.Allocator,
     code: []const u8,
     analysis: *const CodeAnalysis,
     instructions: []Instruction,
@@ -23,14 +22,12 @@ pub const InstructionTranslator = struct {
     
     /// Initialize a new instruction translator.
     pub fn init(
-        allocator: std.mem.Allocator,
         code: []const u8,
         analysis: *const CodeAnalysis,
         instructions: []Instruction,
         jump_table: *const JumpTable,
     ) InstructionTranslator {
         return .{
-            .allocator = allocator,
             .code = code,
             .analysis = analysis,
             .instructions = instructions,
@@ -216,16 +213,19 @@ pub const InstructionTranslator = struct {
     /// Resolve jump targets in the instruction stream.
     /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
     pub fn resolve_jump_targets(self: *InstructionTranslator) !void {
-        // Build a map from PC to instruction index
-        var pc_to_instruction = std.AutoHashMap(usize, usize).init(self.allocator);
-        defer pc_to_instruction.deinit();
+        // Build a map from PC to instruction index using fixed array
+        // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
+        var pc_to_instruction: [@import("constants/code_analysis_limits.zig").MAX_CONTRACT_SIZE]u16 = undefined;
+        @memset(&pc_to_instruction, std.math.maxInt(u16));
         
         var pc: usize = 0;
         var inst_idx: usize = 0;
         
         // First pass: map PC to instruction indices
         while (inst_idx < self.instruction_count) : (inst_idx += 1) {
-            try pc_to_instruction.put(pc, inst_idx);
+            if (pc < pc_to_instruction.len) {
+                pc_to_instruction[pc] = @intCast(inst_idx);
+            }
             
             // Calculate PC advancement based on the original bytecode
             if (pc >= self.code.len) break;
@@ -259,11 +259,14 @@ pub const InstructionTranslator = struct {
                         // Check if the target is a JUMPDEST opcode
                         if (self.code[@intCast(target_pc)] == 0x5B) {
                             // Find the instruction index for this PC
-                            if (pc_to_instruction.get(@intCast(target_pc))) |target_idx| {
-                                // Update the JUMP/JUMPI with the target pointer
-                                self.instructions[inst_idx].arg = .{ 
-                                    .jump_target = &self.instructions[target_idx] 
-                                };
+                            if (target_pc < pc_to_instruction.len) {
+                                const target_idx = pc_to_instruction[@intCast(target_pc)];
+                                if (target_idx != std.math.maxInt(u16)) {
+                                    // Update the JUMP/JUMPI with the target pointer
+                                    self.instructions[inst_idx].arg = .{ 
+                                        .jump_target = &self.instructions[target_idx] 
+                                    };
+                                }
                             }
                         }
                     }
