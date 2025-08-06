@@ -41,55 +41,29 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
 
     const initial_gas = contract.gas;
 
-    // Try to acquire a frame from the pool
-    const pooled_frame = self.acquire_frame();
-    var heap_frame_storage: Frame = undefined;
-    var heap_allocated = false;
-    
-    var frame: *Frame = if (pooled_frame) |pf| pf else blk: {
-        // Pool exhausted, allocate on heap
-        heap_allocated = true;
-        heap_frame_storage = Frame{
-            .gas_remaining = contract.gas,
-            .pc = 0,
-            .contract = contract,
-            .allocator = self.allocator,
-            .stop = false,
-            .is_static = self.read_only,
-            .depth = @as(u32, @intCast(self.depth)),
-            .cost = 0,
-            .err = null,
-            .input = input,
-            .output = &[_]u8{},
-            .op = &.{},
-            .memory = undefined,
-            .stack = .{},
-            .return_data = ReturnData.init(self.allocator),
-            .vm = self, // Set vm to the current Evm instance
-        };
-        heap_frame_storage.memory = try Memory.init_default(self.allocator);
-        break :blk &heap_frame_storage;
+    // Create frame on stack
+    var frame = Frame{
+        .gas_remaining = contract.gas,
+        .pc = 0,
+        .contract = contract,
+        .allocator = self.allocator,
+        .stop = false,
+        .is_static = self.read_only,
+        .depth = @as(u32, @intCast(self.depth)),
+        .cost = 0,
+        .err = null,
+        .input = input,
+        .output = &[_]u8{},
+        .op = &.{},
+        .memory = try Memory.init_default(self.allocator),
+        .stack = .{},
+        .return_data = ReturnData.init(self.allocator),
+        .vm = self,
     };
-    
-    // Configure the frame
-    frame.gas_remaining = contract.gas;
-    frame.pc = 0;
-    frame.contract = contract;
-    frame.is_static = self.read_only;
-    frame.depth = @as(u32, @intCast(self.depth));
-    frame.input = input;
-    frame.vm = self; // Set vm reference for pooled frames too
-    
-    defer {
-        if (pooled_frame != null) {
-            self.release_frame(frame);
-        } else if (heap_allocated) {
-            heap_frame_storage.deinit();
-        }
-    }
+    defer frame.deinit();
 
     const interpreter: Operation.Interpreter = self;
-    const state: Operation.State = frame;
+    const state: Operation.State = &frame;
 
     while (frame.pc < contract.code_size) {
         @branchHint(.likely);

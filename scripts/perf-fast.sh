@@ -11,5 +11,6 @@ zig build build-evm-runner -Doptimize=ReleaseFast \
     --js-internal-runs 1 \
     --snailtracer-internal-runs 2 \
     --js-snailtracer-internal-runs 1\
+    --next\
   && echo "Opening results in browser..." \
   && npx markserv bench/official/results.md

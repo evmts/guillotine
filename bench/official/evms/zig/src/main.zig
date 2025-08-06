@@ -15,7 +15,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const gpa_allocator = gpa.allocator();
-    
+
     // Initialize EVM memory allocator
     var evm_memory_allocator = try evm.EvmMemoryAllocator.init(gpa_allocator);
     defer evm_memory_allocator.deinit();
@@ -136,12 +136,6 @@ pub fn main() !void {
         defer contract.deinit(allocator, null);
 
         // Execute the contract
-        std.debug.print("About to execute contract at address: {any}\n", .{contract_address});
-        std.debug.print("Contract code length: {}\n", .{code.len});
-        std.debug.print("Calldata: 0x{x}\n", .{std.fmt.fmtSliceHexLower(calldata)});
-        if (use_block_execution) {
-            std.debug.print("Using block-based execution\n", .{});
-        }
 
         const result = if (use_block_execution)
             vm.interpret_block(&contract, calldata, false) catch |err| {
@@ -154,18 +148,14 @@ pub fn main() !void {
                 std.process.exit(1);
             };
 
-        if (result.status == .Success) {
-            std.debug.print("Contract execution successful, gas used: {}\n", .{result.gas_used});
-        } else {
+        if (result.status != .Success) {
             std.debug.print("Contract execution failed with status: {}\n", .{result.status});
             std.process.exit(1);
         }
 
         if (result.output) |output| {
-            std.debug.print("Contract output: 0x{x}\n", .{std.fmt.fmtSliceHexLower(output)});
             allocator.free(output);
         }
-        std.debug.print("\n", .{});
     }
 }
 

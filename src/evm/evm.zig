@@ -33,24 +33,6 @@ const Evm = @This();
 
 /// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH = 1024;
-
-/// Frame pool for efficient frame allocation/deallocation
-const FramePool = struct {
-    frames: [32]Frame,
-    available: u32 = 0xFFFFFFFF, // Bitmask of available frames
-    
-    pub fn acquire(self: *FramePool) ?*Frame {
-        if (self.available == 0) return null;
-        const idx = @ctz(self.available);
-        self.available &= ~(@as(u32, 1) << @as(u5, @intCast(idx)));
-        return &self.frames[idx];
-    }
-    
-    pub fn release(self: *FramePool, frame: *Frame) void {
-        const idx = (@intFromPtr(frame) - @intFromPtr(&self.frames[0])) / @sizeOf(Frame);
-        self.available |= @as(u32, 1) << @as(u5, @intCast(idx));
-    }
-};
 // Hot fields (frequently accessed during execution)
 /// Memory allocator for VM operations
 allocator: std.mem.Allocator,
@@ -76,8 +58,6 @@ tracer: ?std.io.AnyWriter = null,
 state: EvmState,
 /// Warm/cold access tracking for EIP-2929 gas costs
 access_list: AccessList,
-/// Frame pool for efficient frame allocation
-frame_pool: FramePool,
 
 // Compile-time validation and optimizations
 comptime {
@@ -132,33 +112,7 @@ pub fn init(
     var access_list = AccessList.init(allocator, ctx);
     errdefer access_list.deinit();
 
-    // Initialize frame pool with all frames available
-    var frame_pool = FramePool{
-        .frames = undefined,
-        .available = 0xFFFFFFFF,
-    };
-    
-    // Initialize each frame in the pool
-    for (&frame_pool.frames) |*frame| {
-        frame.* = Frame{
-            .gas_remaining = 0,
-            .pc = 0,
-            .contract = undefined,
-            .allocator = allocator,
-            .stop = false,
-            .is_static = false,
-            .depth = 0,
-            .cost = 0,
-            .err = null,
-            .input = &[_]u8{},
-            .output = &[_]u8{},
-            .op = &.{},
-            .memory = try Memory.init_default(allocator),
-            .stack = .{},
-            .return_data = ReturnData.init(allocator),
-            .vm = undefined, // Will be set when frame is allocated from pool
-        };
-    }
+    // No frame pool initialization needed - frames are stack-allocated
     
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
@@ -171,7 +125,6 @@ pub fn init(
         .depth = depth,
         .read_only = read_only,
         .tracer = tracer,
-        .frame_pool = frame_pool,
     };
 }
 
@@ -182,11 +135,7 @@ pub fn deinit(self: *Evm) void {
     self.access_list.deinit();
     Contract.clear_analysis_cache(self.allocator);
     
-    // Clean up frame pool memory
-    for (&self.frame_pool.frames) |*frame| {
-        frame.memory.deinit();
-        frame.return_data.deinit();
-    }
+    // No frame pool to clean up - frames are stack-allocated and cleaned up in their respective functions
 }
 
 /// Reset the EVM for reuse without deallocating memory.
@@ -200,39 +149,6 @@ pub fn reset(self: *Evm) void {
     self.read_only = false;
 }
 
-/// Acquire a frame from the pool for execution
-pub fn acquire_frame(self: *Evm) ?*Frame {
-    return self.frame_pool.acquire();
-}
-
-/// Release a frame back to the pool
-pub fn release_frame(self: *Evm, frame: *Frame) void {
-    // Reset frame state before returning to pool
-    frame.gas_remaining = 0;
-    frame.pc = 0;
-    frame.stop = false;
-    frame.is_static = false;
-    frame.depth = 0;
-    frame.cost = 0;
-    frame.err = null;
-    frame.input = &[_]u8{};
-    frame.output = &[_]u8{};
-    frame.op = &.{};
-    frame.stack.clear();
-    // Clear return data and release any allocated memory
-    frame.return_data.clear();
-    // Shrink to minimum capacity to free excess memory
-    frame.return_data.data.shrinkAndFree(0);
-    // Reset memory to initial state by re-initializing
-    frame.memory.deinit();
-    frame.memory = Memory.init_default(self.allocator) catch {
-        // If we can't reinitialize memory, the frame becomes unusable
-        // Don't return it to the pool
-        return;
-    };
-    
-    self.frame_pool.release(frame);
-}
 
 pub usingnamespace @import("evm/set_context.zig");
 pub usingnamespace @import("evm/interpret.zig");
