@@ -1844,7 +1844,7 @@ test "EvmState clear_transaction_state clears all transaction data" {
     const topics = [_]u256{1, 2, 3};
     const data = &[_]u8{ 0xAA, 0xBB, 0xCC };
     try state.emit_log(addr1, &topics, data);
-    try state.emit_log(addr2, &topics[0..2], data);
+    try state.emit_log(addr2, topics[0..2], data);
 
     // Mark selfdestructs
     try state.mark_for_destruction(addr1, addr2);

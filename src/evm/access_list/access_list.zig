@@ -410,7 +410,7 @@ test "access_list_benchmarks" {
     
     // Performance analysis hints
     if (sequential_ns < random_access_ns) {
-        std.log.debug("✓ Sequential access shows expected performance benefit");
+        std.log.debug("✓ Sequential access shows expected performance benefit", .{});
     }
     
     const avg_address_access_ns = address_access_ns / iterations;
@@ -846,7 +846,7 @@ test "fuzz_access_list_collision_handling" {
                     },
                     3 => {
                         // XOR patterns that might create collisions
-                        const xor_key = input[5] % 256;
+                        const xor_key = input[5];
                         for (0..20) |j| {
                             const base_val = @as(u8, @intCast((i * 20 + j) % 256));
                             address[j] = base_val ^ xor_key;

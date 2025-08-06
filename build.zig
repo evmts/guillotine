@@ -1621,23 +1621,12 @@ pub fn build(b: *std.Build) void {
     inline_ops_test.root_module.addImport("evm", evm_mod);
     const run_inline_ops_test = b.addRunArtifact(inline_ops_test);
     
-    // Add instruction test
-    const instruction_test = b.addTest(.{
-        .name = "instruction-test",
-        .root_source_file = b.path("src/evm/instruction.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    instruction_test.root_module.addImport("primitives", primitives_mod);
-    instruction_test.root_module.addImport("evm", evm_mod);
-    const run_instruction_test = b.addRunArtifact(instruction_test);
+    // Instruction tests moved to test/evm/instruction_test.zig to avoid circular dependencies
+    // The tests are included via the regular test/evm test suite
+    
     const inline_ops_test_step = b.step("test-inline-ops", "Run inline ops performance tests");
     inline_ops_test_step.dependOn(&run_inline_ops_test.step);
     test_step.dependOn(&run_inline_ops_test.step);
-    
-    const instruction_test_step = b.step("test-instruction", "Run instruction tests");
-    instruction_test_step.dependOn(&run_instruction_test.step);
-    test_step.dependOn(&run_instruction_test.step);
 
     test_step.dependOn(&run_integration_test.step);
     test_step.dependOn(&run_gas_test.step);

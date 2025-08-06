@@ -1306,7 +1306,18 @@ test "fuzz_frame_builder_patterns" {
             const allocator = std.testing.allocator;
 
             // Create contract for testing
-            var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, .{ .address = primitives.Address.zero() }) catch return;
+            const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 };
+            const code_hash = [_]u8{0} ** 32;
+            var contract = Contract.init(
+                primitives.Address.zero(), // caller
+                primitives.Address.zero(), // address
+                0, // value
+                1000000, // gas
+                code, // bytecode
+                code_hash, // code_hash
+                &[_]u8{}, // input
+                false // is_static
+            );
             defer contract.deinit(allocator, null);
 
             var vm = Vm.init(allocator, undefined, null, null) catch return;
@@ -1380,7 +1391,18 @@ test "fuzz_frame_gas_consumption_patterns" {
 
             const allocator = std.testing.allocator;
 
-            var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, .{ .address = primitives.Address.zero() }) catch return;
+            const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 };
+            const code_hash = [_]u8{0} ** 32;
+            var contract = Contract.init(
+                primitives.Address.zero(), // caller
+                primitives.Address.zero(), // address
+                0, // value
+                1000000, // gas
+                code, // bytecode
+                code_hash, // code_hash
+                &[_]u8{}, // input
+                false // is_static
+            );
             defer contract.deinit(allocator, null);
 
             // Extract gas values from fuzz input
@@ -1428,7 +1450,18 @@ test "fuzz_frame_memory_operations" {
 
             const allocator = std.testing.allocator;
 
-            var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, .{ .address = primitives.Address.zero() }) catch return;
+            const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 };
+            const code_hash = [_]u8{0} ** 32;
+            var contract = Contract.init(
+                primitives.Address.zero(), // caller
+                primitives.Address.zero(), // address
+                0, // value
+                1000000, // gas
+                code, // bytecode
+                code_hash, // code_hash
+                &[_]u8{}, // input
+                false // is_static
+            );
             defer contract.deinit(allocator, null);
 
             var vm = Vm.init(allocator, undefined, null, null) catch return;
@@ -1493,7 +1526,18 @@ test "fuzz_frame_stack_operations" {
 
             const allocator = std.testing.allocator;
 
-            var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, .{ .address = primitives.Address.zero() }) catch return;
+            const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 };
+            const code_hash = [_]u8{0} ** 32;
+            var contract = Contract.init(
+                primitives.Address.zero(), // caller
+                primitives.Address.zero(), // address
+                0, // value
+                1000000, // gas
+                code, // bytecode
+                code_hash, // code_hash
+                &[_]u8{}, // input
+                false // is_static
+            );
             defer contract.deinit(allocator, null);
 
             var vm = Vm.init(allocator, undefined, null, null) catch return;
@@ -1546,7 +1590,18 @@ test "fuzz_frame_state_combinations" {
 
             const allocator = std.testing.allocator;
 
-            var contract = Contract.init(allocator, &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 }, .{ .address = primitives.Address.zero() }) catch return;
+            const code = &[_]u8{ 0x60, 0x10, 0x60, 0x00, 0x52 };
+            const code_hash = [_]u8{0} ** 32;
+            var contract = Contract.init(
+                primitives.Address.zero(), // caller
+                primitives.Address.zero(), // address
+                0, // value
+                1000000, // gas
+                code, // bytecode
+                code_hash, // code_hash
+                &[_]u8{}, // input
+                false // is_static
+            );
             defer contract.deinit(allocator, null);
 
             // Extract various state values from fuzz input

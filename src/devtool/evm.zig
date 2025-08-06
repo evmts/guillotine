@@ -178,7 +178,9 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
     const frame = try self.allocator.create(Evm.Frame);
     errdefer self.allocator.destroy(frame);
     
-    frame.* = try Evm.Frame.init(self.allocator, contract);
+    // Frame.init now requires vm parameter
+    var dummy_vm: Evm.Evm = undefined;
+    frame.* = try Evm.Frame.init(self.allocator, &dummy_vm, contract);
     frame.gas_remaining = 1000000; // Set gas after init
     
     self.current_frame = frame;
