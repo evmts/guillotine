@@ -26,14 +26,17 @@ pub fn main() !void {
     defer std.process.argsFree(gpa_allocator, args);
 
     if (args.len < 5) {
-        std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>]\n", .{args[0]});
+        std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>] [--next]\n", .{args[0]});
         std.debug.print("Example: {s} --contract-code-path bytecode.txt --calldata 0x12345678\n", .{args[0]});
+        std.debug.print("Options:\n", .{});
+        std.debug.print("  --next    Use block-based execution (new optimized interpreter)\n", .{});
         std.process.exit(1);
     }
 
     var contract_code_path: ?[]const u8 = null;
     var calldata_hex: ?[]const u8 = null;
     var num_runs: u8 = 1;
+    var use_block_execution = false;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -61,6 +64,8 @@ pub fn main() !void {
                 std.process.exit(1);
             };
             i += 1;
+        } else if (std.mem.eql(u8, args[i], "--next")) {
+            use_block_execution = true;
         } else {
             std.debug.print("Error: Unknown argument {s}\n", .{args[i]});
             std.process.exit(1);
@@ -134,11 +139,20 @@ pub fn main() !void {
         std.debug.print("About to execute contract at address: {any}\n", .{contract_address});
         std.debug.print("Contract code length: {}\n", .{code.len});
         std.debug.print("Calldata: 0x{x}\n", .{std.fmt.fmtSliceHexLower(calldata)});
+        if (use_block_execution) {
+            std.debug.print("Using block-based execution\n", .{});
+        }
 
-        const result = vm.interpret(&contract, calldata, false) catch |err| {
-            std.debug.print("Contract execution error: {}\n", .{err});
-            std.process.exit(1);
-        };
+        const result = if (use_block_execution)
+            vm.interpret_block(&contract, calldata, false) catch |err| {
+                std.debug.print("Contract execution error: {}\n", .{err});
+                std.process.exit(1);
+            }
+        else
+            vm.interpret(&contract, calldata, false) catch |err| {
+                std.debug.print("Contract execution error: {}\n", .{err});
+                std.process.exit(1);
+            };
 
         if (result.status == .Success) {
             std.debug.print("Contract execution successful, gas used: {}\n", .{result.gas_used});

@@ -19,6 +19,7 @@ pub fn main() !void {
         \\--export <FORMAT>          Export results (json, markdown)
         \\--compare                  Compare all available EVM implementations
         \\--all                      Include all test cases (by default only working benchmarks are included)
+        \\--next                     Use block-based execution for Zig EVM (new optimized interpreter)
         \\
     );
 
@@ -53,6 +54,7 @@ pub fn main() !void {
     const export_format = res.args.@"export";
     const compare_mode = res.args.compare != 0;
     const include_all_cases = res.args.all != 0;
+    const use_next = res.args.next != 0;
 
     if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
@@ -64,7 +66,7 @@ pub fn main() !void {
         for (evms) |evm| {
             std.debug.print("\n=== Running benchmarks for {s} ===\n", .{evm});
 
-            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases);
+            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next);
             defer orchestrator.deinit();
 
             try orchestrator.discoverTestCases();
@@ -98,7 +100,7 @@ pub fn main() !void {
         }
     } else {
         // Single EVM mode
-        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases);
+        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next);
         defer orchestrator.deinit();
 
         // Discover test cases
@@ -366,6 +368,7 @@ fn printHelp() !void {
         \\  --snailtracer-internal-runs <NUM>   Number of internal runs for snailtracer (defaults to --internal-runs)
         \\  --js-snailtracer-internal-runs <NUM>   Number of internal runs for JavaScript snailtracer (defaults to --js-internal-runs)
         \\  --export <FORMAT>          Export results (json, markdown)
+        \\  --next                     Use block-based execution for Zig EVM (new optimized interpreter)
         \\
         \\Examples:
         \\  orchestrator                    Run benchmarks with Zig EVM

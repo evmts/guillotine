@@ -29,6 +29,7 @@ js_internal_runs: u32,
 snailtracer_internal_runs: u32,
 js_snailtracer_internal_runs: u32,
 include_all_cases: bool,
+use_next: bool,
 test_cases: []TestCase,
 results: std.ArrayList(BenchmarkResult),
 
@@ -49,7 +50,7 @@ pub const BenchmarkResult = struct {
     internal_runs: u32,
 };
 
-pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32, snailtracer_internal_runs: u32, js_snailtracer_internal_runs: u32, include_all_cases: bool) !Orchestrator {
+pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32, snailtracer_internal_runs: u32, js_snailtracer_internal_runs: u32, include_all_cases: bool, use_next: bool) !Orchestrator {
     return Orchestrator{
         .allocator = allocator,
         .evm_name = evm_name,
@@ -60,6 +61,7 @@ pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, i
         .snailtracer_internal_runs = snailtracer_internal_runs,
         .js_snailtracer_internal_runs = js_snailtracer_internal_runs,
         .include_all_cases = include_all_cases,
+        .use_next = use_next,
         .test_cases = &[_]TestCase{},
         .results = std.ArrayList(BenchmarkResult).init(allocator),
     };
@@ -213,10 +215,11 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     defer self.allocator.free(num_runs_str);
     
     // Build hyperfine command
+    const next_flag = if (self.use_next and std.mem.eql(u8, self.evm_name, "zig")) " --next" else "";
     const hyperfine_cmd = try std.fmt.allocPrint(
         self.allocator,
-        "{s} --contract-code-path {s} --calldata {s} --num-runs {}",
-        .{ runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use }
+        "{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}",
+        .{ runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag }
     );
     defer self.allocator.free(hyperfine_cmd);
 
