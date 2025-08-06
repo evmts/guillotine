@@ -1743,6 +1743,18 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_bn254_g2_test.step);
     test_step.dependOn(&run_bn254_pairing_test.step);
 
+    // Add ERC20 deployment hang test
+    const erc20_deployment_test = b.addTest(.{
+        .name = "erc20-deployment-test",
+        .root_source_file = b.path("test/evm/erc20_deployment_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    erc20_deployment_test.root_module.addImport("evm", evm_mod);
+    erc20_deployment_test.root_module.addImport("primitives", primitives_mod);
+    const run_erc20_deployment_test = b.addRunArtifact(erc20_deployment_test);
+    test_step.dependOn(&run_erc20_deployment_test.step);
+    
     // Add ERC20 mint debug test
     const erc20_mint_debug_test = b.addTest(.{
         .name = "erc20-mint-debug-test",

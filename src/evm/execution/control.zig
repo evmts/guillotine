@@ -20,7 +20,6 @@ pub fn op_stop(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 }
 
 pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
     _ = interpreter;
 
     const frame = state;
@@ -29,10 +28,13 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
 
     // Use unsafe pop since bounds checking is done by jump_table
     const dest = frame.stack.pop_unsafe();
+    
+    Log.debug("JUMP: from pc={} to dest={}, depth={}, gas={}", .{pc, dest, frame.depth, frame.gas_remaining});
 
     // Check if destination is a valid JUMPDEST (pass u256 directly)
     if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
         @branchHint(.unlikely);
+        Log.err("JUMP: Invalid jump destination {} from pc={}", .{dest, pc});
         return ExecutionError.Error.InvalidJump;
     }
 
@@ -56,6 +58,8 @@ pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     const values = frame.stack.pop2_unsafe();
     const destination = values.b; // Top
     const condition = values.a; // Second from top
+    
+    Log.debug("JUMPI: at pc={}, dest={}, condition={}, depth={}", .{pc, destination, condition, frame.depth});
 
     Log.debug("JUMPI: condition={}, destination={}, current_pc={}", .{ condition, destination, pc });
 

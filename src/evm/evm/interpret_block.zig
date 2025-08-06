@@ -25,6 +25,8 @@ const CodeAnalysis = @import("../frame/code_analysis.zig");
 pub fn interpret_block(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
     Log.debug("VM.interpret_block: Starting block execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
+    self.require_one_thread();
+
     // For very small contracts, fall back to regular interpretation
     // TODO we need to benchmark and tune this
     if (contract.code_size < 32) {

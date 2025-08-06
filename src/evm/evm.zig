@@ -180,6 +180,7 @@ pub usingnamespace @import("evm/create_contract_protected.zig");
 pub usingnamespace @import("evm/create2_contract_protected.zig");
 pub usingnamespace @import("evm/validate_value_transfer.zig");
 pub usingnamespace @import("evm/selfdestruct_protected.zig");
+pub usingnamespace @import("evm/require_one_thread.zig");
 
 pub const ConsumeGasError = ExecutionError.Error;
 

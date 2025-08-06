@@ -30,6 +30,8 @@ const primitives = @import("primitives");
 pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
     Log.debug("VM.interpret: Starting execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
+    self.require_one_thread();
+
     self.depth += 1;
     defer self.depth -= 1;
 
@@ -65,17 +67,44 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
     const state: Operation.State = &frame;
 
     var loop_iterations: usize = 0;
+    const MAX_ITERATIONS = if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) 10_000_000 else std.math.maxInt(usize);
+    var last_pc: usize = 0;
+    var same_pc_count: usize = 0;
+    
     while (frame.pc < contract.code_size) {
         @branchHint(.likely);
 
         // Debug infinite loops
         loop_iterations += 1;
-        if (loop_iterations > 1_000_000) {
-            Log.err("interpret: Possible infinite loop detected after {} iterations at pc={}, code_size={}", .{ loop_iterations, frame.pc, contract.code_size });
-            return ExecutionError.Error.InvalidOpcode;
+        if (loop_iterations > MAX_ITERATIONS) {
+            Log.err("interpret: Infinite loop detected after {} iterations at pc={}, opcode=0x{x:0>2}, depth={}, gas={}", .{
+                loop_iterations, frame.pc, contract.get_op(frame.pc), self.depth, frame.gas_remaining
+            });
+            unreachable;
+        }
+        
+        // Detect stuck at same PC
+        if (frame.pc == last_pc) {
+            same_pc_count += 1;
+            if (same_pc_count > 1000) {
+                Log.err("interpret: Stuck at pc={} for {} iterations, opcode=0x{x:0>2}", .{
+                    frame.pc, same_pc_count, contract.get_op(frame.pc)
+                });
+                unreachable;
+            }
+        } else {
+            last_pc = frame.pc;
+            same_pc_count = 0;
         }
 
         const opcode = contract.get_op(frame.pc);
+        
+        // Log every 10000th iteration for visibility
+        if (loop_iterations % 10000 == 0) {
+            Log.debug("interpret: iteration {}, pc={}, opcode=0x{x:0>2}, gas={}, stack_size={}", .{
+                loop_iterations, frame.pc, opcode, frame.gas_remaining, frame.stack.size
+            });
+        }
 
         const inline_hot_ops = @import("../jump_table/jump_table.zig").execute_with_inline_hot_ops;
         const result = inline_hot_ops(&self.table, frame.pc, interpreter, state, opcode) catch |err| {
