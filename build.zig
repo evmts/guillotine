@@ -645,6 +645,23 @@ pub fn build(b: *std.Build) void {
     const block_execution_bench_step = b.step("bench-block-execution", "Run block-based execution performance benchmarks");
     block_execution_bench_step.dependOn(&run_block_execution_bench_cmd.step);
 
+    // Add ERC20 benchmark executable
+    const erc20_bench_exe = b.addExecutable(.{
+        .name = "erc20-bench",
+        .root_source_file = b.path("bench/erc20_benchmark.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+    erc20_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+    erc20_bench_exe.root_module.addImport("evm", bench_evm_mod);
+    erc20_bench_exe.root_module.addImport("primitives", primitives_mod);
+    b.installArtifact(erc20_bench_exe);
+
+    const run_erc20_bench_cmd = b.addRunArtifact(erc20_bench_exe);
+    run_erc20_bench_cmd.step.dependOn(b.getInstallStep());
+    const erc20_bench_step = b.step("bench-erc20", "Run ERC20 benchmarks comparing regular vs block execution");
+    erc20_bench_step.dependOn(&run_erc20_bench_cmd.step);
+
     // Add precompile optimization benchmark executable
     const precompile_opt_bench_exe = b.addExecutable(.{
         .name = "precompile-opt-bench",
@@ -1811,6 +1828,36 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_jumpi_bug_test.step);
     const jumpi_bug_test_step = b.step("test-jumpi", "Run JUMPI bug test");
     jumpi_bug_test_step.dependOn(&run_jumpi_bug_test.step);
+
+    // Add block execution ERC20 test
+    const block_execution_erc20_test = b.addTest(.{
+        .name = "block-execution-erc20-test",
+        .root_source_file = b.path("test/evm/block_execution_erc20_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    block_execution_erc20_test.root_module.addImport("evm", evm_mod);
+    block_execution_erc20_test.root_module.addImport("primitives", primitives_mod);
+    
+    const run_block_execution_erc20_test = b.addRunArtifact(block_execution_erc20_test);
+    test_step.dependOn(&run_block_execution_erc20_test.step);
+    const block_execution_erc20_test_step = b.step("test-block-execution-erc20", "Run block execution ERC20 test");
+    block_execution_erc20_test_step.dependOn(&run_block_execution_erc20_test.step);
+    
+    // Add simple block execution test
+    const block_execution_simple_test = b.addTest(.{
+        .name = "block-execution-simple-test",
+        .root_source_file = b.path("test/evm/block_execution_simple.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    block_execution_simple_test.root_module.addImport("evm", evm_mod);
+    block_execution_simple_test.root_module.addImport("primitives", primitives_mod);
+    
+    const run_block_execution_simple_test = b.addRunArtifact(block_execution_simple_test);
+    test_step.dependOn(&run_block_execution_simple_test.step);
+    const block_execution_simple_test_step = b.step("test-block-execution-simple", "Run simple block execution test");
+    block_execution_simple_test_step.dependOn(&run_block_execution_simple_test.step);
 
     // TRACER REMOVED: Commenting out tracer tests until tracer is reimplemented
     // See: https://github.com/evmts/guillotine/issues/325
