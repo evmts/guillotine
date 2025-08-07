@@ -77,6 +77,11 @@ pub fn op_sstore(context: *ExecutionContext) ExecutionError.Error!void {
 }
 
 pub fn op_tload(context: *ExecutionContext) ExecutionError.Error!void {
+    // TODO: Add hardfork validation for EIP-1153 (Cancun)
+    // if (!context.flags.is_eip1153) {
+    //     return ExecutionError.Error.InvalidOpcode;
+    // }
+    
     // Gas is already handled by jump table constant_gas = 100
 
     std.debug.assert(context.stack.size() >= 1);
@@ -91,6 +96,11 @@ pub fn op_tload(context: *ExecutionContext) ExecutionError.Error!void {
 }
 
 pub fn op_tstore(context: *ExecutionContext) ExecutionError.Error!void {
+    // TODO: Add hardfork validation for EIP-1153 (Cancun)
+    // if (!context.flags.is_eip1153) {
+    //     return ExecutionError.Error.InvalidOpcode;
+    // }
+    
     if (context.flags.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
