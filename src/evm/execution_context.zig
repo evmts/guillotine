@@ -259,7 +259,7 @@ test "ExecutionContext - address access tracking" {
     try std.testing.expectEqual(@as(u64, 2600), cold_cost);
     
     // Test warm access (non-zero address)
-    const non_zero = primitives.Address.Address{ .bytes = [_]u8{0xFF} ++ [_]u8{0} ** 19 };
+    const non_zero = [_]u8{0xFF} ++ [_]u8{0} ** 19;
     const warm_cost = try ctx.access_address(non_zero);
     try std.testing.expectEqual(@as(u64, 100), warm_cost);
 }
