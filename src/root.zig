@@ -204,8 +204,6 @@ export fn guillotine_execute(
     _ = bytecode;
     _ = caller_address;
     _ = value;
-    _ = gas_limit;
-    _ = result_ptr;
 
     // TODO: Contract API has changed - temporarily disable execution until new API is implemented
     log(.warn, .guillotine_c, "Contract execution temporarily disabled due to API changes", .{});

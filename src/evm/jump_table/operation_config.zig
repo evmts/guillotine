@@ -1,5 +1,6 @@
 const std = @import("std");
 const execution = @import("../execution/package.zig");
+const adapter = @import("../execution/adapter.zig");
 const primitives = @import("primitives");
 const GasConstants = primitives.GasConstants;
 const Stack = @import("../stack/stack.zig");
@@ -87,8 +88,8 @@ pub const ALL_OPERATIONS = [_]OpSpec{
     .{ .name = "EXTCODECOPY_TANGERINE", .opcode = 0x3c, .execute = execution.environment.op_extcodecopy, .gas = 700, .min_stack = 4, .max_stack = Stack.CAPACITY, .variant = .TANGERINE_WHISTLE },
     .{ .name = "EXTCODECOPY_ISTANBUL", .opcode = 0x3c, .execute = execution.environment.op_extcodecopy, .gas = 700, .min_stack = 4, .max_stack = Stack.CAPACITY, .variant = .ISTANBUL },
     .{ .name = "EXTCODECOPY", .opcode = 0x3c, .execute = execution.environment.op_extcodecopy, .gas = 0, .min_stack = 4, .max_stack = Stack.CAPACITY, .variant = .BERLIN },
-    .{ .name = "RETURNDATASIZE", .opcode = 0x3d, .execute = execution.memory.op_returndatasize, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1, .variant = .BYZANTIUM },
-    .{ .name = "RETURNDATACOPY", .opcode = 0x3e, .execute = execution.memory.op_returndatacopy, .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY, .variant = .BYZANTIUM },
+    .{ .name = "RETURNDATASIZE", .opcode = 0x3d, .execute = adapter.op_returndatasize_adapter, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1, .variant = .BYZANTIUM },
+    .{ .name = "RETURNDATACOPY", .opcode = 0x3e, .execute = adapter.op_returndatacopy_adapter, .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY, .variant = .BYZANTIUM },
     .{ .name = "EXTCODEHASH", .opcode = 0x3f, .execute = execution.environment.op_extcodehash, .gas = 0, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .CONSTANTINOPLE },
 
     // 0x40s: Block Information
