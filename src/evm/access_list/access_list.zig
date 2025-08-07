@@ -58,6 +58,17 @@ pub fn deinit(self: *AccessList) void {
     self.storage_slots.deinit();
 }
 
+/// Transfer ownership of this AccessList to the caller
+/// After calling this, the original AccessList should not be used
+pub fn to_owned(self: AccessList) AccessList {
+    return AccessList{
+        .allocator = self.allocator,
+        .addresses = self.addresses,
+        .storage_slots = self.storage_slots, 
+        .context = self.context,
+    };
+}
+
 /// Clear all access lists for a new transaction
 pub fn clear(self: *AccessList) void {
     self.addresses.clearRetainingCapacity();

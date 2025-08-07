@@ -45,6 +45,15 @@ pub const SelfDestruct = struct {
         self.destructions.deinit();
     }
 
+    /// Transfer ownership of this SelfDestruct to the caller
+    /// After calling this, the original SelfDestruct should not be used
+    pub fn to_owned(self: SelfDestruct) SelfDestruct {
+        return SelfDestruct{
+            .destructions = self.destructions,
+            .allocator = self.allocator,
+        };
+    }
+
     /// Mark a contract for destruction
     /// contract_addr: Address of the contract calling SELFDESTRUCT
     /// recipient: Address that will receive the contract's remaining balance
