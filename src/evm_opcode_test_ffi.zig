@@ -15,7 +15,6 @@ const EvmWrapper = struct {
 
 const FrameWrapper = struct {
     frame: *Evm.Frame,
-    contract: *Evm.Contract,
 };
 
 // C-compatible U256 representation
@@ -47,7 +46,7 @@ export fn zigEvmCreate() ?*anyopaque {
     memory_db.* = Evm.MemoryDatabase.init(allocator);
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    // Updated API: create EVM directly via init
 
     const evm = allocator.create(Evm.Evm) catch {
         memory_db.deinit();
@@ -55,7 +54,7 @@ export fn zigEvmCreate() ?*anyopaque {
         return null;
     };
 
-    evm.* = builder.build() catch {
+    evm.* = Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null) catch {
         memory_db.deinit();
         allocator.destroy(memory_db);
         allocator.destroy(evm);
@@ -93,51 +92,38 @@ export fn zigFrameCreate(evm_ptr: ?*anyopaque) ?*anyopaque {
     if (evm_ptr) |ptr| {
         const evm_wrapper: *EvmWrapper = @ptrCast(@alignCast(ptr));
 
-        const caller: Address.Address = [_]u8{0x11} ** 20;
-        const contract_addr: Address.Address = [_]u8{0x33} ** 20;
-
-        const contract = allocator.create(Evm.Contract) catch return null;
-        contract.* = Evm.Contract.init(
-            caller,
-            contract_addr,
-            0,
-            1000,
-            &[_]u8{},
-            [_]u8{0} ** 32,
-            &[_]u8{},
-            false,
-        );
-
-        var builder = Evm.Frame.builder(allocator);
+        // New Frame API: minimal construction adapted to refactor
         const frame = allocator.create(Evm.Frame) catch {
-            contract.deinit(allocator, null);
-            allocator.destroy(contract);
             return null;
         };
-
-        frame.* = builder
-            .withVm(evm_wrapper.evm)
-            .withContract(contract)
-            .withGas(1000)
-            .withCaller(primitives.Address.ZERO_ADDRESS)
-            .build() catch {
-            contract.deinit(allocator, null);
-            allocator.destroy(contract);
-            allocator.destroy(frame);
-            return null;
-        };
+        frame.* = try Evm.Frame.init(
+            1000, // gas_remaining
+            false, // static_call
+            0, // depth
+            primitives.Address.ZERO_ADDRESS, // contract_address
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            undefined, // analysis (will be set by call/interpret when used)
+            &evm_wrapper.evm.access_list, // access list
+            undefined, // journal (placeholder)
+            undefined, // host (placeholder)
+            0, // snapshot_id
+            evm_wrapper.evm.state, // database interface
+            evm_wrapper.evm.chain_rules, // chain rules
+            &evm_wrapper.evm.self_destruct, // self_destruct
+            &[_]u8{}, // input
+            evm_wrapper.evm.arena_allocator(), // allocator
+            null, // next_frame
+        );
 
         const wrapper = allocator.create(FrameWrapper) catch {
             frame.deinit();
-            contract.deinit(allocator, null);
             allocator.destroy(frame);
-            allocator.destroy(contract);
             return null;
         };
 
         wrapper.* = FrameWrapper{
             .frame = frame,
-            .contract = contract,
         };
 
         return @ptrCast(wrapper);
@@ -149,9 +135,7 @@ export fn zigFrameDestroy(frame_ptr: ?*anyopaque) void {
     if (frame_ptr) |ptr| {
         const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
         wrapper.frame.deinit();
-        wrapper.contract.deinit(allocator, null);
         allocator.destroy(wrapper.frame);
-        allocator.destroy(wrapper.contract);
         allocator.destroy(wrapper);
     }
 }
@@ -182,7 +166,7 @@ export fn zigStackPop(frame_ptr: ?*anyopaque) CU256 {
 export fn zigStackSize(frame_ptr: ?*anyopaque) usize {
     if (frame_ptr) |ptr| {
         const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        return wrapper.frame.stack.size;
+        return wrapper.frame.stack.size();
     }
     return 0;
 }

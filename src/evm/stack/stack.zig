@@ -26,25 +26,25 @@ const CLEAR_ON_POP = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 /// - Hot data (pointers) placed first for cache efficiency
 ///
 /// ## SIZE OPTIMIZATION SAFETY MODEL
-/// 
+///
 /// This stack provides two operation variants:
 /// 1. **Safe operations** (`append()`, `pop()`) - Include bounds checking
 /// 2. **Unsafe operations** (`append_unsafe()`, `pop_unsafe()`) - No bounds checking
-/// 
+///
 /// The unsafe variants are used in opcode implementations after the jump table
 /// performs comprehensive validation via `validate_stack_requirements()`. This
 /// centralized validation approach:
-/// 
+///
 /// - Eliminates redundant checks in individual opcodes (smaller binary)
 /// - Maintains safety by validating ALL operations before execution
 /// - Enables maximum performance in the hot path
-/// 
+///
 /// **SAFETY GUARANTEE**: All unsafe operations assume preconditions are met:
 /// - `pop_unsafe()`: Stack must not be empty
-/// - `append_unsafe()`: Stack must have capacity  
+/// - `append_unsafe()`: Stack must have capacity
 /// - `dup_unsafe(n)`: Stack must have >= n items and capacity for +1
 /// - `swap_unsafe(n)`: Stack must have >= n+1 items
-/// 
+///
 /// These preconditions are enforced by jump table validation.
 ///
 /// Example:
@@ -97,17 +97,17 @@ comptime {
 
 /// Initialize a new stack with pointer setup
 pub fn init() Stack {
-    var stack = Stack{ 
+    var stack = Stack{
         .data = undefined,
         .current = undefined,
         .base = undefined,
         .limit = undefined,
     };
-    
+
     stack.base = @ptrCast(&stack.data[0]);
-    stack.current = stack.base;  // Empty stack: current == base
+    stack.current = stack.base; // Empty stack: current == base
     stack.limit = stack.base + CAPACITY;
-    
+
     return stack;
 }
 
@@ -115,7 +115,7 @@ pub fn init() Stack {
 pub fn clear(self: *Stack) void {
     // Reset current pointer to base (empty stack)
     self.current = self.base;
-    
+
     // In debug/safe modes, zero out all values for security
     if (comptime CLEAR_ON_POP) {
         @memset(std.mem.asBytes(&self.data), 0);
@@ -201,7 +201,7 @@ pub inline fn pop_unsafe(self: *Stack) u256 {
     self.current -= 1;
     const value = self.current[0];
     if (comptime CLEAR_ON_POP) {
-        self.current[0] = 0;  // Clear for security
+        self.current[0] = 0; // Clear for security
     }
     return value;
 }
@@ -232,7 +232,7 @@ pub inline fn dup_unsafe(self: *Stack, n: usize) void {
 
 /// Pop 2 values without pushing (unsafe version)
 pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
-    @branchHint(.likely); 
+    @branchHint(.likely);
     @setRuntimeSafety(false);
     self.current -= 2;
     const a = self.current[0];
@@ -311,13 +311,13 @@ pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const F
     _ = allocator;
     var stack = Stack.init();
     const testing = std.testing;
-    
+
     for (operations) |op| {
         switch (op) {
             .push => |value| {
                 const old_size = stack.size();
                 const result = stack.append(value);
-                
+
                 if (old_size < CAPACITY) {
                     try result;
                     try testing.expectEqual(old_size + 1, stack.size());
@@ -330,7 +330,7 @@ pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const F
             .pop => {
                 const old_size = stack.size();
                 const result = stack.pop();
-                
+
                 if (old_size > 0) {
                     _ = try result;
                     try testing.expectEqual(old_size - 1, stack.size());
@@ -353,7 +353,7 @@ pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const F
                 try testing.expectEqual(@as(usize, 0), stack.size());
             },
         }
-        
+
         try validate_stack_invariants(&stack);
     }
 }
@@ -367,7 +367,7 @@ const FuzzOperation = union(enum) {
 
 fn validate_stack_invariants(stack: *const Stack) !void {
     const testing = std.testing;
-    
+
     // Check pointer relationships
     try testing.expect(@intFromPtr(stack.current) >= @intFromPtr(stack.base));
     try testing.expect(@intFromPtr(stack.current) <= @intFromPtr(stack.limit));
@@ -385,19 +385,19 @@ test "fuzz_stack_basic_operations" {
         .clear,
         .{ .push = 42 },
     };
-    
+
     try fuzz_stack_operations(std.testing.allocator, &operations);
 }
 
 test "fuzz_stack_overflow_boundary" {
     var operations = std.ArrayList(FuzzOperation).init(std.testing.allocator);
     defer operations.deinit();
-    
+
     var i: usize = 0;
     while (i <= CAPACITY + 10) : (i += 1) {
         try operations.append(.{ .push = @as(u256, i) });
     }
-    
+
     try fuzz_stack_operations(std.testing.allocator, operations.items);
 }
 
@@ -410,30 +410,30 @@ test "fuzz_stack_underflow_boundary" {
         .{ .pop = {} },
         .{ .pop = {} },
     };
-    
+
     try fuzz_stack_operations(std.testing.allocator, &operations);
 }
 
 test "pointer_arithmetic_correctness" {
     var stack = Stack.init();
-    
+
     // Test initial state
     try std.testing.expectEqual(@as(usize, 0), stack.size());
     try std.testing.expect(stack.is_empty());
     try std.testing.expect(!stack.is_full());
-    
+
     // Test single push
     stack.append_unsafe(42);
     try std.testing.expectEqual(@as(usize, 1), stack.size());
     try std.testing.expect(!stack.is_empty());
     try std.testing.expectEqual(@as(u256, 42), stack.peek_unsafe().*);
-    
+
     // Test multiple pushes
     stack.append_unsafe(100);
     stack.append_unsafe(200);
     try std.testing.expectEqual(@as(usize, 3), stack.size());
     try std.testing.expectEqual(@as(u256, 200), stack.peek_unsafe().*);
-    
+
     // Test pop
     const popped = stack.pop_unsafe();
     try std.testing.expectEqual(@as(u256, 200), popped);
@@ -443,15 +443,15 @@ test "pointer_arithmetic_correctness" {
 
 test "stack_dup_operations" {
     var stack = Stack.init();
-    
+
     stack.append_unsafe(100);
     stack.append_unsafe(200);
     stack.append_unsafe(300);
-    
+
     stack.dup_unsafe(1);
     try std.testing.expectEqual(@as(usize, 4), stack.size());
     try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
-    
+
     stack.dup_unsafe(2);
     try std.testing.expectEqual(@as(usize, 5), stack.size());
     try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
@@ -459,34 +459,34 @@ test "stack_dup_operations" {
 
 test "stack_swap_operations" {
     var stack = Stack.init();
-    
+
     stack.append_unsafe(100);
     stack.append_unsafe(200);
     stack.append_unsafe(300);
-    
+
     // Before swap: [100, 200, 300] (300 on top)
     stack.swap_unsafe(1);
     // After SWAP1: [100, 300, 200] (200 on top)
-    
-    try std.testing.expectEqual(@as(u256, 200), (stack.current - 1)[0]);  // top
-    try std.testing.expectEqual(@as(u256, 300), (stack.current - 2)[0]);  // second
-    try std.testing.expectEqual(@as(u256, 100), (stack.current - 3)[0]);  // bottom
+
+    try std.testing.expectEqual(@as(u256, 200), (stack.current - 1)[0]); // top
+    try std.testing.expectEqual(@as(u256, 300), (stack.current - 2)[0]); // second
+    try std.testing.expectEqual(@as(u256, 100), (stack.current - 3)[0]); // bottom
 }
 
 test "stack_multi_pop_operations" {
     var stack = Stack.init();
-    
+
     stack.append_unsafe(100);
     stack.append_unsafe(200);
     stack.append_unsafe(300);
     stack.append_unsafe(400);
     stack.append_unsafe(500);
-    
+
     const result2 = stack.pop2_unsafe();
     try std.testing.expectEqual(@as(u256, 400), result2.a);
     try std.testing.expectEqual(@as(u256, 500), result2.b);
     try std.testing.expectEqual(@as(usize, 3), stack.size());
-    
+
     const result3 = stack.pop3_unsafe();
     try std.testing.expectEqual(@as(u256, 100), result3.a);
     try std.testing.expectEqual(@as(u256, 200), result3.b);
@@ -496,16 +496,16 @@ test "stack_multi_pop_operations" {
 
 test "performance_comparison_pointer_vs_indexing" {
     var stack = Stack.init();
-    
+
     // Fill stack for testing
     var i: usize = 0;
     while (i < 500) : (i += 1) {
         stack.append_unsafe(i);
     }
-    
+
     const Timer = std.time.Timer;
     var timer = try Timer.start();
-    
+
     // Test pointer arithmetic performance
     timer.reset();
     i = 0;
@@ -517,25 +517,25 @@ test "performance_comparison_pointer_vs_indexing" {
         }
     }
     const pointer_time = timer.read();
-    
+
     // Verify pointer approach completed
     try std.testing.expect(pointer_time > 0);
-    
+
     std.debug.print("Pointer-based stack operations: {} ns for 1M ops\n", .{pointer_time});
 }
 
 test "memory_layout_verification" {
     var stack = Stack.init();
-    
+
     // Verify pointer setup
     try std.testing.expectEqual(@intFromPtr(stack.base), @intFromPtr(&stack.data[0]));
     try std.testing.expectEqual(@intFromPtr(stack.current), @intFromPtr(stack.base));
     try std.testing.expectEqual(@intFromPtr(stack.limit), @intFromPtr(stack.base + CAPACITY));
-    
+
     // Verify data layout
     const data_ptr = @intFromPtr(&stack.data[0]);
     try std.testing.expectEqual(@as(usize, 0), data_ptr % @alignOf(u256));
-    
+
     // Test that pointers are at start of struct for cache efficiency
     const stack_ptr = @intFromPtr(&stack);
     const current_ptr = @intFromPtr(&stack.current);

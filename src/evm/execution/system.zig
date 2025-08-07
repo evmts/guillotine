@@ -213,7 +213,6 @@ fn ensure_return_memory(frame: *ExecutionContext, ret_offset: u256, ret_size: u2
 /// Returns the target address
 fn handle_address_access(vm: *Vm, frame: *ExecutionContext, to: u256) ExecutionError.Error!primitives.Address.Address {
     const to_address = from_u256(to);
-    _ = to_address;
 
     // EIP-2929: Check if address is cold and consume appropriate gas
     const access_cost = try vm.access_list.access_address(to_address);
@@ -514,7 +513,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    
+
     // Pop parameters from stack
     const gas = try frame.stack.pop();
     const to = try frame.stack.pop();
@@ -523,30 +522,30 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     const args_size = try frame.stack.pop();
     const ret_offset = try frame.stack.pop();
     const ret_size = try frame.stack.pop();
-    
+
     // Validate static context for value transfers
     if (frame.is_static() and value != 0) {
         return ExecutionError.Error.WriteProtection;
     }
-    
+
     // Get call frame stack (this would need to be passed somehow)
     // For now this is a placeholder - we need to refactor to pass CallFrameStack
     // const call_stack = frame.get_call_stack();
-    
+
     // Convert to address
     const to_address = from_u256(to);
-    
+
     // Get call arguments from memory
     const args = try get_call_args(frame, args_offset, args_size);
     _ = args;
-    
+
     // Ensure return memory is available
     try ensure_return_memory(frame, ret_offset, ret_size);
-    
+
     // Calculate gas limit
     const gas_limit = calculate_call_gas_amount(frame, gas, value);
     _ = gas_limit;
-    
+
     // For now, push 0 (failure) since we don't have the full implementation
     // In the full implementation, we would:
     // 1. Create new frame using init_call_frame
@@ -569,7 +568,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    
+
     // Pop parameters from stack (DELEGATECALL has no value parameter)
     const gas = try frame.stack.pop();
     const to = try frame.stack.pop();
@@ -577,22 +576,21 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const args_size = try frame.stack.pop();
     const ret_offset = try frame.stack.pop();
     const ret_size = try frame.stack.pop();
-    
+
     // Convert to address
     const to_address = from_u256(to);
-    _ = to_address;
-    
+
     // Get call arguments from memory
     const args = try get_call_args(frame, args_offset, args_size);
     _ = args;
-    
+
     // Ensure return memory is available
     try ensure_return_memory(frame, ret_offset, ret_size);
-    
+
     // Calculate gas limit (DELEGATECALL uses no value)
     const gas_limit = calculate_call_gas_amount(frame, gas, 0);
     _ = gas_limit;
-    
+
     // For now, push 0 (failure) since we don't have the full implementation
     // In the full implementation, we would:
     // 1. Create DELEGATECALL frame that preserves caller and value
@@ -603,7 +601,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    
+
     // Pop parameters from stack (STATICCALL has no value parameter)
     const gas = try frame.stack.pop();
     const to = try frame.stack.pop();
@@ -611,22 +609,21 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const args_size = try frame.stack.pop();
     const ret_offset = try frame.stack.pop();
     const ret_size = try frame.stack.pop();
-    
+
     // Convert to address
     const to_address = from_u256(to);
-    _ = to_address;
-    
+
     // Get call arguments from memory
     const args = try get_call_args(frame, args_offset, args_size);
     _ = args;
-    
+
     // Ensure return memory is available
     try ensure_return_memory(frame, ret_offset, ret_size);
-    
+
     // Calculate gas limit (STATICCALL uses no value)
     const gas_limit = calculate_call_gas_amount(frame, gas, 0);
     _ = gas_limit;
-    
+
     // For now, push 0 (failure) since we don't have the full implementation
     // In the full implementation, we would:
     // 1. Create STATICCALL frame with is_static = true
@@ -653,32 +650,28 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// Storage: Contract marked for destruction
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    
+
     // Check static call restriction
     if (frame.is_static()) {
         return ExecutionError.Error.WriteProtection;
     }
-    
+
     // Pop recipient address from stack
     const recipient = try frame.stack.pop();
     const recipient_address = from_u256(recipient);
-    
+
     // Record the self-destruct operation in the journal
-    try frame.journal.record_selfdestruct(
-        frame.snapshot_id,
-        frame.contract_address,
-        recipient_address
-    );
-    
+    try frame.journal.record_selfdestruct(frame.snapshot_id, frame.contract_address, recipient_address);
+
     // Mark for destruction using the existing self_destruct system if available
     if (frame.self_destruct) |sd| {
         try sd.mark_for_destruction(frame.contract_address, recipient_address);
     }
-    
+
     // Gas consumption would be handled here based on hardfork rules
     // For now, we consume a basic amount
     try frame.consume_gas(GasConstants.SelfDestructCost);
-    
+
     // SELFDESTRUCT terminates execution immediately - we would signal this
     // to the execution loop, but for now we'll just return
 }
@@ -767,283 +760,283 @@ fn validate_system_result(frame: *const ExecutionContext, op: FuzzSystemOperatio
     // FIXME: Orphaned closing brace commented out
     // }
 
-// TODO: Test disabled until ExecutionContext integration is complete
-// test "fuzz_system_basic_operations" {
-//     const allocator = std.testing.allocator;
-//
-//     const simple_init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf3 }; // PUSH1 0 PUSH1 0 RETURN
-//
-//     const operations = [_]FuzzSystemOperation{
-//         // GAS opcode
-//         .{
-//             .op_type = .gas,
-//             .gas_limit = 100000,
-//         },
-//         // Basic CREATE
-//         .{
-//             .op_type = .create,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = simple_init_code.len,
-//             .init_code = &simple_init_code,
-//         },
-//         // Basic CREATE2
-//         .{
-//             .op_type = .create2,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = simple_init_code.len,
-//             .salt = 0x1234,
-//             .init_code = &simple_init_code,
-//         },
-//         // Basic CALL
-//         .{
-//             .op_type = .call,
-//             .gas = 50000,
-//             .to = 0x9999,
-//             .value = 0,
-//             .args_offset = 0,
-//             .args_size = 0,
-//             .ret_offset = 0,
-//             .ret_size = 32,
-//             .target_exists = true,
-//             .target_has_code = true,
-//         },
-//         // Basic DELEGATECALL
-//         .{
-//             .op_type = .delegatecall,
-//             .gas = 50000,
-//             .to = 0x9999,
-//             .args_offset = 0,
-//             .args_size = 0,
-//             .ret_offset = 0,
-//             .ret_size = 32,
-//             .target_exists = true,
-//             .target_has_code = true,
-//         },
-//         // Basic STATICCALL
-//         .{
-//             .op_type = .staticcall,
-//             .gas = 50000,
-//             .to = 0x9999,
-//             .args_offset = 0,
-//             .args_size = 0,
-//             .ret_offset = 0,
-//             .ret_size = 32,
-//             .target_exists = true,
-//             .target_has_code = true,
-//         },
-//     };
-//
-//     try fuzz_system_operations(allocator, &operations);
-// }
+    // TODO: Test disabled until ExecutionContext integration is complete
+    // test "fuzz_system_basic_operations" {
+    //     const allocator = std.testing.allocator;
+    //
+    //     const simple_init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xf3 }; // PUSH1 0 PUSH1 0 RETURN
+    //
+    //     const operations = [_]FuzzSystemOperation{
+    //         // GAS opcode
+    //         .{
+    //             .op_type = .gas,
+    //             .gas_limit = 100000,
+    //         },
+    //         // Basic CREATE
+    //         .{
+    //             .op_type = .create,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = simple_init_code.len,
+    //             .init_code = &simple_init_code,
+    //         },
+    //         // Basic CREATE2
+    //         .{
+    //             .op_type = .create2,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = simple_init_code.len,
+    //             .salt = 0x1234,
+    //             .init_code = &simple_init_code,
+    //         },
+    //         // Basic CALL
+    //         .{
+    //             .op_type = .call,
+    //             .gas = 50000,
+    //             .to = 0x9999,
+    //             .value = 0,
+    //             .args_offset = 0,
+    //             .args_size = 0,
+    //             .ret_offset = 0,
+    //             .ret_size = 32,
+    //             .target_exists = true,
+    //             .target_has_code = true,
+    //         },
+    //         // Basic DELEGATECALL
+    //         .{
+    //             .op_type = .delegatecall,
+    //             .gas = 50000,
+    //             .to = 0x9999,
+    //             .args_offset = 0,
+    //             .args_size = 0,
+    //             .ret_offset = 0,
+    //             .ret_size = 32,
+    //             .target_exists = true,
+    //             .target_has_code = true,
+    //         },
+    //         // Basic STATICCALL
+    //         .{
+    //             .op_type = .staticcall,
+    //             .gas = 50000,
+    //             .to = 0x9999,
+    //             .args_offset = 0,
+    //             .args_size = 0,
+    //             .ret_offset = 0,
+    //             .ret_size = 32,
+    //             .target_exists = true,
+    //             .target_has_code = true,
+    //         },
+    //     };
+    //
+    //     try fuzz_system_operations(allocator, &operations);
+    // }
 
-// TODO: Test disabled until ExecutionContext integration is complete  
-// test "fuzz_system_static_context" {
-//     const allocator = std.testing.allocator;
-//
-//     const operations = [_]FuzzSystemOperation{
-//         // CREATE in static context (should fail)
-//         .{
-//             .op_type = .create,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = 5,
-//             .is_static = true,
-//             .expected_error = ExecutionError.Error.WriteProtection,
-//         },
-//         // CREATE2 in static context (should fail)
-//         .{
-//             .op_type = .create2,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = 5,
-//             .salt = 0,
-//             .is_static = true,
-//             .expected_error = ExecutionError.Error.WriteProtection,
-//         },
-//         // CALL with value in static context (should fail)
-//         .{
-//             .op_type = .call,
-//             .gas = 50000,
-//             .to = 0x9999,
-//             .value = 100,
-//             .is_static = true,
-//             .expected_error = ExecutionError.Error.WriteProtection,
-//         },
-//         // SELFDESTRUCT in static context (should fail)
-//         .{
-//             .op_type = .selfdestruct,
-//             .to = 0x9999,
-//             .is_static = true,
-//             .expected_error = ExecutionError.Error.WriteProtection,
-//         },
-//     };
-//
-//     try fuzz_system_operations(allocator, &operations);
-// }
+    // TODO: Test disabled until ExecutionContext integration is complete
+    // test "fuzz_system_static_context" {
+    //     const allocator = std.testing.allocator;
+    //
+    //     const operations = [_]FuzzSystemOperation{
+    //         // CREATE in static context (should fail)
+    //         .{
+    //             .op_type = .create,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = 5,
+    //             .is_static = true,
+    //             .expected_error = ExecutionError.Error.WriteProtection,
+    //         },
+    //         // CREATE2 in static context (should fail)
+    //         .{
+    //             .op_type = .create2,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = 5,
+    //             .salt = 0,
+    //             .is_static = true,
+    //             .expected_error = ExecutionError.Error.WriteProtection,
+    //         },
+    //         // CALL with value in static context (should fail)
+    //         .{
+    //             .op_type = .call,
+    //             .gas = 50000,
+    //             .to = 0x9999,
+    //             .value = 100,
+    //             .is_static = true,
+    //             .expected_error = ExecutionError.Error.WriteProtection,
+    //         },
+    //         // SELFDESTRUCT in static context (should fail)
+    //         .{
+    //             .op_type = .selfdestruct,
+    //             .to = 0x9999,
+    //             .is_static = true,
+    //             .expected_error = ExecutionError.Error.WriteProtection,
+    //         },
+    //     };
+    //
+    //     try fuzz_system_operations(allocator, &operations);
+    // }
 
-// TODO: Test disabled until ExecutionContext integration is complete
-// test "fuzz_system_depth_limit" {
-//     const allocator = std.testing.allocator;
-//
-//     const operations = [_]FuzzSystemOperation{
-//         // CREATE at max depth
-//         .{
-//             .op_type = .create,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = 5,
-//             .depth = 1024,
-//             .expect_success = false,
-//         },
-//         // CALL at max depth
-//         .{
-//             .op_type = .call,
-//             .gas = 50000,
-//             .to = 0x9999,
-//             .value = 0,
-//             .depth = 1024,
-//             .expect_success = false,
-//         },
-//         // DELEGATECALL at max depth
-//         .{
-//             .op_type = .delegatecall,
-//             .gas = 50000,
-//             .to = 0x9999,
-//             .depth = 1024,
-//             .expect_success = false,
-//         },
-//     };
-//
-//     try fuzz_system_operations(allocator, &operations);
-// }
+    // TODO: Test disabled until ExecutionContext integration is complete
+    // test "fuzz_system_depth_limit" {
+    //     const allocator = std.testing.allocator;
+    //
+    //     const operations = [_]FuzzSystemOperation{
+    //         // CREATE at max depth
+    //         .{
+    //             .op_type = .create,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = 5,
+    //             .depth = 1024,
+    //             .expect_success = false,
+    //         },
+    //         // CALL at max depth
+    //         .{
+    //             .op_type = .call,
+    //             .gas = 50000,
+    //             .to = 0x9999,
+    //             .value = 0,
+    //             .depth = 1024,
+    //             .expect_success = false,
+    //         },
+    //         // DELEGATECALL at max depth
+    //         .{
+    //             .op_type = .delegatecall,
+    //             .gas = 50000,
+    //             .to = 0x9999,
+    //             .depth = 1024,
+    //             .expect_success = false,
+    //         },
+    //     };
+    //
+    //     try fuzz_system_operations(allocator, &operations);
+    // }
 
-// TODO: Test disabled until ExecutionContext integration is complete
-// test "fuzz_system_gas_calculations" {
-//     const allocator = std.testing.allocator;
-//
-//     const large_init_code = [_]u8{0x00} ** 1000; // Large init code for gas testing
-//
-//     const operations = [_]FuzzSystemOperation{
-//         // CREATE with insufficient gas
-//         .{
-//             .op_type = .create,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = large_init_code.len,
-//             .init_code = &large_init_code,
-//             .gas_limit = 1000, // Not enough for large init code
-//             .expected_error = ExecutionError.Error.OutOfGas,
-//         },
-//         // CALL with low gas limit
-//         .{
-//             .op_type = .call,
-//             .gas = 100,
-//             .to = 0x9999,
-//             .value = 0,
-//             .gas_limit = 5000,
-//             .target_exists = true,
-//             .expect_success = false,
-//         },
-//     };
-//
-//     try fuzz_system_operations(allocator, &operations);
-// }
+    // TODO: Test disabled until ExecutionContext integration is complete
+    // test "fuzz_system_gas_calculations" {
+    //     const allocator = std.testing.allocator;
+    //
+    //     const large_init_code = [_]u8{0x00} ** 1000; // Large init code for gas testing
+    //
+    //     const operations = [_]FuzzSystemOperation{
+    //         // CREATE with insufficient gas
+    //         .{
+    //             .op_type = .create,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = large_init_code.len,
+    //             .init_code = &large_init_code,
+    //             .gas_limit = 1000, // Not enough for large init code
+    //             .expected_error = ExecutionError.Error.OutOfGas,
+    //         },
+    //         // CALL with low gas limit
+    //         .{
+    //             .op_type = .call,
+    //             .gas = 100,
+    //             .to = 0x9999,
+    //             .value = 0,
+    //             .gas_limit = 5000,
+    //             .target_exists = true,
+    //             .expect_success = false,
+    //         },
+    //     };
+    //
+    //     try fuzz_system_operations(allocator, &operations);
+    // }
 
-// TODO: Test disabled until ExecutionContext integration is complete
-// test "fuzz_system_edge_cases" {
-//     const allocator = std.testing.allocator;
-//
-//     const operations = [_]FuzzSystemOperation{
-//         // CREATE with zero size init code
-//         .{
-//             .op_type = .create,
-//             .value = 0,
-//             .init_offset = 0,
-//             .init_size = 0,
-//         },
-//         // CALL to non-existent account
-//         .{
-//             .op_type = .call,
-//             .gas = 50000,
-//             .to = 0xdeadbeef,
-//             .value = 0,
-//             .target_exists = false,
-//             .expect_success = false,
-//         },
-//         // CALL with value to new account
-//         .{
-//             .op_type = .call,
-//             .gas = 50000,
-//             .to = 0xbadbeef,
-//             .value = 1000,
-//             .target_exists = false,
-//             .expect_success = false, // Will fail because we're not handling value transfers in mock
-//         },
-//         // CALLCODE to self
-//         .{
-//             .op_type = .callcode,
-//             .gas = 50000,
-//             .to = 0x1234, // Same as contract address
-//             .value = 0,
-//         },
-//     };
-//
-//     try fuzz_system_operations(allocator, &operations);
-// }
+    // TODO: Test disabled until ExecutionContext integration is complete
+    // test "fuzz_system_edge_cases" {
+    //     const allocator = std.testing.allocator;
+    //
+    //     const operations = [_]FuzzSystemOperation{
+    //         // CREATE with zero size init code
+    //         .{
+    //             .op_type = .create,
+    //             .value = 0,
+    //             .init_offset = 0,
+    //             .init_size = 0,
+    //         },
+    //         // CALL to non-existent account
+    //         .{
+    //             .op_type = .call,
+    //             .gas = 50000,
+    //             .to = 0xdeadbeef,
+    //             .value = 0,
+    //             .target_exists = false,
+    //             .expect_success = false,
+    //         },
+    //         // CALL with value to new account
+    //         .{
+    //             .op_type = .call,
+    //             .gas = 50000,
+    //             .to = 0xbadbeef,
+    //             .value = 1000,
+    //             .target_exists = false,
+    //             .expect_success = false, // Will fail because we're not handling value transfers in mock
+    //         },
+    //         // CALLCODE to self
+    //         .{
+    //             .op_type = .callcode,
+    //             .gas = 50000,
+    //             .to = 0x1234, // Same as contract address
+    //             .value = 0,
+    //         },
+    //     };
+    //
+    //     try fuzz_system_operations(allocator, &operations);
+    // }
 
-// TODO: Test disabled until ExecutionContext integration is complete
-// test "fuzz_system_random_operations" {
-//     const allocator = std.testing.allocator;
-//     var prng = std.Random.DefaultPrng.init(42);
-//     const random = prng.random();
-//
-//     var operations = ArrayList(FuzzSystemOperation).init(allocator);
-//     defer operations.deinit();
-//
-//     // Generate random init code
-//     var random_init_code: [64]u8 = undefined;
-//     random.bytes(&random_init_code);
-//
-//     var i: usize = 0;
-//     while (i < 20) : (i += 1) {
-//         const op_type_idx = random.intRangeAtMost(usize, 0, 7);
-//         const op_types = [_]SystemOpType{ .gas, .create, .create2, .call, .callcode, .delegatecall, .staticcall, .selfdestruct };
-//         const op_type = op_types[op_type_idx];
-//
-//         const gas = random.intRangeAtMost(u256, 1000, 100000);
-//         const to = random.int(u256);
-//         const value = random.intRangeAtMost(u256, 0, 1000);
-//         const salt = random.int(u256);
-//         const depth = random.intRangeAtMost(u32, 0, 1025);
-//         const is_static = random.boolean();
-//         const gas_limit = random.intRangeAtMost(u64, 10000, 1000000);
-//
-//         try operations.append(.{
-//             .op_type = op_type,
-//             .gas = gas,
-//             .to = to,
-//             .value = value,
-//             .args_offset = 0,
-//             .args_size = 0,
-//             .ret_offset = 0,
-//             .ret_size = 32,
-//             .salt = salt,
-//             .init_offset = 0,
-//             .init_size = if (op_type == .create or op_type == .create2) 32 else 0,
-//             .gas_limit = gas_limit,
-//             .depth = depth,
-//             .is_static = is_static,
-//             .init_code = &random_init_code,
-//         });
-//     }
-//
-//     try fuzz_system_operations(allocator, operations.items);
-// }
+    // TODO: Test disabled until ExecutionContext integration is complete
+    // test "fuzz_system_random_operations" {
+    //     const allocator = std.testing.allocator;
+    //     var prng = std.Random.DefaultPrng.init(42);
+    //     const random = prng.random();
+    //
+    //     var operations = ArrayList(FuzzSystemOperation).init(allocator);
+    //     defer operations.deinit();
+    //
+    //     // Generate random init code
+    //     var random_init_code: [64]u8 = undefined;
+    //     random.bytes(&random_init_code);
+    //
+    //     var i: usize = 0;
+    //     while (i < 20) : (i += 1) {
+    //         const op_type_idx = random.intRangeAtMost(usize, 0, 7);
+    //         const op_types = [_]SystemOpType{ .gas, .create, .create2, .call, .callcode, .delegatecall, .staticcall, .selfdestruct };
+    //         const op_type = op_types[op_type_idx];
+    //
+    //         const gas = random.intRangeAtMost(u256, 1000, 100000);
+    //         const to = random.int(u256);
+    //         const value = random.intRangeAtMost(u256, 0, 1000);
+    //         const salt = random.int(u256);
+    //         const depth = random.intRangeAtMost(u32, 0, 1025);
+    //         const is_static = random.boolean();
+    //         const gas_limit = random.intRangeAtMost(u64, 10000, 1000000);
+    //
+    //         try operations.append(.{
+    //             .op_type = op_type,
+    //             .gas = gas,
+    //             .to = to,
+    //             .value = value,
+    //             .args_offset = 0,
+    //             .args_size = 0,
+    //             .ret_offset = 0,
+    //             .ret_size = 32,
+    //             .salt = salt,
+    //             .init_offset = 0,
+    //             .init_size = if (op_type == .create or op_type == .create2) 32 else 0,
+    //             .gas_limit = gas_limit,
+    //             .depth = depth,
+    //             .is_static = is_static,
+    //             .init_code = &random_init_code,
+    //         });
+    //     }
+    //
+    //     try fuzz_system_operations(allocator, operations.items);
+    // }
 
-// FIXME: Comment out test functions that use Frame/Contract until ExecutionContext migration is complete
-// test "calculate_call_gas" {
+    // FIXME: Comment out test functions that use Frame/Contract until ExecutionContext migration is complete
+    // test "calculate_call_gas" {
     // Test basic CALL gas calculation
     {
         const gas = calculate_call_gas(
