@@ -49,7 +49,7 @@ pub fn make_log(comptime num_topics: u8) fn (*ExecutionContext) ExecutionError.E
             if (size_usize == 0) {
                 @branchHint(.unlikely);
                 // Empty data - emit empty log without memory operations
-                try context.emit_log(topics[0..num_topics], &[_]u8{});
+                context.host.emit_log(context.contract_address, topics[0..num_topics], &[_]u8{});
                 return;
             }
 
@@ -82,7 +82,7 @@ pub fn make_log(comptime num_topics: u8) fn (*ExecutionContext) ExecutionError.E
             const data = try context.memory.get_slice(offset_usize, size_usize);
 
             // Emit log with data
-            try context.emit_log(topics[0..num_topics], data);
+            context.host.emit_log(context.contract_address, topics[0..num_topics], data);
         }
     }.log;
 }
@@ -136,7 +136,7 @@ fn log_impl(num_topics: u8, context: *ExecutionContext) ExecutionError.Error!voi
     if (size_usize == 0) {
         @branchHint(.unlikely);
         // Empty data - emit empty log without memory operations
-        try context.emit_log(topics[0..num_topics], &[_]u8{});
+        context.host.emit_log(context.contract_address, topics[0..num_topics], &[_]u8{});
         return;
     }
 
@@ -157,7 +157,7 @@ fn log_impl(num_topics: u8, context: *ExecutionContext) ExecutionError.Error!voi
     const data = try context.memory.get_slice(offset_usize, size_usize);
 
     // Emit the log
-    try context.emit_log(topics[0..num_topics], data);
+    context.host.emit_log(context.contract_address, topics[0..num_topics], data);
 }
 
 // LOG operations are now generated directly in jump_table.zig using make_log()
