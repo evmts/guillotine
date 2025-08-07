@@ -14,8 +14,8 @@ const CodeAnalysisExt = @This();
 base: CodeAnalysis,
 
 /// Translated instruction stream for fast execution
-/// Fixed-size array to avoid heap allocation
-instructions: [MAX_INSTRUCTIONS]Instruction,
+/// Heap-allocated with maximum size upfront to avoid reallocation
+instructions: []Instruction,
 
 /// Number of valid instructions in the array
 instruction_count: usize,
@@ -23,16 +23,23 @@ instruction_count: usize,
 /// Get a null-terminated pointer to the instruction stream
 /// The translator must have already set the null pointer after the last instruction
 pub fn get_instructions(self: *const CodeAnalysisExt) [*:null]const Instruction {
-    return @ptrCast(&self.instructions);
+    return @ptrCast(self.instructions.ptr);
 }
 
-/// Initialize with empty instruction stream
-pub fn init(base: CodeAnalysis) CodeAnalysisExt {
+/// Initialize with heap-allocated instruction stream
+/// Allocates maximum size upfront to avoid reallocation
+pub fn init(allocator: std.mem.Allocator, base: CodeAnalysis) !CodeAnalysisExt {
+    const instructions = try allocator.alloc(Instruction, MAX_INSTRUCTIONS);
     return CodeAnalysisExt{
         .base = base,
-        .instructions = undefined,
+        .instructions = instructions,
         .instruction_count = 0,
     };
+}
+
+/// Clean up allocated memory
+pub fn deinit(self: *CodeAnalysisExt, allocator: std.mem.Allocator) void {
+    allocator.free(self.instructions);
 }
 
 /// Add an instruction to the stream
@@ -48,15 +55,10 @@ pub fn add_instruction(self: *CodeAnalysisExt, inst: Instruction) !void {
 /// Finalize the instruction stream by setting null terminator
 pub fn finalize(self: *CodeAnalysisExt) void {
     // Set null pointer after last instruction
-    const array_ptr = @as([*]Instruction, &self.instructions);
+    const array_ptr = self.instructions.ptr;
     @as([*:null]Instruction, @ptrCast(array_ptr + self.instruction_count)).* = null;
 }
 
-/// Clean up all resources
-pub fn deinit(self: *CodeAnalysisExt, allocator: std.mem.Allocator) void {
-    self.base.deinit(allocator);
-    self.* = undefined;
-}
 
 // ===== TESTS =====
 
@@ -80,12 +82,13 @@ test "CodeAnalysisExt initialization" {
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
-    defer base.deinit(allocator);
     
-    const ext = CodeAnalysisExt.init(base);
+    var ext = try CodeAnalysisExt.init(allocator, base);
+    defer ext.deinit(allocator);
+    
     try std.testing.expectEqual(@as(usize, 0), ext.instruction_count);
+    try std.testing.expectEqual(@as(usize, MAX_INSTRUCTIONS), ext.instructions.len);
 }
 
 test "CodeAnalysisExt add and get instructions" {
@@ -109,11 +112,10 @@ test "CodeAnalysisExt add and get instructions" {
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
-    defer base.deinit(allocator);
     
-    var ext = CodeAnalysisExt.init(base);
+    var ext = try CodeAnalysisExt.init(allocator, base);
+    defer ext.deinit(allocator);
     
     // Create dummy opcode function
     const dummy_fn = struct {
@@ -168,11 +170,10 @@ test "CodeAnalysisExt instruction limit" {
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
-    defer base.deinit(allocator);
     
-    var ext = CodeAnalysisExt.init(base);
+    var ext = try CodeAnalysisExt.init(allocator, base);
+    defer ext.deinit(allocator);
     
     // Set instruction count to max to test limit
     ext.instruction_count = MAX_INSTRUCTIONS;
@@ -216,11 +217,10 @@ test "CodeAnalysisExt finalize sets null terminator" {
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
-    defer base.deinit(allocator);
     
-    var ext = CodeAnalysisExt.init(base);
+    var ext = try CodeAnalysisExt.init(allocator, base);
+    defer ext.deinit(allocator);
     
     // Create dummy opcode function
     const dummy_fn = struct {

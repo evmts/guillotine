@@ -19,7 +19,6 @@ pub const BlockMetadataSoA = @import("block_metadata_soa.zig");
 /// ## Fields
 /// - `code_segments`: Bit vector marking which bytes are executable code vs data
 /// - `jumpdest_bitmap`: Bitmap of valid JUMPDEST positions for O(1) validation
-/// - `block_gas_costs`: Optional pre-computed gas costs for basic blocks
 /// - `max_stack_depth`: Maximum stack depth required by the contract
 /// - `has_dynamic_jumps`: Whether the code contains JUMP/JUMPI with dynamic targets
 /// - `has_static_jumps`: Whether the code contains JUMP/JUMPI with static targets
@@ -54,13 +53,6 @@ code_segments: StaticBitSet(limits.MAX_CONTRACT_SIZE),
 ///
 /// This enables O(1) jump destination validation instead of O(log n) binary search.
 jumpdest_bitmap: StaticBitSet(limits.MAX_CONTRACT_SIZE),
-
-/// Optional pre-computed gas costs for each basic block.
-///
-/// When present, enables advanced gas optimization by pre-calculating
-/// the gas cost of straight-line code sequences between jumps.
-/// This is an optional optimization that may not be computed for all contracts.
-block_gas_costs: ?[]const u32,
 
 /// Maximum stack depth required by any execution path in the contract.
 ///
@@ -127,20 +119,7 @@ pc_to_block: [limits.MAX_CONTRACT_SIZE]u16,
 /// contracts have far fewer than 65535 blocks. Most contracts have < 1000 blocks.
 block_count: u16,
 
-/// Clean up any remaining allocated memory.
-/// With StaticBitSet and fixed arrays, only block_gas_costs needs cleanup.
-pub fn deinit(self: *CodeAnalysis, allocator: std.mem.Allocator) void {
-    if (self.block_gas_costs) |costs| {
-        allocator.free(costs);
-    }
-    // StaticBitSet and fixed arrays don't need deallocation
-    self.* = undefined;
-}
-
-
 test "CodeAnalysis with block data initializes and deinits correctly" {
-    const allocator = std.testing.allocator;
-
     var analysis = CodeAnalysis{
         .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
         .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
@@ -154,10 +133,8 @@ test "CodeAnalysis with block data initializes and deinits correctly" {
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
-    defer analysis.deinit(allocator);
-    
+
     // Initialize some test data
     analysis.block_metadata_soa.count = 10;
     @memset(&analysis.pc_to_block, 0);
@@ -173,7 +150,6 @@ test "CodeAnalysis with block data initializes and deinits correctly" {
 }
 
 test "CodeAnalysis deinit handles partially initialized state" {
-    const allocator = std.testing.allocator;
 
     // Test with empty block data
     var analysis = CodeAnalysis{
@@ -189,15 +165,13 @@ test "CodeAnalysis deinit handles partially initialized state" {
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
 
     // Should not crash on deinit
-    analysis.deinit(allocator);
+    analysis.deinit();
 }
 
 test "Block analysis correctly identifies basic blocks" {
-    const allocator = std.testing.allocator;
 
     // Test bytecode with multiple basic blocks:
     // Block 0: PUSH1 0x10 PUSH1 0x20 ADD
@@ -214,8 +188,8 @@ test "Block analysis correctly identifies basic blocks" {
         0x00, // STOP
     };
 
-    var analysis = try analyze_bytecode_blocks(allocator, code);
-    defer analysis.deinit(allocator);
+    var analysis: CodeAnalysis = undefined;
+    try analyze_bytecode_blocks(&analysis, code);
 
     // Verify block count
     try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
@@ -265,7 +239,6 @@ test "Block analysis correctly identifies basic blocks" {
 }
 
 test "Block analysis handles jumps correctly" {
-    const allocator = std.testing.allocator;
 
     // Test bytecode with conditional and unconditional jumps:
     // PUSH1 0x08 PUSH1 0x01 EQ PUSH1 0x0a JUMPI STOP JUMPDEST PUSH1 0x42 STOP
@@ -281,8 +254,8 @@ test "Block analysis handles jumps correctly" {
         0x00, // STOP
     };
 
-    var analysis = try analyze_bytecode_blocks(allocator, code);
-    defer analysis.deinit(allocator);
+    var analysis: CodeAnalysis = undefined;
+    try analyze_bytecode_blocks(&analysis, code);
 
     // Should have 3 blocks:
     // Block 0: 0-8 (up to JUMPI)
@@ -296,7 +269,6 @@ test "Block analysis handles jumps correctly" {
 }
 
 test "Block analysis calculates gas costs correctly" {
-    const allocator = std.testing.allocator;
 
     // Test with various opcodes to verify gas calculation
     const code = &[_]u8{
@@ -311,8 +283,8 @@ test "Block analysis calculates gas costs correctly" {
         0x00, // STOP (0 gas)
     };
 
-    var analysis = try analyze_bytecode_blocks(allocator, code);
-    defer analysis.deinit(allocator);
+    var analysis: CodeAnalysis = undefined;
+    try analyze_bytecode_blocks(&analysis, code);
 
     try std.testing.expectEqual(@as(u16, 2), analysis.block_count);
 
@@ -324,7 +296,6 @@ test "Block analysis calculates gas costs correctly" {
 }
 
 test "Block analysis tracks stack effects" {
-    const allocator = std.testing.allocator;
 
     // Test stack tracking across blocks
     const code = &[_]u8{
@@ -339,8 +310,8 @@ test "Block analysis tracks stack effects" {
         0x00, // STOP
     };
 
-    var analysis = try analyze_bytecode_blocks(allocator, code);
-    defer analysis.deinit(allocator);
+    var analysis: CodeAnalysis = undefined;
+    try analyze_bytecode_blocks(&analysis, code);
 
     try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
 
@@ -361,11 +332,11 @@ test "Block analysis tracks stack effects" {
 fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
     const opcode = @import("../opcodes/opcode.zig");
     var bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initFull();
-    
+
     var i: usize = 0;
     while (i < code.len and i < limits.MAX_CONTRACT_SIZE) {
         const op = code[i];
-        
+
         // If the opcode is a PUSH, mark pushed bytes as data (not code)
         if (opcode.is_push(op)) {
             const push_bytes = opcode.get_push_size(op);
@@ -378,7 +349,7 @@ fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
             i += 1;
         }
     }
-    
+
     return bitmap;
 }
 
@@ -392,35 +363,43 @@ fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
 /// - Gas costs for the entire block
 /// - Stack requirements and effects
 /// - PC to block mapping for fast lookup
-/// 
-/// Returns CodeAnalysis by value - no allocation required (except for optional block_gas_costs).
-pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !CodeAnalysis {
+///
+/// Fills a pre-allocated CodeAnalysis struct - no allocation required.
+/// The caller must provide a pointer to an uninitialized CodeAnalysis struct.
+pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void {
     const opcode = @import("../opcodes/opcode.zig");
     const jump_table = @import("../jump_table/jump_table.zig");
 
     // Initialize analysis structure with fixed arrays
-    var analysis = CodeAnalysis{
+    analysis.* = CodeAnalysis{
         .code_segments = createCodeBitmap(code),
         .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
         .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .block_metadata = undefined,  // Will be filled during analysis
+        .block_metadata = undefined, // Will be filled during analysis
         .block_metadata_soa = BlockMetadataSoA.init(),
-        .pc_to_block = undefined,  // Will be filled during analysis
+        .pc_to_block = undefined, // Will be filled during analysis
         .block_count = 0,
         .max_stack_depth = 0,
         .has_dynamic_jumps = false,
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
-        .block_gas_costs = null,
     };
-    errdefer analysis.deinit(allocator);
+    // No errdefer needed - no allocations to clean up
 
-    if (code.len == 0) return analysis;
+    if (code.len == 0) return;
 
     // First pass: identify JUMPDESTs and block boundaries
     var i: usize = 0;
+    var loop_iterations: u32 = 0;
+    const max_iterations = limits.MAX_CONTRACT_SIZE * 2; // Safety check
     while (i < code.len) {
+        // Safety check to prevent infinite loops
+        loop_iterations += 1;
+        if (loop_iterations > max_iterations) {
+            return error.InstructionLimitExceeded;
+        }
+
         const op = code[i];
 
         // Mark JUMPDEST positions
@@ -434,7 +413,8 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
 
         // Handle opcodes that end blocks - skip invalid opcodes
         const maybe_opcode = std.meta.intToEnum(opcode.Enum, op) catch {
-            // Invalid opcode, skip it
+            // Invalid opcode, skip it but MUST increment i to avoid infinite loop
+            i += 1;
             continue;
         };
         switch (maybe_opcode) {
@@ -481,7 +461,7 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
 
     // Set the count for SoA structure
     analysis.block_metadata_soa.count = block_count;
-    
+
     // Initialize pc_to_block array with zeros
     @memset(&analysis.pc_to_block, 0);
 
@@ -498,7 +478,13 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
     var max_stack_in_block: i16 = 0;
 
     i = 0;
+    loop_iterations = 0; // Reset counter for second pass
     while (i < code.len) {
+        // Safety check to prevent infinite loops
+        loop_iterations += 1;
+        if (loop_iterations > max_iterations) {
+            return error.InstructionLimitExceeded;
+        }
         // Record PC to block mapping (only if within bounds)
         if (i < limits.MAX_CONTRACT_SIZE) {
             analysis.pc_to_block[i] = current_block;
@@ -596,14 +582,13 @@ pub fn analyze_bytecode_blocks(allocator: std.mem.Allocator, code: []const u8) !
         analysis.block_metadata_soa.setBlock(current_block, metadata.gas_cost, metadata.stack_req, metadata.stack_max);
     }
 
-    return analysis;
+    // Analysis struct is already filled, nothing to return
 }
-
 
 test "pc_to_block mapping edge cases" {
     // Test with fixed array
     var mapping: [limits.MAX_CONTRACT_SIZE]u16 = undefined;
-    
+
     // Simulate block assignments
     var current_block: u16 = 0;
     for (&mapping, 0..) |*pc_block, i| {
@@ -618,7 +603,6 @@ test "pc_to_block mapping edge cases" {
 }
 
 test "BlockMetadata with contract deployment scenarios" {
-    const allocator = std.testing.allocator;
 
     // Simulate analysis for different contract types
     const test_cases = .{
@@ -642,10 +626,8 @@ test "BlockMetadata with contract deployment scenarios" {
             .has_static_jumps = false,
             .has_selfdestruct = false,
             .has_create = false,
-            .block_gas_costs = null,
         };
-        defer analysis.deinit(allocator);
-        
+
         analysis.block_metadata_soa.count = tc.blocks;
 
         // Verify fields are correctly set
