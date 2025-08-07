@@ -8,6 +8,7 @@ const testing = std.testing;
 const primitives = @import("Address");
 const Address = primitives.Address.Address;
 const Evm = @import("evm");
+const CallParams = @import("evm").CallParams;
 
 // Command-line arguments structure
 const Args = struct {
@@ -80,14 +81,14 @@ pub fn main() !void {
         const timer = std.time.nanoTimestamp();
         
         // Execute the contract call directly without error handling
-        call_result = vm.call_contract(
-            caller_address,
-            contract_address,
-            0,
-            calldata,
-            1_000_000_000,
-            false
-        ) catch |err| {
+        const call_params = CallParams{ .call = .{
+            .caller = caller_address,
+            .to = contract_address,
+            .value = 0,
+            .input = calldata,
+            .gas = 1_000_000_000,
+        }};
+        call_result = vm.call(call_params) catch |err| {
             std.debug.print("Contract execution failed: {}\n", .{err});
             std.process.exit(1);
         };
@@ -102,8 +103,8 @@ pub fn main() !void {
         }
         
         // Free output if allocated
-        if (call_result.output) |output| {
-            allocator.free(output);
+        if (call_result.output.len > 0) {
+            allocator.free(call_result.output);
         }
         
         // Output timing

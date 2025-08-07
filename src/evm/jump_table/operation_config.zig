@@ -75,7 +75,7 @@ pub const ALL_OPERATIONS = [_]OpSpec{
     .{ .name = "CALLVALUE", .opcode = 0x34, .execute = execution.environment.op_callvalue, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1 },
     .{ .name = "CALLDATALOAD", .opcode = 0x35, .execute = execution.environment.op_calldataload, .gas = GasConstants.GasFastestStep, .min_stack = 1, .max_stack = Stack.CAPACITY },
     .{ .name = "CALLDATASIZE", .opcode = 0x36, .execute = execution.environment.op_calldatasize, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1 },
-    .{ .name = "CALLDATACOPY", .opcode = 0x37, .execute = execution.memory.op_calldatacopy, .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
+    .{ .name = "CALLDATACOPY", .opcode = 0x37, .execute = execution.environment.op_calldatacopy, .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
     .{ .name = "CODESIZE", .opcode = 0x38, .execute = execution.environment.op_codesize, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1 },
     .{ .name = "CODECOPY", .opcode = 0x39, .execute = execution.environment.op_codecopy, .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
     .{ .name = "GASPRICE", .opcode = 0x3a, .execute = execution.environment.op_gasprice, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1 },

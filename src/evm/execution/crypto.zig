@@ -41,11 +41,12 @@ inline fn hash_with_stack_buffer(data: []const u8) [32]u8 {
     return hash;
 }
 
-pub fn op_sha3(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 2);
+pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 2);
 
-    const offset = context.stack.pop_unsafe();
-    const size = context.stack.pop_unsafe();
+    const offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -67,7 +68,7 @@ pub fn op_sha3(context: *ExecutionContext) ExecutionError.Error!void {
         }
         // Hash of empty data = keccak256("")
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        context.stack.append_unsafe(empty_hash);
+        frame.stack.append_unsafe(empty_hash);
         return;
     }
 
@@ -90,13 +91,13 @@ pub fn op_sha3(context: *ExecutionContext) ExecutionError.Error!void {
     // Dynamic gas cost for hashing
     const word_size = (size_usize + 31) / 32;
     const gas_cost = 6 * word_size;
-    try context.consume_gas(gas_cost);
+    try frame.consume_gas(gas_cost);
 
     // Ensure memory is available
-    _ = try context.memory.ensure_context_capacity(offset_usize + size_usize);
+    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
 
     // Get data and hash using optimized stack buffer approach
-    const data = try context.memory.get_slice(offset_usize, size_usize);
+    const data = try frame.memory.get_slice(offset_usize, size_usize);
 
     // Calculate keccak256 hash using optimized tiered stack buffers
     const hash = hash_with_stack_buffer(data);
@@ -104,7 +105,7 @@ pub fn op_sha3(context: *ExecutionContext) ExecutionError.Error!void {
     // Convert hash to u256 using std.mem for efficiency
     const result = std.mem.readInt(u256, &hash, .big);
 
-    context.stack.append_unsafe(result);
+    frame.stack.append_unsafe(result);
 }
 
 // Alias for backwards compatibility

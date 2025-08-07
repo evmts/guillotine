@@ -15,13 +15,12 @@ test "JUMPI should take jump when condition is non-zero" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);
     const caller_balance = std.math.maxInt(u256);
-    try vm.state.set_balance(caller, caller_balance);
+    try evm.state.set_balance(caller, caller_balance);
 
     // Create bytecode that reproduces the exact bug:
     // The ERC20 constructor was failing because JUMPI at pc=284 wasn't jumping to pc=292
@@ -46,13 +45,15 @@ test "JUMPI should take jump when condition is non-zero" {
     };
 
     // Call the contract to execute the bytecode
-    const result = try vm.call_contract(caller, Address.from_u256(0x2000000000000000000000000000000000000002), // arbitrary contract address
-        0, // value
-        bytecode, // using bytecode as calldata for simplicity
-        1000000, // gas
-        false // not static
-    );
-    defer if (result.output) |output| allocator.free(output);
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = Address.from_u256(0x2000000000000000000000000000000000000002), // arbitrary contract address
+        .value = 0,
+        .input = bytecode, // using bytecode as calldata for simplicity
+        .gas = 1000000,
+    }};
+    const result = try evm.call(call_params);
+    defer if (result.output.len > 0) allocator.free(result.output);
 
     // JUMPI is now working correctly after stack order fix
     // JUMPI should take the jump when condition is non-zero
@@ -71,13 +72,12 @@ test "JUMPI should NOT jump when condition is zero" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);
     const caller_balance = std.math.maxInt(u256);
-    try vm.state.set_balance(caller, caller_balance);
+    try evm.state.set_balance(caller, caller_balance);
 
     // Same bytecode but with condition = 0
     const bytecode = &[_]u8{
@@ -116,13 +116,12 @@ test "JUMPI bug reproduction via contract deployment" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);
     const caller_balance = std.math.maxInt(u256);
-    try vm.state.set_balance(caller, caller_balance);
+    try evm.state.set_balance(caller, caller_balance);
 
     // Create init code that tests JUMPI and returns a value based on the result
     // Let me use a simpler, correct bytecode:
