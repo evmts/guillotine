@@ -213,7 +213,6 @@ fn ensure_return_memory(frame: *ExecutionContext, ret_offset: u256, ret_size: u2
 /// Returns the target address
 fn handle_address_access(vm: *Vm, frame: *ExecutionContext, to: u256) ExecutionError.Error!primitives.Address.Address {
     const to_address = from_u256(to);
-    _ = to_address;
 
     // EIP-2929: Check if address is cold and consume appropriate gas
     const access_cost = try vm.access_list.access_address(to_address);
@@ -615,6 +614,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // Convert to address
     const to_address = from_u256(to);
+    _ = to_address;
 
     // Get call arguments from memory
     const args = try get_call_args(frame, args_offset, args_size);
