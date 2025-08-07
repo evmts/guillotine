@@ -8,7 +8,7 @@ const AccessList = @import("../access_list.zig").AccessList;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CodeAnalysis = @import("../analysis.zig");
 const Evm = @import("../evm.zig");
-const interpret = @import("interpret.zig");
+const interpret = @import("interpret.zig").interpret;
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const primitives = @import("primitives");
@@ -59,27 +59,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     if (call_info.gas == 0) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     if (call_info.code_size > 0 and call_info.code.len == 0) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
 
-    // Check if this is a precompile call
-    if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
-        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_info.input, call_info.gas, call_info.is_static) catch |err| {
-            return switch (err) {
-                else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
-            };
-        };
-
-        return precompile_result;
-    }
-
-    // Only initialize EVM state if we're at depth 0 (top-level call)
-    // Check current frame depth from EVM to determine if this is a nested call
-    if (self.current_frame_depth == 0) {
-        // Initialize fresh execution state in EVM instance (per-call isolation)
-        // CRITICAL: Clear all state at beginning of top-level call
-        self.current_frame_depth = 0;
-        self.access_list.clear(); // Reset access list for fresh per-call state
-        self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
-    }
-
     // Do analysis using EVM instance buffer if contract is small
     const analysis_allocator = if (call_info.code_size <= STACK_ALLOCATION_THRESHOLD)
         std.heap.FixedBufferAllocator.init(&self.analysis_stack_buffer)
@@ -89,7 +68,14 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     defer analysis.deinit();
 
     // Reinitialize if first frame
+    // Only initialize EVM state if we're at depth 0 (top-level call)
+    // Check current frame depth from EVM to determine if this is a nested call
     if (self.current_frame_depth == 0) {
+        // Initialize fresh execution state in EVM instance (per-call isolation)
+        // CRITICAL: Clear all state at beginning of top-level call
+        self.current_frame_depth = 0;
+        self.access_list.clear(); // Reset access list for fresh per-call state
+        self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
         for (0..MAX_CALL_DEPTH) |i| {
             const next_frame = if (i + 1 < MAX_CALL_DEPTH) &self.frame_stack[i + 1] else null;
             self.frame_stack[i] = try Frame.init(
@@ -107,19 +93,26 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
                 next_frame,
             );
         }
+        // Set up the first frame properly for execution
+        self.frame_stack[0].gas_remaining = call_info.gas;
+        self.frame_stack[0].hot_flags.is_static = call_info.is_static;
+        self.frame_stack[0].hot_flags.depth = @intCast(self.depth);
+        self.frame_stack[0].contract_address = call_info.address;
+        self.frame_stack[0].input = call_info.input;
     }
 
-    // Set up the first frame properly for execution
-    self.frame_stack[0].gas_remaining = call_info.gas;
-    self.frame_stack[0].hot_flags.is_static = call_info.is_static;
-    self.frame_stack[0].hot_flags.depth = @intCast(self.depth);
-    self.frame_stack[0].contract_address = call_info.address;
-    self.frame_stack[0].input = call_info.input;
+    if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
+        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_info.input, call_info.gas, call_info.is_static) catch |err| {
+            return switch (err) {
+                else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
+            };
+        };
 
-    // Ensure all frames are properly deinitialized
+        return precompile_result;
+    }
 
     // Call interpret with the first frame
-    interpret.interpret(self, &self.frame_stack[0]) catch |err| {
+    interpret(self, &self.frame_stack[0]) catch |err| {
         // Handle error cases and transform to CallResult
         var output = &[_]u8{};
         if (self.frame_stack[0].output.len > 0) {
