@@ -22,24 +22,8 @@ pub const InterpretResult = struct {
     /// Allocator used for all components (for recursive cleanup)
     allocator: std.mem.Allocator,
 
-    /// Initialize InterpretResult with all components
+    /// Initialize InterpretResult from execution parameters
     pub fn init(
-        allocator: std.mem.Allocator,
-        run_result: RunResult,
-        access_list: AccessList,
-        self_destruct: ?SelfDestruct,
-    ) InterpretResult {
-        return InterpretResult{
-            .run_result = run_result,
-            .access_list = access_list,
-            .self_destruct = self_destruct,
-            .allocator = allocator,
-        };
-    }
-
-    /// Convenience method to create InterpretResult from execution parameters
-    /// Combines RunResult.init and InterpretResult.init in one call
-    pub fn from_execution(
         allocator: std.mem.Allocator,
         initial_gas: u64,
         gas_left: u64,
@@ -50,7 +34,12 @@ pub const InterpretResult = struct {
         self_destruct: ?SelfDestruct,
     ) InterpretResult {
         const run_result = RunResult.init(initial_gas, gas_left, status, err, output);
-        return InterpretResult.init(allocator, run_result, access_list, self_destruct);
+        return InterpretResult{
+            .run_result = run_result,
+            .access_list = access_list,
+            .self_destruct = self_destruct,
+            .allocator = allocator,
+        };
     }
 
     /// Recursively clean up all resources
@@ -102,12 +91,11 @@ test "InterpretResult - initialization and cleanup" {
     const allocator = std.testing.allocator;
     
     // Create components
-    const run_result = RunResult.init(1000, 500, .Success, null, null);
-    var access_list = AccessList.init(allocator);
-    var self_destruct = SelfDestruct.init(allocator);
+    const access_list = AccessList.init(allocator);
+    const self_destruct = SelfDestruct.init(allocator);
     
     // Initialize result
-    var result = InterpretResult.init(allocator, run_result, access_list, self_destruct);
+    var result = InterpretResult.init(allocator, 1000, 500, .Success, null, null, access_list, self_destruct);
     defer result.deinit();
     
     // Verify initialization
@@ -121,11 +109,10 @@ test "InterpretResult - without selfdestruct support" {
     const allocator = std.testing.allocator;
     
     // Create components without self destruct
-    const run_result = RunResult.init(1000, 500, .Success, null, null);
-    var access_list = AccessList.init(allocator);
+    const access_list = AccessList.init(allocator);
     
     // Initialize result
-    var result = InterpretResult.init(allocator, run_result, access_list, null);
+    var result = InterpretResult.init(allocator, 1000, 500, .Success, null, null, access_list, null);
     defer result.deinit();
     
     // Verify no selfdestruct support
@@ -139,12 +126,11 @@ test "InterpretResult - destruction tracking" {
     const primitives = @import("primitives");
     
     // Create components
-    const run_result = RunResult.init(1000, 500, .Success, null, null);
-    var access_list = AccessList.init(allocator);
-    var self_destruct = SelfDestruct.init(allocator);
+    const access_list = AccessList.init(allocator);
+    const self_destruct = SelfDestruct.init(allocator);
     
     // Initialize result
-    var result = InterpretResult.init(allocator, run_result, access_list, self_destruct);
+    var result = InterpretResult.init(allocator, 1000, 500, .Success, null, null, access_list, self_destruct);
     defer result.deinit();
     
     // Initially no destructions

@@ -111,8 +111,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                     const dest = frame.stack.pop_unsafe();
                     if (!frame.valid_jumpdest(dest)) {
                         contract.gas = frame.gas_remaining;
-                        const run_result = RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null);
-                        return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                        return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
                     }
                     current_instruction = @ptrCast(target);
                 } else if (nextInstruction.opcode_fn == execution.control.op_jumpi) {
@@ -121,8 +120,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                     if (condition != 0) {
                         if (!frame.valid_jumpdest(dest)) {
                             contract.gas = frame.gas_remaining;
-                            const run_result = RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null);
-                            return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                            return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
                         }
                         current_instruction = @ptrCast(target);
                     } else {
@@ -146,33 +144,28 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                     const return_data = frame.output;
                     if (return_data.len > 0) {
                         output = self.allocator.dupe(u8, return_data) catch {
-                            const run_result = RunResult.init(initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfMemory, null);
-                            return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                            return InterpretResult.init(self.allocator, initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfMemory, null, access_list, self_destruct);
                         };
                     }
 
                     if (err == ExecutionError.Error.STOP) {
                         @branchHint(.likely);
-                        const run_result = RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
                         // Apply destructions before returning
                         // TODO: Apply destructions to state
-                        return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                        return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Success, null, output, access_list, self_destruct);
                     }
 
                     return switch (err) {
                         ExecutionError.Error.InvalidOpcode => {
                             frame.gas_remaining = 0;
                             contract.gas = 0;
-                            const run_result = RunResult.init(initial_gas, 0, .Invalid, err, output);
-                            return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                            return InterpretResult.init(self.allocator, initial_gas, 0, .Invalid, err, output, access_list, self_destruct);
                         },
                         ExecutionError.Error.REVERT => {
-                            const run_result = RunResult.init(initial_gas, frame.gas_remaining, .Revert, err, output);
-                            return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                            return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Revert, err, output, access_list, self_destruct);
                         },
                         ExecutionError.Error.OutOfGas => {
-                            const run_result = RunResult.init(initial_gas, frame.gas_remaining, .OutOfGas, err, output);
-                            return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                            return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .OutOfGas, err, output, access_list, self_destruct);
                         },
                         ExecutionError.Error.InvalidJump,
                         ExecutionError.Error.StackUnderflow,
@@ -183,8 +176,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                         ExecutionError.Error.MaxCodeSizeExceeded,
                         ExecutionError.Error.OutOfMemory,
                         => {
-                            const run_result = RunResult.init(initial_gas, frame.gas_remaining, .Invalid, err, output);
-                            return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                            return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, err, output, access_list, self_destruct);
                         },
                         else => return err,
                     };
@@ -197,8 +189,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                     @branchHint(.cold);
                     frame.gas_remaining = 0;
                     contract.gas = 0;
-                    const run_result = RunResult.init(initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfGas, null);
-                    return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+                    return InterpretResult.init(self.allocator, initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfGas, null, access_list, self_destruct);
                 }
                 frame.gas_remaining -= cost;
             },
@@ -209,8 +200,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
     const output_data = frame.output;
     const output: ?[]const u8 = if (output_data.len > 0) try self.allocator.dupe(u8, output_data) else null;
 
-    const run_result = RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
     // Apply destructions before returning
     // TODO: Apply destructions to state
-    return InterpretResult.init(self.allocator, run_result, access_list, self_destruct);
+    return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Success, null, output, access_list, self_destruct);
 }
