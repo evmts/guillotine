@@ -352,11 +352,11 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
 /// Resolve jump targets in the instruction stream.
 /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
-fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
+fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
     // Build a map from PC to instruction index using dynamic allocation
     // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
-    var pc_to_instruction = try std.heap.page_allocator.alloc(u16, code.len);
-    defer std.heap.page_allocator.free(pc_to_instruction);
+    var pc_to_instruction = try allocator.alloc(u16, code.len);
+    defer allocator.free(pc_to_instruction);
     @memset(pc_to_instruction, std.math.maxInt(u16));
 
     var pc: usize = 0;
