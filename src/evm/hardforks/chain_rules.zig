@@ -54,7 +54,7 @@ const Log = @import("../log.zig");
 /// ## Memory Layout
 /// This structure uses bool fields for efficient memory usage and fast access.
 /// The compiler typically packs multiple bools together for cache efficiency.
-pub const ChainRules = @This();
+pub const ChainRules = packed struct {
 
 /// Homestead hardfork activation flag (March 2016).
 ///
@@ -664,3 +664,4 @@ pub fn for_hardfork(hardfork: Hardfork) ChainRules {
 
     return rules;
 }
+}; // Close ChainRules struct

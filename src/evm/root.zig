@@ -180,11 +180,11 @@ pub const opcodes = execution;
 pub const bitvec = @import("frame/bitvec.zig");
 
 /// Chain-specific validation rules
-pub const chain_rules = @import("hardforks/chain_rules.zig");
+pub const chain_rules = @import("execution_context.zig").ChainRules;
 
 /// Hardforks namespace for easier access
 pub const hardforks = struct {
-    pub const chain_rules = @import("hardforks/chain_rules.zig");
+    pub const chain_rules = @import("execution_context.zig").ChainRules;
     pub const hardfork = @import("hardforks/hardfork.zig");
 };
 

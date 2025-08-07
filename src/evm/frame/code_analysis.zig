@@ -12,7 +12,7 @@ const CodeAnalysis = @This();
 
 /// Heap-allocated null-terminated instruction stream for execution.
 /// Must be freed by caller using deinit().
-instructions: [*:null]Instruction,
+instructions: [*]?Instruction,
 
 /// Allocator used for the instruction array (needed for cleanup)
 allocator: std.mem.Allocator,
@@ -26,7 +26,6 @@ max_stack_depth: u16,
 
 /// Contract property flags
 has_static_jumps: bool,
-has_dynamic_jumps: bool,
 has_selfdestruct: bool,
 has_create: bool,
 
@@ -277,7 +276,6 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     var jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty();
     var max_stack_depth: u16 = 0;
     var has_static_jumps = false;
-    var has_dynamic_jumps = false;
     var has_selfdestruct = false;
     var has_create = false;
 
@@ -291,7 +289,6 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
             .jumpdest_bitmap = jumpdest_bitmap,
             .max_stack_depth = 0,
             .has_static_jumps = false,
-            .has_dynamic_jumps = false,
             .has_selfdestruct = false,
             .has_create = false,
         };
@@ -393,7 +390,6 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         .jumpdest_bitmap = jumpdest_bitmap,
         .max_stack_depth = max_stack_depth,
         .has_static_jumps = has_static_jumps,
-        .has_dynamic_jumps = has_dynamic_jumps,
         .has_selfdestruct = has_selfdestruct,
         .has_create = has_create,
     };

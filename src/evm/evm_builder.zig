@@ -1,7 +1,8 @@
 const std = @import("std");
 const Evm = @import("evm.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
-const ChainRules = @import("hardforks/chain_rules.zig");
+const ExecutionContext = @import("execution_context.zig");
+const ChainRules = ExecutionContext.ChainRules;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const Context = @import("access_list/context.zig");
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
@@ -53,7 +54,7 @@ pub const EvmBuilder = struct {
     /// Configure for a specific hardfork (sets both jump table and chain rules).
     pub fn with_hardfork(self: *EvmBuilder, hardfork: Hardfork) *EvmBuilder {
         self.table = JumpTable.init_from_hardfork(hardfork);
-        self.chain_rules = ChainRules.for_hardfork(hardfork);
+        self.chain_rules = ExecutionContext.Frame.chainRulesForHardfork(hardfork);
         return self;
     }
 
