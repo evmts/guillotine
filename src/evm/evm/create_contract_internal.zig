@@ -2,10 +2,12 @@ const std = @import("std");
 const primitives = @import("primitives");
 const ExecutionError = @import("../execution/execution_error.zig");
 const CreateResult = @import("create_result.zig").CreateResult;
-const Keccak256 = std.crypto.hash.sha3.Keccak256;
 const opcode = @import("../opcodes/opcode.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const CodeAnalysis = @import("../analysis/analysis.zig");
+const ChainRules = @import("../execution_context.zig").ChainRules;
 
 pub fn create_contract_internal(self: *Vm, creator: primitives.Address.Address, value: u256, init_code: []const u8, gas: u64, new_address: primitives.Address.Address) (std.mem.Allocator.Error || @import("../state/database_interface.zig").DatabaseError || ExecutionError.Error)!CreateResult {
     Log.debug("VM.create_contract_internal: Creating contract from {any} to {any}, value={}, gas={}", .{ creator, new_address, value, gas });
@@ -37,72 +39,54 @@ pub fn create_contract_internal(self: *Vm, creator: primitives.Address.Address, 
         };
     }
 
-    var init_contract = Contract.init_deployment(
-        creator, // caller (who is creating this contract)
-        value, // value being sent to this contract
-        gas, // gas available for init code execution
-        init_code, // the init code to execute
-        null, // no salt for CREATE (only for CREATE2)
-    );
-    init_contract.address = new_address; // Set the computed address
-    defer init_contract.deinit(self.allocator, null);
-
-    // Execute the init code - this should return the deployment bytecode
-    Log.debug("create_contract_internal: Executing init code, size: {}", .{init_code.len});
-    const init_result = self.interpret(&init_contract, &[_]u8{}, false) catch |err| {
-        Log.debug("Init code execution failed with error: {}", .{err});
-        if (err == ExecutionError.Error.REVERT) {
-            // On revert, consume partial gas
-            return CreateResult.init_failure(init_contract.gas, null);
-        }
-
-        // Most initcode failures should return 0 address and consume all gas
-        return CreateResult.init_failure(0, null);
+    // Create code analysis for the init code
+    var analysis = CodeAnalysis.from_code(self.allocator, init_code, &self.table) catch |err| {
+        Log.debug("create_contract_internal: Code analysis failed with error: {}", .{err});
+        return CreateResult.init_failure(gas, null);
     };
+    defer analysis.deinit();
 
-    Log.debug("create_contract_internal: Init code execution completed: status={}, gas_used={}, output_size={}, output_ptr={any}", .{
-        init_result.status,
-        init_result.gas_used,
-        if (init_result.output) |o| o.len else 0,
-        init_result.output,
-    });
-
-    // Check if init code reverted
-    if (init_result.status == .Revert) {
-        Log.debug("create_contract_internal: Init code reverted, contract creation failed", .{});
-        return CreateResult.init_failure(init_result.gas_left, init_result.output);
-    }
-
-    const deployment_code = init_result.output orelse &[_]u8{};
-
-    if (deployment_code.len == 0) {
-        Log.debug("create_contract_internal: WARNING: Init code returned empty deployment code! init_result.output={any}", .{init_result.output});
-    } else {
-        Log.debug("create_contract_internal: Got deployment code, size={}", .{deployment_code.len});
-    }
-
-    // Check EIP-170 MAX_CODE_SIZE limit on the returned bytecode (24,576 bytes)
-    if (deployment_code.len > opcode.MAX_CODE_SIZE) {
-        return CreateResult.init_failure(0, null);
-    }
-
-    const deploy_code_gas = @as(u64, @intCast(deployment_code.len)) * opcode.DEPLOY_CODE_GAS_PER_BYTE;
-
-    if (deploy_code_gas > init_result.gas_left) {
-        return CreateResult.init_failure(0, null);
-    }
-
-    try self.state.set_code(new_address, deployment_code);
-    Log.debug("Contract code deployed at {any}, size: {}", .{ new_address, deployment_code.len });
-
-    const gas_left = init_result.gas_left - deploy_code_gas;
-
-    Log.debug("Contract creation successful! Address: {any}, gas_left: {}", .{ new_address, gas_left });
-
-    return CreateResult{
-        .success = true,
-        .address = new_address,
-        .gas_left = gas_left,
-        .output = deployment_code,
+    // Create execution context for init code execution
+    var context = ExecutionContext.init(
+        gas, // gas remaining
+        false, // not static - contract creation can modify state
+        @intCast(self.depth), // call depth
+        new_address, // contract address being created
+        &analysis, // code analysis for init code
+        &self.access_list, // access list
+        self.state.to_database_interface(), // database interface
+        self.chain_rules, // chain rules
+        null, // self_destruct (not supported in this context)
+        &[_]u8{}, // empty input data for constructor
+        self.allocator, // allocator
+    ) catch |err| {
+        Log.debug("create_contract_internal: ExecutionContext creation failed with error: {}", .{err});
+        return CreateResult.init_failure(gas, null);
     };
+    defer context.deinit();
+
+    // TODO: Execute the init code using the ExecutionContext
+    // This would require implementing a new execution method that works with ExecutionContext
+    // The init code should return the deployment bytecode
+    // For now, return a failure indicating this isn't implemented yet
+    Log.debug("create_contract_internal: Init code execution with ExecutionContext not yet implemented", .{});
+    const init_result_placeholder = CreateResult.init_failure(gas, null);
+    
+    // Handle execution errors (placeholder)
+    const err_handler_start = false;
+    if (err_handler_start) {
+        // This error handling block is now a placeholder
+        // When actual execution is implemented, this will handle real errors
+        _ = ExecutionError.Error.REVERT;
+        return CreateResult.init_failure(0, null);
+    }
+
+    // For now, return the placeholder result since execution is not implemented
+    // When actual execution is implemented, we'll need to process the init result
+    // and deploy the contract code using these constants:
+    _ = opcode.MAX_CODE_SIZE; // EIP-170 MAX_CODE_SIZE limit (24,576 bytes)
+    _ = opcode.DEPLOY_CODE_GAS_PER_BYTE; // Gas cost per byte of deployed code
+    
+    Log.debug("create_contract_internal: Contract creation not yet fully implemented", .{});
+    return init_result_placeholder;
 }

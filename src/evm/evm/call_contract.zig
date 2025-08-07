@@ -6,7 +6,9 @@ const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
-const Keccak256 = std.crypto.hash.sha3.Keccak256;
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const CodeAnalysis = @import("../analysis/analysis.zig");
+const ChainRules = @import("../execution_context.zig").ChainRules;
 
 pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error || @import("../state/database_interface.zig").DatabaseError;
 
@@ -101,75 +103,50 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         try self.state.set_balance(to, to_balance + value);
     }
 
-    // Calculate code hash
-    var hasher = Keccak256.init(.{});
-    hasher.update(code);
-    var code_hash: [32]u8 = undefined;
-    hasher.final(&code_hash);
-
-    // Create contract context for execution
-    var contract = Contract.init(
-        caller, // caller
-        to, // address being called
-        value, // value already transferred
-        execution_gas, // gas for execution
-        code, // contract code
-        code_hash, // code hash
-        input, // call data
-        is_static, // static flag
-    );
-    defer contract.deinit(self.allocator, null);
-
-    // Execute the contract
-    Log.debug("VM.call_contract: About to execute contract with gas={}", .{execution_gas});
-    const result = self.interpret(&contract, input, is_static) catch |err| {
-        Log.debug("VM.call_contract: Execution failed with error: {}", .{err});
-
-        // On error, revert value transfer
-        if (value > 0) {
-            const caller_balance = self.state.get_balance(caller);
-            try self.state.set_balance(caller, caller_balance + value);
-            const to_balance = self.state.get_balance(to);
-            try self.state.set_balance(to, to_balance - value);
-        }
-
-        // For REVERT, we return partial gas
-        if (err == ExecutionError.Error.REVERT) {
-            // REVERT returns partial gas but no output data in error case
-            return CallResult{ .success = false, .gas_left = contract.gas, .output = null };
-        }
-
-        // Other errors consume all gas
+    // Create code analysis for the contract bytecode
+    var analysis = CodeAnalysis.from_code(self.allocator, code, &self.table) catch |err| {
+        Log.debug("VM.call_contract: Code analysis failed with error: {}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
-    defer if (result.output) |out| self.allocator.free(out);
+    defer analysis.deinit();
 
-    Log.debug("VM.call_contract: Execution completed, status={}, gas_used={}, output_size={}", .{ result.status, result.gas_used, if (result.output) |o| o.len else 0 });
-
-    // Prepare output
-    const output = if (result.output) |out|
-        try self.allocator.dupe(u8, out)
-    else
-        null;
-
-    // Check execution status
-    const success = switch (result.status) {
-        .Success => true,
-        .Revert => false,
-        .Invalid => false,
-        .OutOfGas => false,
+    // Create execution context for the contract
+    var context = ExecutionContext.init(
+        execution_gas, // gas remaining
+        is_static, // static call flag 
+        @intCast(self.depth), // call depth
+        to, // contract address
+        &analysis, // code analysis
+        &self.access_list, // access list
+        self.state.to_database_interface(), // database interface
+        self.chain_rules, // chain rules
+        null, // self_destruct (not supported in this context)
+        input, // input data
+        self.allocator, // allocator
+    ) catch |err| {
+        Log.debug("VM.call_contract: ExecutionContext creation failed with error: {}", .{err});
+        return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
+    defer context.deinit();
 
-    // If execution failed, revert value transfer
-    if (!success and value > 0) {
-        const caller_balance = self.state.get_balance(caller);
-        try self.state.set_balance(caller, caller_balance + value);
-        const to_balance = self.state.get_balance(to);
-        try self.state.set_balance(to, to_balance - value);
+    // TODO: Execute the contract using the ExecutionContext
+    // This would require implementing a new execution method that works with ExecutionContext
+    // For now, return a failure indicating this isn't implemented yet
+    Log.debug("VM.call_contract: Contract execution with ExecutionContext not yet implemented", .{});
+    const result = CallResult{ .success = false, .gas_left = execution_gas, .output = null };
+    
+    // Handle execution errors (placeholder)
+    const err_handler_start = false;
+    if (err_handler_start) {
+        // This error handling block is now a placeholder
+        // When actual execution is implemented, this will handle real errors
+        _ = ExecutionError.Error.REVERT;
+        return CallResult{ .success = false, .gas_left = 0, .output = null };
     }
 
-    Log.debug("VM.call_contract: Call completed, success={}, gas_used={}, gas_left={}, output_size={}", .{ success, result.gas_used, result.gas_left, if (output) |o| o.len else 0 });
+    // When actual execution is implemented, this will process the real result
+    Log.debug("VM.call_contract: Call completed (placeholder implementation), gas_left={}", .{result.gas_left});
 
-    // The intrinsic gas is consumed, so we don't add it back to gas_left
-    return CallResult{ .success = success, .gas_left = result.gas_left, .output = output };
+    // The intrinsic gas is consumed, so we don't add it back to gas_left  
+    return result;
 }
