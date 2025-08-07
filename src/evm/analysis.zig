@@ -1,6 +1,7 @@
 const std = @import("std");
 const limits = @import("constants/code_analysis_limits.zig");
 const StaticBitSet = std.bit_set.StaticBitSet;
+const DynamicBitSet = std.DynamicBitSet;
 const Instruction = @import("instruction.zig").Instruction;
 const Opcode = @import("opcodes/opcode.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
@@ -14,18 +15,19 @@ const CodeAnalysis = @This();
 /// Must be freed by caller using deinit().
 instructions: [*]?Instruction,
 
-/// Bitmap marking all valid JUMPDEST positions in the bytecode.
+/// Heap-allocated bitmap marking all valid JUMPDEST positions in the bytecode.
 /// Required for JUMP/JUMPI validation during execution.
-jumpdest_bitmap: StaticBitSet(limits.MAX_CONTRACT_SIZE),
+jumpdest_bitmap: DynamicBitSet,
 
 /// Allocator used for the instruction array (needed for cleanup)
 allocator: std.mem.Allocator,
 
 /// Creates a code bitmap that marks which bytes are opcodes vs data.
-fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
+fn createCodeBitmap(allocator: std.mem.Allocator, code: []const u8) !DynamicBitSet {
     std.debug.assert(code.len <= limits.MAX_CONTRACT_SIZE);
 
-    var bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initFull();
+    var bitmap = try DynamicBitSet.initFull(allocator, code.len);
+    errdefer bitmap.deinit();
 
     var i: usize = 0;
     while (i < code.len) {
@@ -48,7 +50,7 @@ fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
 }
 
 /// Convert bytecode to null-terminated instruction stream.
-fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const StaticBitSet(limits.MAX_CONTRACT_SIZE)) ![*:null]Instruction {
+fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) ![*:null]Instruction {
     // Allocate instruction array with space for null terminator
     const instructions = try allocator.alloc(?Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
     errdefer allocator.free(instructions);
@@ -218,7 +220,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
 /// Resolve jump targets in the instruction stream.
 /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
-fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const StaticBitSet(limits.MAX_CONTRACT_SIZE)) !void {
+fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
     // Build a map from PC to instruction index using fixed array
     // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
     var pc_to_instruction: [limits.MAX_CONTRACT_SIZE]u16 = undefined;
@@ -296,8 +298,10 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     }
 
     // Create temporary analysis data that will be discarded
-    var code_segments = createCodeBitmap(code);
-    var jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty();
+    var code_segments = try createCodeBitmap(allocator, code);
+    defer code_segments.deinit();
+    var jumpdest_bitmap = try DynamicBitSet.initEmpty(allocator, code.len);
+    errdefer jumpdest_bitmap.deinit();
 
     if (code.len == 0) {
         // For empty code, just create empty instruction array
@@ -398,7 +402,7 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     };
 }
 
-/// Clean up allocated instruction array.
+/// Clean up allocated instruction array and bitmap.
 /// Must be called by the caller to prevent memory leaks.
 pub fn deinit(self: *CodeAnalysis) void {
     // Find the length by looking for null terminator
@@ -409,6 +413,9 @@ pub fn deinit(self: *CodeAnalysis) void {
     // Free the instruction array
     const instructions_slice = @as([*]?Instruction, @ptrCast(self.instructions))[0..len];
     self.allocator.free(instructions_slice);
+
+    // Free the bitmap
+    self.jumpdest_bitmap.deinit();
 }
 
 test "from_code basic functionality" {
