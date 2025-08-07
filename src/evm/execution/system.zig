@@ -6,7 +6,9 @@ const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
-const AccessList = @import("../access_list/access_list.zig").AccessList;
+const CallFrameStack = @import("../call_frame_stack.zig").CallFrameStack;
+const CallType = @import("../call_frame_stack.zig").CallType;
+const CallParams = @import("../call_frame_stack.zig").CallParams;
 const Log = @import("../log.zig");
 
 // ============================================================================
@@ -517,15 +519,44 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
 }
 
 pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = ctx;
-
-    // TODO: Implementation requires:
-    // - vm instance for contract calls
-    // - frame.contract.address access
-    // - frame.is_static checks
-    // - frame.return_data operations
-    // - handle_call_result integration
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    
+    // Pop parameters from stack
+    const gas = try frame.stack.pop();
+    const to = try frame.stack.pop();
+    const value = try frame.stack.pop();
+    const args_offset = try frame.stack.pop();
+    const args_size = try frame.stack.pop();
+    const ret_offset = try frame.stack.pop();
+    const ret_size = try frame.stack.pop();
+    
+    // Validate static context for value transfers
+    if (frame.is_static() and value != 0) {
+        return ExecutionError.Error.WriteProtection;
+    }
+    
+    // Get call frame stack (this would need to be passed somehow)
+    // For now this is a placeholder - we need to refactor to pass CallFrameStack
+    // const call_stack = frame.get_call_stack();
+    
+    // Convert to address
+    const to_address = from_u256(to);
+    
+    // Get call arguments from memory
+    const args = try get_call_args(frame, args_offset, args_size);
+    
+    // Ensure return memory is available
+    try ensure_return_memory(frame, ret_offset, ret_size);
+    
+    // Calculate gas limit
+    const gas_limit = calculate_call_gas_amount(frame, gas, value);
+    
+    // For now, push 0 (failure) since we don't have the full implementation
+    // In the full implementation, we would:
+    // 1. Create new frame using init_call_frame
+    // 2. Execute the frame
+    // 3. Handle result and gas updates
+    try frame.stack.append(0);
 }
 
 pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
@@ -541,26 +572,65 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
 }
 
 pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = ctx;
-
-    // TODO: Implementation requires:
-    // - vm instance for delegatecall operations
-    // - frame.contract.address and frame.contract.caller access
-    // - frame.contract.value and frame.is_static access
-    // - frame.return_data operations
-    // - handle_call_result integration
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    
+    // Pop parameters from stack (DELEGATECALL has no value parameter)
+    const gas = try frame.stack.pop();
+    const to = try frame.stack.pop();
+    const args_offset = try frame.stack.pop();
+    const args_size = try frame.stack.pop();
+    const ret_offset = try frame.stack.pop();
+    const ret_size = try frame.stack.pop();
+    
+    // Convert to address
+    const to_address = from_u256(to);
+    
+    // Get call arguments from memory
+    const args = try get_call_args(frame, args_offset, args_size);
+    
+    // Ensure return memory is available
+    try ensure_return_memory(frame, ret_offset, ret_size);
+    
+    // Calculate gas limit (DELEGATECALL uses no value)
+    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
+    
+    // For now, push 0 (failure) since we don't have the full implementation
+    // In the full implementation, we would:
+    // 1. Create DELEGATECALL frame that preserves caller and value
+    // 2. Execute with shared memory
+    // 3. Handle result
+    try frame.stack.append(0);
 }
 
 pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = ctx;
-
-    // TODO: Implementation requires:
-    // - vm instance for staticcall operations
-    // - frame.contract.address access
-    // - frame.return_data operations
-    // - handle_call_result integration
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    
+    // Pop parameters from stack (STATICCALL has no value parameter)
+    const gas = try frame.stack.pop();
+    const to = try frame.stack.pop();
+    const args_offset = try frame.stack.pop();
+    const args_size = try frame.stack.pop();
+    const ret_offset = try frame.stack.pop();
+    const ret_size = try frame.stack.pop();
+    
+    // Convert to address
+    const to_address = from_u256(to);
+    
+    // Get call arguments from memory
+    const args = try get_call_args(frame, args_offset, args_size);
+    
+    // Ensure return memory is available
+    try ensure_return_memory(frame, ret_offset, ret_size);
+    
+    // Calculate gas limit (STATICCALL uses no value)
+    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
+    
+    // For now, push 0 (failure) since we don't have the full implementation
+    // In the full implementation, we would:
+    // 1. Create STATICCALL frame with is_static = true
+    // 2. Execute with separate memory
+    // 3. Handle result
+    try frame.stack.append(0);
 }
 
 /// SELFDESTRUCT opcode (0xFF): Destroy the current contract and send balance to recipient
@@ -580,14 +650,35 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// Memory: No memory access
 /// Storage: Contract marked for destruction
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = ctx;
-
-    // TODO: Implementation requires:
-    // - vm.chain_rules access for hardfork rules
-    // - vm.state access for account existence checks
-    // - frame.contract.address access
-    // - mark_for_destruction functionality integration
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    
+    // Check static call restriction
+    if (frame.is_static()) {
+        return ExecutionError.Error.WriteProtection;
+    }
+    
+    // Pop recipient address from stack
+    const recipient = try frame.stack.pop();
+    const recipient_address = from_u256(recipient);
+    
+    // Record the self-destruct operation in the journal
+    try frame.journal.record_selfdestruct(
+        frame.snapshot_id,
+        frame.contract_address,
+        recipient_address
+    );
+    
+    // Mark for destruction using the existing self_destruct system if available
+    if (frame.self_destruct) |sd| {
+        try sd.mark_for_destruction(frame.contract_address, recipient_address);
+    }
+    
+    // Gas consumption would be handled here based on hardfork rules
+    // For now, we consume a basic amount
+    try frame.consume_gas(GasConstants.SelfDestructCost);
+    
+    // SELFDESTRUCT terminates execution immediately - we would signal this
+    // to the execution loop, but for now we'll just return
 }
 
 /// EXTCALL opcode (0xF8): External call with EOF validation
