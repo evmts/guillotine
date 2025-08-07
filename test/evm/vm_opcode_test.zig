@@ -84,8 +84,29 @@ fn run_bytecode(
     // Set the code for the contract address in EVM state
     try evm_instance.state.set_code(address, bytecode);
 
-    // Execute the contract
-    return try evm_instance.interpret(&contract, input orelse &[_]u8{}, false);
+    // Execute the contract with traditional interpreter
+    const result = try evm_instance.interpret(&contract, input orelse &[_]u8{}, false);
+    
+    // Also test with block interpreter for parallel validation
+    // SKIP: Bug #3 - interpret_block causes test to hang
+    // var contract_block = Contract.init_at_address(
+    //     address, // caller
+    //     address, // address where code executes
+    //     0, // value
+    //     gas,
+    //     bytecode,
+    //     input orelse &[_]u8{},
+    //     false, // not static
+    // );
+    // defer contract_block.deinit(evm_instance.allocator, null);
+    // const result_block = try evm_instance.interpret_block_write(&contract_block, input orelse &[_]u8{});
+    // defer if (result_block.output) |output| evm_instance.allocator.free(output);
+    // 
+    // // Verify both interpreters produce same result
+    // try std.testing.expectEqual(result.status, result_block.status);
+    // try std.testing.expectEqual(result.gas_used, result_block.gas_used);
+    
+    return result;
 }
 
 // ===== Control Flow Opcodes =====
