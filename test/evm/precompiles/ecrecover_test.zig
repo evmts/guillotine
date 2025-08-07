@@ -287,10 +287,11 @@ test "ecrecover precompile dispatcher integration" {
     try testing.expect(precompiles.is_precompile(ecrecover_address));
 
     // Check availability (ECRECOVER available from Frontier)
-    const ChainRules = Evm.chain_rules.ChainRules;
-    const frontier_rules = ChainRules.for_hardfork(.FRONTIER);
-    const byzantium_rules = ChainRules.for_hardfork(.BYZANTIUM);
-    const istanbul_rules = ChainRules.for_hardfork(.ISTANBUL);
+    const ChainRules = Evm.chain_rules;
+const Frame = @import("../../../src/evm/execution_context.zig").Frame;
+    const frontier_rules = Frame.chainRulesForHardfork(.FRONTIER);
+    const byzantium_rules = Frame.chainRulesForHardfork(.BYZANTIUM);
+    const istanbul_rules = Frame.chainRulesForHardfork(.ISTANBUL);
 
     try testing.expect(precompiles.is_available(ecrecover_address, frontier_rules));
     try testing.expect(precompiles.is_available(ecrecover_address, byzantium_rules));
@@ -301,7 +302,8 @@ test "ecrecover precompile dispatcher execute" {
     const primitives = @import("primitives");
     const Address = primitives.Address.Address;
     const precompiles = @import("../../../src/evm/precompiles/precompiles.zig");
-    const ChainRules = Evm.chain_rules.ChainRules;
+    const ChainRules = Evm.chain_rules;
+const Frame = @import("../../../src/evm/execution_context.zig").Frame;
 
     const ecrecover_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 };
 
@@ -313,7 +315,7 @@ test "ecrecover precompile dispatcher execute" {
     input[95] = 1; // r = 1
     input[127] = 1; // s = 1
 
-    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
+    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
     const result = precompiles.execute_precompile(ecrecover_address, &input, &output, 5000, chain_rules);
 
     try testing.expect(result.is_success());
@@ -326,10 +328,11 @@ test "ecrecover precompile dispatcher estimate gas" {
     const primitives = @import("primitives");
     const Address = primitives.Address.Address;
     const precompiles = @import("../../../src/evm/precompiles/precompiles.zig");
-    const ChainRules = Evm.chain_rules.ChainRules;
+    const ChainRules = Evm.chain_rules;
+const Frame = @import("../../../src/evm/execution_context.zig").Frame;
 
     const ecrecover_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 };
-    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
+    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
 
     // Test gas estimation for various input sizes (should always be 3000)
     try testing.expectEqual(@as(u64, 3000), try precompiles.estimate_gas(ecrecover_address, 0, chain_rules));
@@ -341,10 +344,11 @@ test "ecrecover precompile dispatcher get output size" {
     const primitives = @import("primitives");
     const Address = primitives.Address.Address;
     const precompiles = @import("../../../src/evm/precompiles/precompiles.zig");
-    const ChainRules = Evm.chain_rules.ChainRules;
+    const ChainRules = Evm.chain_rules;
+const Frame = @import("../../../src/evm/execution_context.zig").Frame;
 
     const ecrecover_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 };
-    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
+    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
 
     try testing.expectEqual(@as(usize, 32), try precompiles.get_output_size(ecrecover_address, 128, chain_rules));
     try testing.expectEqual(@as(usize, 32), try precompiles.get_output_size(ecrecover_address, 0, chain_rules));
@@ -355,10 +359,11 @@ test "ecrecover precompile dispatcher validate call" {
     const primitives = @import("primitives");
     const Address = primitives.Address.Address;
     const precompiles = @import("../../../src/evm/precompiles/precompiles.zig");
-    const ChainRules = Evm.chain_rules.ChainRules;
+    const ChainRules = Evm.chain_rules;
+const Frame = @import("../../../src/evm/execution_context.zig").Frame;
 
     const ecrecover_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 };
-    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
+    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
 
     // Valid calls
     try testing.expect(precompiles.validate_call(ecrecover_address, 128, 3000, chain_rules));

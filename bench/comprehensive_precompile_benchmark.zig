@@ -46,7 +46,8 @@ const PrecompileAddresses = struct {
     const kzg_point_evaluation = primitives.Address.from_u256(10);
 };
 
-const chain_rules = evm.hardforks.ChainRules.for_hardfork(.CANCUN);
+const Frame = @import("../src/evm/execution_context.zig").Frame;
+const chain_rules = Frame.chainRulesForHardfork(.CANCUN);
 var output_buffer: [4096]u8 = undefined;
 
 /// Benchmark IDENTITY precompile with various input sizes

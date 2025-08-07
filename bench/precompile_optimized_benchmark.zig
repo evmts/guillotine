@@ -11,8 +11,9 @@ const BenchmarkConfig = timing.BenchmarkConfig;
 const precompiles_original = @import("evm").precompiles.precompiles;
 const precompiles_optimized = @import("evm").Precompiles;
 
-const ChainRules = @import("evm").chain_rules.ChainRules;
-const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
+const ChainRules = @import("evm").chain_rules;
+const Frame = @import("../src/evm/execution_context.zig").Frame;
+const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
 
 // Test data
 const TestData = struct {

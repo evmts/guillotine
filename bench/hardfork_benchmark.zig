@@ -7,6 +7,7 @@ const BenchmarkResult = timing.BenchmarkResult;
 // Import hardfork types
 const Hardfork = @import("evm").Hardfork.Hardfork;
 const ChainRules = @import("evm").chain_rules;
+const Frame = @import("../src/evm/execution_context.zig").Frame;
 
 /// Comprehensive benchmarks for hardfork logic and chain rules.
 /// These benchmarks measure the overhead of hardfork checks that are
@@ -17,12 +18,12 @@ const ChainRules = @import("evm").chain_rules;
 pub fn hardfork_flag_checks_benchmark(allocator: Allocator) !BenchmarkResult {
     const TestFunc = struct {
         fn run() void {
-            const rules_frontier = ChainRules.for_hardfork(.FRONTIER);
-            const rules_byzantium = ChainRules.for_hardfork(.BYZANTIUM);
-            const rules_berlin = ChainRules.for_hardfork(.BERLIN);
-            const rules_london = ChainRules.for_hardfork(.LONDON);
-            const rules_shanghai = ChainRules.for_hardfork(.SHANGHAI);
-            const rules_cancun = ChainRules.for_hardfork(.CANCUN);
+            const rules_frontier = Frame.chainRulesForHardfork(.FRONTIER);
+            const rules_byzantium = Frame.chainRulesForHardfork(.BYZANTIUM);
+            const rules_berlin = Frame.chainRulesForHardfork(.BERLIN);
+            const rules_london = Frame.chainRulesForHardfork(.LONDON);
+            const rules_shanghai = Frame.chainRulesForHardfork(.SHANGHAI);
+            const rules_cancun = Frame.chainRulesForHardfork(.CANCUN);
             // Test common hardfork checks that happen frequently
             var counter: u32 = 0;
             
@@ -61,12 +62,12 @@ pub fn chain_rules_initialization_benchmark(allocator: Allocator) !BenchmarkResu
     const TestFunc = struct {
         fn run() void {
             // Test initialization for various hardforks
-            const rules1 = ChainRules.for_hardfork(.FRONTIER);
-            const rules2 = ChainRules.for_hardfork(.BYZANTIUM);
-            const rules3 = ChainRules.for_hardfork(.BERLIN);
-            const rules4 = ChainRules.for_hardfork(.LONDON);
-            const rules5 = ChainRules.for_hardfork(.SHANGHAI);
-            const rules6 = ChainRules.for_hardfork(.CANCUN);
+            const rules1 = Frame.chainRulesForHardfork(.FRONTIER);
+            const rules2 = Frame.chainRulesForHardfork(.BYZANTIUM);
+            const rules3 = Frame.chainRulesForHardfork(.BERLIN);
+            const rules4 = Frame.chainRulesForHardfork(.LONDON);
+            const rules5 = Frame.chainRulesForHardfork(.SHANGHAI);
+            const rules6 = Frame.chainRulesForHardfork(.CANCUN);
             
             // Prevent optimization
             std.mem.doNotOptimizeAway(rules1);
@@ -90,10 +91,10 @@ pub fn chain_rules_initialization_benchmark(allocator: Allocator) !BenchmarkResu
 pub fn feature_availability_lookup_benchmark(allocator: Allocator) !BenchmarkResult {
     const TestFunc = struct {
         fn run() void {
-            const rules_cancun = ChainRules.for_hardfork(.CANCUN);
-            const rules_london = ChainRules.for_hardfork(.LONDON);
-            const rules_berlin = ChainRules.for_hardfork(.BERLIN);
-            const rules_byzantium = ChainRules.for_hardfork(.BYZANTIUM);
+            const rules_cancun = Frame.chainRulesForHardfork(.CANCUN);
+            const rules_london = Frame.chainRulesForHardfork(.LONDON);
+            const rules_berlin = Frame.chainRulesForHardfork(.BERLIN);
+            const rules_byzantium = Frame.chainRulesForHardfork(.BYZANTIUM);
             var feature_count: u32 = 0;
             
             // Check for various features across different hardforks
@@ -132,11 +133,11 @@ pub fn opcode_availability_by_hardfork_benchmark(allocator: Allocator) !Benchmar
             var available_opcodes: u32 = 0;
             
             // Test opcode availability for different hardforks
-            const rules_byzantium = ChainRules.for_hardfork(.BYZANTIUM);
-            const rules_constantinople = ChainRules.for_hardfork(.CONSTANTINOPLE);
-            const rules_istanbul = ChainRules.for_hardfork(.ISTANBUL);
-            const rules_shanghai = ChainRules.for_hardfork(.SHANGHAI);
-            const rules_cancun = ChainRules.for_hardfork(.CANCUN);
+            const rules_byzantium = Frame.chainRulesForHardfork(.BYZANTIUM);
+            const rules_constantinople = Frame.chainRulesForHardfork(.CONSTANTINOPLE);
+            const rules_istanbul = Frame.chainRulesForHardfork(.ISTANBUL);
+            const rules_shanghai = Frame.chainRulesForHardfork(.SHANGHAI);
+            const rules_cancun = Frame.chainRulesForHardfork(.CANCUN);
             
             // Byzantium opcodes: REVERT, RETURNDATASIZE, RETURNDATACOPY, STATICCALL
             if (rules_byzantium.is_byzantium) available_opcodes += 4;
@@ -175,9 +176,9 @@ pub fn gas_cost_variations_benchmark(allocator: Allocator) !BenchmarkResult {
             var total_gas: u64 = 0;
             
             // Simulate gas cost calculations for different hardforks
-            const rules_tangerine = ChainRules.for_hardfork(.TANGERINE_WHISTLE);
-            const rules_istanbul = ChainRules.for_hardfork(.ISTANBUL);
-            const rules_berlin = ChainRules.for_hardfork(.BERLIN);
+            const rules_tangerine = Frame.chainRulesForHardfork(.TANGERINE_WHISTLE);
+            const rules_istanbul = Frame.chainRulesForHardfork(.ISTANBUL);
+            const rules_berlin = Frame.chainRulesForHardfork(.BERLIN);
             
             // EIP-150 (Tangerine Whistle) - increased SLOAD cost
             if (rules_tangerine.is_eip150) {
@@ -220,9 +221,9 @@ pub fn hardfork_rule_application_benchmark(allocator: Allocator) !BenchmarkResul
         fn run() void {
             var validation_passed: u32 = 0;
             
-            const rules_london = ChainRules.for_hardfork(.LONDON);
-            const rules_berlin = ChainRules.for_hardfork(.BERLIN);
-            const rules_istanbul = ChainRules.for_hardfork(.ISTANBUL);
+            const rules_london = Frame.chainRulesForHardfork(.LONDON);
+            const rules_berlin = Frame.chainRulesForHardfork(.BERLIN);
+            const rules_istanbul = Frame.chainRulesForHardfork(.ISTANBUL);
             
             // Simulate various validation rules
             // EIP-3541 - reject contracts starting with 0xEF
@@ -269,10 +270,10 @@ pub fn validation_rule_differences_benchmark(allocator: Allocator) !BenchmarkRes
             
             // Test different validation patterns per hardfork
             const rules = [_]ChainRules{
-                ChainRules.for_hardfork(.FRONTIER),
-                ChainRules.for_hardfork(.BYZANTIUM),
-                ChainRules.for_hardfork(.LONDON),
-                ChainRules.for_hardfork(.CANCUN),
+                Frame.chainRulesForHardfork(.FRONTIER),
+                Frame.chainRulesForHardfork(.BYZANTIUM),
+                Frame.chainRulesForHardfork(.LONDON),
+                Frame.chainRulesForHardfork(.CANCUN),
             };
             
             for (rules) |rule| {
@@ -318,7 +319,7 @@ pub fn compile_time_vs_runtime_benchmark(allocator: Allocator) !BenchmarkResult 
             var result2: u32 = 0;
             
             // Compile-time known hardfork (should be optimized away)
-            const ct_rules = comptime ChainRules.for_hardfork(.CANCUN);
+            const ct_rules = comptime Frame.chainRulesForHardfork(.CANCUN);
             if (ct_rules.is_cancun) {
                 result1 += 1;
             }
@@ -354,15 +355,15 @@ pub fn hardfork_detection_benchmark(allocator: Allocator) !BenchmarkResult {
             
             // Create rules for different hardforks
             const rules = [_]ChainRules{
-                ChainRules.for_hardfork(.FRONTIER),
-                ChainRules.for_hardfork(.HOMESTEAD),
-                ChainRules.for_hardfork(.BYZANTIUM),
-                ChainRules.for_hardfork(.CONSTANTINOPLE),
-                ChainRules.for_hardfork(.ISTANBUL),
-                ChainRules.for_hardfork(.BERLIN),
-                ChainRules.for_hardfork(.LONDON),
-                ChainRules.for_hardfork(.SHANGHAI),
-                ChainRules.for_hardfork(.CANCUN),
+                Frame.chainRulesForHardfork(.FRONTIER),
+                Frame.chainRulesForHardfork(.HOMESTEAD),
+                Frame.chainRulesForHardfork(.BYZANTIUM),
+                Frame.chainRulesForHardfork(.CONSTANTINOPLE),
+                Frame.chainRulesForHardfork(.ISTANBUL),
+                Frame.chainRulesForHardfork(.BERLIN),
+                Frame.chainRulesForHardfork(.LONDON),
+                Frame.chainRulesForHardfork(.SHANGHAI),
+                Frame.chainRulesForHardfork(.CANCUN),
             };
             
             // Detect hardfork for each rule set
@@ -515,9 +516,9 @@ test "hardfork benchmarks integration" {
 
 test "hardfork detection" {
     // Test the reverse lookup functionality
-    const rules_cancun = ChainRules.for_hardfork(.CANCUN);
-    const rules_london = ChainRules.for_hardfork(.LONDON);
-    const rules_byzantium = ChainRules.for_hardfork(.BYZANTIUM);
+    const rules_cancun = Frame.chainRulesForHardfork(.CANCUN);
+    const rules_london = Frame.chainRulesForHardfork(.LONDON);
+    const rules_byzantium = Frame.chainRulesForHardfork(.BYZANTIUM);
     
     try std.testing.expectEqual(Hardfork.CANCUN, ChainRules.getHardfork(rules_cancun));
     try std.testing.expectEqual(Hardfork.LONDON, ChainRules.getHardfork(rules_london));

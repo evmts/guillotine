@@ -1,6 +1,6 @@
 const std = @import("std");
 const ecpairing = @import("ecpairing.zig");
-const chain_rules = @import("../hardforks/chain_rules.zig");
+const ExecutionContext = @import("../execution_context.zig");
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 
 test "fuzz ecpairing input length validation" {
@@ -9,7 +9,7 @@ test "fuzz ecpairing input length validation" {
     // ECPAIRING expects input length to be a multiple of 192 bytes
     // Each pair is: G1 point (64 bytes) + G2 point (128 bytes) = 192 bytes
     var output: [32]u8 = undefined;
-    const rules = chain_rules.for_hardfork(Hardfork.ISTANBUL);
+    const rules = ExecutionContext.Frame.chainRulesForHardfork(Hardfork.ISTANBUL);
     
     const result = ecpairing.execute(input, &output, 10000000, rules);
     
@@ -35,7 +35,7 @@ test "fuzz ecpairing single pair validation" {
     @memcpy(&pair_input, input[0..192]);
     
     var output: [32]u8 = undefined;
-    const rules = chain_rules.for_hardfork(Hardfork.ISTANBUL);
+    const rules = ExecutionContext.Frame.chainRulesForHardfork(Hardfork.ISTANBUL);
     
     const result = ecpairing.execute(&pair_input, &output, 10000000, rules);
     
@@ -59,7 +59,7 @@ test "fuzz ecpairing multiple pairs" {
     const pair_input = input[0..pair_bytes];
     
     var output: [32]u8 = undefined;
-    const rules = chain_rules.for_hardfork(Hardfork.ISTANBUL);
+    const rules = ExecutionContext.Frame.chainRulesForHardfork(Hardfork.ISTANBUL);
     
     const result = ecpairing.execute(pair_input, &output, 10000000, rules);
     
@@ -81,7 +81,7 @@ test "fuzz ecpairing gas consumption" {
     const gas_limit = std.mem.readInt(u64, input[192..200], .little);
     
     var output: [32]u8 = undefined;
-    const rules = chain_rules.for_hardfork(Hardfork.ISTANBUL);
+    const rules = ExecutionContext.Frame.chainRulesForHardfork(Hardfork.ISTANBUL);
     
     const result = ecpairing.execute(pair_input, &output, gas_limit, rules);
     
@@ -109,7 +109,7 @@ test "fuzz ecpairing identity elements" {
     @memset(pair_input[64..192], 0);
     
     var output: [32]u8 = undefined;
-    const rules = chain_rules.for_hardfork(Hardfork.ISTANBUL);
+    const rules = ExecutionContext.Frame.chainRulesForHardfork(Hardfork.ISTANBUL);
     
     const result = ecpairing.execute(&pair_input, &output, 10000000, rules);
     
@@ -140,7 +140,7 @@ test "fuzz ecpairing field element bounds" {
     std.mem.writeInt(u256, pair_input[160..192], 1, .big); // G2 y2
     
     var output: [32]u8 = undefined;
-    const rules = chain_rules.for_hardfork(Hardfork.ISTANBUL);
+    const rules = ExecutionContext.Frame.chainRulesForHardfork(Hardfork.ISTANBUL);
     
     const result = ecpairing.execute(&pair_input, &output, 10000000, rules);
     
