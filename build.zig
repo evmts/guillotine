@@ -226,13 +226,6 @@ pub fn build(b: *std.Build) void {
     compilers_mod.addImport("primitives", primitives_mod);
     compilers_mod.addImport("evm", evm_mod);
 
-    // Create bench module - always use ReleaseFast for benchmarks
-    const bench_optimize = if (optimize == .Debug) .ReleaseFast else optimize;
-
-    // Use the same BN254 library for benchmarks (no separate build needed)
-    const bench_bn254_lib = if (!no_bn254) blk: {
-        break :blk bn254_lib;
-    } else null;
 
 
 
