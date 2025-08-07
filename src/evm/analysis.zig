@@ -325,25 +325,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     // Null-terminate the instruction stream
     instructions[instruction_count] = null;
 
-    // Convert to slice of non-nullable instructions for jump target resolution
-    var non_null_instructions = try allocator.alloc(Instruction, instruction_count);
-    errdefer allocator.free(non_null_instructions);
-
-    for (0..instruction_count) |i| {
-        non_null_instructions[i] = instructions[i].?; // Safe because we know they're not null
-    }
-
     // Resolve jump targets after initial translation
-    resolveJumpTargets(allocator, code, non_null_instructions, jumpdest_bitmap) catch {
+    resolveJumpTargets(allocator, code, instructions[0..instruction_count], jumpdest_bitmap) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
     };
-
-    // Copy back the resolved instructions
-    for (0..instruction_count) |i| {
-        instructions[i] = non_null_instructions[i];
-    }
-
-    allocator.free(non_null_instructions);
 
     // Resize array to actual size + null terminator
     const final_instructions = try allocator.realloc(instructions, instruction_count + 1);
@@ -352,7 +337,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
 /// Resolve jump targets in the instruction stream.
 /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
-fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
+fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructions: []?Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
     // Build a map from PC to instruction index using dynamic allocation
     // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
     var pc_to_instruction = try allocator.alloc(u16, code.len);
@@ -392,17 +377,17 @@ fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructio
 
         if (opcode_byte == 0x56 or opcode_byte == 0x57) { // JUMP or JUMPI
             // Look for the target address in the previous PUSH instruction
-            if (inst_idx > 0 and instructions[inst_idx - 1].arg == .push_value) {
-                const target_pc = instructions[inst_idx - 1].arg.push_value;
+            if (inst_idx > 0 and instructions[inst_idx - 1] != null and instructions[inst_idx - 1].?.arg == .push_value) {
+                const target_pc = instructions[inst_idx - 1].?.arg.push_value;
 
                 // Check if it's within bounds and is a valid jumpdest
                 if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {
                     // Find the instruction index for this PC
                     if (target_pc < pc_to_instruction.len) {
                         const target_idx = pc_to_instruction[@intCast(target_pc)];
-                        if (target_idx != std.math.maxInt(u16)) {
+                        if (target_idx != std.math.maxInt(u16) and target_idx < instructions.len and instructions[target_idx] != null) {
                             // Update the JUMP/JUMPI with the target pointer
-                            instructions[inst_idx].arg = .{ .jump_target = &instructions[target_idx] };
+                            instructions[inst_idx].?.arg = .{ .jump_target = &instructions[target_idx].? };
                         }
                     }
                 }
