@@ -1661,6 +1661,46 @@ pub fn build(b: *std.Build) void {
     inline_ops_test_step.dependOn(&run_inline_ops_test.step);
     test_step.dependOn(&run_inline_ops_test.step);
 
+    // Add memory optimization tests
+    const block_metadata_heap_test = b.addTest(.{
+        .name = "block-metadata-heap-test",
+        .root_source_file = b.path("src/evm/frame/block_metadata_heap.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    block_metadata_heap_test.root_module.addImport("primitives", primitives_mod);
+    block_metadata_heap_test.root_module.addImport("evm", evm_mod);
+    const run_block_metadata_heap_test = b.addRunArtifact(block_metadata_heap_test);
+    const block_metadata_heap_test_step = b.step("test-block-metadata-heap", "Run block metadata heap tests");
+    block_metadata_heap_test_step.dependOn(&run_block_metadata_heap_test.step);
+    test_step.dependOn(&run_block_metadata_heap_test.step);
+
+    const code_analysis_optimized_test = b.addTest(.{
+        .name = "code-analysis-optimized-test",
+        .root_source_file = b.path("src/evm/frame/code_analysis_optimized.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    code_analysis_optimized_test.root_module.addImport("primitives", primitives_mod);
+    code_analysis_optimized_test.root_module.addImport("evm", evm_mod);
+    const run_code_analysis_optimized_test = b.addRunArtifact(code_analysis_optimized_test);
+    const code_analysis_optimized_test_step = b.step("test-code-analysis-optimized", "Run optimized code analysis tests");
+    code_analysis_optimized_test_step.dependOn(&run_code_analysis_optimized_test.step);
+    test_step.dependOn(&run_code_analysis_optimized_test.step);
+
+    const analyze_compact_test = b.addTest(.{
+        .name = "analyze-compact-test",
+        .root_source_file = b.path("src/evm/frame/analyze_and_compact.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    analyze_compact_test.root_module.addImport("primitives", primitives_mod);
+    analyze_compact_test.root_module.addImport("evm", evm_mod);
+    const run_analyze_compact_test = b.addRunArtifact(analyze_compact_test);
+    const analyze_compact_test_step = b.step("test-analyze-compact", "Run analyze and compact tests");
+    analyze_compact_test_step.dependOn(&run_analyze_compact_test.step);
+    test_step.dependOn(&run_analyze_compact_test.step);
+
     test_step.dependOn(&run_integration_test.step);
     test_step.dependOn(&run_gas_test.step);
     test_step.dependOn(&run_static_protection_test.step);
