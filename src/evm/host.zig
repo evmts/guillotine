@@ -1,5 +1,48 @@
 const std = @import("std");
-const Address = @import("../address/address.zig").Address;
+const Address = @import("primitives").Address.Address;
+const CallResult = @import("evm/call_result.zig").CallResult;
+const Frame = @import("frame.zig").Frame;
+
+/// Call operation parameters for different call types
+pub const CallParams = union(enum) {
+    /// Regular CALL operation
+    call: struct {
+        caller: Address,
+        to: Address,
+        value: u256,
+        input: []const u8,
+        gas: u64,
+    },
+    /// DELEGATECALL operation (preserves caller context)
+    delegatecall: struct {
+        caller: Address,  // Original caller, not current contract
+        to: Address,
+        input: []const u8,
+        gas: u64,
+    },
+    /// STATICCALL operation (read-only)
+    staticcall: struct {
+        caller: Address,
+        to: Address, 
+        input: []const u8,
+        gas: u64,
+    },
+    /// CREATE operation
+    create: struct {
+        caller: Address,
+        value: u256,
+        init_code: []const u8,
+        gas: u64,
+    },
+    /// CREATE2 operation
+    create2: struct {
+        caller: Address,
+        value: u256,
+        init_code: []const u8,
+        salt: u256,
+        gas: u64,
+    },
+};
 
 /// Block information structure for Host interface
 pub const BlockInfo = struct {
@@ -39,6 +82,8 @@ pub const Host = struct {
         get_block_info: *const fn (ptr: *anyopaque) BlockInfo,
         /// Emit log event (for LOG0-LOG4 opcodes)
         emit_log: *const fn (ptr: *anyopaque, contract_address: Address, topics: []const u256, data: []const u8) void,
+        /// Execute EVM call (CALL, DELEGATECALL, STATICCALL, CREATE, CREATE2)
+        call: *const fn (ptr: *anyopaque, params: CallParams) CallResult,
     };
 
     /// Initialize a Host interface from any implementation
@@ -76,12 +121,18 @@ pub const Host = struct {
                 return self.emit_log(contract_address, topics, data);
             }
 
+            fn vtable_call(ptr: *anyopaque, params: CallParams) CallResult {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.call(params);
+            }
+
             const vtable = VTable{
                 .get_balance = vtable_get_balance,
                 .account_exists = vtable_account_exists,
                 .get_code = vtable_get_code,
                 .get_block_info = vtable_get_block_info,
                 .emit_log = vtable_emit_log,
+                .call = vtable_call,
             };
         };
 
@@ -114,6 +165,11 @@ pub const Host = struct {
     /// Emit log event
     pub fn emit_log(self: Host, contract_address: Address, topics: []const u256, data: []const u8) void {
         return self.vtable.emit_log(self.ptr, contract_address, topics, data);
+    }
+
+    /// Execute EVM call
+    pub fn call(self: Host, params: CallParams) CallResult {
+        return self.vtable.call(self.ptr, params);
     }
 };
 
@@ -190,6 +246,17 @@ pub const MockHost = struct {
         }) catch {
             self.allocator.free(topics_copy);
             self.allocator.free(data_copy);
+        };
+    }
+    
+    pub fn call(self: *MockHost, params: CallParams) CallResult {
+        _ = self;
+        _ = params;
+        // Mock implementation - just return success with empty output
+        return CallResult{
+            .success = true,
+            .gas_left = 0,
+            .output = &.{},
         };
     }
     
