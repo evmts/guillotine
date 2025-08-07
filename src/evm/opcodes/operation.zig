@@ -61,7 +61,7 @@ pub const State = *@import("../frame/frame.zig");
 /// @param interpreter VM interpreter context
 /// @param state Execution state and environment
 /// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = *const fn (pc: usize, interpreter: Interpreter, state: State) ExecutionError.Error!ExecutionResult;
+pub const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
 
 /// Function signature for dynamic gas calculation.
 ///

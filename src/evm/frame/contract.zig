@@ -48,6 +48,7 @@ const AnalysisCacheConfig = @import("analysis_lru_cache.zig").AnalysisCacheConfi
 const StoragePool = @import("storage_pool.zig");
 const Log = @import("../log.zig");
 const build_options = @import("build_options");
+const JumpTable = @import("../jump_table/jump_table.zig");
 
 /// Maximum gas refund allowed (EIP-3529)
 const MAX_REFUND_QUOTIENT = 5;
@@ -479,14 +480,6 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     return analysis.jumpdest_bitmap.isSet(pos);
 }
 
-/// Check if position is code (not data)
-pub fn is_code(self: *const Contract, pos: u64) bool {
-    if (self.analysis) |analysis| {
-        // Use the safe isSet method
-        return analysis.code_segments.isSet(@intCast(pos));
-    }
-    return true;
-}
 
 /// Attempts to consume gas from the contract's available gas.
 ///
@@ -802,22 +795,21 @@ pub fn analyze_code(allocator: std.mem.Allocator, code: []const u8, code_hash: [
 
 /// Direct bytecode analysis without caching (for size-optimized builds)
 fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnalysisError!*const CodeAnalysis {
-    // When caching is disabled, we still need to manage memory properly
-    // The caller (ensure_analysis) is responsible for cleanup
-    const analysis = allocator.create(CodeAnalysis) catch |err| {
+    // Allocate space for the CodeAnalysis struct
+    const analysis_ptr = allocator.create(CodeAnalysis) catch |err| {
         Log.debug("Failed to allocate CodeAnalysis: {any}", .{err});
         return error.OutOfMemory;
     };
-    errdefer allocator.destroy(analysis);
+    errdefer allocator.destroy(analysis_ptr);
 
-    // Use the comprehensive block analysis with static arrays
-    CodeAnalysis.from_code(analysis, code) catch |err| {
+    // Use the new CodeAnalysis API and store the result directly
+    analysis_ptr.* = CodeAnalysis.from_code(allocator, code, &JumpTable.DEFAULT) catch |err| {
         Log.debug("Failed to analyze bytecode: {any}", .{err});
-        allocator.destroy(analysis);
+        allocator.destroy(analysis_ptr);
         return error.OutOfMemory;
     };
 
-    return analysis;
+    return analysis_ptr;
 }
 
 /// SIMD-optimized version of analyze_code for x86_64 with AVX2
@@ -946,8 +938,10 @@ pub fn clear_analysis_cache(allocator: std.mem.Allocator) void {
     if (simple_cache) |*cache| {
         var iter = cache.iterator();
         while (iter.next()) |entry| {
-            // CodeAnalysis no longer needs deinit - it uses fixed-size arrays
-            allocator.destroy(entry.value_ptr.*);
+            // Clean up the heap-allocated instructions in the CodeAnalysis
+            var analysis = entry.value_ptr.*;
+            analysis.deinit();
+            allocator.destroy(analysis);
         }
         cache.deinit();
         simple_cache = null;

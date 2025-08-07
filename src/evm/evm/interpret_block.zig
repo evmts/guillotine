@@ -50,18 +50,10 @@ pub inline fn interpret_block(self: *Evm, contract: *Contract, input: []const u8
     defer self.read_only = prev_read_only;
     self.read_only = self.read_only or is_static;
 
-    // This block based evm optimizes performance by preanalyzing bytecode and turning it into null terminated series of instructions in memory
-    // This maximizes branch prediction and our code analysis is set up to optimize gas estimation such that we precalculate it for all blocks
-    // And also maximize cpu cache hits by bulk calculating it all at once. We create series of structs in memory such that as we linearly loop through
-    // the opcode analyzing it and generating structures we are optimizing CPu cache hits using data oriented design.
-    // The ultimate result of this analysis step is a data structure where all blocks of opcodes that run sequentially are placed in memory in a null
-    // terminated array of our `Instruction` struct. Most instructions we just increment pointer to next instruction. Jumps and other instructions will
-    // have a pointer reeference to where they go to (potentially a new group)
-    const analysis = try CodeAnalysis.from_code(contract.code[0..contract.code_size]);
-    // Null terminated array of instructions. All instructions by default will expect the next instruction to be pointer+1.
-    // For jumps they will store the pointer to the next instruction
-    // The EVM just iterates through instructions until encountering an opcode that terminates execution or hitting a null terminator
-    var current_instruction = try analysis.to_instructions(self.allocator, contract.code[0..contract.code_size], &self.table);
+    // Analyze bytecode and get optimized instruction stream in one call
+    var analysis = try CodeAnalysis.from_code(self.allocator, contract.code[0..contract.code_size], &self.table);
+    defer analysis.deinit();
+    var current_instruction = analysis.instructions;
 
     // The Frame struct is one fat struct that represents the entire state of the EVM as it executes
     // It uses arena allocation
