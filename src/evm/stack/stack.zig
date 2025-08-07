@@ -111,6 +111,17 @@ pub fn init() Stack {
     return stack;
 }
 
+/// Clear the stack without deallocating memory - resets to initial empty state
+pub fn clear(self: *Stack) void {
+    // Reset current pointer to base (empty stack)
+    self.current = self.base;
+    
+    // In debug/safe modes, zero out all values for security
+    if (comptime CLEAR_ON_POP) {
+        @memset(std.mem.asBytes(&self.data), 0);
+    }
+}
+
 /// Get current stack size using pointer arithmetic
 pub inline fn size(self: *const Stack) usize {
     return (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
