@@ -8,7 +8,6 @@ const AccessList = @import("../access_list.zig").AccessList;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CodeAnalysis = @import("../analysis.zig");
 const Evm = @import("../evm.zig");
-const Contract = Evm.Contract;
 const interpret = @import("interpret.zig");
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
@@ -16,6 +15,7 @@ const primitives = @import("primitives");
 const precompiles = @import("../precompiles/precompiles.zig");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const CallResult = @import("call_result.zig").CallResult;
+const CallParams = @import("../host.zig").CallParams;
 
 // Threshold for stack vs heap allocation optimization
 const STACK_ALLOCATION_THRESHOLD = 12800; // bytes of bytecode
@@ -26,121 +26,131 @@ const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 // 128 KB is about the limit most rpc providers limit call data to so we use it as the default
 pub const MAX_INPUT_SIZE: u18 = 128 * 1024; // 128 kb
 
-pub inline fn call(self: *Evm, contract: *Contract, input: []const u8, comptime is_static: bool) ExecutionError.Error!InterpretResult {
-    {
-        if (contract.input.len > MAX_INPUT_SIZE) return ExecutionError.Error.InputSizeExceeded;
-        if (contract.code_size > MAX_CODE_SIZE) return ExecutionError.Error.MaxCodeSizeExceeded;
-        if (contract.code_size != contract.code.len) return ExecutionError.Error.CodeSizeMismatch;
-        if (contract.gas == 0) return ExecutionError.Error.OutOfGas;
-        if (contract.code_size > 0 and contract.code.len == 0) return ExecutionError.Error.CodeSizeMismatch;
-    }
-
-    // Check if this is a precompile call
-    if (precompile_addresses.get_precompile_id_checked(contract.address)) |precompile_id| {
-        const precompile_result = self.execute_precompile_call_by_id(precompile_id, input, contract.gas, is_static) catch |err| {
-            return switch (err) {
-                else => ExecutionError.Error.PrecompileError,
-            };
-        };
-        
-        // Convert CallResult to InterpretResult
-        const status: RunResult.Status = if (precompile_result.success) .Success else .Revert;
-        const final_error = if (precompile_result.success) null else ExecutionError.Error.PrecompileError;
-        
-        var access_list = AccessList.init(self.allocator);
-        var self_destruct = SelfDestruct.init(self.allocator);
-        
-        return InterpretResult.init(
-            self.allocator,
-            contract.gas, // initial_gas
-            precompile_result.gas_left, // gas_remaining
-            status,
-            final_error,
-            precompile_result.output,
-            access_list,
-            self_destruct
-        );
-    }
-
-    const initial_gas = contract.gas;
-
-    // Initialize the call stack with MAX_CALL_DEPTH frames
-    var frame_stack: [MAX_CALL_DEPTH]Frame = undefined;
-
-    // Do analysis on stack if contract is small
-    var stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined;
-    const analysis_allocator = if (contract.code_size <= STACK_ALLOCATION_THRESHOLD)
-        std.heap.FixedBufferAllocator.init(&stack_buffer)
-    else
-        self.allocator;
-    var analysis = try CodeAnalysis.from_code(analysis_allocator, contract.code[0..contract.code_size], &self.table);
-    defer analysis.deinit();
-
-    // Create access list and self destruct trackers
-    var access_list = AccessList.init(self.allocator);
-    var self_destruct = SelfDestruct.init(self.allocator);
-
-    // Initialize all frames in the stack and link them together
-    for (0..MAX_CALL_DEPTH) |i| {
-        const next_frame = if (i + 1 < MAX_CALL_DEPTH) &frame_stack[i + 1] else null;
-        frame_stack[i] = try Frame.init(
-            0, // gas_remaining - will be set properly for frame 0
-            false, // static_call - will be set properly for frame 0  
-            @intCast(i), // call_depth
-            primitives.Address.ZERO_ADDRESS, // contract_address - will be set properly for frame 0
-            &analysis, // analysis - will be set properly for each frame when used
-            &access_list,
-            self.state,
-            ChainRules{},
-            &self_destruct,
-            &[_]u8{}, // input - will be set properly for frame 0
-            self.arena_allocator(),
-            next_frame,
-        );
-    }
-    
-    // Set up the first frame properly for execution
-    frame_stack[0].gas_remaining = contract.gas;
-    frame_stack[0].hot_flags.is_static = is_static;
-    frame_stack[0].hot_flags.depth = @intCast(self.depth);
-    frame_stack[0].contract_address = contract.address;
-    frame_stack[0].input = input;
-    
-    // Ensure all frames are properly deinitialized
-    defer {
-        for (0..MAX_CALL_DEPTH) |i| {
-            frame_stack[i].deinit();
-        }
-    }
-
-    // Call interpret with the first frame
-    interpret.interpret(self, &frame_stack[0]) catch |err| {
-        // Handle error cases and transform to InterpretResult
-        var output: ?[]const u8 = null;
-        if (frame_stack[0].output.len > 0) {
-            output = self.allocator.dupe(u8, frame_stack[0].output) catch {
-                return InterpretResult.init(self.allocator, initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfMemory, null, access_list, self_destruct);
-            };
-        }
-
-        const status: RunResult.Status = switch (err) {
-            ExecutionError.Error.STOP => .Success,
-            ExecutionError.Error.REVERT => .Revert,
-            ExecutionError.Error.OutOfGas => .OutOfGas,
-            else => .Invalid,
-        };
-
-        return InterpretResult.init(self.allocator, initial_gas, frame_stack[0].gas_remaining, status, err, output, access_list, self_destruct);
+pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+    // Extract call info from params - for now just handle the .call case
+    // TODO: Handle other call types properly
+    const call_info = switch (params) {
+        .call => |call_data| .{
+            .address = call_data.to,
+            .code = &[_]u8{}, // TODO: Load from state
+            .code_size = 0,
+            .input = call_data.input,
+            .gas = call_data.gas,
+            .is_static = false,
+        },
+        .staticcall => |call_data| .{
+            .address = call_data.to,
+            .code = &[_]u8{}, // TODO: Load from state
+            .code_size = 0,
+            .input = call_data.input,
+            .gas = call_data.gas,
+            .is_static = true,
+        },
+        else => {
+            // For now, return error for unhandled call types
+            return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+        },
     };
 
-    // Success case - update contract gas and copy output if needed
-    contract.gas = frame_stack[0].gas_remaining;
-    var output: ?[]const u8 = null;
-    if (frame_stack[0].output.len > 0) {
-        output = try self.allocator.dupe(u8, frame_stack[0].output);
+    // Input validation
+    if (call_info.input.len > MAX_INPUT_SIZE) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    if (call_info.code_size > MAX_CODE_SIZE) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    if (call_info.code_size != call_info.code.len) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    if (call_info.gas == 0) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    if (call_info.code_size > 0 and call_info.code.len == 0) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+
+    // Check if this is a precompile call
+    if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
+        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_info.input, call_info.gas, call_info.is_static) catch |err| {
+            return switch (err) {
+                else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
+            };
+        };
+
+        return precompile_result;
+    }
+
+    // Only initialize EVM state if we're at depth 0 (top-level call)
+    // Check current frame depth from EVM to determine if this is a nested call
+    if (self.current_frame_depth == 0) {
+        // Initialize fresh execution state in EVM instance (per-call isolation)
+        // CRITICAL: Clear all state at beginning of top-level call
+        self.current_frame_depth = 0;
+        self.access_list.clear(); // Reset access list for fresh per-call state
+        self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
+    }
+
+    // Do analysis using EVM instance buffer if contract is small
+    const analysis_allocator = if (call_info.code_size <= STACK_ALLOCATION_THRESHOLD)
+        std.heap.FixedBufferAllocator.init(&self.analysis_stack_buffer)
+    else
+        self.allocator;
+    var analysis = try CodeAnalysis.from_code(analysis_allocator, call_info.code[0..call_info.code_size], &self.table);
+    defer analysis.deinit();
+
+    // Reinitialize if first frame
+    if (self.current_frame_depth == 0) {
+        for (0..MAX_CALL_DEPTH) |i| {
+            const next_frame = if (i + 1 < MAX_CALL_DEPTH) &self.frame_stack[i + 1] else null;
+            self.frame_stack[i] = try Frame.init(
+                0, // gas_remaining - will be set properly for frame 0
+                false, // static_call - will be set properly for frame 0
+                @intCast(i), // call_depth
+                primitives.Address.ZERO_ADDRESS, // contract_address - will be set properly for frame 0
+                &analysis, // analysis - will be set properly for each frame when used
+                &self.access_list,
+                self.state,
+                ChainRules{},
+                &self.self_destruct,
+                &[_]u8{}, // input - will be set properly for frame 0
+                self.arena_allocator(),
+                next_frame,
+            );
+        }
+    }
+
+    // Set up the first frame properly for execution
+    self.frame_stack[0].gas_remaining = call_info.gas;
+    self.frame_stack[0].hot_flags.is_static = call_info.is_static;
+    self.frame_stack[0].hot_flags.depth = @intCast(self.depth);
+    self.frame_stack[0].contract_address = call_info.address;
+    self.frame_stack[0].input = call_info.input;
+
+    // Ensure all frames are properly deinitialized
+
+    // Call interpret with the first frame
+    interpret.interpret(self, &self.frame_stack[0]) catch |err| {
+        // Handle error cases and transform to CallResult
+        var output = &[_]u8{};
+        if (self.frame_stack[0].output.len > 0) {
+            output = self.allocator.dupe(u8, self.frame_stack[0].output) catch &[_]u8{};
+        }
+
+        const success = switch (err) {
+            ExecutionError.Error.STOP => true,
+            ExecutionError.Error.REVERT => false,
+            ExecutionError.Error.OutOfGas => false,
+            else => false,
+        };
+
+        return CallResult{
+            .success = success,
+            .gas_left = self.frame_stack[0].gas_remaining,
+            .output = output,
+        };
+    };
+
+    // Success case - copy output if needed
+    var output = &[_]u8{};
+    if (self.frame_stack[0].output.len > 0) {
+        output = try self.allocator.dupe(u8, self.frame_stack[0].output);
     }
 
     // Apply destructions before returning
     // TODO: Apply destructions to state
-    return InterpretResult.init(self.allocator, initial_gas, frame_stack[0].gas_remaining, .Success, null, output, access_list, self_destruct);
+    return CallResult{
+        .success = true,
+        .gas_left = self.frame_stack[0].gas_remaining,
+        .output = output,
+    };
 }
