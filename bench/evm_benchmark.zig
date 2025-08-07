@@ -23,8 +23,16 @@ fn evm_snail_shell_benchmark_impl(allocator: Allocator) !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    evm_instance.* = try builder.build();
+    evm_instance.* = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer evm_instance.deinit();
 
     // Set up deployer account with ETH
@@ -155,8 +163,16 @@ fn evm_arithmetic_benchmark_impl(allocator: Allocator) !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    evm_instance.* = try builder.build();
+    evm_instance.* = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer evm_instance.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);
@@ -225,8 +241,16 @@ fn evm_memory_benchmark_impl(allocator: Allocator) !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    evm_instance.* = try builder.build();
+    evm_instance.* = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer evm_instance.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);
@@ -305,8 +329,16 @@ fn evm_storage_benchmark_impl(allocator: Allocator) !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    evm_instance.* = try builder.build();
+    evm_instance.* = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer evm_instance.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);

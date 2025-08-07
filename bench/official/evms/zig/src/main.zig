@@ -106,8 +106,16 @@ pub fn main() !void {
 
     // Create EVM instance using builder pattern
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try evm_builder.build();
+    var vm = try evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer vm.deinit();
 
     // Set up caller account with max balance

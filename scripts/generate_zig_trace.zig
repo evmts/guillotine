@@ -33,10 +33,16 @@ pub fn main() !void {
     var trace_buffer = std.ArrayList(u8).init(allocator);
     defer trace_buffer.deinit();
     
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    _ = builder.withTracer(trace_buffer.writer().any());
-    
-    var vm = try builder.build();
+    var vm = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        trace_buffer.writer().any(), // tracer
+    );
     defer vm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);
