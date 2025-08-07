@@ -112,60 +112,6 @@ pub const Evm = @import("evm.zig");
 pub const Frame = @import("frame.zig").Frame;
 pub const ExecutionContext = @import("frame.zig").ExecutionContext;
 
-/// Placeholder Contract struct for backward compatibility during migration
-/// TODO: Remove this when all code is migrated to ExecutionContext
-pub const Contract = struct {
-    const Self = @This();
-    
-    pub fn init_at_address(
-        caller: primitives.Address.Address,
-        target: primitives.Address.Address,
-        value: u256,
-        gas_limit: u64,
-        bytecode: []const u8,
-        input: []const u8,
-        is_static: bool,
-    ) Self {
-        // Placeholder implementation - should not be used in production
-        _ = caller;
-        _ = target;
-        _ = value;
-        _ = gas_limit;
-        _ = bytecode;
-        _ = input;
-        _ = is_static;
-        return Self{};
-    }
-    
-    pub fn init(
-        allocator: std.mem.Allocator, 
-        bytecode: []const u8,
-        code_hash: ?[32]u8,
-        caller: primitives.Address.Address,
-        target: primitives.Address.Address,
-        address: primitives.Address.Address,
-        gas_limit: u64,
-        is_static: bool,
-    ) !Self {
-        // Placeholder implementation - should not be used in production
-        _ = allocator;
-        _ = bytecode;
-        _ = code_hash;
-        _ = caller;
-        _ = target;
-        _ = address;
-        _ = gas_limit;
-        _ = is_static;
-        return Self{};
-    }
-    
-    pub fn deinit(self: *Self, allocator: std.mem.Allocator, storage_pool: ?*anyopaque) void {
-        _ = self;
-        _ = allocator;
-        _ = storage_pool;
-        // No cleanup needed for placeholder
-    }
-};
 
 /// EVM state management (accounts, storage, logs)
 pub const EvmState = @import("state/state.zig");
