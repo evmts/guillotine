@@ -25,18 +25,13 @@ test "Simple bytecode works with block execution" {
     
     std.log.info("TEST: Bytecode is PUSH-MSTORE-RETURN with padding (len={})", .{bytecode.len});
     
-    // Initialize EVM memory allocator
-    var evm_memory_allocator = try evm.EvmMemoryAllocator.init(allocator);
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    // Initialize database
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Initialize database with normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = try evm_builder.build();
     defer vm.deinit();
     
@@ -63,7 +58,7 @@ test "Simple bytecode works with block execution" {
         &.{}, // empty input
         false // is_static
     );
-    defer contract.deinit(evm_allocator, null);
+    defer contract.deinit(allocator, null);
     
     // Execute with block interpreter to test
     std.log.info("TEST: Starting block execution with interpret_block", .{});
@@ -74,7 +69,7 @@ test "Simple bytecode works with block execution" {
     try std.testing.expect(result.status == .Success);
     
     if (result.output) |output| {
-        defer evm_allocator.free(output);
+        defer allocator.free(output);
         std.log.info("Simple block execution output size: {}", .{output.len});
     }
 }

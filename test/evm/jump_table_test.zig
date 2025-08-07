@@ -94,13 +94,10 @@ test "Manual VM.init reproduction" {
     const db_interface = memory_db.to_database_interface();
     std.log.debug("Step 1: Database setup complete", .{});
 
-    // Step 2: EvmMemoryAllocator (we know this works individually)
-    std.log.debug("Step 2: Setting up EvmMemoryAllocator", .{});
-    const EvmMemoryAllocator = @import("evm").memory.EvmMemoryAllocator;
-    var evm_allocator = try EvmMemoryAllocator.init(test_allocator);
-    defer evm_allocator.deinit();
-    const evm_alloc = evm_allocator.allocator();
-    std.log.debug("Step 2: EvmMemoryAllocator setup complete", .{});
+    // Step 2: Use normal allocator (EVM will handle internal arena allocation)
+    std.log.debug("Step 2: Using normal allocator", .{});
+    const evm_alloc = test_allocator;
+    std.log.debug("Step 2: Normal allocator setup complete", .{});
 
     // Step 3: EvmState (we know this works individually)
     std.log.debug("Step 3: Setting up EvmState", .{});

@@ -39,15 +39,12 @@ test "ERC20 contract deployment hangs - minimal reproduction" {
     std.log.info("TEST: Loaded ERC20 bytecode, size={}", .{bytecode.len});
     
     // Initialize EVM
-    var evm_memory_allocator = try evm.EvmMemoryAllocator.init(allocator);
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Use normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = try evm_builder.build();
     defer vm.deinit();
     
@@ -92,15 +89,12 @@ test "Simple contract deployment works" {
     std.log.info("TEST: Simple bytecode size={}", .{simple_bytecode.len});
     
     // Initialize EVM
-    var evm_memory_allocator = try evm.EvmMemoryAllocator.init(allocator);
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Use normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = try evm_builder.build();
     defer vm.deinit();
     
