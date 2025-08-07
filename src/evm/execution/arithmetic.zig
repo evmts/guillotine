@@ -53,7 +53,7 @@
 /// SIGNEXTEND   | [b, x]      | [y]          | Sign extend x from byte b
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 

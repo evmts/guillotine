@@ -1,6 +1,6 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const primitives = @import("primitives");
 
 // Imports for tests
@@ -124,7 +124,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
     const CodeAnalysis = @import("../analysis.zig");
     const AccessList = @import("../access_list.zig").AccessList;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
-    const ChainRules = @import("../execution_context.zig").ChainRules;
+    const ChainRules = @import("../frame.zig").ChainRules;
 
     for (operations) |op| {
         var memory_db = MemoryDatabase.init(allocator);

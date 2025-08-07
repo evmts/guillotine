@@ -1,6 +1,6 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;

@@ -1,6 +1,6 @@
 const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Vm = @import("../evm.zig");
