@@ -162,6 +162,10 @@ pub const Error = error{
     /// Contract code size mismatch between expected and actual size
     /// Occurs when contract.code_size doesn't match contract.input.len
     CodeSizeMismatch,
+    
+    /// SELFDESTRUCT opcode not available in current hardfork
+    /// Some hardforks disable SELFDESTRUCT functionality
+    SelfDestructNotAvailable,
 };
 
 /// Get a human-readable description for an execution error
@@ -223,6 +227,7 @@ pub fn get_description(err: Error) []const u8 {
         Error.OpcodeNotImplemented => "Opcode not implemented in translator",
         Error.InputSizeExceeded => "Contract input size exceeds maximum allowed size",
         Error.CodeSizeMismatch => "Contract code size mismatch between expected and actual size",
+        Error.SelfDestructNotAvailable => "SELFDESTRUCT opcode not available in current hardfork",
     };
 }
 
@@ -436,7 +441,7 @@ const all_errors = [_]Error{
     Error.EOFNotSupported,       Error.AccountNotFound,         Error.StorageNotFound,    Error.CodeNotFound,
     Error.InvalidAddress,        Error.DatabaseCorrupted,       Error.NetworkError,       Error.PermissionDenied,
     Error.InvalidSnapshot,       Error.NoBatchInProgress,       Error.SnapshotNotFound,   Error.InstructionLimitExceeded,
-    Error.OpcodeNotImplemented,  Error.InputSizeExceeded,       Error.CodeSizeMismatch,
+    Error.OpcodeNotImplemented,  Error.InputSizeExceeded,       Error.CodeSizeMismatch,   Error.SelfDestructNotAvailable,
 };
 
 // test "fuzz_error_enumeration_completeness" {

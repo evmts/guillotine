@@ -6,11 +6,10 @@
 // Import only the error types we need
 const ExecutionError = @import("execution/execution_error.zig");
 const ExecutionResult = @import("execution/execution_result.zig");
+const ExecutionContext = @import("execution_context.zig").ExecutionContext;
 
-/// Function signature for EVM opcode execution using opaque pointers to break dependencies.
+/// Function signature for EVM opcode execution using ExecutionContext only.
 ///
-/// @param pc Current program counter position
-/// @param interpreter VM interpreter context (opaque pointer)
-/// @param state Execution state and environment (opaque pointer) 
-/// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = *const fn (pc: usize, interpreter: *anyopaque, state: *anyopaque) ExecutionError.Error!ExecutionResult;
+/// @param context ExecutionContext containing all execution state  
+/// @return Execution error (void return means success)
+pub const ExecutionFunc = *const fn (context: *ExecutionContext) ExecutionError.Error!void;
