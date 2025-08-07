@@ -21,7 +21,6 @@ jumpdest_bitmap: []u8,
 block_metadata: BlockMetadataHeap,
 
 /// Flags for contract properties
-has_dynamic_jumps: bool,
 has_static_jumps: bool,
 has_selfdestruct: bool,
 has_create: bool,
@@ -81,7 +80,6 @@ pub fn init(allocator: std.mem.Allocator) !CodeAnalysisOptimized {
     return CodeAnalysisOptimized{
         .jumpdest_bitmap = jumpdest_bitmap,
         .block_metadata = block_metadata,
-        .has_dynamic_jumps = false,
         .has_static_jumps = false,
         .has_selfdestruct = false,
         .has_create = false,
@@ -184,7 +182,6 @@ test "CodeAnalysisOptimized initialization and cleanup" {
     try std.testing.expect(analysis.code_segments != null);
     try std.testing.expect(analysis.block_starts != null);
     try std.testing.expect(analysis.pc_to_block != null);
-    try std.testing.expectEqual(false, analysis.has_dynamic_jumps);
 }
 
 test "CodeAnalysisOptimized free intermediate structures" {

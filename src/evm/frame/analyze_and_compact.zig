@@ -166,7 +166,6 @@ test "analyzeAndCompact basic functionality" {
     
     // Check flags
     try std.testing.expect(analysis.has_static_jumps);
-    try std.testing.expect(!analysis.has_dynamic_jumps);
     try std.testing.expect(!analysis.has_selfdestruct);
     try std.testing.expect(!analysis.has_create);
 }

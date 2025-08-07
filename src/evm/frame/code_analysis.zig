@@ -25,8 +25,8 @@ jumpdest_bitmap: StaticBitSet(limits.MAX_CONTRACT_SIZE),
 max_stack_depth: u16,
 
 /// Contract property flags
-has_dynamic_jumps: bool,
 has_static_jumps: bool,
+has_dynamic_jumps: bool,
 has_selfdestruct: bool,
 has_create: bool,
 
@@ -276,8 +276,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     var code_segments = createCodeBitmap(code);
     var jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty();
     var max_stack_depth: u16 = 0;
-    const has_dynamic_jumps = false;
     var has_static_jumps = false;
+    const has_dynamic_jumps = false;
     var has_selfdestruct = false;
     var has_create = false;
 
@@ -290,8 +290,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
             .allocator = allocator,
             .jumpdest_bitmap = jumpdest_bitmap,
             .max_stack_depth = 0,
-            .has_dynamic_jumps = false,
             .has_static_jumps = false,
+            .has_dynamic_jumps = false,
             .has_selfdestruct = false,
             .has_create = false,
         };
@@ -392,8 +392,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         .allocator = allocator,
         .jumpdest_bitmap = jumpdest_bitmap,
         .max_stack_depth = max_stack_depth,
-        .has_dynamic_jumps = has_dynamic_jumps,
         .has_static_jumps = has_static_jumps,
+        .has_dynamic_jumps = has_dynamic_jumps,
         .has_selfdestruct = has_selfdestruct,
         .has_create = has_create,
     };
@@ -429,7 +429,6 @@ test "from_code basic functionality" {
 
     // Verify basic properties
     try std.testing.expectEqual(@as(u16, 1), analysis.max_stack_depth);
-    try std.testing.expectEqual(false, analysis.has_dynamic_jumps);
     try std.testing.expectEqual(false, analysis.has_static_jumps);
     try std.testing.expectEqual(false, analysis.has_selfdestruct);
     try std.testing.expectEqual(false, analysis.has_create);

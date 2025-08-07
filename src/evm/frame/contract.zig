@@ -689,7 +689,7 @@ pub fn deinit(self: *Contract, allocator: std.mem.Allocator, pool: ?*StoragePool
 /// This function performs comprehensive static analysis on EVM bytecode:
 /// 1. Identifies code vs data segments (for JUMPDEST validation)
 /// 2. Extracts and sorts all JUMPDEST positions
-/// 3. Detects special opcodes (CREATE, SELFDESTRUCT, dynamic jumps)
+/// 3. Detects special opcodes (CREATE, SELFDESTRUCT, static jumps)
 /// 4. Caches results by code hash for reuse
 ///
 /// ## Parameters
