@@ -20,116 +20,116 @@ pub const StateError = error{OutOfMemory};
 
 /// Combined chain rules (hardforks + EIPs) for configuration input.
 /// Used to create the optimized Flags packed struct.
+/// NOTE: Only includes EIPs that need runtime checks during opcode execution.
+/// EIPs for transaction validation, gas pricing, bytecode analysis, and pre-execution setup are handled elsewhere.
 pub const ChainRules = struct {
+    // Core hardfork markers (used for getHardfork() only)
     is_homestead: bool = true,
-    is_eip150: bool = true,
-    is_eip158: bool = true,
     is_byzantium: bool = true,
     is_constantinople: bool = true,
     is_petersburg: bool = true,
     is_istanbul: bool = true,
     is_berlin: bool = true,
-    is_eip2930: bool = true,
     is_london: bool = true,
-    is_eip1559: bool = true,
-    is_eip3198: bool = true,
-    is_eip3541: bool = true,
     is_merge: bool = true,
     is_shanghai: bool = true,
-    is_eip3651: bool = true,
-    is_eip3855: bool = true,
-    is_eip3860: bool = true,
-    is_eip4895: bool = true,
     is_cancun: bool = true,
-    is_eip4844: bool = true,
-    is_eip1153: bool = true,
-    is_eip5656: bool = true,
     is_prague: bool = false,
+    
+    // EIPs that need runtime opcode validation (very few!)
+    is_eip1153: bool = true,     // Transient storage (TLOAD/TSTORE) - runtime validation
 
     /// Default chain rules for the latest hardfork (CANCUN).
     pub const DEFAULT = ChainRules{};
 };
 
-/// Packed flags struct - ordered by introduction date (newest first)
-/// Fits exactly in 64 bits for optimal cache performance
+/// Packed flags struct - optimized for actual runtime usage
+/// Only contains flags that are checked during opcode execution
 pub const Flags = packed struct {
-    // Core execution state - most frequently accessed
-    depth: u10,           // 10 bits (0-1023)
-    is_static: bool,      // 1 bit
+    // Hot execution state - accessed every opcode
+    depth: u10,           // 10 bits (0-1023) - call stack depth
+    is_static: bool,      // 1 bit - static call restriction (checked by SSTORE, TSTORE, etc.)
     
-    // Prague (future) - 1 bit
-    is_prague: bool,
+    // EIP flags checked during execution (very few!)
+    is_eip1153: bool,     // 1 bit - Transient storage (TLOAD/TSTORE validation)
     
-    // Cancun (2024) - 3 bits
-    is_cancun: bool,
-    is_eip4844: bool,     // Blob transactions
-    is_eip1153: bool,     // Transient storage
-    is_eip5656: bool,     // MCOPY opcode
-    
-    // Shanghai (2023) - 5 bits
-    is_shanghai: bool,
-    is_eip3651: bool,     // Warm COINBASE
-    is_eip3855: bool,     // PUSH0 opcode
-    is_eip3860: bool,     // Limit and meter initcode
-    is_eip4895: bool,     // Beacon chain withdrawals
-    
-    // Merge (2022) - 1 bit
-    is_merge: bool,
-    
-    // London (2021) - 3 bits
-    is_london: bool,
-    is_eip1559: bool,     // Fee market change
-    is_eip3198: bool,     // BASEFEE opcode
-    is_eip3541: bool,     // Reject EF contracts
-    
-    // Berlin (2021) - 2 bits
-    is_berlin: bool,
-    is_eip2930: bool,     // Access lists
-    
-    // Istanbul (2019) - 1 bit
-    is_istanbul: bool,
-    
-    // Petersburg (2019) - 1 bit
-    is_petersburg: bool,
-    
-    // Constantinople (2019) - 1 bit
-    is_constantinople: bool,
-    
-    // Byzantium (2017) - 1 bit
-    is_byzantium: bool,
-    
-    // Spurious Dragon (2016) - 1 bit
-    is_eip158: bool,      // State clearing
-    
-    // Tangerine Whistle (2016) - 1 bit
-    is_eip150: bool,      // Gas cost changes
-    
-    // Homestead (2016) - 1 bit
-    is_homestead: bool,
+    // Hardfork markers (only for getHardfork() method)
+    is_prague: bool,      // 1 bit
+    is_cancun: bool,      // 1 bit
+    is_shanghai: bool,    // 1 bit
+    is_merge: bool,       // 1 bit
+    is_london: bool,      // 1 bit
+    is_berlin: bool,      // 1 bit
+    is_istanbul: bool,    // 1 bit
+    is_petersburg: bool,  // 1 bit
+    is_constantinople: bool, // 1 bit
+    is_byzantium: bool,   // 1 bit
+    is_homestead: bool,   // 1 bit
     
     // Reserved for future expansion - remaining bits
-    _reserved: u20 = 0,   // Ensures exactly 64 bits total
+    _reserved: u41 = 0,   // Ensures exactly 64 bits total (11 + 1 + 1 + 10 + 1 + 41 = 64)
 };
 
 /// Data-oriented Frame struct optimized for cache performance
+/// Layout designed around actual opcode access patterns and data correlations
 pub const Frame = struct {
-    // Hot data - accessed frequently
-    stack: Stack, // 33,536 bytes - very hot
-    gas_remaining: u64, // 8 bytes - checked constantly
-
-    // Packed struct for all bit fields - 8 bytes (64 bits total)
-    flags: Flags,
-
-    // Pointers - frequently accessed
-    memory: *Memory, // 8 bytes - hot for MLOAD/MSTORE
-    analysis: *const CodeAnalysis, // 8 bytes - hot for jumps
-    access_list: *AccessList, // 8 bytes - warm for storage/account access
-    state: DatabaseInterface, // 16 bytes - medium for storage operations
-
-    // Cold data - rarely accessed
-    output: []const u8, // 16 bytes - only for RETURN/REVERT
-    contract_address: primitives.Address.Address, // 20 bytes - rarely needed
-    self_destruct: ?*SelfDestruct, // 8 bytes - very rare
+    // ========================================================================
+    // TIER 1: ULTRA HOT - Accessed by virtually every opcode
+    // ========================================================================
+    stack: Stack,          // 33,536 bytes - accessed by every opcode (PUSH/POP/DUP/SWAP/arithmetic/etc)
+    gas_remaining: u64,    // 8 bytes - checked/consumed by every opcode for gas accounting
+    
+    // ========================================================================
+    // TIER 2: HOT - Accessed by major opcode categories  
+    // ========================================================================
+    memory: *Memory,       // 8 bytes - hot for memory ops (MLOAD/MSTORE/MSIZE/MCOPY/LOG*/KECCAK256)
+    analysis: *const CodeAnalysis, // 8 bytes - hot for control flow (JUMP/JUMPI validation)
+    
+    // Hot execution flags (only the bits that are actually checked frequently)
+    // Packed together to minimize cache footprint - these are checked by different opcode categories
+    hot_flags: packed struct {
+        depth: u10,        // 10 bits - call stack depth for CALL/CREATE operations  
+        is_static: bool,   // 1 bit - static call restriction (checked by SSTORE/TSTORE)
+        is_eip1153: bool,  // 1 bit - transient storage validation (TLOAD/TSTORE)
+        _padding: u4 = 0,  // 4 bits - align to byte boundary
+    },                     // 2 bytes total - fits in 16 bits
+    
+    _hot_padding: [6]u8 = [_]u8{0} ** 6, // 6 bytes - align storage cluster to 8-byte boundary
+    
+    // ========================================================================
+    // TIER 3: WARM - Storage Operations Cluster (high correlation group)
+    // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together
+    // ========================================================================
+    contract_address: primitives.Address.Address, // 20 bytes - FIRST: storage key = hash(contract_address, slot)
+    state: DatabaseInterface,       // 16 bytes - actual storage read/write interface  
+    access_list: *AccessList,       // 8 bytes - LAST: EIP-2929 warm/cold gas cost calculation
+    // Total: 44 bytes - all storage operations cause exactly one cache line fetch for this cluster
+    
+    // ========================================================================
+    // TIER 4: COLD - Rarely accessed data
+    // ========================================================================
+    input: []const u8,     // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
+    output: []const u8,    // 16 bytes - only set by RETURN/REVERT at function exit
+    self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
+    
+    // Cold hardfork detection flags - only used by getHardfork() method for version detection
+    // Packed separately from hot flags to avoid polluting hot cache lines
+    cold_flags: packed struct {
+        is_prague: bool,      // 1 bit
+        is_cancun: bool,      // 1 bit  
+        is_shanghai: bool,    // 1 bit
+        is_merge: bool,       // 1 bit
+        is_london: bool,      // 1 bit
+        is_berlin: bool,      // 1 bit
+        is_istanbul: bool,    // 1 bit
+        is_petersburg: bool,  // 1 bit
+        is_constantinople: bool, // 1 bit
+        is_byzantium: bool,   // 1 bit
+        is_homestead: bool,   // 1 bit
+        _reserved: u5 = 0,    // 5 bits - future expansion
+    },                        // 2 bytes total - fits in 16 bits
+    
+    _final_padding: [6]u8 = [_]u8{0} ** 6, // 6 bytes - struct alignment padding
 
     /// Initialize a Frame with required parameters
     pub fn init(
@@ -143,46 +143,44 @@ pub const Frame = struct {
         state: DatabaseInterface,
         chain_rules: ChainRules,
         self_destruct: ?*SelfDestruct,
+        input: []const u8,
     ) !Frame {
         return Frame{
+            // Ultra hot data
             .stack = Stack.init(),
             .gas_remaining = gas_remaining,
-            .flags = .{
+            
+            // Hot data
+            .memory = try Memory.init_default(allocator),
+            .analysis = analysis,
+            .hot_flags = .{
                 .depth = @intCast(call_depth),
                 .is_static = static_call,
-                // Map from ChainRules to Flags - ordered by introduction date
+                .is_eip1153 = chain_rules.is_eip1153,
+            },
+            
+            // Storage cluster (warm)
+            .contract_address = contract_address,
+            .state = state,
+            .access_list = access_list,
+            
+            // Cold data
+            .input = input,
+            .output = &[_]u8{},
+            .self_destruct = self_destruct,
+            .cold_flags = .{
                 .is_prague = chain_rules.is_prague,
                 .is_cancun = chain_rules.is_cancun,
-                .is_eip4844 = chain_rules.is_eip4844,
-                .is_eip1153 = chain_rules.is_eip1153,
-                .is_eip5656 = chain_rules.is_eip5656,
                 .is_shanghai = chain_rules.is_shanghai,
-                .is_eip3651 = chain_rules.is_eip3651,
-                .is_eip3855 = chain_rules.is_eip3855,
-                .is_eip3860 = chain_rules.is_eip3860,
-                .is_eip4895 = chain_rules.is_eip4895,
                 .is_merge = chain_rules.is_merge,
                 .is_london = chain_rules.is_london,
-                .is_eip1559 = chain_rules.is_eip1559,
-                .is_eip3198 = chain_rules.is_eip3198,
-                .is_eip3541 = chain_rules.is_eip3541,
                 .is_berlin = chain_rules.is_berlin,
-                .is_eip2930 = chain_rules.is_eip2930,
                 .is_istanbul = chain_rules.is_istanbul,
                 .is_petersburg = chain_rules.is_petersburg,
                 .is_constantinople = chain_rules.is_constantinople,
                 .is_byzantium = chain_rules.is_byzantium,
-                .is_eip158 = chain_rules.is_eip158,
-                .is_eip150 = chain_rules.is_eip150,
                 .is_homestead = chain_rules.is_homestead,
             },
-            .memory = try Memory.init_default(allocator),
-            .analysis = analysis,
-            .access_list = access_list,
-            .state = state,
-            .output = &[_]u8{},
-            .contract_address = contract_address,
-            .self_destruct = self_destruct,
         };
     }
 
@@ -269,19 +267,19 @@ pub const Frame = struct {
 
     /// Backward compatibility accessors
     pub fn depth(self: *const Frame) u32 {
-        return @intCast(self.flags.depth);
+        return @intCast(self.hot_flags.depth);
     }
 
     pub fn is_static(self: *const Frame) bool {
-        return self.flags.is_static;
+        return self.hot_flags.is_static;
     }
 
     pub fn set_depth(self: *Frame, d: u32) void {
-        self.flags.depth = @intCast(d);
+        self.hot_flags.depth = @intCast(d);
     }
 
     pub fn set_is_static(self: *Frame, static: bool) void {
-        self.flags.is_static = static;
+        self.hot_flags.is_static = static;
     }
 
     /// ChainRules helper methods - moved from ChainRules struct for better data locality
@@ -293,8 +291,6 @@ pub const Frame = struct {
 
     const HARDFORK_RULES = [_]HardforkRule{
         .{ .field_name = "is_homestead", .introduced_in = .HOMESTEAD },
-        .{ .field_name = "is_eip150", .introduced_in = .TANGERINE_WHISTLE },
-        .{ .field_name = "is_eip158", .introduced_in = .SPURIOUS_DRAGON },
         .{ .field_name = "is_byzantium", .introduced_in = .BYZANTIUM },
         .{ .field_name = "is_constantinople", .introduced_in = .CONSTANTINOPLE },
         .{ .field_name = "is_petersburg", .introduced_in = .PETERSBURG },
@@ -304,17 +300,7 @@ pub const Frame = struct {
         .{ .field_name = "is_merge", .introduced_in = .MERGE },
         .{ .field_name = "is_shanghai", .introduced_in = .SHANGHAI },
         .{ .field_name = "is_cancun", .introduced_in = .CANCUN },
-        .{ .field_name = "is_eip1559", .introduced_in = .LONDON },
-        .{ .field_name = "is_eip2930", .introduced_in = .BERLIN },
-        .{ .field_name = "is_eip3198", .introduced_in = .LONDON },
-        .{ .field_name = "is_eip3541", .introduced_in = .LONDON },
-        .{ .field_name = "is_eip3651", .introduced_in = .SHANGHAI },
-        .{ .field_name = "is_eip3855", .introduced_in = .SHANGHAI },
-        .{ .field_name = "is_eip3860", .introduced_in = .SHANGHAI },
-        .{ .field_name = "is_eip4895", .introduced_in = .SHANGHAI },
-        .{ .field_name = "is_eip4844", .introduced_in = .CANCUN },
         .{ .field_name = "is_eip1153", .introduced_in = .CANCUN },
-        .{ .field_name = "is_eip5656", .introduced_in = .CANCUN },
     };
 
     /// Create ChainRules for a specific hardfork
@@ -338,30 +324,83 @@ pub const Frame = struct {
     /// Order matches the packed struct layout (newest first)
     pub fn getHardfork(self: *const Frame) Hardfork {
         // Check in same order as packed struct - newest first
-        if (self.flags.is_prague) return .PRAGUE;
-        if (self.flags.is_cancun) return .CANCUN;
-        if (self.flags.is_shanghai) return .SHANGHAI;
-        if (self.flags.is_merge) return .MERGE;
-        if (self.flags.is_london) return .LONDON;
-        if (self.flags.is_berlin) return .BERLIN;
-        if (self.flags.is_istanbul) return .ISTANBUL;
-        if (self.flags.is_petersburg) return .PETERSBURG;
-        if (self.flags.is_constantinople) return .CONSTANTINOPLE;
-        if (self.flags.is_byzantium) return .BYZANTIUM;
-        if (self.flags.is_eip158) return .SPURIOUS_DRAGON;
-        if (self.flags.is_eip150) return .TANGERINE_WHISTLE;
-        if (self.flags.is_homestead) return .HOMESTEAD;
+        if (self.cold_flags.is_prague) return .PRAGUE;
+        if (self.cold_flags.is_cancun) return .CANCUN;
+        if (self.cold_flags.is_shanghai) return .SHANGHAI;
+        if (self.cold_flags.is_merge) return .MERGE;
+        if (self.cold_flags.is_london) return .LONDON;
+        if (self.cold_flags.is_berlin) return .BERLIN;
+        if (self.cold_flags.is_istanbul) return .ISTANBUL;
+        if (self.cold_flags.is_petersburg) return .PETERSBURG;
+        if (self.cold_flags.is_constantinople) return .CONSTANTINOPLE;
+        if (self.cold_flags.is_byzantium) return .BYZANTIUM;
+        if (self.cold_flags.is_homestead) return .HOMESTEAD;
         return .FRONTIER;
     }
 
     /// Check if a specific hardfork feature is enabled
     pub fn hasHardforkFeature(self: *const Frame, comptime field_name: []const u8) bool {
-        return @field(self.flags, field_name);
+        // Check hot flags first (most likely to be accessed)
+        if (@hasField(@TypeOf(self.hot_flags), field_name)) {
+            return @field(self.hot_flags, field_name);
+        }
+        // Fall back to cold flags for hardfork markers
+        if (@hasField(@TypeOf(self.cold_flags), field_name)) {
+            return @field(self.cold_flags, field_name);
+        }
+        @compileError("Unknown hardfork feature: " ++ field_name);
     }
 };
 
 /// Type alias for backward compatibility
 pub const ExecutionContext = Frame;
+
+// ============================================================================
+// Compile-time Frame Alignment and Layout Assertions
+// ============================================================================
+
+comptime {
+    // Assert that hot data is at the beginning of the struct for cache locality
+    std.debug.assert(@offsetOf(Frame, "stack") == 0);
+    std.debug.assert(@offsetOf(Frame, "gas_remaining") == @sizeOf(Stack));
+    
+    // Assert proper alignment of hot data (should be naturally aligned)
+    std.debug.assert(@offsetOf(Frame, "memory") % @alignOf(*Memory) == 0);
+    std.debug.assert(@offsetOf(Frame, "analysis") % @alignOf(*const CodeAnalysis) == 0);
+    
+    // Assert hot_flags comes before cold_flags (hot data first)
+    std.debug.assert(@offsetOf(Frame, "hot_flags") < @offsetOf(Frame, "cold_flags"));
+    
+    // Assert storage cluster is properly grouped together
+    const contract_address_offset = @offsetOf(Frame, "contract_address");
+    const state_offset = @offsetOf(Frame, "state");
+    const access_list_offset = @offsetOf(Frame, "access_list");
+    
+    // Storage cluster should be contiguous (within reasonable padding)
+    std.debug.assert(state_offset - contract_address_offset <= @sizeOf(primitives.Address.Address) + 8); // Allow up to 8 bytes padding
+    std.debug.assert(access_list_offset - state_offset <= @sizeOf(DatabaseInterface) + 8); // Allow up to 8 bytes padding
+    
+    // Assert cold data comes after warm data
+    std.debug.assert(@offsetOf(Frame, "input") > @offsetOf(Frame, "access_list"));
+    std.debug.assert(@offsetOf(Frame, "output") > @offsetOf(Frame, "access_list"));
+    std.debug.assert(@offsetOf(Frame, "self_destruct") > @offsetOf(Frame, "access_list"));
+    
+    // Assert packed structs are properly sized
+    std.debug.assert(@sizeOf(@TypeOf(Frame.hot_flags)) == 2); // Should be 16 bits (2 bytes)
+    std.debug.assert(@sizeOf(@TypeOf(Frame.cold_flags)) == 2); // Should be 16 bits (2 bytes)
+    
+    // Assert reasonable struct size (should be dominated by stack)
+    const stack_size = @sizeOf(Stack);
+    const total_size = @sizeOf(Frame);
+    
+    // Frame should be mostly stack + reasonable overhead
+    std.debug.assert(total_size >= stack_size); // At least as big as stack
+    std.debug.assert(total_size <= stack_size + 1024); // Not more than stack + 1KB overhead
+    
+    // Assert natural alignment for performance-critical fields
+    std.debug.assert(@offsetOf(Frame, "gas_remaining") % @alignOf(u64) == 0);
+    std.debug.assert(@offsetOf(Frame, "contract_address") % @alignOf(primitives.Address.Address) == 0);
+}
 
 // ============================================================================
 // Tests - TDD approach
@@ -425,13 +464,14 @@ test "Frame - basic initialization" {
         db.to_database_interface(),
         chain_rules,
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer ctx.deinit();
 
     // Test initial state
     try std.testing.expectEqual(@as(u64, 1000000), ctx.gas_remaining);
-    try std.testing.expectEqual(false, ctx.flags.is_static);
-    try std.testing.expectEqual(@as(u10, 1), ctx.flags.depth);
+    try std.testing.expectEqual(false, ctx.hot_flags.is_static);
+    try std.testing.expectEqual(@as(u10, 1), ctx.hot_flags.depth);
     try std.testing.expectEqual(@as(usize, 0), ctx.stack.size());
     try std.testing.expectEqual(@as(usize, 0), ctx.output.len);
 
@@ -468,6 +508,7 @@ test "Frame - gas consumption" {
         db.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer ctx.deinit();
 
@@ -512,6 +553,7 @@ test "Frame - jumpdest validation" {
         db.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer ctx.deinit();
 
@@ -554,6 +596,7 @@ test "Frame - address access tracking" {
         db.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer ctx.deinit();
 
@@ -591,6 +634,7 @@ test "Frame - output data management" {
         db.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer ctx.deinit();
 
@@ -632,6 +676,7 @@ test "Frame - static call restrictions" {
         db1.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer static_ctx.deinit();
 
@@ -647,12 +692,13 @@ test "Frame - static call restrictions" {
         db2.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer normal_ctx.deinit();
 
     // Test static flag
-    try std.testing.expect(static_ctx.flags.is_static);
-    try std.testing.expect(!normal_ctx.flags.is_static);
+    try std.testing.expect(static_ctx.hot_flags.is_static);
+    try std.testing.expect(!normal_ctx.hot_flags.is_static);
 }
 
 test "Frame - selfdestruct availability" {
@@ -684,6 +730,7 @@ test "Frame - selfdestruct availability" {
         db3.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
+        &[_]u8{}, // input
     );
     defer ctx_with_selfdestruct.deinit();
 
@@ -703,6 +750,7 @@ test "Frame - selfdestruct availability" {
         db4.to_database_interface(),
         TestHelpers.createMockChainRules(),
         null,
+        &[_]u8{}, // input
     );
     defer ctx_without_selfdestruct.deinit();
 
