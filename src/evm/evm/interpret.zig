@@ -106,29 +106,43 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
 
         // Handle instruction
         switch (nextInstruction.arg) {
-            .jump_target => |target| {
-                if (nextInstruction.opcode_fn == execution.control.op_jump) {
-                    const dest = frame.stack.pop_unsafe();
-                    if (!frame.valid_jumpdest(dest)) {
-                        return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
-                    }
-                    current_instruction = @ptrCast(target);
-                } else if (nextInstruction.opcode_fn == execution.control.op_jumpi) {
-                    const pops = frame.stack.pop2_unsafe();
-                    const dest = pops.a;
-                    const condition = pops.b;
-                    if (condition != 0) {
-                        if (!frame.valid_jumpdest(dest)) {
-                            contract.gas = frame.gas_remaining;
-                            return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
+            // BEGINBLOCK instructions - validate entire basic block upfront
+            // This eliminates per-instruction gas and stack validation for the entire block
+            .block_info => {
+                current_instruction += 1;
+                nextInstruction.opcode_fn(@ptrCast(&frame)) catch |err| {
+                    contract.gas = frame.gas_remaining;
+                    return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, err, null, access_list, self_destruct);
+                };
+            },
+            // For jumps we handle them inline as they are preprocessed by analysis
+            // 1. Handle dynamic jumps validating it is a valid jumpdest
+            // 2. Handle optional jump
+            // 3. Handle normal jump
+            .jump_target => |jump_target| {
+                switch (jump_target.jump_type) {
+                    .jump => {
+                        const dest = frame.stack.pop_unsafe();
+                        if (!frame.valid_jumpdest(dest)) return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
+                        current_instruction = @ptrCast(jump_target.instruction);
+                    },
+                    .jumpi => {
+                        const pops = frame.stack.pop2_unsafe();
+                        const dest = pops.a;
+                        const condition = pops.b;
+                        if (condition != 0) {
+                            if (!frame.valid_jumpdest(dest)) {
+                                contract.gas = frame.gas_remaining;
+                                return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
+                            }
+                            current_instruction = @ptrCast(jump_target.instruction);
+                        } else {
+                            current_instruction += 1;
                         }
-                        current_instruction = @ptrCast(target);
-                    } else {
-                        current_instruction += 1;
-                    }
-                } else {
-                    // For other opcodes that have jump targets, just use the target
-                    current_instruction = @ptrCast(target);
+                    },
+                    .other => {
+                        current_instruction = @ptrCast(jump_target.instruction);
+                    },
                 }
             },
             .push_value => |value| {
@@ -136,6 +150,9 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                 try frame.stack.append(value);
             },
             .none => {
+                @branchHint(.likely);
+                // Most opcodes now have .none - no individual gas/stack validation needed
+                // Gas and stack validation is handled by BEGINBLOCK instructions
                 current_instruction += 1;
                 nextInstruction.opcode_fn(@ptrCast(&frame)) catch |err| {
                     contract.gas = frame.gas_remaining;
@@ -183,8 +200,8 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                 };
             },
             .gas_cost => |cost| {
+                // Keep for special opcodes that need individual gas tracking (GAS, CALL, etc.)
                 current_instruction += 1;
-                // TODO we need to handle this more completely!
                 if (frame.gas_remaining < cost) {
                     @branchHint(.cold);
                     frame.gas_remaining = 0;

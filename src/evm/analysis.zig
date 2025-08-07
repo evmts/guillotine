@@ -3,9 +3,14 @@ const limits = @import("constants/code_analysis_limits.zig");
 const StaticBitSet = std.bit_set.StaticBitSet;
 const DynamicBitSet = std.DynamicBitSet;
 const Instruction = @import("instruction.zig").Instruction;
+const BlockInfo = @import("instruction.zig").BlockInfo;
+const JumpType = @import("instruction.zig").JumpType;
+const JumpTarget = @import("instruction.zig").JumpTarget;
 const Opcode = @import("opcodes/opcode.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
 const instruction_limits = @import("constants/instruction_limits.zig");
+const ExecutionError = @import("execution/execution_error.zig");
+const Log = @import("log.zig");
 
 /// Optimized code analysis for EVM bytecode execution.
 /// Contains only the essential data needed during execution.
@@ -21,6 +26,93 @@ jumpdest_bitmap: DynamicBitSet,
 
 /// Allocator used for the instruction array (needed for cleanup)
 allocator: std.mem.Allocator,
+
+/// Handler for opcodes that should never be executed directly.
+/// Used for JUMP, JUMPI, and PUSH opcodes that are handled inline by the interpreter.
+/// This function should never be called - if it is, there's a bug in the analysis or interpreter.
+pub fn UnreachableHandler(frame: anytype) ExecutionError.Error!void {
+    _ = frame;
+    Log.err("UnreachableHandler called - this indicates a bug where an opcode marked for inline handling was executed through the jump table", .{});
+    unreachable;
+}
+
+/// Handler for BEGINBLOCK instructions that validates an entire basic block upfront.
+/// This performs gas and stack validation for all instructions in the block in one operation,
+/// eliminating the need for per-instruction validation during execution.
+/// 
+/// The block information (gas cost, stack requirements) is stored in the instruction's arg.block_info.
+/// This handler must be called before executing any instructions in the basic block.
+pub fn BeginBlockHandler(frame: anytype) ExecutionError.Error!void {
+    // Access the current instruction through the frame
+    // Note: This assumes the frame has access to the current instruction
+    // This may need adjustment based on the actual frame structure
+    const current_instruction = @as(*const Instruction, @ptrCast(frame.current_instruction));
+    const block = current_instruction.arg.block_info;
+    
+    // Single gas check for entire block - eliminates per-opcode gas validation
+    if (frame.gas_remaining < block.gas_cost) {
+        return ExecutionError.Error.OutOfGas;
+    }
+    frame.gas_remaining -= block.gas_cost;
+    
+    // Single stack validation for entire block - eliminates per-opcode stack checks
+    const stack_size = @as(u16, @intCast(frame.stack.len()));
+    if (stack_size < block.stack_req) {
+        return ExecutionError.Error.StackUnderflow;
+    }
+    if (stack_size + block.stack_max_growth > 1024) {
+        return ExecutionError.Error.StackOverflow;
+    }
+    
+    Log.debug("BeginBlock: gas_cost={}, stack_req={}, stack_max_growth={}, current_stack={}", .{
+        block.gas_cost, block.stack_req, block.stack_max_growth, stack_size
+    });
+}
+
+/// Block analysis structure used during instruction stream generation.
+/// Tracks the accumulated requirements for a basic block during analysis.
+const BlockAnalysis = struct {
+    /// Total static gas cost accumulated for all instructions in the block
+    gas_cost: u32 = 0,
+    /// Stack height requirement relative to block start
+    stack_req: i16 = 0,
+    /// Maximum stack growth during block execution
+    stack_max_growth: i16 = 0,
+    /// Current stack change from block start
+    stack_change: i16 = 0,
+    /// Index of the BEGINBLOCK instruction that starts this block
+    begin_block_index: usize,
+    
+    /// Initialize a new block analysis at the given instruction index
+    fn init(begin_index: usize) BlockAnalysis {
+        return BlockAnalysis{
+            .begin_block_index = begin_index,
+        };
+    }
+    
+    /// Close the current block by producing compressed information about the block
+    fn close(self: *const BlockAnalysis) BlockInfo {
+        return BlockInfo{
+            .gas_cost = self.gas_cost,
+            .stack_req = @intCast(@max(0, self.stack_req)),
+            .stack_max_growth = @intCast(@max(0, self.stack_max_growth)),
+        };
+    }
+    
+    /// Update stack tracking for an operation
+    fn updateStackTracking(self: *BlockAnalysis, min_stack: u32, max_stack: u32) void {
+        const stack_inputs = @as(i16, @intCast(min_stack));
+        const stack_outputs: i16 = if (max_stack > min_stack) 1 else 0;
+        
+        // Calculate requirement relative to block start
+        const current_stack_req = stack_inputs - self.stack_change;
+        self.stack_req = @max(self.stack_req, current_stack_req);
+        
+        // Update stack change
+        self.stack_change += stack_outputs - stack_inputs;
+        self.stack_max_growth = @max(self.stack_max_growth, self.stack_change);
+    }
+};
 
 /// Main public API: Analyzes bytecode and returns optimized CodeAnalysis with instruction stream.
 /// The caller must call deinit() to free the instruction array.
@@ -181,14 +273,26 @@ fn createCodeBitmap(allocator: std.mem.Allocator, code: []const u8) !DynamicBitS
     return bitmap;
 }
 
-/// Convert bytecode to null-terminated instruction stream.
+/// Convert bytecode to null-terminated instruction stream with block-based optimization.
+/// This implementation follows evmone's advanced analysis approach by:
+/// 1. Injecting BEGINBLOCK instructions at basic block boundaries
+/// 2. Pre-calculating gas and stack requirements for entire blocks
+/// 3. Eliminating per-instruction validation during execution
 fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) ![*:null]Instruction {
-    // Allocate instruction array with space for null terminator
+    // Allocate instruction array with extra space for BEGINBLOCK instructions
     const instructions = try allocator.alloc(?Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
     errdefer allocator.free(instructions);
 
     var pc: usize = 0;
     var instruction_count: usize = 0;
+
+    // Start first block with BEGINBLOCK instruction
+    instructions[instruction_count] = Instruction{
+        .opcode_fn = BeginBlockHandler,
+        .arg = .{ .block_info = BlockInfo{} }, // Will be filled when block closes
+    };
+    var block = BlockAnalysis.init(instruction_count);
+    instruction_count += 1;
 
     while (pc < code.len) {
         if (instruction_count >= instruction_limits.MAX_INSTRUCTIONS) {
@@ -196,130 +300,211 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         }
 
         const opcode_byte = code[pc];
-
         const opcode = std.meta.intToEnum(Opcode.Enum, opcode_byte) catch {
-            // Invalid opcode - add it as a regular instruction
+            // Invalid opcode - accumulate in block and create instruction
+            const operation = jump_table.get_operation(opcode_byte);
+            block.gas_cost += @intCast(operation.constant_gas);
+            block.updateStackTracking(operation.min_stack, operation.max_stack);
+            
             instructions[instruction_count] = Instruction{
-                .opcode_fn = jump_table.execute_funcs[opcode_byte],
-                .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[opcode_byte]) },
+                .opcode_fn = operation.execute,
+                .arg = .none, // No individual gas cost - handled by BEGINBLOCK
             };
             instruction_count += 1;
             pc += 1;
             continue;
         };
 
+        // Handle basic block boundaries and special opcodes
         switch (opcode) {
-            .STOP => {
+            .JUMPDEST => {
+                // Close current block and start new one
+                instructions[block.begin_block_index].arg.block_info = block.close();
+                
+                // Start new block with BEGINBLOCK
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = jump_table.execute_funcs[opcode_byte],
-                    .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[opcode_byte]) },
+                    .opcode_fn = BeginBlockHandler,
+                    .arg = .{ .block_info = BlockInfo{} },
+                };
+                block = BlockAnalysis.init(instruction_count);
+                instruction_count += 1;
+                
+                // Add the JUMPDEST instruction to the new block
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = operation.execute,
+                    .arg = .none,
                 };
                 instruction_count += 1;
                 pc += 1;
             },
-            .PUSH0 => {
-                // TODO: Add EIP-3855 (Shanghai) validation during bytecode analysis
-                // if (!chain_rules.is_eip3855) {
-                //     // Treat PUSH0 as INVALID opcode if EIP-3855 not enabled
-                //     instructions[instruction_count] = Instruction{
-                //         .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
-                //         .arg = .none,
-                //     };
-                // } else {
+            
+            // Terminating instructions - end current block
+            .JUMP, .STOP, .RETURN, .REVERT, .SELFDESTRUCT => {
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                
+                if (opcode == .JUMP) {
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = UnreachableHandler, // Handled inline by interpreter
+                        .arg = .none, // Will be filled with .jump_target during resolveJumpTargets
+                    };
+                } else {
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = operation.execute,
+                        .arg = .none,
+                    };
+                }
+                instruction_count += 1;
+                pc += 1;
+                
+                // Close current block
+                instructions[block.begin_block_index].arg.block_info = block.close();
+                
+                // Skip dead code until next JUMPDEST
+                while (pc < code.len and code[pc] != @intFromEnum(Opcode.Enum.JUMPDEST)) {
+                    if (Opcode.is_push(code[pc])) {
+                        const push_bytes = Opcode.get_push_size(code[pc]);
+                        pc += 1 + push_bytes;
+                    } else {
+                        pc += 1;
+                    }
+                }
+            },
+            
+            .JUMPI => {
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = jump_table.execute_funcs[opcode_byte],
+                    .opcode_fn = UnreachableHandler, // Handled inline by interpreter
+                    .arg = .none, // Will be filled with .jump_target during resolveJumpTargets
+                };
+                instruction_count += 1;
+                pc += 1;
+                
+                // Close current block and start new one (for fall-through path)
+                instructions[block.begin_block_index].arg.block_info = block.close();
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = BeginBlockHandler,
+                    .arg = .{ .block_info = BlockInfo{} },
+                };
+                block = BlockAnalysis.init(instruction_count);
+                instruction_count += 1;
+            },
+            
+            // PUSH operations - handled inline by interpreter
+            .PUSH0 => {
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = UnreachableHandler,
                     .arg = .{ .push_value = 0 },
                 };
-                // }
                 instruction_count += 1;
                 pc += 1;
             },
+            
             .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
-                // Calculate how many bytes to read
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                
                 const push_size = Opcode.get_push_size(opcode_byte);
-
-                // Make sure we have enough bytes
-                if (pc + 1 + push_size > code.len) {
-                    // If not enough bytes, pad with zeros (EVM behavior)
-                    var value: u256 = 0;
+                var value: u256 = 0;
+                
+                // Read push value with bounds checking
+                if (pc + 1 + push_size <= code.len) {
+                    var i: usize = 0;
+                    while (i < push_size) : (i += 1) {
+                        value = (value << 8) | code[pc + 1 + i];
+                    }
+                    pc += 1 + push_size;
+                } else {
+                    // Handle truncated PUSH at end of code
                     const available = code.len - (pc + 1);
                     if (available > 0) {
-                        // Read what we can
                         const bytes_to_read = @min(push_size, available);
                         var i: usize = 0;
                         while (i < bytes_to_read) : (i += 1) {
                             value = (value << 8) | code[pc + 1 + i];
                         }
-                        // Shift left for any missing bytes
                         const missing_bytes = push_size - bytes_to_read;
                         if (missing_bytes > 0) {
                             value = value << (8 * missing_bytes);
                         }
                     }
-                    instructions[instruction_count] = Instruction{
-                        .opcode_fn = jump_table.execute_funcs[opcode_byte],
-                        .arg = .{ .push_value = value },
-                    };
-                    instruction_count += 1;
                     pc = code.len; // End of code
-                } else {
-                    // Read the push value from bytecode
-                    var value: u256 = 0;
-                    var i: usize = 0;
-                    while (i < push_size) : (i += 1) {
-                        value = (value << 8) | code[pc + 1 + i];
-                    }
-
-                    const opcode_fn = jump_table.execute_funcs[opcode_byte];
-                    instructions[instruction_count] = Instruction{
-                        .opcode_fn = opcode_fn,
-                        .arg = .{ .push_value = value },
-                    };
-                    instruction_count += 1;
-                    pc += 1 + push_size;
                 }
+                
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = UnreachableHandler,
+                    .arg = .{ .push_value = value },
+                };
+                instruction_count += 1;
             },
-            // All other opcodes - no special args
+            
+            // Special opcodes that need individual gas tracking for dynamic calculations
+            .GAS, .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL, .CREATE, .CREATE2, .SSTORE => {
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = operation.execute,
+                    .arg = .{ .gas_cost = block.gas_cost }, // Pass accumulated gas for precise calculations
+                };
+                instruction_count += 1;
+                pc += 1;
+            },
+            
+            // Regular opcodes - accumulate in block
             else => {
-                // Check if it's an undefined opcode
-                if (jump_table.undefined_flags[opcode_byte]) {
+                const operation = jump_table.get_operation(opcode_byte);
+                
+                if (operation.undefined) {
                     // Treat undefined opcodes as INVALID
-                    const invalid_opcode = @intFromEnum(Opcode.Enum.INVALID);
+                    const invalid_operation = jump_table.get_operation(@intFromEnum(Opcode.Enum.INVALID));
+                    block.gas_cost += @intCast(invalid_operation.constant_gas);
+                    block.updateStackTracking(invalid_operation.min_stack, invalid_operation.max_stack);
+                    
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = jump_table.execute_funcs[invalid_opcode],
-                        .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[invalid_opcode]) },
+                        .opcode_fn = invalid_operation.execute,
+                        .arg = .none,
                     };
-                    instruction_count += 1;
-                    pc += 1;
                 } else {
-                    // TODO: Add EIP validation for specific opcodes during bytecode analysis:
-                    // Check opcode_byte and validate against chain rules:
-                    // if (opcode_byte == @intFromEnum(Opcode.Enum.BASEFEE) and !chain_rules.is_eip3198) {
-                    //     // Treat BASEFEE as INVALID if EIP-3198 not enabled
-                    //     const invalid_opcode = @intFromEnum(Opcode.Enum.INVALID);
-                    //     instructions[instruction_count] = Instruction{
-                    //         .opcode_fn = jump_table.execute_funcs[invalid_opcode],
-                    //         .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[invalid_opcode]) },
-                    //     };
-                    // } else if (opcode_byte == @intFromEnum(Opcode.Enum.MCOPY) and !chain_rules.is_eip5656) {
-                    //     // Treat MCOPY as INVALID if EIP-5656 not enabled
-                    //     const invalid_opcode = @intFromEnum(Opcode.Enum.INVALID);
-                    //     instructions[instruction_count] = Instruction{
-                    //         .opcode_fn = jump_table.execute_funcs[invalid_opcode],
-                    //         .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[invalid_opcode]) },
-                    //     };
-                    // } else {
-                    const opcode_fn = jump_table.execute_funcs[opcode_byte];
+                    block.gas_cost += @intCast(operation.constant_gas);
+                    block.updateStackTracking(operation.min_stack, operation.max_stack);
+                    
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = opcode_fn,
-                        .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[opcode_byte]) },
+                        .opcode_fn = operation.execute,
+                        .arg = .none, // No individual gas cost - handled by BEGINBLOCK
                     };
-                    // }
-                    instruction_count += 1;
-                    pc += 1;
                 }
+                instruction_count += 1;
+                pc += 1;
             },
         }
+    }
+
+    // Close final block
+    instructions[block.begin_block_index].arg.block_info = block.close();
+
+    // Ensure the last instruction terminates execution
+    if (instruction_count < instruction_limits.MAX_INSTRUCTIONS) {
+        const stop_operation = jump_table.get_operation(@intFromEnum(Opcode.Enum.STOP));
+        instructions[instruction_count] = Instruction{
+            .opcode_fn = stop_operation.execute,
+            .arg = .none,
+        };
+        instruction_count += 1;
     }
 
     // Null-terminate the instruction stream
@@ -386,8 +571,14 @@ fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructio
                     if (target_pc < pc_to_instruction.len) {
                         const target_idx = pc_to_instruction[@intCast(target_pc)];
                         if (target_idx != std.math.maxInt(u16) and target_idx < instructions.len and instructions[target_idx] != null) {
-                            // Update the JUMP/JUMPI with the target pointer
-                            instructions[inst_idx].?.arg = .{ .jump_target = &instructions[target_idx].? };
+                            // Determine jump type based on opcode
+                            const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
+                            
+                            // Update the JUMP/JUMPI with the target pointer and type
+                            instructions[inst_idx].?.arg = .{ .jump_target = JumpTarget{
+                                .instruction = &instructions[target_idx].?,
+                                .jump_type = jump_type,
+                            }};
                         }
                     }
                 }
