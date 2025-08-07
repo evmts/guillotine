@@ -7,7 +7,7 @@ const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const from_u256 = primitives.Address.from_u256;
 
-pub fn op_stop(context: *ExecutionContext) ExecutionError.Error!void {
+pub fn op_stop(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
 
     return ExecutionError.Error.STOP;
@@ -15,7 +15,7 @@ pub fn op_stop(context: *ExecutionContext) ExecutionError.Error!void {
 
 // DEPRECATED: JUMP is now handled directly in interpret.zig via .jump_target instruction type
 // This function is no longer called and should be deleted
-pub fn op_jump(context: *ExecutionContext) ExecutionError.Error!void {
+pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
     // TODO_DELETE: This function is deprecated - JUMP is handled in interpret loop
     unreachable;
@@ -23,27 +23,28 @@ pub fn op_jump(context: *ExecutionContext) ExecutionError.Error!void {
 
 // DEPRECATED: JUMPI is now handled directly in interpret.zig via .jump_target instruction type
 // This function is no longer called and should be deleted
-pub fn op_jumpi(context: *ExecutionContext) ExecutionError.Error!void {
+pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
     // TODO_DELETE: This function is deprecated - JUMPI is handled in interpret loop
     unreachable;
 }
 
 // TODO_PC_DELETE: PC operations are deprecated in the new architecture
-pub fn op_pc(context: *ExecutionContext) ExecutionError.Error!void {
+pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
     // TODO_DELETE: This function is deprecated - PC is not needed in new architecture
     unreachable;
 }
 
-pub fn op_jumpdest(context: *ExecutionContext) ExecutionError.Error!void {
+pub fn op_jumpdest(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
 
     // No-op, just marks valid jump destination
 }
 
-pub fn op_return(context: *ExecutionContext) ExecutionError.Error!void {
-    const frame = context.frame;
+pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
+    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    const frame = ctx.frame;
 
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -97,8 +98,9 @@ pub fn op_return(context: *ExecutionContext) ExecutionError.Error!void {
     return ExecutionError.Error.STOP; // RETURN ends execution normally
 }
 
-pub fn op_revert(context: *ExecutionContext) ExecutionError.Error!void {
-    const frame = context.frame;
+pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
+    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    const frame = ctx.frame;
 
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -140,8 +142,9 @@ pub fn op_revert(context: *ExecutionContext) ExecutionError.Error!void {
     return ExecutionError.Error.REVERT;
 }
 
-pub fn op_invalid(context: *ExecutionContext) ExecutionError.Error!void {
-    const frame = context.frame;
+pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
+    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    const frame = ctx.frame;
 
     // Debug: op_invalid entered
     // INVALID opcode consumes all remaining gas
@@ -151,9 +154,10 @@ pub fn op_invalid(context: *ExecutionContext) ExecutionError.Error!void {
     return ExecutionError.Error.InvalidOpcode;
 }
 
-pub fn op_selfdestruct(context: *ExecutionContext) ExecutionError.Error!void {
-    const frame = context.frame;
-    const vm = context.vm;
+pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
+    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    const frame = ctx.frame;
+    const vm = ctx.vm;
 
     // Check if we're in a static call
     if (frame.is_static) {
