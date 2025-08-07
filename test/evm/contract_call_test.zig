@@ -3,6 +3,7 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
+const CallParams = @import("evm").CallParams;
 
 test "contract call: empty contract returns success" {
     const allocator = testing.allocator;
@@ -11,28 +12,29 @@ test "contract call: empty contract returns success" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);
     const empty_contract = primitives.Address.from_u256(0x2222);
 
     // Set up caller with balance
-    try vm.state.set_balance(caller, 1000000);
+    try evm.state.set_balance(caller, 1000000);
 
     // Call empty contract (no code)
-    const result = try vm.call_contract(caller, empty_contract, 0, // no value
-        &.{}, // no input
-        100000, // gas
-        false // not static
-    );
-    defer if (result.output) |output| allocator.free(output);
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = empty_contract,
+        .value = 0,
+        .input = &.{},
+        .gas = 100000,
+    }};
+    const result = try evm.call(call_params);
+    defer if (result.output.len > 0) allocator.free(result.output);
 
     try testing.expect(result.success);
     try testing.expectEqual(@as(u64, 100000), result.gas_left); // No gas consumed
-    try testing.expect(result.output == null);
+    try testing.expect(result.output.len == 0);
 }
 
 test "contract call: value transfer to empty contract" {
@@ -42,25 +44,30 @@ test "contract call: value transfer to empty contract" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);
     const recipient = primitives.Address.from_u256(0x2222);
     const transfer_amount: u256 = 1000;
 
     // Set up caller with balance
-    try vm.state.set_balance(caller, 10000);
+    try evm.state.set_balance(caller, 10000);
 
     // Call with value transfer
-    const result = try vm.call_contract(caller, recipient, transfer_amount, &.{}, 100000, false);
-    defer if (result.output) |output| allocator.free(output);
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = recipient,
+        .value = transfer_amount,
+        .input = &.{},
+        .gas = 100000,
+    }};
+    const result = try evm.call(call_params);
+    defer if (result.output.len > 0) allocator.free(result.output);
 
     try testing.expect(result.success);
-    try testing.expectEqual(@as(u256, 9000), vm.state.get_balance(caller));
-    try testing.expectEqual(@as(u256, 1000), vm.state.get_balance(recipient));
+    try testing.expectEqual(@as(u256, 9000), evm.state.get_balance(caller));
+    try testing.expectEqual(@as(u256, 1000), evm.state.get_balance(recipient));
 }
 
 test "contract call: insufficient balance for value transfer" {
@@ -70,26 +77,30 @@ test "contract call: insufficient balance for value transfer" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);
     const recipient = primitives.Address.from_u256(0x2222);
 
     // Caller has insufficient balance
-    try vm.state.set_balance(caller, 500);
+    try evm.state.set_balance(caller, 500);
 
     // Try to transfer more than balance
-    const result = try vm.call_contract(caller, recipient, 1000, // more than caller has
-        &.{}, 100000, false);
-    defer if (result.output) |output| allocator.free(output);
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = recipient,
+        .value = 1000, // more than caller has
+        .input = &.{},
+        .gas = 100000,
+    }};
+    const result = try evm.call(call_params);
+    defer if (result.output.len > 0) allocator.free(result.output);
 
     try testing.expect(!result.success);
     try testing.expectEqual(@as(u64, 100000), result.gas_left); // Gas not consumed
-    try testing.expectEqual(@as(u256, 500), vm.state.get_balance(caller)); // Balance unchanged
-    try testing.expectEqual(@as(u256, 0), vm.state.get_balance(recipient));
+    try testing.expectEqual(@as(u256, 500), evm.state.get_balance(caller)); // Balance unchanged
+    try testing.expectEqual(@as(u256, 0), evm.state.get_balance(recipient));
 }
 
 test "contract call: static call cannot transfer value" {
@@ -99,21 +110,23 @@ test "contract call: static call cannot transfer value" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);
     const recipient = primitives.Address.from_u256(0x2222);
 
-    try vm.state.set_balance(caller, 10000);
+    try evm.state.set_balance(caller, 10000);
 
-    // Static call with value should fail
-    const result = try vm.call_contract(caller, recipient, 1000, // value in static call
-        &.{}, 100000, true // static call
-    );
-    defer if (result.output) |output| allocator.free(output);
+    // Static call with value should fail - use staticcall variant
+    const call_params = CallParams{ .staticcall = .{
+        .caller = caller,
+        .to = recipient,
+        .input = &.{},
+        .gas = 100000,
+    }};
+    const result = try evm.call(call_params);
+    defer if (result.output.len > 0) allocator.free(result.output);
 
     try testing.expect(!result.success);
     try testing.expectEqual(@as(u64, 100000), result.gas_left);

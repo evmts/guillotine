@@ -3,6 +3,7 @@ const testing = std.testing;
 const Evm = @import("evm");
 const Address = @import("evm").primitives.Address;
 const MemoryDatabase = @import("evm").MemoryDatabase;
+const CallParams = @import("evm").CallParams;
 
 test "JUMPI should take jump when condition is non-zero" {
     const allocator = std.testing.allocator;

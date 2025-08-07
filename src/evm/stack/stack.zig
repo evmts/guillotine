@@ -148,7 +148,7 @@ pub inline fn is_full(self: *const Stack) bool {
 /// try stack.append(0x1234);
 /// ```
 pub fn append(self: *Stack, value: u256) Error!void {
-    if (self.current >= self.limit) {
+    if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
         @branchHint(.cold);
         return Error.StackOverflow;
     }
@@ -182,7 +182,7 @@ pub inline fn append_unsafe(self: *Stack, value: u256) void {
 /// const value = try stack.pop();
 /// ```
 pub fn pop(self: *Stack) Error!u256 {
-    if (self.current <= self.base) {
+    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }

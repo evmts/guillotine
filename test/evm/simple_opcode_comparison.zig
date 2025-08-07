@@ -1,6 +1,7 @@
 const std = @import("std");
 const Evm = @import("evm");
 const Address = @import("primitives").Address;
+const CallParams = @import("evm").CallParams;
 
 const OpcodeTestCase = struct {
     name: []const u8,
@@ -37,31 +38,31 @@ fn runOurEvm(allocator: std.mem.Allocator, bytecode: []const u8) !struct { succe
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
-    defer vm.deinit();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
     const contract = Address.from_u256(0x3300000000000000000000000000000000000000);
     
-    try vm.state.set_code(contract, bytecode);
-    try vm.state.set_balance(caller, std.math.maxInt(u256));
+    try evm.state.set_code(contract, bytecode);
+    try evm.state.set_balance(caller, std.math.maxInt(u256));
     
-    const result = try vm.call_contract(
-        caller,
-        contract,
-        0,
-        &[_]u8{},
-        1_000_000,
-        false
-    );
-    defer if (result.output) |out| allocator.free(out);
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = contract,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1_000_000,
+    }};
+    
+    const result = try evm.call(call_params);
+    defer if (result.output.len > 0) allocator.free(result.output);
     
     var output_value: ?u256 = null;
-    if (result.output) |out| {
-        if (out.len == 32) {
+    if (result.output.len > 0) {
+        if (result.output.len == 32) {
             var bytes: [32]u8 = undefined;
-            @memcpy(&bytes, out[0..32]);
+            @memcpy(&bytes, result.output[0..32]);
             output_value = std.mem.readInt(u256, &bytes, .big);
         }
     }
