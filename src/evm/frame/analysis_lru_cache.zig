@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const CodeAnalysis = @import("code_analysis.zig");
+const CodeAnalysis = @import("../analysis/analysis.zig");
 
 /// LRU cache for bytecode analysis results
 /// 

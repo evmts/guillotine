@@ -1,5 +1,5 @@
 const std = @import("std");
-const CodeAnalysis = @import("code_analysis.zig");
+const CodeAnalysis = @import("../analysis/analysis.zig");
 const Instruction = @import("../instruction.zig").Instruction;
 const instruction_limits = @import("../constants/instruction_limits.zig");
 

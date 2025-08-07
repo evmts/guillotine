@@ -62,7 +62,7 @@ pub const primitives = @import("primitives");
 // Import all EVM modules
 
 /// Bytecode analysis for jump destination detection
-pub const CodeAnalysis = @import("frame/code_analysis.zig");
+pub const CodeAnalysis = @import("analysis/analysis.zig");
 
 /// Contract code and storage management
 pub const Contract = @import("frame/contract.zig");
