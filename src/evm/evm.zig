@@ -17,6 +17,7 @@ const Context = @import("access_list/context.zig");
 const EvmState = @import("state/state.zig");
 const Memory = @import("memory/memory.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
+const EvmMemoryAllocator = @import("memory/evm_allocator.zig").EvmMemoryAllocator;
 pub const StorageKey = @import("primitives").StorageKey;
 pub const CreateResult = @import("evm/create_result.zig").CreateResult;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
@@ -35,8 +36,10 @@ const Evm = @This();
 /// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH = 1024;
 // Hot fields (frequently accessed during execution)
-/// Memory allocator for VM operations
+/// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
+/// Internal arena allocator for temporary data that's reset between executions
+internal_allocator: EvmMemoryAllocator,
 /// Opcode dispatch table for the configured hardfork
 table: JumpTable,
 /// Current call depth for overflow protection
@@ -112,6 +115,10 @@ pub fn init(
 ) !Evm {
     Log.debug("Evm.init: Initializing EVM with configuration", .{});
 
+    // Initialize internal arena allocator for temporary data
+    var internal_allocator = try EvmMemoryAllocator.init(allocator);
+    errdefer internal_allocator.deinit();
+
     var state = try EvmState.init(allocator, database);
     errdefer state.deinit();
 
@@ -124,6 +131,7 @@ pub fn init(
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
         .allocator = allocator,
+        .internal_allocator = internal_allocator,
         .table = table orelse JumpTable.DEFAULT,
         .chain_rules = chain_rules orelse ChainRules.DEFAULT,
         .state = state,
@@ -142,6 +150,7 @@ pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
     Contract.clear_analysis_cache(self.allocator);
+    self.internal_allocator.deinit();
 
     // No frame pool to clean up - frames are stack-allocated and cleaned up in their respective functions
 }
@@ -150,11 +159,18 @@ pub fn deinit(self: *Evm) void {
 /// This is efficient for executing multiple contracts in sequence.
 /// Clears all state but keeps the allocated memory for reuse.
 pub fn reset(self: *Evm) void {
-    // Reset allocator without deallocating (no custom allocator to reset)
+    // Reset internal arena allocator to reuse memory
+    self.internal_allocator.reset();
 
     // Reset execution state
     self.depth = 0;
     self.read_only = false;
+}
+
+/// Get the internal arena allocator for temporary EVM data
+/// Use this for allocations that are reset between EVM executions
+pub fn arena_allocator(self: *Evm) std.mem.Allocator {
+    return self.internal_allocator.allocator();
 }
 
 pub usingnamespace @import("evm/set_context.zig");

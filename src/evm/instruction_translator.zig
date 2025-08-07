@@ -125,8 +125,10 @@ pub const InstructionTranslator = struct {
                         }
                         
                         log.debug("PC={}: PUSH with value={}", .{pc, value});
+                        const opcode_fn = self.jump_table.execute_funcs[opcode_byte];
+                        log.debug("PC={}: PUSH opcode_fn={any}", .{pc, opcode_fn});
                         self.instructions[self.instruction_count] = .{
-                            .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                            .opcode_fn = opcode_fn,
                             .arg = .{ .push_value = value },
                         };
                         self.instruction_count += 1;
@@ -167,8 +169,10 @@ pub const InstructionTranslator = struct {
                 .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL,
                 // Other EIPs
                 .MCOPY, .TLOAD, .TSTORE => {
+                    const opcode_fn = self.jump_table.execute_funcs[opcode_byte];
+                    log.debug("PC={}: EIP opcode 0x{x:0>2}, opcode_fn={any}", .{pc, opcode_byte, opcode_fn});
                     self.instructions[self.instruction_count] = .{
-                        .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                        .opcode_fn = opcode_fn,
                         .arg = .none,
                     };
                     self.instruction_count += 1;
@@ -177,8 +181,10 @@ pub const InstructionTranslator = struct {
                 // Jump operations - for now just translate them without resolving targets
                 // Jump target resolution will be done in a second pass
                 .JUMP, .JUMPI => {
+                    const opcode_fn = self.jump_table.execute_funcs[opcode_byte];
+                    log.debug("PC={}: JUMP opcode 0x{x:0>2}, opcode_fn={any}", .{pc, opcode_byte, opcode_fn});
                     self.instructions[self.instruction_count] = .{
-                        .opcode_fn = self.jump_table.execute_funcs[opcode_byte],
+                        .opcode_fn = opcode_fn,
                         .arg = .none, // Will be updated with .jump_target in second pass
                     };
                     self.instruction_count += 1;

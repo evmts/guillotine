@@ -47,13 +47,22 @@ pub fn init(
     initial_capacity: usize,
     memory_limit: u64,
 ) !Memory {
+    std.log.debug("Memory.init: Starting, initial_capacity={}, memory_limit={}", .{initial_capacity, memory_limit});
+    
+    std.log.debug("Memory.init: About to create shared_buffer", .{});
     const shared_buffer = try allocator.create(std.ArrayList(u8));
     errdefer allocator.destroy(shared_buffer);
+    std.log.debug("Memory.init: Created shared_buffer ptr={*}", .{shared_buffer});
     
+    std.log.debug("Memory.init: Initializing ArrayList", .{});
     shared_buffer.* = std.ArrayList(u8).init(allocator);
     errdefer shared_buffer.deinit();
+    
+    std.log.debug("Memory.init: About to ensureTotalCapacity({})", .{initial_capacity});
     try shared_buffer.ensureTotalCapacity(initial_capacity);
+    std.log.debug("Memory.init: ensureTotalCapacity complete", .{});
 
+    std.log.debug("Memory.init: Returning Memory struct", .{});
     return Memory{
         .my_checkpoint = 0,
         .memory_limit = memory_limit,
@@ -76,7 +85,10 @@ pub fn init_child_memory(self: *Memory, checkpoint: usize) !Memory {
 }
 
 pub fn init_default(allocator: std.mem.Allocator) !Memory {
-    return try init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
+    std.log.debug("Memory.init_default: Called with allocator={*}", .{allocator.ptr});
+    const result = try init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
+    std.log.debug("Memory.init_default: Returning", .{});
+    return result;
 }
 
 /// Deinitializes the Memory. Only root Memory instances clean up the shared buffer.
