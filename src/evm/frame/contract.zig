@@ -40,7 +40,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const opcode = @import("../opcodes/opcode.zig");
-const bitvec = @import("bitvec.zig");
 const primitives = @import("primitives");
 const ExecutionError = @import("../execution/execution_error.zig");
 const CodeAnalysis = @import("code_analysis.zig");
@@ -477,14 +476,14 @@ pub fn valid_jumpdest(self: *Contract, allocator: std.mem.Allocator, dest: u256)
     const analysis = self.analysis orelse return false;
 
     // O(1) lookup in the JUMPDEST bitmap
-    return analysis.jumpdest_bitmap.isSetUnchecked(pos);
+    return analysis.jumpdest_bitmap.isSet(pos);
 }
 
 /// Check if position is code (not data)
 pub fn is_code(self: *const Contract, pos: u64) bool {
     if (self.analysis) |analysis| {
-        // We know pos is within bounds if analysis exists, so use unchecked version
-        return analysis.code_segments.isSetUnchecked(@intCast(pos));
+        // Use the safe isSet method
+        return analysis.code_segments.isSet(@intCast(pos));
     }
     return true;
 }
@@ -811,68 +810,12 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
     };
     errdefer allocator.destroy(analysis);
 
-    // Initialize with basic analysis - no block analysis for now
-    analysis.* = CodeAnalysis{
-        .code_segments = bitvec.BitVec64.codeBitmap(allocator, code) catch |err| {
-            Log.debug("Failed to create code bitmap: {any}", .{err});
-            allocator.destroy(analysis);
-            return error.OutOfMemory;
-        },
-        .jumpdest_bitmap = bitvec.BitVec64.init(allocator, code.len) catch |err| {
-            Log.debug("Failed to create jumpdest bitmap: {any}", .{err});
-            analysis.code_segments.deinit(allocator);
-            allocator.destroy(analysis);
-            return error.OutOfMemory;
-        },
-        .block_gas_costs = null,
-        .max_stack_depth = 0,
-        .has_dynamic_jumps = false,
-        .has_static_jumps = false,
-        .has_selfdestruct = false,
-        .has_create = false,
-        // Block-related fields with empty/default values
-        .block_starts = bitvec.BitVec64{
-            .bits = &[_]u64{},
-            .size = 0,
-            .owned = false,
-            .cached_ptr = undefined,
-        },
-        .block_metadata = undefined, // Fixed array, unused for simple analysis
-        .block_metadata_soa = CodeAnalysis.BlockMetadataSoA.init(),
-        .pc_to_block = undefined, // Fixed array, unused for simple analysis
-        .block_count = 0,
+    // Use the comprehensive block analysis with static arrays
+    CodeAnalysis.analyze_bytecode_blocks(analysis, code) catch |err| {
+        Log.debug("Failed to analyze bytecode: {any}", .{err});
+        allocator.destroy(analysis);
+        return error.OutOfMemory;
     };
-
-    // Mark JUMPDESTs
-    var i: usize = 0;
-    while (i < code.len) {
-        const op = code[i];
-        if (op == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSetUnchecked(i)) {
-            analysis.jumpdest_bitmap.setUnchecked(i);
-        }
-        
-        // Track opcodes - skip invalid opcodes
-        if (op <= 0xFF) {
-            const maybe_opcode = std.meta.intToEnum(opcode.Enum, op) catch {
-                // Invalid opcode, skip it
-                continue;
-            };
-            switch (maybe_opcode) {
-                .JUMP, .JUMPI => analysis.has_static_jumps = true,
-                .SELFDESTRUCT => analysis.has_selfdestruct = true,
-                .CREATE, .CREATE2 => analysis.has_create = true,
-                else => {},
-            }
-        }
-        
-        // Advance PC
-        if (opcode.is_push(op)) {
-            const push_bytes = opcode.get_push_size(op);
-            i += 1 + push_bytes;
-        } else {
-            i += 1;
-        }
-    }
 
     return analysis;
 }
@@ -1003,7 +946,7 @@ pub fn clear_analysis_cache(allocator: std.mem.Allocator) void {
     if (simple_cache) |*cache| {
         var iter = cache.iterator();
         while (iter.next()) |entry| {
-            entry.value_ptr.*.deinit(allocator);
+            // CodeAnalysis no longer needs deinit - it uses fixed-size arrays
             allocator.destroy(entry.value_ptr.*);
         }
         cache.deinit();
