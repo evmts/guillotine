@@ -36,20 +36,29 @@ pub inline fn interpret_block(self: *Vm, contract: *Contract, input: []const u8,
     self.read_only = self.read_only or is_static;
     const initial_gas = contract.gas;
 
-    // Analyze the bytecode (returns by value, no allocation)
+    // Always heap-allocate CodeAnalysis (89KB) to support EVM recursion depth of 1024
+    // At max depth, stack allocation would require 91MB just for CodeAnalysis structs
     Log.debug("VM.interpret_block: Analyzing bytecode", .{});
-    var analysis = try CodeAnalysis.analyze_bytecode_blocks(self.allocator, contract.code[0..contract.code_size]);
-    defer analysis.deinit(self.allocator); // Only cleans up BitVec allocations
+    const analysis = try self.arena_allocator().create(CodeAnalysis);
+    defer self.arena_allocator().destroy(analysis);
+    try CodeAnalysis.analyze_bytecode_blocks(analysis, contract.code[0..contract.code_size]);
     Log.debug("VM.interpret_block: Code analysis complete", .{});
 
-    // Use fixed-size array for instructions (no allocation)
-    var instructions: [instruction_limits.MAX_INSTRUCTIONS + 1]Instruction = undefined;
+    // Always heap-allocate instruction array (up to 1.5MB for max contract size)
+    // This ensures consistent behavior across all platforms (WASM, Windows, macOS, Linux)
+    const instructions = try self.allocator.alloc(Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
+    defer self.allocator.free(instructions);
+    
+    // Initialize all instructions to ensure no undefined behavior
+    for (instructions) |*inst| {
+        inst.* = .{ .opcode_fn = null, .arg = .none };
+    }
 
     // Translate bytecode to instructions
     Log.debug("VM.interpret_block: Translating bytecode to instructions", .{});
     var translator = InstructionTranslator.init(
         contract.code[0..contract.code_size],
-        &analysis,
+        analysis,
         instructions[0..instruction_limits.MAX_INSTRUCTIONS],
         &self.table,
     );
@@ -64,8 +73,26 @@ pub inline fn interpret_block(self: *Vm, contract: *Contract, input: []const u8,
     };
 
     Log.debug("VM.interpret_block: Translated {} opcodes to {} instructions", .{ contract.code_size, instruction_count });
+    
+    // Debug: Check first few instructions
+    {
+        Log.debug("VM.interpret_block: After translation - checking instructions", .{});
+        Log.debug("  instructions.ptr={*}, len={}, first 3 instructions:", .{
+            instructions.ptr, instructions.len
+        });
+        var i: usize = 0;
+        while (i < @min(3, instruction_count)) : (i += 1) {
+            const fn_ptr = instructions[i].opcode_fn;
+            Log.debug("    [{}]: fn={any}, arg={}", .{
+                i, fn_ptr, instructions[i].arg
+            });
+        }
+    }
 
-    // Create frame on stack
+    // Create frame on stack with detailed logging
+    Log.debug("VM.interpret_block: About to create Frame", .{});
+    Log.debug("  Check before Frame creation - inst[0].fn={any}", .{instructions[0].opcode_fn});
+    
     var frame = Frame{
         .gas_remaining = contract.gas,
         .pc = 0,
@@ -79,16 +106,36 @@ pub inline fn interpret_block(self: *Vm, contract: *Contract, input: []const u8,
         .input = input,
         .output = &[_]u8{},
         .op = &.{},
-        .memory = try Memory.init_default(self.allocator),
+        .memory = blk: {
+            Log.debug("  Before Memory.init_default - inst[0].fn={any}", .{instructions[0].opcode_fn});
+            const mem = try Memory.init_default(self.arena_allocator());
+            Log.debug("  After Memory.init_default - inst[0].fn={any}", .{instructions[0].opcode_fn});
+            break :blk mem;
+        },
         .stack = .{},
-        .return_data = ReturnData.init(self.allocator),
+        .return_data = blk: {
+            Log.debug("  Before ReturnData.init - inst[0].fn={any}", .{instructions[0].opcode_fn});
+            const rd = ReturnData.init(self.arena_allocator());
+            Log.debug("  After ReturnData.init - inst[0].fn={any}", .{instructions[0].opcode_fn});
+            break :blk rd;
+        },
         .vm = self,
     };
+    Log.debug("  After full Frame creation - inst[0].fn={any}", .{instructions[0].opcode_fn});
     defer frame.deinit();
 
     // Execute the instruction stream
     Log.debug("VM.interpret_block: Starting block execution", .{});
-    const inst_ptr: [*]const Instruction = &instructions;
+    const inst_ptr: [*]const Instruction = instructions.ptr;
+    Log.debug("  inst_ptr={*}, checking first 3 instructions:", .{inst_ptr});
+    {
+        var i: usize = 0;
+        while (i < 3) : (i += 1) {
+            Log.debug("    [{}]: fn={any}, arg={}", .{
+                i, inst_ptr[i].opcode_fn, inst_ptr[i].arg
+            });
+        }
+    }
     BlockExecutor.execute_block(inst_ptr, &frame) catch |err| {
         contract.gas = frame.gas_remaining;
 

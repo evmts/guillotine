@@ -56,9 +56,9 @@ pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: b
         .input = input,
         .output = &[_]u8{},
         .op = &.{},
-        .memory = try Memory.init_default(self.allocator),
+        .memory = try Memory.init_default(self.arena_allocator()),
         .stack = .{},
-        .return_data = ReturnData.init(self.allocator),
+        .return_data = ReturnData.init(self.arena_allocator()),
         .vm = self,
     };
     defer frame.deinit();
