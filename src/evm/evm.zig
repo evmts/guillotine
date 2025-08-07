@@ -174,8 +174,7 @@ pub fn arena_allocator(self: *Evm) std.mem.Allocator {
 }
 
 pub usingnamespace @import("evm/set_context.zig");
-pub usingnamespace @import("evm/interpret.zig");
-pub usingnamespace @import("evm/interpret_block.zig");
+pub usingnamespace @import("evm/interpret_legacy.zig");
 pub usingnamespace @import("evm/create_contract_internal.zig");
 
 pub usingnamespace @import("evm/create_contract.zig");

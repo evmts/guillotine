@@ -43,6 +43,9 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
 
     const initial_gas = contract.gas;
 
+    self.depth += 1;
+    defer self.depth -= 1;
+
     // The EVM does inner calls by recursively calling into this interpret_block method
     // Tracking readonly globally like this only works because of self.require_one_thread()
     // TODO move this to Frame struct
@@ -80,13 +83,50 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
     };
     defer frame.deinit();
 
+    var loop_iterations: usize = 0;
+    const MAX_ITERATIONS = if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) 10_000_000 else std.math.maxInt(usize);
+    var last_pc: usize = 0;
+    var same_pc_count: usize = 0;
+
     while (current_instruction[0]) |nextInstruction| {
+        @branchHint(.likely);
+
+        // Debug infinite loops
+        loop_iterations += 1;
+        if (loop_iterations > MAX_ITERATIONS) {
+            Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}", .{
+                loop_iterations, frame.pc, self.depth, frame.gas_remaining
+            });
+            unreachable;
+        }
+        
+        // Detect stuck at same PC
+        if (frame.pc == last_pc) {
+            same_pc_count += 1;
+            if (same_pc_count > 1000) {
+                Log.err("interpret: Stuck at pc={} for {} iterations", .{
+                    frame.pc, same_pc_count
+                });
+                unreachable;
+            }
+        } else {
+            last_pc = frame.pc;
+            same_pc_count = 0;
+        }
+
+        // Log every 10000th iteration for visibility
+        if (loop_iterations % 10000 == 0) {
+            Log.debug("interpret: iteration {}, pc={}, gas={}, stack_size={}", .{
+                loop_iterations, frame.pc, frame.gas_remaining, frame.stack.size
+            });
+        }
         switch (nextInstruction.arg) {
             .jump_target => |target| {
                 if (nextInstruction.opcode_fn == execution.control.op_jump) {
                     current_instruction = frame.stack.pop_unsafe();
                     if (!frame.contract.valid_jumpdest(frame.allocator, current_instruction)) {
-                        return ExecutionError.Error.InvalidJump;
+                        contract.gas = frame.gas_remaining;
+                        return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null);
                     }
                 }
                 if (nextInstruction.opcode_fn == execution.control.op_jumpi) {
@@ -94,7 +134,8 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                     const condition = frame.stack.pop_unsafe();
                     if (condition != 0) {
                         if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
-                            return ExecutionError.Error.InvalidJump;
+                            contract.gas = frame.gas_remaining;
+                            return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null);
                         }
                         current_instruction = @ptrCast(target);
                     }
@@ -107,7 +148,48 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
             },
             .none => {
                 current_instruction += 1;
-                try nextInstruction.opcode_fn(frame.pc, frame.vm, frame);
+                nextInstruction.opcode_fn(frame.pc, frame.vm, frame) catch |err| {
+                    contract.gas = frame.gas_remaining;
+
+                    var output: ?[]const u8 = null;
+                    const return_data = frame.output;
+                    if (return_data.len > 0) {
+                        output = self.allocator.dupe(u8, return_data) catch {
+                            return RunResult.init(initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfMemory, null);
+                        };
+                    }
+
+                    if (err == ExecutionError.Error.STOP) {
+                        @branchHint(.likely);
+                        return RunResult.init(initial_gas, frame.gas_remaining, .Success, null, output);
+                    }
+
+                    return switch (err) {
+                        ExecutionError.Error.InvalidOpcode => {
+                            frame.gas_remaining = 0;
+                            contract.gas = 0;
+                            return RunResult.init(initial_gas, 0, .Invalid, err, output);
+                        },
+                        ExecutionError.Error.REVERT => {
+                            return RunResult.init(initial_gas, frame.gas_remaining, .Revert, err, output);
+                        },
+                        ExecutionError.Error.OutOfGas => {
+                            return RunResult.init(initial_gas, frame.gas_remaining, .OutOfGas, err, output);
+                        },
+                        ExecutionError.Error.InvalidJump,
+                        ExecutionError.Error.StackUnderflow,
+                        ExecutionError.Error.StackOverflow,
+                        ExecutionError.Error.StaticStateChange,
+                        ExecutionError.Error.WriteProtection,
+                        ExecutionError.Error.DepthLimit,
+                        ExecutionError.Error.MaxCodeSizeExceeded,
+                        ExecutionError.Error.OutOfMemory,
+                        => {
+                            return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, err, output);
+                        },
+                        else => return err,
+                    };
+                };
             },
             .gas_cost => |cost| {
                 current_instruction += 1;
@@ -115,7 +197,8 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                 if (frame.gas_remaining < cost) {
                     @branchHint(.cold);
                     frame.gas_remaining = 0;
-                    return ExecutionError.Error.OutOfGas;
+                    contract.gas = 0;
+                    return RunResult.init(initial_gas, 0, .OutOfGas, ExecutionError.Error.OutOfGas, null);
                 }
                 frame.gas_remaining -= cost;
             },
