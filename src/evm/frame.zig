@@ -110,6 +110,10 @@ pub const Frame = struct {
     _pad3: [7]u8 = [_]u8{0} ** 7, // Align to 8-byte boundary
     
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
+    
+    /// Pointer to the next frame in the call stack (for nested calls)
+    /// null if this is the deepest frame or no more frames available
+    next_frame: ?*Frame, // 8 bytes - pointer to next frame for CALL/CREATE operations
 
     /// Initialize a Frame with required parameters
     pub fn init(
@@ -124,6 +128,7 @@ pub const Frame = struct {
         self_destruct: ?*SelfDestruct,
         input: []const u8,
         allocator: std.mem.Allocator,
+        next_frame: ?*Frame,
     ) !Frame {
         // Determine hardfork from chain rules
         const hardfork = blk: {
@@ -166,6 +171,7 @@ pub const Frame = struct {
             .hardfork = hardfork,
             .self_destruct = self_destruct,
             .allocator = allocator,
+            .next_frame = next_frame,
         };
     }
 
@@ -343,6 +349,42 @@ pub const Frame = struct {
         
         @compileError("Unknown hardfork feature: " ++ field_name);
     }
+
+    /// Get the next available frame for nested calls (CALL, DELEGATECALL, etc.)
+    /// Returns null if we've reached maximum call depth (stack overflow)
+    pub fn get_next_frame(self: *Frame) ?*Frame {
+        return self.next_frame;
+    }
+
+    /// Check if we can make another call (haven't reached max call depth)
+    pub fn can_make_call(self: *const Frame) bool {
+        return self.next_frame != null;
+    }
+
+    /// Prepare the next frame for a nested call
+    /// This should be called by CALL/DELEGATECALL/STATICCALL/CREATE opcodes
+    /// TODO: This will need to be implemented when we add actual CALL/CREATE opcodes
+    pub fn prepare_call_frame(
+        self: *Frame, 
+        gas: u64,
+        static_call: bool,
+        contract_address: primitives.Address.Address,
+        analysis: *const CodeAnalysis,
+        input: []const u8
+    ) ExecutionError.Error!*Frame {
+        const next_frame = self.get_next_frame() orelse return ExecutionError.Error.DepthLimit;
+        
+        // Set up the next frame for execution
+        next_frame.gas_remaining = gas;
+        next_frame.hot_flags.is_static = static_call;
+        next_frame.hot_flags.depth = self.hot_flags.depth + 1;
+        next_frame.contract_address = contract_address;
+        next_frame.analysis = analysis;
+        next_frame.input = input;
+        next_frame.output = &[_]u8{}; // Reset output
+        
+        return next_frame;
+    }
 };
 
 /// Type alias for backward compatibility
@@ -472,6 +514,7 @@ test "Frame - basic initialization" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx.deinit();
 
@@ -516,6 +559,7 @@ test "Frame - gas consumption" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx.deinit();
 
@@ -561,6 +605,7 @@ test "Frame - jumpdest validation" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx.deinit();
 
@@ -604,6 +649,7 @@ test "Frame - address access tracking" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx.deinit();
 
@@ -642,6 +688,7 @@ test "Frame - output data management" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx.deinit();
 
@@ -684,6 +731,7 @@ test "Frame - static call restrictions" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer static_ctx.deinit();
 
@@ -700,6 +748,7 @@ test "Frame - static call restrictions" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer normal_ctx.deinit();
 
@@ -738,6 +787,7 @@ test "Frame - selfdestruct availability" {
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx_with_selfdestruct.deinit();
 
@@ -758,6 +808,7 @@ test "Frame - selfdestruct availability" {
         null,
         &[_]u8{}, // input
         allocator,
+        null, // next_frame
     );
     defer ctx_without_selfdestruct.deinit();
 
