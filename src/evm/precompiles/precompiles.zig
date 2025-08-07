@@ -5,7 +5,7 @@ const primitives = @import("primitives");
 const addresses = @import("precompile_addresses.zig");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
-const ChainRules = @import("../execution_context.zig").ChainRules;
+const ChainRules = @import("../frame.zig").ChainRules;
 
 // Import all precompile modules
 const ecrecover = @import("ecrecover.zig");

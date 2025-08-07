@@ -4,7 +4,7 @@ const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
-const ChainRules = @import("../execution_context.zig").ChainRules;
+const ChainRules = @import("../frame.zig").ChainRules;
 
 /// RIPEMD160 precompile implementation (Optimized Version)
 ///

@@ -31,7 +31,7 @@ const log = @import("../log.zig");
 const GasConstants = @import("primitives").GasConstants;
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
-const ChainRules = @import("../execution_context.zig").ChainRules;
+const ChainRules = @import("../frame.zig").ChainRules;
 const ec_validation = @import("ec_validation.zig");
 
 // Conditional imports based on target

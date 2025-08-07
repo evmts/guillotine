@@ -1,6 +1,6 @@
 const std = @import("std");
 const ecmul = @import("ecmul.zig");
-const ExecutionContext = @import("../execution_context.zig");
+const ExecutionContext = @import("../frame.zig");
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 
 test "fuzz ecmul precompile input parsing" {

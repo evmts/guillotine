@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
-const ChainRules = @import("../execution_context.zig").ChainRules;
+const ChainRules = @import("../frame.zig").ChainRules;
 
 // Test the uniform interface pattern
 test "uniform precompile interface" {
