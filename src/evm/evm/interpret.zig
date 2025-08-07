@@ -1,6 +1,6 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
-const Frame = @import("../execution_context.zig").Frame;
+const Frame = @import("../frame.zig").Frame;
 const Operation = @import("../opcodes/operation.zig");
 const RunResult = @import("run_result.zig").RunResult;
 const InterpretResult = @import("interpret_result.zig").InterpretResult;
@@ -56,7 +56,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
     var current_instruction = analysis.instructions;
 
     // Initialize the new execution context Frame
-    const ChainRules = @import("../execution_context.zig").ChainRules;
+    const ChainRules = @import("../frame.zig").ChainRules;
     const chain_rules = ChainRules{}; // Use default values
     var frame = try Frame.init(
         self.arena_allocator(),

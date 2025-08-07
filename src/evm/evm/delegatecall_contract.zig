@@ -4,9 +4,10 @@ const CallResult = @import("call_result.zig").CallResult;
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const CodeAnalysis = @import("../analysis.zig");
-const ChainRules = @import("../execution_context.zig").ChainRules;
+const ChainRules = @import("../frame.zig").ChainRules;
+const evm_limits = @import("../constants/evm_limits.zig");
 
 pub const DelegatecallContractError = std.mem.Allocator.Error || ExecutionError.Error || @import("../state/database_interface.zig").DatabaseError;
 
@@ -30,8 +31,8 @@ pub fn delegatecall_contract(self: *Vm, current: primitives.Address.Address, cod
 
     Log.debug("VM.delegatecall_contract: DELEGATECALL from {any} to {any}, caller={any}, value={}, gas={}, static={}", .{ current, code_address, caller, value, gas, is_static });
 
-    // Check call depth limit (1024)
-    if (self.depth >= 1024) {
+    // Check call depth limit
+    if (self.depth >= evm_limits.MAX_CALL_DEPTH) {
         @branchHint(.unlikely);
         Log.debug("VM.delegatecall_contract: Call depth limit exceeded", .{});
         return CallResult{ .success = false, .gas_left = gas, .output = null };

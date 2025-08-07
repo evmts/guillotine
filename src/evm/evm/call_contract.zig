@@ -6,9 +6,10 @@ const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const CodeAnalysis = @import("../analysis.zig");
-const ChainRules = @import("../execution_context.zig").ChainRules;
+const ChainRules = @import("../frame.zig").ChainRules;
+const evm_limits = @import("../constants/evm_limits.zig");
 
 pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error || @import("../state/database_interface.zig").DatabaseError;
 
@@ -39,8 +40,8 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     // Regular contract call
     Log.debug("VM.call_contract: Regular contract call to {any}", .{to});
 
-    // Check call depth limit (1024)
-    if (self.depth >= 1024) {
+    // Check call depth limit
+    if (self.depth >= evm_limits.MAX_CALL_DEPTH) {
         @branchHint(.unlikely);
         Log.debug("VM.call_contract: Call depth limit exceeded", .{});
         return CallResult{ .success = false, .gas_left = gas, .output = null };

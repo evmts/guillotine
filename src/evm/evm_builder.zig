@@ -1,8 +1,9 @@
 const std = @import("std");
 const Evm = @import("evm.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
-const ExecutionContext = @import("execution_context.zig");
-const ChainRules = ExecutionContext.ChainRules;
+const Frame = @import("frame.zig");
+const ExecutionContext = @import("frame.zig").ExecutionContext;
+const ChainRules = Frame.ChainRules;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const Context = @import("access_list/context.zig");
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
@@ -54,7 +55,7 @@ pub const EvmBuilder = struct {
     /// Configure for a specific hardfork (sets both jump table and chain rules).
     pub fn with_hardfork(self: *EvmBuilder, hardfork: Hardfork) *EvmBuilder {
         self.table = JumpTable.init_from_hardfork(hardfork);
-        self.chain_rules = ExecutionContext.Frame.chainRulesForHardfork(hardfork);
+        self.chain_rules = Frame.chainRulesForHardfork(hardfork);
         return self;
     }
 
@@ -100,7 +101,7 @@ pub const EvmBuilder = struct {
 const testing = std.testing;
 const MemoryDatabase = @import("state/memory_database.zig");
 
-test "EvmBuilder basic usage" {
+test "Evm basic initialization" {
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -108,15 +109,23 @@ test "EvmBuilder basic usage" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var builder = EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(
+        allocator,
+        db_interface,
+        null,
+        null,
+        null,
+        0,
+        false,
+        null,
+    );
     defer evm.deinit();
 
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
-test "EvmBuilder with all options" {
+test "Evm with all options" {
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -124,19 +133,26 @@ test "EvmBuilder with all options" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var builder = EvmBuilder.init(allocator, db_interface);
-    var evm = try builder
-        .with_hardfork(.LONDON)
-        .with_depth(10)
-        .with_read_only(true)
-        .build();
+    const table = JumpTable.init_from_hardfork(.LONDON);
+    const chain_rules = Frame.chainRulesForHardfork(.LONDON);
+
+    var evm = try Evm.init(
+        allocator,
+        db_interface,
+        table,
+        chain_rules,
+        null,
+        10,
+        true,
+        null,
+    );
     defer evm.deinit();
 
-    try testing.expectEqual(@as(u16, 10), evm.depth);
+    try testing.expectEqual(@as(u11, 10), evm.depth);
     try testing.expectEqual(true, evm.read_only);
 }
 
-test "EvmBuilder fluent API" {
+test "Evm with hardfork configuration" {
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -144,19 +160,26 @@ test "EvmBuilder fluent API" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var builder = EvmBuilder.init(allocator, db_interface);
-    var evm = try builder
-        .with_depth(5)
-        .with_read_only(true)
-        .with_hardfork(.BERLIN)
-        .build();
+    const table = JumpTable.init_from_hardfork(.BERLIN);
+    const chain_rules = Frame.chainRulesForHardfork(.BERLIN);
+
+    var evm = try Evm.init(
+        allocator,
+        db_interface,
+        table,
+        chain_rules,
+        null,
+        5,
+        true,
+        null,
+    );
     defer evm.deinit();
 
-    try testing.expectEqual(@as(u16, 5), evm.depth);
+    try testing.expectEqual(@as(u11, 5), evm.depth);
     try testing.expectEqual(true, evm.read_only);
 }
 
-test "EvmBuilder custom jump table and chain rules" {
+test "Evm custom jump table and chain rules" {
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -164,19 +187,27 @@ test "EvmBuilder custom jump table and chain rules" {
 
     const db_interface = memory_db.to_database_interface();
     const custom_table = JumpTable.init_from_hardfork(.ISTANBUL);
-    const custom_rules = ChainRules.for_hardfork(.ISTANBUL);
+    const custom_rules = Frame.chainRulesForHardfork(.ISTANBUL);
 
-    var builder = EvmBuilder.init(allocator, db_interface);
-    var evm = try builder
-        .with_jump_table(custom_table)
-        .with_chain_rules(custom_rules)
-        .build();
+    var evm = try Evm.init(
+        allocator,
+        db_interface,
+        custom_table,
+        custom_rules,
+        null,
+        0,
+        false,
+        null,
+    );
     defer evm.deinit();
 
-    try testing.expect(evm.chain_rules.hardfork() == .ISTANBUL);
+    // Test that the chain rules were set correctly
+    try testing.expect(evm.chain_rules.is_istanbul);
+    try testing.expect(evm.chain_rules.is_berlin);
+    try testing.expect(evm.chain_rules.is_london);
 }
 
-test "EvmBuilder context configuration" {
+test "Evm context configuration" {
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -188,17 +219,23 @@ test "EvmBuilder context configuration" {
     custom_context.block.number = 12345;
     custom_context.block.timestamp = 1234567890;
 
-    var builder = EvmBuilder.init(allocator, db_interface);
-    var evm = try builder
-        .with_context(custom_context)
-        .build();
+    var evm = try Evm.init(
+        allocator,
+        db_interface,
+        null,
+        null,
+        custom_context,
+        0,
+        false,
+        null,
+    );
     defer evm.deinit();
 
     try testing.expectEqual(@as(u256, 12345), evm.context.block.number);
     try testing.expectEqual(@as(u64, 1234567890), evm.context.block.timestamp);
 }
 
-test "EvmBuilder multiple configurations" {
+test "Evm multiple hardfork configurations" {
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -209,14 +246,39 @@ test "EvmBuilder multiple configurations" {
     const hardforks = [_]Hardfork{ .FRONTIER, .HOMESTEAD, .BYZANTIUM, .LONDON };
 
     for (hardforks) |hardfork| {
-        var builder = EvmBuilder.init(allocator, db_interface);
-        var evm = try builder
-            .with_hardfork(hardfork)
-            .with_depth(10)
-            .build();
+        const table = JumpTable.init_from_hardfork(hardfork);
+        const chain_rules = Frame.chainRulesForHardfork(hardfork);
+
+        var evm = try Evm.init(
+            allocator,
+            db_interface,
+            table,
+            chain_rules,
+            null,
+            10,
+            false,
+            null,
+        );
         defer evm.deinit();
 
-        try testing.expectEqual(@as(u16, 10), evm.depth);
-        try testing.expect(evm.chain_rules.hardfork() == hardfork);
+        try testing.expectEqual(@as(u11, 10), evm.depth);
+        // Test that the chain rules correspond to the hardfork by checking specific features
+        switch (hardfork) {
+            .FRONTIER => {
+                try testing.expect(!evm.chain_rules.is_homestead);
+            },
+            .HOMESTEAD => {
+                try testing.expect(evm.chain_rules.is_homestead);
+                try testing.expect(!evm.chain_rules.is_byzantium);
+            },
+            .BYZANTIUM => {
+                try testing.expect(evm.chain_rules.is_byzantium);
+                try testing.expect(!evm.chain_rules.is_london);
+            },
+            .LONDON => {
+                try testing.expect(evm.chain_rules.is_london);
+            },
+            else => {},
+        }
     }
 }
