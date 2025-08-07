@@ -14,7 +14,7 @@ const Evm = @import("../evm.zig");
 const primitives = @import("primitives");
 const execution = @import("../execution/package.zig");
 const Instruction = @import("../instruction.zig").Instruction;
-const CodeAnalysis = @import("../frame/code_analysis.zig");
+const CodeAnalysis = @import("../analysis/analysis.zig");
 const instruction_limits = @import("../constants/instruction_limits.zig");
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 
@@ -56,7 +56,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
     defer analysis.deinit();
     var current_instruction = analysis.instructions;
 
-    // Initialize the new execution context Frame  
+    // Initialize the new execution context Frame
     const ChainRules = @import("../execution_context.zig").ChainRules;
     const chain_rules = ChainRules{}; // Use default values
     var frame = try Frame.init(
@@ -70,6 +70,7 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
         self.state,
         chain_rules,
         &self_destruct,
+        input,
     );
     defer frame.deinit();
 
@@ -84,20 +85,16 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
         // Debug infinite loops
         loop_iterations += 1;
         if (loop_iterations > MAX_ITERATIONS) {
-            Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}", .{
-                loop_iterations, current_instruction - analysis.instructions, self.depth, frame.gas_remaining
-            });
+            Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}", .{ loop_iterations, current_instruction - analysis.instructions, self.depth, frame.gas_remaining });
             unreachable;
         }
-        
+
         // Detect stuck at same PC
         const current_pc = current_instruction - analysis.instructions;
         if (current_pc == last_pc) {
             same_pc_count += 1;
             if (same_pc_count > 1000) {
-                Log.err("interpret: Stuck at pc={} for {} iterations", .{
-                    current_pc, same_pc_count
-                });
+                Log.err("interpret: Stuck at pc={} for {} iterations", .{ current_pc, same_pc_count });
                 unreachable;
             }
         } else {
@@ -105,12 +102,6 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
             same_pc_count = 0;
         }
 
-        // Log every 10000th iteration for visibility
-        if (loop_iterations % 10000 == 0) {
-            Log.debug("interpret: iteration {}, pc={}, gas={}, stack_size={}", .{
-                loop_iterations, current_instruction - analysis.instructions, frame.gas_remaining, frame.stack.size()
-            });
-        }
         switch (nextInstruction.arg) {
             .jump_target => |target| {
                 if (nextInstruction.opcode_fn == execution.control.op_jump) {

@@ -17,6 +17,9 @@ pub fn op_pop(context: *ExecutionContext) ExecutionError.Error!void {
 }
 
 pub fn op_push0(context: *ExecutionContext) ExecutionError.Error!void {
+    // EIP-3855 validation should be handled during bytecode analysis phase,
+    // not at runtime. Invalid PUSH0 opcodes should be rejected during code analysis.
+    
     // Compile-time validation: PUSH0 pops 0 items, pushes 1
     // This ensures at build time that PUSH0 has valid stack effects for EVM
     try StackValidation.validateStackRequirements(0, 1, context.stack.size());
