@@ -203,6 +203,7 @@ export fn guillotine_execute(
     const bytecode = bytecode_ptr[0..bytecode_len];
     const caller_bytes = caller_ptr[0..20];
     const caller_address: primitives.Address.Address = caller_bytes.*;
+    _ = vm; _ = bytecode; _ = caller_address; _ = value; _ = gas_limit; _ = result_ptr;
 
     // TODO: Contract API has changed - temporarily disable execution until new API is implemented
     log(.warn, .guillotine_c, "Contract execution temporarily disabled due to API changes", .{});
@@ -371,6 +372,7 @@ export fn guillotine_vm_execute(
     const to_addr = if (to) |t| t.bytes else primitives.Address.ZERO_ADDRESS;
     const value_u256 = if (value) |v| u256_from_bytes(&v.bytes) else 0;
     const input_slice = if (input) |i| i[0..input_len] else &[_]u8{};
+    _ = from_addr; _ = to_addr; _ = value_u256; _ = input_slice; _ = gas_limit;
     
     // TODO: Contract and Frame APIs have changed - temporarily disable execution  
     // Note: using warn level since debug function may not work in all contexts

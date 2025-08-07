@@ -291,15 +291,7 @@ pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
     return (self.current - 1 - n)[0];
 }
 
-/// Clear the stack (for test compatibility)
-pub fn clear(self: *Stack) void {
-    // Zero out used portion for security
-    const stack_size = self.size();
-    @memset(self.base[0..stack_size], 0);
-    
-    // Reset pointer to base
-    self.current = self.base;
-}
+// Note: test-compatibility clear consolidated with main clear() above
 
 /// Peek at the top value (for test compatibility)
 pub fn peek(self: *const Stack) Error!u256 {
