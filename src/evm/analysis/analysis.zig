@@ -92,10 +92,19 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc += 1;
             },
             .PUSH0 => {
-                instructions[instruction_count] = Instruction{
-                    .opcode_fn = jump_table.execute_funcs[opcode_byte],
-                    .arg = .{ .push_value = 0 },
-                };
+                // TODO: Add EIP-3855 (Shanghai) validation during bytecode analysis
+                // if (!chain_rules.is_eip3855) {
+                //     // Treat PUSH0 as INVALID opcode if EIP-3855 not enabled
+                //     instructions[instruction_count] = Instruction{
+                //         .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
+                //         .arg = .none,
+                //     };
+                // } else {
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = jump_table.execute_funcs[opcode_byte],
+                        .arg = .{ .push_value = 0 },
+                    };
+                // }
                 instruction_count += 1;
                 pc += 1;
             },
@@ -156,11 +165,27 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     instruction_count += 1;
                     pc += 1;
                 } else {
-                    const opcode_fn = jump_table.execute_funcs[opcode_byte];
-                    instructions[instruction_count] = Instruction{
-                        .opcode_fn = opcode_fn,
-                        .arg = .none,
-                    };
+                    // TODO: Add EIP validation for specific opcodes during bytecode analysis:
+                    // Check opcode_byte and validate against chain rules:
+                    // if (opcode_byte == @intFromEnum(Opcode.Enum.BASEFEE) and !chain_rules.is_eip3198) {
+                    //     // Treat BASEFEE as INVALID if EIP-3198 not enabled
+                    //     instructions[instruction_count] = Instruction{
+                    //         .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
+                    //         .arg = .none,
+                    //     };
+                    // } else if (opcode_byte == @intFromEnum(Opcode.Enum.MCOPY) and !chain_rules.is_eip5656) {
+                    //     // Treat MCOPY as INVALID if EIP-5656 not enabled
+                    //     instructions[instruction_count] = Instruction{
+                    //         .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
+                    //         .arg = .none,
+                    //     };
+                    // } else {
+                        const opcode_fn = jump_table.execute_funcs[opcode_byte];
+                        instructions[instruction_count] = Instruction{
+                            .opcode_fn = opcode_fn,
+                            .arg = .none,
+                        };
+                    // }
                     instruction_count += 1;
                     pc += 1;
                 }
@@ -266,6 +291,10 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
 
 /// Main public API: Analyzes bytecode and returns optimized CodeAnalysis with instruction stream.
 /// The caller must call deinit() to free the instruction array.
+/// TODO: Add chain_rules parameter to validate EIP-specific opcodes during analysis:
+/// - EIP-3855 (PUSH0): Reject PUSH0 in pre-Shanghai contracts
+/// - EIP-5656 (MCOPY): Reject MCOPY in pre-Cancun contracts  
+/// - EIP-3198 (BASEFEE): Reject BASEFEE in pre-London contracts
 pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable) !CodeAnalysis {
     if (code.len > limits.MAX_CONTRACT_SIZE) {
         return error.CodeTooLarge;

@@ -1688,6 +1688,19 @@ pub fn build(b: *std.Build) void {
     code_analysis_optimized_test_step.dependOn(&run_code_analysis_optimized_test.step);
     test_step.dependOn(&run_code_analysis_optimized_test.step);
 
+    const analysis_test = b.addTest(.{
+        .name = "analysis-test",
+        .root_source_file = b.path("src/evm/analysis/analysis.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    analysis_test.root_module.addImport("primitives", primitives_mod);
+    analysis_test.root_module.addImport("evm", evm_mod);
+    const run_analysis_test = b.addRunArtifact(analysis_test);
+    const analysis_test_step = b.step("test-analysis", "Run analysis tests");
+    analysis_test_step.dependOn(&run_analysis_test.step);
+    test_step.dependOn(&run_analysis_test.step);
+
     const analyze_compact_test = b.addTest(.{
         .name = "analyze-compact-test",
         .root_source_file = b.path("src/evm/frame/analyze_and_compact.zig"),
