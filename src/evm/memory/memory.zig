@@ -113,6 +113,24 @@ pub const resize_context = context_ops.resize_context;
 pub const size = context_ops.size;
 pub const total_size = context_ops.total_size;
 
+/// Clear the memory by resetting size to 0 (for call frame reuse)
+pub fn clear(self: *Memory) void {
+    // For shared buffer memory, we can't actually clear the buffer
+    // since other contexts might be using it. Instead we reset our checkpoint
+    // to the current buffer end, effectively giving us a "fresh" view
+    if (self.owns_buffer) {
+        // If we own the buffer, we can actually clear it
+        self.shared_buffer_ref.items.len = 0;
+    } else {
+        // If we don't own the buffer, reset our checkpoint to current end
+        // This effectively gives us a clean slate from this point forward
+        self.my_checkpoint = self.shared_buffer_ref.items.len;
+    }
+    
+    // Reset cached expansion calculations
+    self.cached_expansion = .{ .last_size = 0, .last_cost = 0 };
+}
+
 // Read operations
 pub const get_u256 = read_ops.get_u256;
 pub const get_slice = read_ops.get_slice;
