@@ -334,7 +334,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     }
 
     // Resolve jump targets after initial translation
-    resolveJumpTargets(code, non_null_instructions, jumpdest_bitmap) catch {
+    resolveJumpTargets(allocator, code, non_null_instructions, jumpdest_bitmap) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
     };
 
@@ -353,10 +353,11 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 /// Resolve jump targets in the instruction stream.
 /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
 fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
-    // Build a map from PC to instruction index using fixed array
+    // Build a map from PC to instruction index using dynamic allocation
     // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
-    var pc_to_instruction: [limits.MAX_CONTRACT_SIZE]u16 = undefined;
-    @memset(&pc_to_instruction, std.math.maxInt(u16));
+    var pc_to_instruction = try std.heap.page_allocator.alloc(u16, code.len);
+    defer std.heap.page_allocator.free(pc_to_instruction);
+    @memset(pc_to_instruction, std.math.maxInt(u16));
 
     var pc: usize = 0;
     var inst_idx: usize = 0;
