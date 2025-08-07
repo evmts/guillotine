@@ -30,6 +30,11 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    
+    // EIP-3651 (Shanghai) COINBASE warming should be handled during pre-execution setup,
+    // not at runtime. The coinbase address should be pre-warmed in the access list
+    // before execution begins if EIP-3651 is enabled.
+    
     // TODO: Need block_coinbase field in ExecutionContext
     // try context.stack.append(primitives.Address.to_u256(context.block_coinbase));
     
@@ -82,9 +87,17 @@ pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
-    // TODO: Need block_base_fee field in ExecutionContext
-    // Get base fee from block context
-    // Push base fee (EIP-1559)
+    
+    // EIP-3198 validation should be handled during bytecode analysis phase,
+    // not at runtime. Invalid BASEFEE opcodes should be rejected during code analysis.
+    
+    // NOTE: BASEFEE opcode (EIP-3198) returns the base fee from the block header.
+    // This is separate from EIP-1559 fee market logic, which is handled at the 
+    // transaction/client layer, not in the EVM interpreter itself.
+    // The EVM only needs to expose the base fee value via this opcode.
+    
+    // TODO: Need block_base_fee field in ExecutionContext or pass via block context
+    // The base fee should be provided by the client/block processing layer
     // try context.stack.append(context.block_base_fee);
     
     // Placeholder implementation - push zero for now
