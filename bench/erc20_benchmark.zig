@@ -100,18 +100,13 @@ fn benchErc20TransferRegular(allocator: std.mem.Allocator) void {
     const bytecode = global_bytecode_transfer.?;
     const calldata = global_calldata_transfer.?;
     
-    // Initialize EVM memory allocator
-    var evm_memory_allocator = evm.EvmMemoryAllocator.init(allocator) catch unreachable;
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    // Initialize database
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Initialize database with normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = evm_builder.build() catch unreachable;
     defer vm.deinit();
     
@@ -137,13 +132,16 @@ fn benchErc20TransferRegular(allocator: std.mem.Allocator) void {
         calldata, // input
         false // is_static
     );
-    defer contract.deinit(evm_allocator, null);
+    defer contract.deinit(allocator, null);
     
-    // Execute
-    const result = vm.interpret(&contract, calldata, false) catch unreachable;
-    
-    if (result.output) |output| {
-        evm_allocator.free(output);
+    // Execute 100 times
+    var i: u32 = 0;
+    while (i < 100) : (i += 1) {
+        const result = vm.interpret(&contract, calldata, false) catch unreachable;
+        
+        if (result.output) |output| {
+            allocator.free(output);
+        }
     }
 }
 
@@ -152,18 +150,13 @@ fn benchErc20TransferBlock(allocator: std.mem.Allocator) void {
     const bytecode = global_bytecode_transfer.?;
     const calldata = global_calldata_transfer.?;
     
-    // Initialize EVM memory allocator
-    var evm_memory_allocator = evm.EvmMemoryAllocator.init(allocator) catch unreachable;
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    // Initialize database
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Initialize database with normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = evm_builder.build() catch unreachable;
     defer vm.deinit();
     
@@ -189,13 +182,16 @@ fn benchErc20TransferBlock(allocator: std.mem.Allocator) void {
         calldata, // input
         false // is_static
     );
-    defer contract.deinit(evm_allocator, null);
+    defer contract.deinit(allocator, null);
     
-    // Execute with block mode
-    const result = vm.interpret_block_write(&contract, calldata) catch unreachable;
-    
-    if (result.output) |output| {
-        evm_allocator.free(output);
+    // Execute with block mode 100 times
+    var i: u32 = 0;
+    while (i < 100) : (i += 1) {
+        const result = vm.interpret_block_write(&contract, calldata) catch unreachable;
+        
+        if (result.output) |output| {
+            allocator.free(output);
+        }
     }
 }
 
@@ -204,18 +200,13 @@ fn benchErc20MintRegular(allocator: std.mem.Allocator) void {
     const bytecode = global_bytecode_mint.?;
     const calldata = global_calldata_mint.?;
     
-    // Initialize EVM memory allocator
-    var evm_memory_allocator = evm.EvmMemoryAllocator.init(allocator) catch unreachable;
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    // Initialize database
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Initialize database with normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = evm_builder.build() catch unreachable;
     defer vm.deinit();
     
@@ -241,13 +232,16 @@ fn benchErc20MintRegular(allocator: std.mem.Allocator) void {
         calldata, // input
         false // is_static
     );
-    defer contract.deinit(evm_allocator, null);
+    defer contract.deinit(allocator, null);
     
-    // Execute
-    const result = vm.interpret(&contract, calldata, false) catch unreachable;
-    
-    if (result.output) |output| {
-        evm_allocator.free(output);
+    // Execute 100 times
+    var i: u32 = 0;
+    while (i < 100) : (i += 1) {
+        const result = vm.interpret(&contract, calldata, false) catch unreachable;
+        
+        if (result.output) |output| {
+            allocator.free(output);
+        }
     }
 }
 
@@ -256,18 +250,13 @@ fn benchErc20MintBlock(allocator: std.mem.Allocator) void {
     const bytecode = global_bytecode_mint.?;
     const calldata = global_calldata_mint.?;
     
-    // Initialize EVM memory allocator
-    var evm_memory_allocator = evm.EvmMemoryAllocator.init(allocator) catch unreachable;
-    defer evm_memory_allocator.deinit();
-    const evm_allocator = evm_memory_allocator.allocator();
-    
-    // Initialize database
-    var memory_db = evm.MemoryDatabase.init(evm_allocator);
+    // Initialize database with normal allocator (EVM will handle internal arena allocation)
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(evm_allocator, db_interface);
+    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
     var vm = evm_builder.build() catch unreachable;
     defer vm.deinit();
     
@@ -293,13 +282,16 @@ fn benchErc20MintBlock(allocator: std.mem.Allocator) void {
         calldata, // input
         false // is_static
     );
-    defer contract.deinit(evm_allocator, null);
+    defer contract.deinit(allocator, null);
     
-    // Execute with block mode
-    const result = vm.interpret_block_write(&contract, calldata) catch unreachable;
-    
-    if (result.output) |output| {
-        evm_allocator.free(output);
+    // Execute with block mode 100 times
+    var i: u32 = 0;
+    while (i < 100) : (i += 1) {
+        const result = vm.interpret_block_write(&contract, calldata) catch unreachable;
+        
+        if (result.output) |output| {
+            allocator.free(output);
+        }
     }
 }
 

@@ -16,10 +16,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const gpa_allocator = gpa.allocator();
 
-    // Initialize EVM memory allocator
-    var evm_memory_allocator = try evm.EvmMemoryAllocator.init(gpa_allocator);
-    defer evm_memory_allocator.deinit();
-    const allocator = evm_memory_allocator.allocator();
+    // Use normal allocator (EVM will handle internal arena allocation)
+    const allocator = gpa_allocator;
 
     // Parse command line arguments (use GPA for args, not EVM allocator)
     const args = try std.process.argsAlloc(gpa_allocator);

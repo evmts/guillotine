@@ -81,11 +81,13 @@ fn runBenchmark(
         defer contract.deinit(allocator, null);
         
         const start = std.time.nanoTimestamp();
-        const result = try vm.interpret(&contract, &.{}, false);
+        var j: u32 = 0;
+        while (j < 100) : (j += 1) {
+            const result = try vm.interpret(&contract, &.{}, false);
+            gas_used = result.gas_used;
+            if (result.output) |output| allocator.free(output);
+        }
         regular_total_ns += @intCast(std.time.nanoTimestamp() - start);
-        
-        gas_used = result.gas_used;
-        defer if (result.output) |output| allocator.free(output);
     }
     
     // Benchmark block execution
@@ -107,10 +109,12 @@ fn runBenchmark(
         defer contract.deinit(allocator, null);
         
         const start = std.time.nanoTimestamp();
-        const result = try vm.interpret_block_write(&contract, &.{});
+        var j: u32 = 0;
+        while (j < 100) : (j += 1) {
+            const result = try vm.interpret_block_write(&contract, &.{});
+            if (result.output) |output| allocator.free(output);
+        }
         block_total_ns += @intCast(std.time.nanoTimestamp() - start);
-        
-        defer if (result.output) |output| allocator.free(output);
     }
     
     const regular_avg = regular_total_ns / config.iterations;

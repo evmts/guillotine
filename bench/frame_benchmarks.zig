@@ -16,6 +16,7 @@ const Contract = @import("evm").Contract;
 const CodeAnalysis = @import("evm").CodeAnalysis;
 const StoragePool = @import("evm").StoragePool;
 const MemoryDatabase = @import("evm").MemoryDatabase;
+const Vm = @import("evm").Vm;
 
 /// Comprehensive frame management benchmarks
 pub const FrameBenchmarks = struct {
@@ -57,6 +58,10 @@ pub const FrameBenchmarks = struct {
         var memory_db = MemoryDatabase.init(self.allocator);
         defer memory_db.deinit();
         
+        const db_interface = memory_db.to_database_interface();
+        var vm = try Vm.init(self.allocator, db_interface, null, null, null, 0, false, null);
+        defer vm.deinit();
+        
         var contract = Contract.init(
             Address.ZERO, // caller
             Address.ZERO, // address
@@ -71,6 +76,7 @@ pub const FrameBenchmarks = struct {
         // Create and destroy frame
         var frame = try Frame.init(
             self.allocator,
+            &vm,
             &contract,
         );
         defer frame.deinit();
