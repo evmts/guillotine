@@ -13,7 +13,7 @@ const Evm = @import("../evm.zig");
 const primitives = @import("primitives");
 const execution = @import("../execution/package.zig");
 const Instruction = @import("../instruction.zig").Instruction;
-const CodeAnalysis = @import("../analysis/analysis.zig");
+const CodeAnalysis = @import("../analysis.zig");
 const instruction_limits = @import("../constants/instruction_limits.zig");
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 

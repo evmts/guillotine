@@ -473,7 +473,7 @@ const Address = primitives.Address;
     
     // Create minimal ExecutionContext using the same pattern as in execution_context.zig tests
     // const JumpTable = @import("../jump_table/jump_table.zig");
-    // const CodeAnalysis = @import("../analysis/analysis.zig");
+    // const CodeAnalysis = @import("../analysis.zig");
     // const AccessList = @import("../access_list.zig").AccessList;
     // const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     

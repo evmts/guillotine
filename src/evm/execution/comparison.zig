@@ -121,7 +121,7 @@ pub fn op_iszero(context: *ExecutionContext) ExecutionError.Error!void {
 // Fuzz testing functions for comparison operations
 pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []const FuzzComparisonOperation) !void {
     const JumpTable = @import("../jump_table/jump_table.zig");
-    const CodeAnalysis = @import("../analysis/analysis.zig");
+    const CodeAnalysis = @import("../analysis.zig");
     const AccessList = @import("../access_list.zig").AccessList;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const ChainRules = @import("../execution_context.zig").ChainRules;

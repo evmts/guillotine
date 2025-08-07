@@ -1,6 +1,6 @@
 const std = @import("std");
 const Instruction = @import("instruction.zig").Instruction;
-const CodeAnalysis = @import("analysis/analysis.zig");
+const CodeAnalysis = @import("analysis.zig");
 
 /// Metrics collected during block-based execution.
 /// Helps with performance analysis and optimization.

@@ -6,7 +6,7 @@ const opcode = @import("../opcodes/opcode.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
-const CodeAnalysis = @import("../analysis/analysis.zig");
+const CodeAnalysis = @import("../analysis.zig");
 const ChainRules = @import("../execution_context.zig").ChainRules;
 
 pub fn create_contract_internal(self: *Vm, creator: primitives.Address.Address, value: u256, init_code: []const u8, gas: u64, new_address: primitives.Address.Address) (std.mem.Allocator.Error || @import("../state/database_interface.zig").DatabaseError || ExecutionError.Error)!CreateResult {

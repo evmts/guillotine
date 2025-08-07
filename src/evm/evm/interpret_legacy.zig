@@ -8,7 +8,7 @@ const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const primitives = @import("primitives");
 const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
-const CodeAnalysis = @import("../analysis/analysis.zig");
+const CodeAnalysis = @import("../analysis.zig");
 
 /// Legacy interpret function - placeholder implementation
 ///

@@ -1,10 +1,10 @@
 const std = @import("std");
-const limits = @import("../constants/code_analysis_limits.zig");
+const limits = @import("constants/code_analysis_limits.zig");
 const StaticBitSet = std.bit_set.StaticBitSet;
-const Instruction = @import("../instruction.zig").Instruction;
-const Opcode = @import("../opcodes/opcode.zig");
-const JumpTable = @import("../jump_table/jump_table.zig");
-const instruction_limits = @import("../constants/instruction_limits.zig");
+const Instruction = @import("instruction.zig").Instruction;
+const Opcode = @import("opcodes/opcode.zig");
+const JumpTable = @import("jump_table/jump_table.zig");
+const instruction_limits = @import("constants/instruction_limits.zig");
 
 /// Optimized code analysis for EVM bytecode execution.
 /// Contains only the essential data needed during execution.
@@ -442,4 +442,3 @@ test "from_code with jumpdest" {
     try std.testing.expect(analysis.jumpdest_bitmap.isSet(0));
     try std.testing.expect(!analysis.jumpdest_bitmap.isSet(1));
 }
-

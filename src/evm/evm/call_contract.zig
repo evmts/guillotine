@@ -7,7 +7,7 @@ const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
-const CodeAnalysis = @import("../analysis/analysis.zig");
+const CodeAnalysis = @import("../analysis.zig");
 const ChainRules = @import("../execution_context.zig").ChainRules;
 
 pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error || @import("../state/database_interface.zig").DatabaseError;

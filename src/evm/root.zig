@@ -62,7 +62,7 @@ pub const primitives = @import("primitives");
 // Import all EVM modules
 
 /// Bytecode analysis for jump destination detection
-pub const CodeAnalysis = @import("analysis/analysis.zig");
+pub const CodeAnalysis = @import("analysis.zig");
 
 
 /// Unified error types for EVM execution

@@ -1348,7 +1348,7 @@ pub fn build(b: *std.Build) void {
 
     const analysis_test = b.addTest(.{
         .name = "analysis-test",
-        .root_source_file = b.path("src/evm/analysis/analysis.zig"),
+        .root_source_file = b.path("src/evm/analysis.zig"),
         .target = target,
         .optimize = optimize,
     });
