@@ -2,14 +2,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = std.HashMap;
-const HashSet = std.HashSet;
-const Address = @import("../address/address.zig").Address;
+const AutoHashMap = std.AutoHashMap;
+const Address = @import("primitives").Address.Address;
 const primitives = @import("../primitives/primitives.zig");
 const Host = @import("host.zig").Host;
 
 const Frame = @import("frame.zig").Frame;
 const Memory = @import("memory/memory.zig").Memory;
-const ExecutionError = @import("execution_error.zig").ExecutionError;
+const ExecutionError = @import("execution/execution_error.zig").ExecutionError;
 const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 
 /// Maximum call depth per EVM specification
@@ -38,16 +38,16 @@ pub const CallParams = struct {
 /// Access list for EIP-2929 warm/cold address and storage tracking
 pub const AccessList = struct {
     /// Warm addresses accessed this transaction
-    warm_addresses: HashSet(Address),
+    warm_addresses: AutoHashMap(Address, void),
     /// Warm storage slots accessed this transaction
-    warm_storage: HashMap(Address, HashSet(u256)),
+    warm_storage: AutoHashMap(Address, AutoHashMap(u256, void)),
     
     allocator: Allocator,
     
     pub fn init(allocator: Allocator) !AccessList {
         return AccessList{
-            .warm_addresses = HashSet(Address).init(allocator),
-            .warm_storage = HashMap(Address, HashSet(u256)).init(allocator),
+            .warm_addresses = AutoHashMap(Address, void).init(allocator),
+            .warm_storage = AutoHashMap(Address, AutoHashMap(u256, void)).init(allocator),
             .allocator = allocator,
         };
     }
@@ -79,7 +79,7 @@ pub const AccessList = struct {
         };
         
         if (!storage.found_existing) {
-            storage.value_ptr.* = HashSet(u256).init(self.allocator);
+            storage.value_ptr.* = AutoHashMap(u256, void).init(self.allocator);
         }
         
         if (storage.value_ptr.contains(key)) {
