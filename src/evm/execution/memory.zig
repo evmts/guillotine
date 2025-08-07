@@ -143,6 +143,9 @@ pub fn op_msize(context: *ExecutionContext) ExecutionError.Error!void {
 }
 
 pub fn op_mcopy(context: *ExecutionContext) ExecutionError.Error!void {
+    // EIP-5656 validation should be handled during bytecode analysis phase,
+    // not at runtime. Invalid MCOPY opcodes should be rejected during code analysis.
+    
     if (context.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;
