@@ -123,13 +123,13 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
         switch (nextInstruction.arg) {
             .jump_target => |target| {
                 if (nextInstruction.opcode_fn == execution.control.op_jump) {
-                    current_instruction = frame.stack.pop_unsafe();
-                    if (!frame.contract.valid_jumpdest(frame.allocator, current_instruction)) {
+                    const dest = frame.stack.pop_unsafe();
+                    if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
                         contract.gas = frame.gas_remaining;
                         return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null);
                     }
-                }
-                if (nextInstruction.opcode_fn == execution.control.op_jumpi) {
+                    current_instruction = @ptrCast(target);
+                } else if (nextInstruction.opcode_fn == execution.control.op_jumpi) {
                     const dest = frame.stack.pop_unsafe();
                     const condition = frame.stack.pop_unsafe();
                     if (condition != 0) {
@@ -138,9 +138,13 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                             return RunResult.init(initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null);
                         }
                         current_instruction = @ptrCast(target);
+                    } else {
+                        current_instruction += 1;
                     }
+                } else {
+                    // For other opcodes that have jump targets, just use the target
+                    current_instruction = @ptrCast(target);
                 }
-                current_instruction = @ptrCast(target);
             },
             .push_value => |value| {
                 current_instruction += 1;

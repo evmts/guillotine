@@ -277,7 +277,7 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     var jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty();
     var max_stack_depth: u16 = 0;
     var has_static_jumps = false;
-    const has_dynamic_jumps = false;
+    var has_dynamic_jumps = false;
     var has_selfdestruct = false;
     var has_create = false;
 
