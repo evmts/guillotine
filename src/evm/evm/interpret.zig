@@ -110,13 +110,13 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
                 if (nextInstruction.opcode_fn == execution.control.op_jump) {
                     const dest = frame.stack.pop_unsafe();
                     if (!frame.valid_jumpdest(dest)) {
-                        contract.gas = frame.gas_remaining;
                         return InterpretResult.init(self.allocator, initial_gas, frame.gas_remaining, .Invalid, ExecutionError.Error.InvalidJump, null, access_list, self_destruct);
                     }
                     current_instruction = @ptrCast(target);
                 } else if (nextInstruction.opcode_fn == execution.control.op_jumpi) {
-                    const dest = frame.stack.pop_unsafe();
-                    const condition = frame.stack.pop_unsafe();
+                    const pops = frame.stack.pop2_unsafe();
+                    const dest = pops.a;
+                    const condition = pops.b;
                     if (condition != 0) {
                         if (!frame.valid_jumpdest(dest)) {
                             contract.gas = frame.gas_remaining;

@@ -1,5 +1,8 @@
 const std = @import("std");
 const stack_constants = @import("../constants/stack_constants.zig");
+const builtin = @import("builtin");
+
+const CLEAR_ON_POP = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
 /// High-performance EVM stack implementation using pointer arithmetic.
 ///
@@ -186,7 +189,9 @@ pub inline fn pop_unsafe(self: *Stack) u256 {
     @branchHint(.likely);
     self.current -= 1;
     const value = self.current[0];
-    self.current[0] = 0;  // Clear for security
+    if (comptime CLEAR_ON_POP) {
+        self.current[0] = 0;  // Clear for security
+    }
     return value;
 }
 
@@ -221,9 +226,11 @@ pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
     self.current -= 2;
     const a = self.current[0];
     const b = self.current[1];
-    // Clear for security
-    self.current[0] = 0;
-    self.current[1] = 0;
+    if (comptime CLEAR_ON_POP) {
+        // Clear for security
+        self.current[0] = 0;
+        self.current[1] = 0;
+    }
     return .{ .a = a, .b = b };
 }
 
@@ -235,10 +242,12 @@ pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
     const a = self.current[0];
     const b = self.current[1];
     const c = self.current[2];
-    // Clear for security
-    self.current[0] = 0;
-    self.current[1] = 0;
-    self.current[2] = 0;
+    if (comptime CLEAR_ON_POP) {
+        // Clear for security
+        self.current[0] = 0;
+        self.current[1] = 0;
+        self.current[2] = 0;
+    }
     return .{ .a = a, .b = b, .c = c };
 }
 
