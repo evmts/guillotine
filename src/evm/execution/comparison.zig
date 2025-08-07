@@ -15,13 +15,14 @@ const Stack = @import("../stack/stack.zig");
 /// unsigned comparisons (LT, GT), signed comparisons (SLT, SGT),
 /// equality checking (EQ), and zero testing (ISZERO).
 
-pub fn op_lt(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 2);
+pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = context.stack.pop_unsafe();
+    const b = frame.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = context.stack.peek_unsafe().*;
+    const a = frame.stack.peek_unsafe().*;
 
     // EVM LT computes: b < a (where b was top, a was second from top)
     const result: u256 = switch (std.math.order(b, a)) {
@@ -30,16 +31,17 @@ pub fn op_lt(context: *ExecutionContext) ExecutionError.Error!void {
     };
 
     // Modify the current top of the stack in-place with the result
-    context.stack.set_top_unsafe(result);
+    frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_gt(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 2);
+pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = context.stack.pop_unsafe();
+    const b = frame.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = context.stack.peek_unsafe().*;
+    const a = frame.stack.peek_unsafe().*;
 
     // EVM GT computes: b > a (where b was top, a was second from top)
     const result: u256 = switch (std.math.order(b, a)) {
@@ -48,16 +50,17 @@ pub fn op_gt(context: *ExecutionContext) ExecutionError.Error!void {
     };
 
     // Modify the current top of the stack in-place with the result
-    context.stack.set_top_unsafe(result);
+    frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_slt(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 2);
+pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = context.stack.pop_unsafe();
+    const b = frame.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = context.stack.peek_unsafe().*;
+    const a = frame.stack.peek_unsafe().*;
 
     // Signed less than: b < a (where b was popped first, a is remaining top)
     const a_i256 = @as(i256, @bitCast(a));
@@ -69,16 +72,17 @@ pub fn op_slt(context: *ExecutionContext) ExecutionError.Error!void {
     };
 
     // Modify the current top of the stack in-place with the result
-    context.stack.set_top_unsafe(result);
+    frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_sgt(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 2);
+pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = context.stack.pop_unsafe();
+    const b = frame.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = context.stack.peek_unsafe().*;
+    const a = frame.stack.peek_unsafe().*;
 
     // Signed greater than: b > a (where b was popped first, a is remaining top)
     const a_i256 = @as(i256, @bitCast(a));
@@ -87,35 +91,37 @@ pub fn op_sgt(context: *ExecutionContext) ExecutionError.Error!void {
     const result: u256 = if (b_i256 > a_i256) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    context.stack.set_top_unsafe(result);
+    frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_eq(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 2);
+pub fn op_eq(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = context.stack.pop_unsafe();
+    const b = frame.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = context.stack.peek_unsafe().*;
+    const a = frame.stack.peek_unsafe().*;
 
     const result: u256 = if (a == b) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    context.stack.set_top_unsafe(result);
+    frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_iszero(context: *ExecutionContext) ExecutionError.Error!void {
-    std.debug.assert(context.stack.size() >= 1);
+pub fn op_iszero(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    std.debug.assert(frame.stack.size() >= 1);
 
     // Peek the operand unsafely
-    const value = context.stack.peek_unsafe().*;
+    const value = frame.stack.peek_unsafe().*;
 
     // Optimized: Use @intFromBool for direct bool to int conversion
     // This should compile to more efficient assembly than if/else
     const result: u256 = @intFromBool(value == 0);
 
     // Modify the current top of the stack in-place with the result
-    context.stack.set_top_unsafe(result);
+    frame.stack.set_top_unsafe(result);
 }
 
 // Fuzz testing functions for comparison operations
