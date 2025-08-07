@@ -16,6 +16,8 @@ const Memory = @import("memory/memory.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
 const EvmMemoryAllocator = @import("memory/evm_allocator.zig").EvmMemoryAllocator;
 const evm_limits = @import("constants/evm_limits.zig");
+const Frame = @import("frame.zig").Frame;
+const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 pub const StorageKey = @import("primitives").StorageKey;
 pub const CreateResult = @import("evm/create_result.zig").CreateResult;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
@@ -33,6 +35,10 @@ const Evm = @This();
 
 /// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
+
+// Constants from call.zig for frame management
+/// Maximum stack buffer size for contracts up to 12,800 bytes
+const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
@@ -61,6 +67,19 @@ state: EvmState,
 
 /// Warm/cold access tracking for EIP-2929 gas costs
 access_list: AccessList,
+
+// Execution state for nested calls and frame management
+/// Pre-allocated frame stack for nested calls (moved from call.zig local variable)
+frame_stack: [MAX_CALL_DEPTH]Frame = undefined,
+
+/// Current active frame depth in the frame stack
+current_frame_depth: u11 = 0,
+
+/// Self-destruct tracking for the current execution
+self_destruct: SelfDestruct = undefined,
+
+/// Stack buffer for small contract analysis optimization
+analysis_stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined,
 
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
@@ -124,7 +143,10 @@ pub fn init(
     var access_list = AccessList.init(allocator, ctx);
     errdefer access_list.deinit();
 
-    // No frame pool initialization needed - frames are stack-allocated
+    // NOTE: Execution state is left undefined - will be initialized fresh in each call
+    // - frame_stack: initialized in call execution
+    // - self_destruct: initialized in call execution  
+    // - analysis_stack_buffer: initialized in call execution
 
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
@@ -139,6 +161,11 @@ pub fn init(
         .depth = depth,
         .read_only = read_only,
         .tracer = tracer,
+        // New execution state fields (initialized fresh in each call)
+        .frame_stack = undefined,
+        .current_frame_depth = 0,
+        .self_destruct = undefined,
+        .analysis_stack_buffer = undefined,
     };
 }
 
@@ -149,7 +176,10 @@ pub fn deinit(self: *Evm) void {
     self.access_list.deinit();
     self.internal_allocator.deinit();
 
-    // No frame pool to clean up - frames are stack-allocated and cleaned up in their respective functions
+    // Execution state doesn't need cleanup in deinit:
+    // - self_destruct: undefined or ownership transferred to caller
+    // - frame_stack: undefined or cleaned up in call execution
+    // - analysis_stack_buffer: undefined or stack-allocated
 }
 
 /// Reset the EVM for reuse without deallocating memory.
@@ -171,14 +201,9 @@ pub fn arena_allocator(self: *Evm) std.mem.Allocator {
 }
 
 pub usingnamespace @import("evm/set_context.zig");
-pub usingnamespace @import("evm/create_contract_internal.zig");
 
-pub usingnamespace @import("evm/create_contract.zig");
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
-pub usingnamespace @import("evm/create2_contract.zig");
-pub usingnamespace @import("evm/callcode_contract.zig");
-pub usingnamespace @import("evm/delegatecall_contract.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
 pub usingnamespace @import("evm/emit_log.zig");
 pub usingnamespace @import("evm/validate_static_context.zig");
@@ -187,8 +212,6 @@ pub usingnamespace @import("evm/set_transient_storage_protected.zig");
 pub usingnamespace @import("evm/set_balance_protected.zig");
 pub usingnamespace @import("evm/set_code_protected.zig");
 pub usingnamespace @import("evm/emit_log_protected.zig");
-pub usingnamespace @import("evm/create_contract_protected.zig");
-pub usingnamespace @import("evm/create2_contract_protected.zig");
 pub usingnamespace @import("evm/validate_value_transfer.zig");
 pub usingnamespace @import("evm/selfdestruct_protected.zig");
 pub usingnamespace @import("evm/require_one_thread.zig");
