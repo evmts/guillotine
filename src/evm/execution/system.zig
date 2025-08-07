@@ -9,19 +9,12 @@ const GasConstants = @import("primitives").GasConstants;
 const CallFrameStack = @import("../call_frame_stack.zig").CallFrameStack;
 const CallType = @import("../call_frame_stack.zig").CallType;
 const CallParams = @import("../call_frame_stack.zig").CallParams;
+const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
 
 // ============================================================================
 // Call Operation Types and Gas Calculation
 // ============================================================================
-
-/// Call operation types for gas calculation
-pub const CallType = enum {
-    Call,
-    CallCode,
-    DelegateCall,
-    StaticCall,
-};
 
 /// Input parameters for contract call operations
 ///
