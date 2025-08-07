@@ -1,116 +1,51 @@
 const std = @import("std");
-const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
-const ExecutionResult = @import("execution_result.zig");
-const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
-const Vm = @import("../evm.zig");
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const AccessList = @import("../access_list.zig").AccessList;
 const GasConstants = @import("primitives").GasConstants;
-const AccessList = @import("../access_list/access_list.zig").AccessList;
 const primitives = @import("primitives");
 const from_u256 = primitives.Address.from_u256;
 
-pub fn op_stop(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_stop(context: *ExecutionContext) ExecutionError.Error!void {
+    _ = context;
 
     return ExecutionError.Error.STOP;
 }
 
-pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = interpreter;
-
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 1);
-
-    // Use unsafe pop since bounds checking is done by jump_table
-    const dest = frame.stack.pop_unsafe();
-    
-    Log.debug("JUMP: from pc={} to dest={}, depth={}, gas={}", .{pc, dest, frame.depth, frame.gas_remaining});
-
-    // Check if destination is a valid JUMPDEST (pass u256 directly)
-    if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
-        @branchHint(.unlikely);
-        Log.debug("JUMP: Invalid jump destination {} from pc={}", .{dest, pc});
-        return ExecutionError.Error.InvalidJump;
-    }
-
-    // The destination must be within the bounds of the code
-    std.debug.assert(dest <= std.math.maxInt(usize));
-
-    frame.pc = @as(usize, @intCast(dest));
-
-    return ExecutionResult{};
+// DEPRECATED: JUMP is now handled directly in interpret.zig via .jump_target instruction type
+// This function is no longer called and should be deleted
+pub fn op_jump(context: *ExecutionContext) ExecutionError.Error!void {
+    _ = context;
+    // TODO_DELETE: This function is deprecated - JUMP is handled in interpret loop
+    unreachable;
 }
 
-pub fn op_jumpi(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = interpreter;
-
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 2);
-
-    // Use batch pop for performance - pop 2 values at once
-    // Stack order (top to bottom): [destination, condition]
-    const values = frame.stack.pop2_unsafe();
-    const destination = values.b; // Top
-    const condition = values.a; // Second from top
-    
-    Log.debug("JUMPI: at pc={}, dest={}, condition={}, depth={}", .{pc, destination, condition, frame.depth});
-
-    Log.debug("JUMPI: condition={}, destination={}, current_pc={}", .{ condition, destination, pc });
-
-    if (condition != 0) {
-        Log.debug("JUMPI: condition is non-zero, checking jump destination", .{});
-
-        // Check if destination is a valid JUMPDEST (pass u256 directly)
-        if (!frame.contract.valid_jumpdest(frame.allocator, destination)) {
-            @branchHint(.unlikely);
-            Log.debug("JUMPI: Invalid jump destination {}", .{destination});
-            return ExecutionError.Error.InvalidJump;
-        }
-        const new_pc = @as(usize, @intCast(destination));
-        Log.debug("JUMPI: Setting frame.pc from {} to {}", .{ frame.pc, new_pc });
-        frame.pc = new_pc;
-    } else {
-        Log.debug("JUMPI: condition is zero, not jumping", .{});
-    }
-
-    return ExecutionResult{};
+// DEPRECATED: JUMPI is now handled directly in interpret.zig via .jump_target instruction type
+// This function is no longer called and should be deleted
+pub fn op_jumpi(context: *ExecutionContext) ExecutionError.Error!void {
+    _ = context;
+    // TODO_DELETE: This function is deprecated - JUMPI is handled in interpret loop
+    unreachable;
 }
 
-pub fn op_pc(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = interpreter;
-
-    const frame = state;
-
-    std.debug.assert(frame.stack.size < Stack.CAPACITY);
-
-    // Use unsafe push since bounds checking is done by jump_table
-    frame.stack.append_unsafe(@as(u256, @intCast(pc)));
-
-    return ExecutionResult{};
+// TODO_PC_DELETE: PC operations are deprecated in the new architecture
+pub fn op_pc(context: *ExecutionContext) ExecutionError.Error!void {
+    _ = context;
+    // TODO_DELETE: This function is deprecated - PC is not needed in new architecture
+    unreachable;
 }
 
-pub fn op_jumpdest(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+pub fn op_jumpdest(context: *ExecutionContext) ExecutionError.Error!void {
+    _ = context;
 
     // No-op, just marks valid jump destination
-    return ExecutionResult{};
 }
 
-pub fn op_return(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_return(context: *ExecutionContext) ExecutionError.Error!void {
+    const frame = context.frame;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
@@ -162,13 +97,10 @@ pub fn op_return(pc: usize, interpreter: Operation.Interpreter, state: Operation
     return ExecutionError.Error.STOP; // RETURN ends execution normally
 }
 
-pub fn op_revert(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
+pub fn op_revert(context: *ExecutionContext) ExecutionError.Error!void {
+    const frame = context.frame;
 
-    const frame = state;
-
-    std.debug.assert(frame.stack.size >= 2);
+    std.debug.assert(frame.stack.size() >= 2);
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
@@ -208,11 +140,8 @@ pub fn op_revert(pc: usize, interpreter: Operation.Interpreter, state: Operation
     return ExecutionError.Error.REVERT;
 }
 
-pub fn op_invalid(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_invalid(context: *ExecutionContext) ExecutionError.Error!void {
+    const frame = context.frame;
 
     // Debug: op_invalid entered
     // INVALID opcode consumes all remaining gas
@@ -222,11 +151,9 @@ pub fn op_invalid(pc: usize, interpreter: Operation.Interpreter, state: Operatio
     return ExecutionError.Error.InvalidOpcode;
 }
 
-pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
+pub fn op_selfdestruct(context: *ExecutionContext) ExecutionError.Error!void {
+    const frame = context.frame;
+    const vm = context.vm;
 
     // Check if we're in a static call
     if (frame.is_static) {
@@ -234,7 +161,7 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
         return ExecutionError.Error.WriteProtection;
     }
 
-    std.debug.assert(frame.stack.size >= 1);
+    std.debug.assert(frame.stack.size() >= 1);
 
     // Use unsafe pop since bounds checking is done by jump_table
     const recipient_u256 = frame.stack.pop_unsafe();
@@ -261,192 +188,45 @@ pub fn op_selfdestruct(pc: usize, interpreter: Operation.Interpreter, state: Ope
     return ExecutionError.Error.STOP;
 }
 
+// TODO_DELETE: All fuzz testing functions need to be updated for new ExecutionContext pattern
+// These functions are currently broken due to the signature changes
 // Fuzz testing functions for control flow operations
-pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const FuzzControlOperation) !void {
-    for (operations) |op| {
-        // Create clean VM and frame for each test
-        var memory = try @import("../memory/memory.zig").init_default(allocator);
-        defer memory.deinit();
+// pub fn fuzz_control_operations(allocator: std.mem.Allocator, operations: []const FuzzControlOperation) !void {
+//     // TODO: Update to use ExecutionContext pattern
+// }
 
-        var db = @import("../state/memory_database.zig").init(allocator);
-        defer db.deinit();
+// TODO_DELETE: These structs are part of the broken fuzz testing code
+// const FuzzControlOperation = struct {
+//     op_type: ControlOpType,
+//     destination: u256 = 0,
+//     condition: u256 = 0,
+//     offset: u256 = 0,
+//     size: u256 = 0,
+//     recipient: u256 = 0,
+//     initial_pc: ?usize = null,
+// };
+//
+// const ControlOpType = enum {
+//     stop,
+//     jump,
+//     jumpi,
+//     pc,
+//     jumpdest,
+//     return_op,
+//     revert,
+//     invalid,
+//     selfdestruct,
+// };
 
-        var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
-        defer vm.deinit();
+// TODO_DELETE: This function is broken and needs to be updated for ExecutionContext
+// fn execute_control_operation(op_type: ControlOpType, context: *ExecutionContext) ExecutionError.Error!void {
+//     // TODO: Update to use ExecutionContext pattern
+// }
 
-        // Create bytecode with JUMPDEST at positions we want to jump to
-        var code = std.ArrayList(u8).init(allocator);
-        defer code.deinit();
-
-        // Add some NOPs and JUMPDESTs for testing
-        var i: usize = 0;
-        while (i < 256) : (i += 1) {
-            if (i == 10 or i == 20 or i == 100) {
-                try code.append(0x5B); // JUMPDEST
-            } else {
-                try code.append(0x00); // STOP
-            }
-        }
-
-        var contract = try @import("../frame/contract.zig").init(allocator, code.items, .{});
-        defer contract.deinit(allocator, null);
-
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, @import("../../Address.zig").ZERO, &.{});
-        defer frame.deinit();
-
-        // Set initial PC if needed
-        if (op.initial_pc) |pc| {
-            frame.pc = pc;
-        }
-
-        // Setup stack with test values
-        switch (op.op_type) {
-            .stop, .jumpdest, .invalid => {
-                // No stack setup needed
-            },
-            .jump => {
-                try frame.stack.append(op.destination);
-            },
-            .jumpi => {
-                try frame.stack.append(op.condition);
-                try frame.stack.append(op.destination);
-            },
-            .pc => {
-                // No stack setup needed
-            },
-            .return_op, .revert => {
-                try frame.stack.append(op.size);
-                try frame.stack.append(op.offset);
-            },
-            .selfdestruct => {
-                try frame.stack.append(op.recipient);
-            },
-        }
-
-        // Pre-fill memory for return/revert tests
-        if (op.op_type == .return_op or op.op_type == .revert) {
-            // Ensure memory has some data
-            const memory_size = 1024;
-            _ = try frame.memory.ensure_context_capacity(memory_size);
-
-            // Write some test data to memory
-            var test_data: [32]u8 = undefined;
-            std.mem.writeInt(u256, &test_data, 0x123456789ABCDEF0, .big);
-            try frame.memory.set_slice(0, &test_data);
-        }
-
-        // Execute the operation
-        const result = execute_control_operation(op.op_type, frame.pc, &vm, &frame);
-
-        // Verify the result makes sense
-        try validate_control_result(&frame, op, result);
-    }
-}
-
-const FuzzControlOperation = struct {
-    op_type: ControlOpType,
-    destination: u256 = 0,
-    condition: u256 = 0,
-    offset: u256 = 0,
-    size: u256 = 0,
-    recipient: u256 = 0,
-    initial_pc: ?usize = null,
-};
-
-const ControlOpType = enum {
-    stop,
-    jump,
-    jumpi,
-    pc,
-    jumpdest,
-    return_op,
-    revert,
-    invalid,
-    selfdestruct,
-};
-
-fn execute_control_operation(op_type: ControlOpType, pc: usize, vm: *Vm, frame: *Frame) ExecutionError.Error!ExecutionResult {
-    switch (op_type) {
-        .stop => return op_stop(pc, @ptrCast(vm), @ptrCast(frame)),
-        .jump => return op_jump(pc, @ptrCast(vm), @ptrCast(frame)),
-        .jumpi => return op_jumpi(pc, @ptrCast(vm), @ptrCast(frame)),
-        .pc => return op_pc(pc, @ptrCast(vm), @ptrCast(frame)),
-        .jumpdest => return op_jumpdest(pc, @ptrCast(vm), @ptrCast(frame)),
-        .return_op => return op_return(pc, @ptrCast(vm), @ptrCast(frame)),
-        .revert => return op_revert(pc, @ptrCast(vm), @ptrCast(frame)),
-        .invalid => return op_invalid(pc, @ptrCast(vm), @ptrCast(frame)),
-        .selfdestruct => return op_selfdestruct(pc, @ptrCast(vm), @ptrCast(frame)),
-    }
-}
-
-fn validate_control_result(frame: *const Frame, op: FuzzControlOperation, result: ExecutionError.Error!ExecutionResult) !void {
-    const testing = std.testing;
-
-    switch (op.op_type) {
-        .stop => {
-            // STOP should always return STOP error
-            try testing.expectError(ExecutionError.Error.STOP, result);
-        },
-        .jump => {
-            if (op.destination == 10 or op.destination == 20 or op.destination == 100) {
-                // Valid jump destinations should succeed and set PC
-                _ = try result; // Should not error
-                try testing.expectEqual(@as(usize, @intCast(op.destination)), frame.pc);
-            } else {
-                // Invalid jump destinations should return InvalidJump error
-                try testing.expectError(ExecutionError.Error.InvalidJump, result);
-            }
-        },
-        .jumpi => {
-            if (op.condition == 0) {
-                // Conditional jump with false condition should not jump
-                _ = try result; // Should not error
-                // PC should not change (we don't track original PC here)
-            } else {
-                // Conditional jump with true condition
-                if (op.destination == 10 or op.destination == 20 or op.destination == 100) {
-                    _ = try result; // Should not error
-                    try testing.expectEqual(@as(usize, @intCast(op.destination)), frame.pc);
-                } else {
-                    try testing.expectError(ExecutionError.Error.InvalidJump, result);
-                }
-            }
-        },
-        .pc => {
-            // PC should succeed and push current PC to stack
-            _ = try result; // Should not error
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
-            // Stack should contain the PC value
-            try testing.expect(frame.stack.data[0] >= 0);
-        },
-        .jumpdest => {
-            // JUMPDEST should always succeed (no-op)
-            _ = try result; // Should not error
-        },
-        .return_op => {
-            // RETURN should always end with STOP
-            try testing.expectError(ExecutionError.Error.STOP, result);
-            // Frame should have output set (even if empty)
-            try testing.expect(frame.output != null);
-        },
-        .revert => {
-            // REVERT should always end with REVERT error
-            try testing.expectError(ExecutionError.Error.REVERT, result);
-            // Frame should have output set (even if empty)
-            try testing.expect(frame.output != null);
-        },
-        .invalid => {
-            // INVALID should always return InvalidOpcode error
-            try testing.expectError(ExecutionError.Error.InvalidOpcode, result);
-            // Should consume all gas
-            try testing.expectEqual(@as(u64, 0), frame.gas_remaining);
-        },
-        .selfdestruct => {
-            // SELFDESTRUCT should return STOP (ends execution)
-            try testing.expectError(ExecutionError.Error.STOP, result);
-        },
-    }
-}
+// TODO_DELETE: This function is broken and needs to be updated for ExecutionContext
+// fn validate_control_result(frame: *const Frame, op: FuzzControlOperation, result: ExecutionError.Error!void) !void {
+//     // TODO: Update to use ExecutionContext pattern and new signatures
+// }
 
 // test "fuzz_control_basic_operations" {
 //     const allocator = std.testing.allocator;

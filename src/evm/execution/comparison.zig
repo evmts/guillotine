@@ -1,24 +1,29 @@
 const std = @import("std");
-const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
-const Stack = @import("../stack/stack.zig");
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const primitives = @import("primitives");
+
+// Imports for tests
+const Vm = @import("../evm.zig");
+const Operation = @import("../opcodes/operation.zig");
+const MemoryDatabase = @import("../state/memory_database.zig");
+const Contract = @import("../frame/contract.zig");
 const Frame = @import("../frame/frame.zig");
+const Stack = @import("../stack/stack.zig");
 
-// Helper to convert Stack errors to ExecutionError
-// These are redundant and can be removed.
-// The op_* functions below use unsafe stack operations,
-// so these helpers are unused anyway.
+/// Comparison operations for the Ethereum Virtual Machine
+///
+/// This module implements all comparison opcodes for the EVM, including
+/// unsigned comparisons (LT, GT), signed comparisons (SLT, SGT),
+/// equality checking (EQ), and zero testing (ISZERO).
 
-pub fn op_lt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_lt(context: *ExecutionContext) ExecutionError.Error!void {
+    std.debug.assert(context.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = context.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = context.stack.peek_unsafe().*;
 
     // EVM LT computes: b < a (where b was top, a was second from top)
     const result: u256 = switch (std.math.order(b, a)) {
@@ -27,21 +32,16 @@ pub fn op_lt(pc: usize, interpreter: Operation.Interpreter, state: Operation.Sta
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(result);
 }
 
-pub fn op_gt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_gt(context: *ExecutionContext) ExecutionError.Error!void {
+    std.debug.assert(context.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = context.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = context.stack.peek_unsafe().*;
 
     // EVM GT computes: b > a (where b was top, a was second from top)
     const result: u256 = switch (std.math.order(b, a)) {
@@ -50,21 +50,16 @@ pub fn op_gt(pc: usize, interpreter: Operation.Interpreter, state: Operation.Sta
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(result);
 }
 
-pub fn op_slt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_slt(context: *ExecutionContext) ExecutionError.Error!void {
+    std.debug.assert(context.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = context.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = context.stack.peek_unsafe().*;
 
     // Signed less than: b < a (where b was popped first, a is remaining top)
     const a_i256 = @as(i256, @bitCast(a));
@@ -76,21 +71,16 @@ pub fn op_slt(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(result);
 }
 
-pub fn op_sgt(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_sgt(context: *ExecutionContext) ExecutionError.Error!void {
+    std.debug.assert(context.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = context.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = context.stack.peek_unsafe().*;
 
     // Signed greater than: b > a (where b was popped first, a is remaining top)
     const a_i256 = @as(i256, @bitCast(a));
@@ -99,94 +89,99 @@ pub fn op_sgt(pc: usize, interpreter: Operation.Interpreter, state: Operation.St
     const result: u256 = if (b_i256 > a_i256) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(result);
 }
 
-pub fn op_eq(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_eq(context: *ExecutionContext) ExecutionError.Error!void {
+    std.debug.assert(context.stack.size() >= 2);
 
     // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
+    const b = context.stack.pop_unsafe();
     // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    const a = context.stack.peek_unsafe().*;
 
     const result: u256 = if (a == b) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(result);
 }
 
-pub fn op_iszero(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
+pub fn op_iszero(context: *ExecutionContext) ExecutionError.Error!void {
+    std.debug.assert(context.stack.size() >= 1);
 
     // Peek the operand unsafely
-    const value = frame.stack.peek_unsafe().*;
+    const value = context.stack.peek_unsafe().*;
 
     // Optimized: Use @intFromBool for direct bool to int conversion
     // This should compile to more efficient assembly than if/else
     const result: u256 = @intFromBool(value == 0);
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(result);
 }
 
 // Fuzz testing functions for comparison operations
 pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []const FuzzComparisonOperation) !void {
-    const Vm = @import("../evm.zig");
+    const JumpTable = @import("../jump_table/jump_table.zig");
+    const CodeAnalysis = @import("../frame/code_analysis.zig");
+    const AccessList = @import("../access_list.zig").AccessList;
+    const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+    const ChainRules = @import("../execution_context.zig").ChainRules;
 
     for (operations) |op| {
-        var memory = try @import("../memory/memory.zig").init_default(allocator);
-        defer memory.deinit();
+        var memory_db = MemoryDatabase.init(allocator);
+        defer memory_db.deinit();
 
-        var db = @import("../state/memory_database.zig").init(allocator);
-        defer db.deinit();
+        // Create a simple code analysis for testing
+        const code = &[_]u8{0x00}; // STOP
+        const table = JumpTable.DEFAULT;
+        var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+        defer analysis.deinit();
 
-        var vm = try Vm.init(allocator, db.to_database_interface(), null, null);
-        defer vm.deinit();
+        // Create mock components
+        var access_list = try AccessList.init(allocator);
+        defer access_list.deinit();
+        var self_destruct = try SelfDestruct.init(allocator);
+        defer self_destruct.deinit();
+        const chain_rules = ChainRules.DEFAULT;
 
-        var contract = try @import("../frame/contract.zig").init(allocator, &[_]u8{0x01}, .{});
-        defer contract.deinit(allocator, null);
-
-        const primitives = @import("primitives");
-        var frame = try Frame.init(allocator, &vm, 1000000, contract, primitives.Address.ZERO, &.{});
-        defer frame.deinit();
+        var context = try ExecutionContext.init(
+            allocator,
+            1000000, // gas
+            false, // not static
+            0, // depth
+            primitives.Address.ZERO_ADDRESS,
+            &analysis,
+            &access_list,
+            memory_db.to_database_interface(),
+            &chain_rules,
+            &self_destruct,
+        );
+        defer context.deinit();
 
         // Setup stack with test values
         switch (op.op_type) {
             .lt, .gt, .slt, .sgt, .eq => {
-                try frame.stack.append(op.a);
-                try frame.stack.append(op.b);
+                try context.stack.append(op.a);
+                try context.stack.append(op.b);
             },
             .iszero => {
-                try frame.stack.append(op.a);
+                try context.stack.append(op.a);
             },
         }
 
         // Execute the operation
-        var result: Operation.ExecutionResult = undefined;
         switch (op.op_type) {
-            .lt => result = try op_lt(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .gt => result = try op_gt(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .slt => result = try op_slt(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .sgt => result = try op_sgt(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .eq => result = try op_eq(0, @ptrCast(&vm), @ptrCast(&frame)),
-            .iszero => result = try op_iszero(0, @ptrCast(&vm), @ptrCast(&frame)),
+            .lt => try op_lt(&context),
+            .gt => try op_gt(&context),
+            .slt => try op_slt(&context),
+            .sgt => try op_sgt(&context),
+            .eq => try op_eq(&context),
+            .iszero => try op_iszero(&context),
         }
 
         // Verify the result makes sense
-        try validate_comparison_result(&frame.stack, op);
+        try validate_comparison_result(&context.stack, op);
     }
 }
 

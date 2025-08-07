@@ -2,12 +2,13 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
-const Memory = @import("../memory/memory.zig");
 const GasConstants = @import("primitives").GasConstants;
 
-// Common copy operation helper
+// Common copy operation helper - works with old Frame type for now
+// TODO: Update to use ExecutionContext when all operations are converted
 fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) !void {
     // Calculate memory expansion gas cost
     const new_size = mem_offset + size;
@@ -23,19 +24,14 @@ fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) !void {
     _ = try frame.memory.ensure_context_capacity(new_size);
 }
 
-pub fn op_mload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
-
-    if (frame.stack.size < 1) {
+pub fn op_mload(context: *ExecutionContext) ExecutionError.Error!void {
+    if (context.stack.size() < 1) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
-    const offset = frame.stack.peek_unsafe().*;
+    const offset = context.stack.peek_unsafe().*;
 
     // Check offset bounds
     if (offset > std.math.maxInt(usize)) {
@@ -47,36 +43,29 @@ pub fn op_mload(pc: usize, interpreter: Operation.Interpreter, state: Operation.
 
     // Calculate memory expansion gas cost
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
+    const gas_cost = context.memory.get_expansion_cost(new_size_u64);
+    try context.consume_gas(gas_cost);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    _ = try context.memory.ensure_context_capacity(aligned_size);
 
     // Read 32 bytes from memory
-    const value = try frame.memory.get_u256(offset_usize);
+    const value = try context.memory.get_u256(offset_usize);
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
-    frame.stack.set_top_unsafe(value);
-
-    return Operation.ExecutionResult{};
+    context.stack.set_top_unsafe(value);
 }
 
-pub fn op_mstore(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
-
-    if (frame.stack.size < 2) {
+pub fn op_mstore(context: *ExecutionContext) ExecutionError.Error!void {
+    if (context.stack.size() < 2) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // EVM Stack: [..., value, offset] where offset is on top
-    const popped = frame.stack.pop2_unsafe();
+    const popped = context.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
@@ -90,35 +79,28 @@ pub fn op_mstore(pc: usize, interpreter: Operation.Interpreter, state: Operation
 
     // Calculate memory expansion gas cost
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
+    const gas_cost = context.memory.get_expansion_cost(new_size_u64);
+    try context.consume_gas(gas_cost);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    _ = try context.memory.ensure_context_capacity(aligned_size);
 
     // Write 32 bytes to memory (big-endian)
     var bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &bytes, value, .big);
-    try frame.memory.set_data(offset_usize, &bytes);
-
-    return Operation.ExecutionResult{};
+    try context.memory.set_data(offset_usize, &bytes);
 }
 
-pub fn op_mstore8(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
-
-    if (frame.stack.size < 2) {
+pub fn op_mstore8(context: *ExecutionContext) ExecutionError.Error!void {
+    if (context.stack.size() < 2) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // EVM Stack: [..., value, offset] where offset is on top
-    const popped = frame.stack.pop2_unsafe();
+    const popped = context.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
@@ -132,63 +114,49 @@ pub fn op_mstore8(pc: usize, interpreter: Operation.Interpreter, state: Operatio
 
     // Calculate memory expansion gas cost
     const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
+    const gas_cost = context.memory.get_expansion_cost(new_size_u64);
+    try context.consume_gas(gas_cost);
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    _ = try context.memory.ensure_context_capacity(aligned_size);
 
     // Write single byte to memory
     const byte_value = @as(u8, @truncate(value));
     const bytes = [_]u8{byte_value};
-    try frame.memory.set_data(offset_usize, &bytes);
-
-    return Operation.ExecutionResult{};
+    try context.memory.set_data(offset_usize, &bytes);
 }
 
-pub fn op_msize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
-
-    if (frame.stack.size >= Stack.CAPACITY) {
+pub fn op_msize(context: *ExecutionContext) ExecutionError.Error!void {
+    if (context.stack.size() >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
 
     // MSIZE returns the size in bytes, but memory is always expanded in 32-byte words
     // So we need to round up to the nearest word boundary
-    const size = frame.memory.context_size();
+    const size = context.memory.context_size();
     const aligned_size = std.mem.alignForward(usize, size, 32);
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(aligned_size)));
-
-    return Operation.ExecutionResult{};
+    context.stack.append_unsafe(@as(u256, @intCast(aligned_size)));
 }
 
-pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-
-    const frame = state;
-
-    if (frame.stack.size < 3) {
+pub fn op_mcopy(context: *ExecutionContext) ExecutionError.Error!void {
+    if (context.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order per EIP-5656: [dst, src, length] (top to bottom)
-    const dest = frame.stack.pop_unsafe();
-    const src = frame.stack.pop_unsafe();
-    const length = frame.stack.pop_unsafe();
+    const dest = context.stack.pop_unsafe();
+    const src = context.stack.pop_unsafe();
+    const length = context.stack.pop_unsafe();
 
     if (length == 0) {
         @branchHint(.unlikely);
-        return Operation.ExecutionResult{};
+        return;
     }
 
     // Check bounds
@@ -202,19 +170,19 @@ pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.
 
     // Calculate memory expansion gas cost
     const max_addr = @max(dest_usize + length_usize, src_usize + length_usize);
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(max_addr)));
-    try frame.consume_gas(memory_gas);
+    const memory_gas = context.memory.get_expansion_cost(@as(u64, @intCast(max_addr)));
+    try context.consume_gas(memory_gas);
 
     // Dynamic gas for copy operation
     const word_size = (length_usize + 31) / 32;
-    try frame.consume_gas(GasConstants.CopyGas * word_size);
+    try context.consume_gas(GasConstants.CopyGas * word_size);
 
     // Ensure memory is available for both source and destination
-    _ = try frame.memory.ensure_context_capacity(max_addr);
+    _ = try context.memory.ensure_context_capacity(max_addr);
 
     // Copy with overlap handling
     // Get memory slice and handle overlapping copy
-    const mem_slice = frame.memory.slice();
+    const mem_slice = context.memory.slice();
     if (mem_slice.len >= max_addr) {
         @branchHint(.likely);
         // Handle overlapping memory copy correctly
@@ -233,17 +201,17 @@ pub fn op_mcopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.
     } else {
         return ExecutionError.Error.OutOfOffset;
     }
-
-    return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when input data access is available
+// Currently ExecutionContext doesn't have input field needed for calldata operations
 pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size < 1) {
+    if (frame.stack.size() < 1) {
         @branchHint(.cold);
         unreachable;
     }
@@ -280,13 +248,15 @@ pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Ope
     return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when input data access is available
+// Currently ExecutionContext doesn't have input field needed for calldata operations
 pub fn op_calldatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
@@ -297,13 +267,15 @@ pub fn op_calldatasize(pc: usize, interpreter: Operation.Interpreter, state: Ope
     return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when input data access is available
+// Currently ExecutionContext doesn't have input field needed for calldata operations
 pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size < 3) {
+    if (frame.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;
     }
@@ -337,13 +309,15 @@ pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Ope
     return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when contract access is available
+// Currently ExecutionContext doesn't have contract field needed for code operations
 pub fn op_codesize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
@@ -354,13 +328,15 @@ pub fn op_codesize(pc: usize, interpreter: Operation.Interpreter, state: Operati
     return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when contract access is available
+// Currently ExecutionContext doesn't have contract field needed for code operations
 pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size < 3) {
+    if (frame.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;
     }
@@ -399,13 +375,15 @@ pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operati
     return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when return data access is available
+// Currently ExecutionContext doesn't have return_data field needed for return data operations
 pub fn op_returndatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
@@ -416,13 +394,15 @@ pub fn op_returndatasize(pc: usize, interpreter: Operation.Interpreter, state: O
     return Operation.ExecutionResult{};
 }
 
+// TODO: Update to ExecutionContext pattern when return data access is available
+// Currently ExecutionContext doesn't have return_data field needed for return data operations
 pub fn op_returndatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size < 3) {
+    if (frame.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;
     }
@@ -596,15 +576,15 @@ fn validate_memory_result(frame: *const Frame, op: FuzzMemoryOperation, result: 
     // Validate stack results for operations that push values
     switch (op.op_type) {
         .mload, .calldataload => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack.size());
             // Additional validation can be done based on specific test cases
         },
         .msize, .calldatasize, .codesize, .returndatasize => {
-            try testing.expectEqual(@as(usize, 1), frame.stack.size);
+            try testing.expectEqual(@as(usize, 1), frame.stack.size());
         },
         .mstore, .mstore8, .mcopy, .calldatacopy, .codecopy, .returndatacopy => {
             // These operations don't push to stack
-            try testing.expectEqual(@as(usize, 0), frame.stack.size);
+            try testing.expectEqual(@as(usize, 0), frame.stack.size());
         },
     }
 }

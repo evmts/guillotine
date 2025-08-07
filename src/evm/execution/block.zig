@@ -1,150 +1,131 @@
 const std = @import("std");
-const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
-const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
-const Vm = @import("../evm.zig");
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
 const primitives = @import("primitives");
 
-pub fn op_blockhash(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    const block_number = try context.stack.pop();
 
-    const frame = state;
-    const vm = interpreter;
-
-    const block_number = try frame.stack.pop();
-
-    const current_block = vm.context.block_number;
+    // TODO: Need block_number field in ExecutionContext
+    // const current_block = context.block_number;
+    const current_block: u64 = 1000; // Placeholder
 
     if (block_number >= current_block) {
         @branchHint(.unlikely);
-        try frame.stack.append(0);
+        try context.stack.append(0);
     } else if (current_block > block_number + 256) {
         @branchHint(.unlikely);
-        try frame.stack.append(0);
+        try context.stack.append(0);
     } else if (block_number == 0) {
         @branchHint(.unlikely);
-        try frame.stack.append(0);
+        try context.stack.append(0);
     } else {
         // Return a pseudo-hash based on block number for testing
         // In production, this would retrieve the actual block hash from chain history
         const hash = std.hash.Wyhash.hash(0, std.mem.asBytes(&block_number));
-        try frame.stack.append(hash);
+        try context.stack.append(hash);
     }
-
-    return Operation.ExecutionResult{};
 }
 
-pub fn op_coinbase(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
-    try frame.stack.append(primitives.Address.to_u256(vm.context.block_coinbase));
-
-    return Operation.ExecutionResult{};
+pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need block_coinbase field in ExecutionContext
+    // try context.stack.append(primitives.Address.to_u256(context.block_coinbase));
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
-pub fn op_timestamp(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
-    try frame.stack.append(@as(u256, @intCast(vm.context.block_timestamp)));
-
-    return Operation.ExecutionResult{};
+pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need block_timestamp field in ExecutionContext
+    // try context.stack.append(@as(u256, @intCast(context.block_timestamp)));
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
-pub fn op_number(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
-    try frame.stack.append(@as(u256, @intCast(vm.context.block_number)));
-
-    return Operation.ExecutionResult{};
+pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need block_number field in ExecutionContext
+    // try context.stack.append(@as(u256, @intCast(context.block_number)));
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
-pub fn op_difficulty(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
+pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need block_difficulty field in ExecutionContext
     // Get difficulty/prevrandao from block context
     // Post-merge this returns PREVRANDAO
-    try frame.stack.append(vm.context.block_difficulty);
-
-    return Operation.ExecutionResult{};
+    // try context.stack.append(context.block_difficulty);
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
-pub fn op_prevrandao(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
     // Same as difficulty post-merge
-    return op_difficulty(pc, interpreter, state);
+    return op_difficulty(context_ptr);
 }
 
-pub fn op_gaslimit(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
-    try frame.stack.append(@as(u256, @intCast(vm.context.block_gas_limit)));
-
-    return Operation.ExecutionResult{};
+pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need block_gas_limit field in ExecutionContext
+    // try context.stack.append(@as(u256, @intCast(context.block_gas_limit)));
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
-pub fn op_basefee(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
+pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need block_base_fee field in ExecutionContext
     // Get base fee from block context
     // Push base fee (EIP-1559)
-    try frame.stack.append(vm.context.block_base_fee);
-
-    return Operation.ExecutionResult{};
+    // try context.stack.append(context.block_base_fee);
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
-pub fn op_blobhash(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
+pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    const index = try context.stack.pop();
 
-    const frame = state;
-    const vm = interpreter;
-
-    const index = try frame.stack.pop();
-
+    // TODO: Need blob_hashes field in ExecutionContext
     // EIP-4844: Get blob hash at index
-    if (index >= vm.context.blob_hashes.len) {
-        @branchHint(.unlikely);
-        try frame.stack.append(0);
-    } else {
-        const idx = @as(usize, @intCast(index));
-        try frame.stack.append(vm.context.blob_hashes[idx]);
-    }
-
-    return Operation.ExecutionResult{};
+    // if (index >= context.blob_hashes.len) {
+    //     @branchHint(.unlikely);
+    //     try context.stack.append(0);
+    // } else {
+    //     const idx = @as(usize, @intCast(index));
+    //     try context.stack.append(context.blob_hashes[idx]);
+    // }
+    
+    // Placeholder implementation - always return zero
+    _ = index;
+    try context.stack.append(0);
 }
 
-pub fn op_blobbasefee(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
-    _ = pc;
-
-    const frame = state;
-    const vm = interpreter;
-
+pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
+    const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
+    // TODO: Need blob_base_fee field in ExecutionContext
     // Get blob base fee from block context
     // Push blob base fee (EIP-4844)
-    try frame.stack.append(vm.context.blob_base_fee);
-
-    return Operation.ExecutionResult{};
+    // try context.stack.append(context.blob_base_fee);
+    
+    // Placeholder implementation - push zero for now
+    try context.stack.append(0);
 }
 
 // Tests
 const testing = std.testing;
+const Operation = @import("../opcodes/operation.zig");
+const Frame = @import("../frame/frame.zig");
+const Vm = @import("../evm.zig");
 const MemoryDatabase = @import("../state/memory_database.zig");
 const Contract = @import("../frame/contract.zig");
 const Context = @import("../access_list/context.zig");
