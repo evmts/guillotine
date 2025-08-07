@@ -70,28 +70,24 @@ pub const Flags = packed struct {
     _reserved: u41 = 0, // Ensures exactly 64 bits total (11 + 1 + 1 + 10 + 1 + 41 = 64)
 };
 
-/// Data-oriented Frame struct optimized for cache performance
+/// Frame represents the entire execution state of the EVM as it executes opcodes
 /// Layout designed around actual opcode access patterns and data correlations
 pub const Frame = struct {
-    // TIER 1: ULTRA HOT - Accessed by virtually every opcode
+    // ULTRA HOT - Accessed by virtually every opcode
     stack: Stack, // 33,536 bytes - accessed by every opcode (PUSH/POP/DUP/SWAP/arithmetic/etc)
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode for gas accounting
-
-    // TIER 2: HOT - Accessed by major opcode categories
-    // ========================================================================
+    // HOT - Accessed by major opcode categories
     memory: *Memory, // 8 bytes - hot for memory ops (MLOAD/MSTORE/MSIZE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - hot for control flow (JUMP/JUMPI validation)
-
     // Hot execution flags (only the bits that are actually checked frequently)
     // Packed together to minimize cache footprint - these are checked by different opcode categories
     hot_flags: packed struct {
         depth: u10, // 10 bits - call stack depth for CALL/CREATE operations
         is_static: bool, // 1 bit - static call restriction (checked by SSTORE/TSTORE)
         is_eip1153: bool, // 1 bit - transient storage validation (TLOAD/TSTORE)
-        _padding: u4 = 0, // 4 bits - align to byte boundary
-    }, // 2 bytes total - fits in 16 bits
-
-    // TIER 3: WARM - Storage Operations Cluster (high correlation group)
+        _padding: u4 = 0, // 4 bits - align to byte boundary and room for future flags
+    },
+    // High correlation group
     // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together so pack them together in struct
     contract_address: primitives.Address.Address, // 20 bytes - FIRST: storage key = hash(contract_address, slot)
     state: DatabaseInterface, // 16 bytes - actual storage read/write interface
@@ -169,6 +165,7 @@ pub const Frame = struct {
                 .is_byzantium = chain_rules.is_byzantium,
                 .is_homestead = chain_rules.is_homestead,
             },
+            .allocator = allocator,
         };
     }
 
@@ -177,19 +174,15 @@ pub const Frame = struct {
     }
 
     /// Gas consumption with bounds checking - used by all opcodes that consume gas
-    pub fn consume_gas(self: *Frame, amount: u64) !void {
-        if (self.gas_remaining < amount) {
-            return ExecutionError.Error.OutOfGas;
-        }
+    pub fn consume_gas(self: *Frame, amount: u64) ExecutionError!void {
+        if (self.gas_remaining < amount) return ExecutionError.Error.OutOfGas;
         self.gas_remaining -= amount;
     }
 
     /// Jump destination validation - uses direct bitmap access
     /// This is significantly faster than the previous function pointer approach
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
-        // Check bounds first
-        if (dest >= std.math.maxInt(u32)) return false;
-
+        std.debug.assert(dest <= std.math.maxInt(u32));
         const dest_usize = @as(usize, @intCast(dest));
         return self.analysis.jumpdest_bitmap.isSet(dest_usize);
     }
@@ -202,10 +195,10 @@ pub const Frame = struct {
     /// Mark contract for destruction - uses direct self destruct pointer
     pub fn mark_for_destruction(self: *Frame, recipient: primitives.Address.Address) !void {
         if (self.self_destruct) |sd| {
+            @branchHint(.likely);
             return sd.mark_for_destruction(self.contract_address, recipient);
-        } else {
-            return ExecutionError.Error.SelfDestructNotAvailable;
         }
+        return ExecutionError.Error.SelfDestructNotAvailable;
     }
 
     /// Set output data for RETURN/REVERT operations
