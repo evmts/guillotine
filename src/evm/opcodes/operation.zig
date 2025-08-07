@@ -2,7 +2,7 @@ const std = @import("std");
 const Opcode = @import("opcode.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
+const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const Memory = @import("../memory/memory.zig");
 
 /// Operation metadata and execution functions for EVM opcodes.
@@ -162,9 +162,7 @@ pub const NULL_OPERATION = Operation{
 ///
 /// Consumes all remaining gas and returns InvalidOpcode error.
 /// This ensures undefined opcodes cannot be used for computation.
-fn undefined_execute(pc: usize, interpreter: *anyopaque, state: *anyopaque) ExecutionError.Error!ExecutionResult {
-    _ = pc;
-    _ = interpreter;
-    _ = state;
+fn undefined_execute(context: *anyopaque) ExecutionError.Error!void {
+    _ = context;
     return ExecutionError.Error.InvalidOpcode;
 }
