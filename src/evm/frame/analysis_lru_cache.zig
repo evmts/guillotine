@@ -79,7 +79,7 @@ pub const AnalysisLRUCache = struct {
         var current = self.head;
         while (current) |entry| {
             const next = entry.next;
-            entry.analysis.deinit(self.allocator);
+            // CodeAnalysis no longer needs deinit - it uses fixed-size arrays
             self.allocator.destroy(entry.analysis);
             self.allocator.destroy(entry);
             current = next;
@@ -105,7 +105,7 @@ pub const AnalysisLRUCache = struct {
         // Check if entry already exists
         if (self.entries.get(code_hash)) |existing_entry| {
             // Update existing entry and move to front
-            existing_entry.analysis.deinit(self.allocator);
+            // CodeAnalysis no longer needs deinit - it uses fixed-size arrays
             self.allocator.destroy(existing_entry.analysis);
             existing_entry.analysis = analysis;
             self.moveToFront(existing_entry);
@@ -194,7 +194,7 @@ pub const AnalysisLRUCache = struct {
             }
             
             // Clean up memory
-            lru_entry.analysis.deinit(self.allocator);
+            // CodeAnalysis no longer needs deinit - it uses fixed-size arrays
             self.allocator.destroy(lru_entry.analysis);
             self.allocator.destroy(lru_entry);
             

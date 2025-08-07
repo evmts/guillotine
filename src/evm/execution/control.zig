@@ -34,7 +34,7 @@ pub fn op_jump(pc: usize, interpreter: Operation.Interpreter, state: Operation.S
     // Check if destination is a valid JUMPDEST (pass u256 directly)
     if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
         @branchHint(.unlikely);
-        Log.err("JUMP: Invalid jump destination {} from pc={}", .{dest, pc});
+        Log.debug("JUMP: Invalid jump destination {} from pc={}", .{dest, pc});
         return ExecutionError.Error.InvalidJump;
     }
 
