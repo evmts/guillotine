@@ -1,4 +1,5 @@
 const std = @import("std");
+const stack_constants = @import("../constants/stack_constants.zig");
 
 /// High-performance EVM stack implementation using pointer arithmetic.
 ///
@@ -53,7 +54,7 @@ pub const Stack = @This();
 
 /// Maximum stack capacity as defined by the EVM specification.
 /// This limit prevents stack-based DoS attacks.
-pub const CAPACITY: usize = 1024;
+pub const CAPACITY: usize = stack_constants.CAPACITY;
 
 /// Error types for stack operations.
 /// These map directly to EVM execution errors.

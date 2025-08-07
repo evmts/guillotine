@@ -3,6 +3,7 @@ const primitives = @import("primitives");
 const AccessListStorageKey = @import("access_list_storage_key.zig");
 const AccessListStorageKeyContext = @import("access_list_storage_key_context.zig");
 const Context = @import("context.zig");
+const access_list_constants = @import("../constants/access_list_constants.zig");
 
 /// EIP-2929 & EIP-2930: Access list management for gas cost calculation
 ///
@@ -27,13 +28,13 @@ pub const GetCallCostError = Error;
 pub const AccessList = @This();
 
 // Gas costs defined by EIP-2929
-pub const COLD_ACCOUNT_ACCESS_COST: u64 = 2600;
-pub const WARM_ACCOUNT_ACCESS_COST: u64 = 100;
-pub const COLD_SLOAD_COST: u64 = 2100;
-pub const WARM_SLOAD_COST: u64 = 100;
+pub const COLD_ACCOUNT_ACCESS_COST: u64 = access_list_constants.COLD_ACCOUNT_ACCESS_COST;
+pub const WARM_ACCOUNT_ACCESS_COST: u64 = access_list_constants.WARM_ACCOUNT_ACCESS_COST;
+pub const COLD_SLOAD_COST: u64 = access_list_constants.COLD_SLOAD_COST;
+pub const WARM_SLOAD_COST: u64 = access_list_constants.WARM_SLOAD_COST;
 
 // Additional costs for CALL operations
-pub const COLD_CALL_EXTRA_COST: u64 = COLD_ACCOUNT_ACCESS_COST - WARM_ACCOUNT_ACCESS_COST;
+pub const COLD_CALL_EXTRA_COST: u64 = access_list_constants.COLD_CALL_EXTRA_COST;
 
 allocator: std.mem.Allocator,
 /// Warm addresses - addresses that have been accessed

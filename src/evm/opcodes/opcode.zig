@@ -35,6 +35,7 @@
 /// const name = opcode.get_name(); // "ADD"
 /// ```
 pub const MemorySize = @import("memory_size.zig");
+const evm_limits = @import("../constants/evm_limits.zig");
 
 /// Enumeration of all EVM opcodes with their byte values.
 ///
@@ -522,7 +523,7 @@ pub fn is_valid(op: u8) bool {
 /// - Libraries and proxy patterns help work around this limit
 ///
 /// Reference: https://eips.ethereum.org/EIPS/eip-170
-pub const MAX_CODE_SIZE: u32 = 24576;
+pub const MAX_CODE_SIZE: u32 = evm_limits.MAX_CODE_SIZE;
 
 /// Gas cost per byte of deployed contract code.
 ///
@@ -542,4 +543,4 @@ pub const MAX_CODE_SIZE: u32 = 24576;
 ///
 /// ## Note
 /// This is separate from the initcode gas cost introduced in EIP-3860.
-pub const DEPLOY_CODE_GAS_PER_BYTE: u64 = 200;
+pub const DEPLOY_CODE_GAS_PER_BYTE: u64 = evm_limits.DEPLOY_CODE_GAS_PER_BYTE;
