@@ -34,7 +34,7 @@ const builtin = @import("builtin");
 const Evm = @This();
 
 /// Maximum call depth supported by EVM (per EIP-150)
-pub const MAX_CALL_DEPTH = 1024;
+pub const MAX_CALL_DEPTH: u11 = 1024;
 // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
@@ -43,7 +43,7 @@ internal_allocator: EvmMemoryAllocator,
 /// Opcode dispatch table for the configured hardfork
 table: JumpTable,
 /// Current call depth for overflow protection
-depth: u16 = 0,
+depth: u11 = 0,
 /// Whether the current context is read-only (STATICCALL)
 read_only: bool = false,
 
@@ -215,7 +215,7 @@ test "Evm.init default configuration" {
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -234,7 +234,7 @@ test "Evm.init with custom jump table and chain rules" {
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -252,7 +252,7 @@ test "Evm.init with hardfork" {
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -333,8 +333,8 @@ test "Evm multiple VM instances" {
     evm1.depth = 5;
     evm2.depth = 10;
 
-    try testing.expectEqual(@as(u16, 5), evm1.depth);
-    try testing.expectEqual(@as(u16, 10), evm2.depth);
+    try testing.expectEqual(@as(u11, 5), evm1.depth);
+    try testing.expectEqual(@as(u11, 10), evm2.depth);
 }
 
 test "Evm initialization with different hardforks" {
@@ -354,7 +354,7 @@ test "Evm initialization with different hardforks" {
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
-        try testing.expectEqual(@as(u16, 0), evm.depth);
+        try testing.expectEqual(@as(u11, 0), evm.depth);
         try testing.expectEqual(false, evm.read_only);
     }
 }
@@ -370,7 +370,7 @@ test "Evm initialization memory invariants" {
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 
@@ -384,10 +384,10 @@ test "Evm depth tracking" {
     var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
 
     evm.depth = 1024;
-    try testing.expectEqual(@as(u16, 1024), evm.depth);
+    try testing.expectEqual(@as(u11, 1024), evm.depth);
 
     evm.depth = 0;
     try testing.expectEqual(@as(u16, 0), evm.depth);
@@ -515,7 +515,7 @@ test "Evm reinitialization behavior" {
     evm = try Evm.init(allocator, db_interface, null, null);
     defer evm.deinit();
 
-    try testing.expectEqual(@as(u16, 0), evm.depth);
+    try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
 

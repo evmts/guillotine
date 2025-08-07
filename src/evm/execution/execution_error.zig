@@ -154,6 +154,14 @@ pub const Error = error{
     InstructionLimitExceeded,
     /// Opcode not implemented in translator
     OpcodeNotImplemented,
+    
+    /// Contract input (calldata) size exceeds maximum allowed size
+    /// Typically 128KB limit imposed by RPC providers
+    InputSizeExceeded,
+    
+    /// Contract code size mismatch between expected and actual size
+    /// Occurs when contract.code_size doesn't match contract.input.len
+    CodeSizeMismatch,
 };
 
 /// Get a human-readable description for an execution error
@@ -211,6 +219,10 @@ pub fn get_description(err: Error) []const u8 {
         Error.InvalidSnapshot => "Invalid snapshot identifier",
         Error.NoBatchInProgress => "No batch operation in progress",
         Error.SnapshotNotFound => "Snapshot not found in database",
+        Error.InstructionLimitExceeded => "Instruction limit exceeded during translation",
+        Error.OpcodeNotImplemented => "Opcode not implemented in translator",
+        Error.InputSizeExceeded => "Contract input size exceeds maximum allowed size",
+        Error.CodeSizeMismatch => "Contract code size mismatch between expected and actual size",
     };
 }
 
@@ -423,7 +435,8 @@ const all_errors = [_]Error{
     Error.InvalidSize,           Error.MemoryLimitExceeded,     Error.ChildContextActive, Error.NoChildContextToRevertOrCommit,
     Error.EOFNotSupported,       Error.AccountNotFound,         Error.StorageNotFound,    Error.CodeNotFound,
     Error.InvalidAddress,        Error.DatabaseCorrupted,       Error.NetworkError,       Error.PermissionDenied,
-    Error.InvalidSnapshot,       Error.NoBatchInProgress,       Error.SnapshotNotFound,
+    Error.InvalidSnapshot,       Error.NoBatchInProgress,       Error.SnapshotNotFound,   Error.InstructionLimitExceeded,
+    Error.OpcodeNotImplemented,  Error.InputSizeExceeded,       Error.CodeSizeMismatch,
 };
 
 // test "fuzz_error_enumeration_completeness" {

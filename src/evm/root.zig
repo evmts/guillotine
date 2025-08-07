@@ -204,13 +204,7 @@ pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");
 pub const Instruction = @import("instruction.zig").Instruction;
 const instruction_module = @import("instruction.zig");
 
-/// Instruction translator for bytecode to instruction conversion
-pub const InstructionTranslator = @import("instruction_translator.zig").InstructionTranslator;
-const translator_module = @import("instruction_translator.zig");
 
-/// Block executor for instruction stream execution
-pub const BlockExecutor = @import("block_executor.zig").BlockExecutor;
-const block_executor_module = @import("block_executor.zig");
 
 /// Block execution metrics and performance analysis
 pub const block_metrics = @import("block_metrics.zig");
@@ -354,10 +348,4 @@ test "Execution module" {
 }
 test "Instruction module" {
     std.testing.refAllDecls(instruction_module);
-}
-test "InstructionTranslator module" {
-    std.testing.refAllDecls(translator_module);
-}
-test "BlockExecutor module" {
-    std.testing.refAllDecls(block_executor_module);
 }

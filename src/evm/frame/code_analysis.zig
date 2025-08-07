@@ -1,6 +1,10 @@
 const std = @import("std");
 const limits = @import("../constants/code_analysis_limits.zig");
 const StaticBitSet = std.bit_set.StaticBitSet;
+const Instruction = @import("../instruction.zig").Instruction;
+const Opcode = @import("../opcodes/opcode.zig");
+const JumpTable = @import("../jump_table/jump_table.zig");
+const instruction_limits = @import("../constants/instruction_limits.zig");
 
 // Import structs from their own files
 pub const BlockMetadata = @import("block_metadata.zig");
@@ -119,229 +123,21 @@ pc_to_block: [limits.MAX_CONTRACT_SIZE]u16,
 /// contracts have far fewer than 65535 blocks. Most contracts have < 1000 blocks.
 block_count: u16,
 
-test "CodeAnalysis with block data initializes and deinits correctly" {
-    var analysis = CodeAnalysis{
-        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .block_metadata = undefined,
-        .block_metadata_soa = BlockMetadataSoA.init(),
-        .pc_to_block = undefined,
-        .block_count = 10,
-        .max_stack_depth = 0,
-        .has_dynamic_jumps = false,
-        .has_static_jumps = false,
-        .has_selfdestruct = false,
-        .has_create = false,
-    };
-
-    // Initialize some test data
-    analysis.block_metadata_soa.count = 10;
-    @memset(&analysis.pc_to_block, 0);
-
-    // Verify fields are accessible
-    try std.testing.expectEqual(@as(u16, 10), analysis.block_count);
-    try std.testing.expectEqual(@as(usize, limits.MAX_BLOCKS), analysis.block_metadata.len);
-    try std.testing.expectEqual(@as(usize, limits.MAX_CONTRACT_SIZE), analysis.pc_to_block.len);
-
-    // Test pc_to_block mapping
-    analysis.pc_to_block[50] = 5;
-    try std.testing.expectEqual(@as(u16, 5), analysis.pc_to_block[50]);
-}
-
-test "CodeAnalysis deinit handles partially initialized state" {
-
-    // Test with empty block data
-    var analysis = CodeAnalysis{
-        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
-        .block_metadata = undefined,
-        .block_metadata_soa = BlockMetadataSoA.init(),
-        .pc_to_block = undefined,
-        .block_count = 0,
-        .max_stack_depth = 0,
-        .has_dynamic_jumps = false,
-        .has_static_jumps = false,
-        .has_selfdestruct = false,
-        .has_create = false,
-    };
-
-    // Should not crash on deinit
-    analysis.deinit();
-}
-
-test "Block analysis correctly identifies basic blocks" {
-
-    // Test bytecode with multiple basic blocks:
-    // Block 0: PUSH1 0x10 PUSH1 0x20 ADD
-    // Block 1: JUMPDEST PUSH1 0x30 MUL
-    // Block 2: JUMPDEST STOP
-    const code = &[_]u8{
-        0x60, 0x10, // PUSH1 0x10
-        0x60, 0x20, // PUSH1 0x20
-        0x01, // ADD
-        0x5b, // JUMPDEST (starts block 1)
-        0x60, 0x30, // PUSH1 0x30
-        0x02, // MUL
-        0x5b, // JUMPDEST (starts block 2)
-        0x00, // STOP
-    };
-
-    var analysis: CodeAnalysis = undefined;
-    try analyze_bytecode_blocks(&analysis, code);
-
-    // Verify block count
-    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
-
-    // Verify block starts
-    try std.testing.expect(!analysis.block_starts.isSet(0)); // Block 0 starts at 0 (implicit)
-    try std.testing.expect(!analysis.block_starts.isSet(1));
-    try std.testing.expect(!analysis.block_starts.isSet(2));
-    try std.testing.expect(!analysis.block_starts.isSet(3));
-    try std.testing.expect(!analysis.block_starts.isSet(4));
-    try std.testing.expect(analysis.block_starts.isSet(5)); // Block 1 starts at JUMPDEST
-    try std.testing.expect(!analysis.block_starts.isSet(6));
-    try std.testing.expect(!analysis.block_starts.isSet(7));
-    try std.testing.expect(!analysis.block_starts.isSet(8));
-    try std.testing.expect(analysis.block_starts.isSet(9)); // Block 2 starts at JUMPDEST
-
-    // Verify PC to block mapping
-    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[0]);
-    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[1]);
-    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[2]);
-    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[3]);
-    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[4]);
-    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[5]);
-    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[6]);
-    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[7]);
-    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[8]);
-    try std.testing.expectEqual(@as(u16, 2), analysis.pc_to_block[9]);
-    try std.testing.expectEqual(@as(u16, 2), analysis.pc_to_block[10]);
-
-    // Verify block metadata count
-    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
-
-    // Block 0: PUSH1 (3) + PUSH1 (3) + ADD (3) = 9 gas
-    try std.testing.expectEqual(@as(u32, 9), analysis.block_metadata[0].gas_cost);
-    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[0].stack_req);
-    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[0].stack_max); // Pushes 2, pops 2, net +1
-
-    // Block 1: JUMPDEST (1) + PUSH1 (3) + MUL (5) = 9 gas
-    try std.testing.expectEqual(@as(u32, 9), analysis.block_metadata[1].gas_cost);
-    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[1].stack_req); // Needs 1 from previous block
-    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[1].stack_max); // Has 1, pushes 1, pops 2, net 0
-
-    // Block 2: JUMPDEST (1) + STOP (0) = 1 gas
-    try std.testing.expectEqual(@as(u32, 1), analysis.block_metadata[2].gas_cost);
-    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[2].stack_req);
-    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[2].stack_max);
-}
-
-test "Block analysis handles jumps correctly" {
-
-    // Test bytecode with conditional and unconditional jumps:
-    // PUSH1 0x08 PUSH1 0x01 EQ PUSH1 0x0a JUMPI STOP JUMPDEST PUSH1 0x42 STOP
-    const code = &[_]u8{
-        0x60, 0x08, // PUSH1 0x08
-        0x60, 0x01, // PUSH1 0x01
-        0x14, // EQ
-        0x60, 0x0a, // PUSH1 0x0a (jump target)
-        0x57, // JUMPI (conditional jump)
-        0x00, // STOP
-        0x5b, // JUMPDEST (at position 0x0a)
-        0x60, 0x42, // PUSH1 0x42
-        0x00, // STOP
-    };
-
-    var analysis: CodeAnalysis = undefined;
-    try analyze_bytecode_blocks(&analysis, code);
-
-    // Should have 3 blocks:
-    // Block 0: 0-8 (up to JUMPI)
-    // Block 1: 9 (STOP after JUMPI)
-    // Block 2: 10-13 (JUMPDEST onwards)
-    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
-
-    // Verify JUMPI creates block boundaries
-    try std.testing.expect(analysis.block_starts.isSet(9)); // New block after JUMPI
-    try std.testing.expect(analysis.block_starts.isSet(10)); // JUMPDEST starts new block
-}
-
-test "Block analysis calculates gas costs correctly" {
-
-    // Test with various opcodes to verify gas calculation
-    const code = &[_]u8{
-        0x60, 0x01, // PUSH1 (3 gas)
-        0x60, 0x02, // PUSH1 (3 gas)
-        0x01, // ADD (3 gas)
-        0x60, 0x03, // PUSH1 (3 gas)
-        0x02, // MUL (5 gas)
-        0x5b, // JUMPDEST (1 gas) - new block
-        0x80, // DUP1 (3 gas)
-        0x50, // POP (2 gas)
-        0x00, // STOP (0 gas)
-    };
-
-    var analysis: CodeAnalysis = undefined;
-    try analyze_bytecode_blocks(&analysis, code);
-
-    try std.testing.expectEqual(@as(u16, 2), analysis.block_count);
-
-    // Block 0: 3+3+3+3+5 = 17 gas
-    try std.testing.expectEqual(@as(u32, 17), analysis.block_metadata[0].gas_cost);
-
-    // Block 1: 1+3+2+0 = 6 gas
-    try std.testing.expectEqual(@as(u32, 6), analysis.block_metadata[1].gas_cost);
-}
-
-test "Block analysis tracks stack effects" {
-
-    // Test stack tracking across blocks
-    const code = &[_]u8{
-        0x60, 0x01, // PUSH1 (stack: +1)
-        0x60, 0x02, // PUSH1 (stack: +1)
-        0x60, 0x03, // PUSH1 (stack: +1)
-        0x5b, // JUMPDEST - new block, inherits stack depth 3
-        0x01, // ADD (stack: -1)
-        0x02, // MUL (stack: -1)
-        0x5b, // JUMPDEST - new block, inherits stack depth 1
-        0x50, // POP (stack: -1)
-        0x00, // STOP
-    };
-
-    var analysis: CodeAnalysis = undefined;
-    try analyze_bytecode_blocks(&analysis, code);
-
-    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
-
-    // Block 0: starts with 0, max growth to 3
-    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[0].stack_req);
-    try std.testing.expectEqual(@as(i16, 3), analysis.block_metadata[0].stack_max);
-
-    // Block 1: needs 3 items (for ADD and MUL), ends with 1
-    try std.testing.expectEqual(@as(i16, 3), analysis.block_metadata[1].stack_req);
-    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[1].stack_max); // No growth, only consumption
-
-    // Block 2: needs 1 item (for POP)
-    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[2].stack_req);
-    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[2].stack_max);
-}
-
 /// Creates a code bitmap that marks which bytes are opcodes vs data.
 fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
-    const opcode = @import("../opcodes/opcode.zig");
+    std.debug.assert(code.len <= limits.MAX_CONTRACT_SIZE);
+
     var bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initFull();
 
     var i: usize = 0;
-    while (i < code.len and i < limits.MAX_CONTRACT_SIZE) {
+    while (i < code.len) {
         const op = code[i];
 
         // If the opcode is a PUSH, mark pushed bytes as data (not code)
-        if (opcode.is_push(op)) {
-            const push_bytes = opcode.get_push_size(op);
+        if (Opcode.is_push(op)) {
+            const push_bytes = Opcode.get_push_size(op);
             var j: usize = 1;
-            while (j <= push_bytes and i + j < code.len and i + j < limits.MAX_CONTRACT_SIZE) : (j += 1) {
+            while (j <= push_bytes and i + j < code.len) : (j += 1) {
                 bitmap.unset(i + j);
             }
             i += 1 + push_bytes;
@@ -366,10 +162,7 @@ fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
 ///
 /// Fills a pre-allocated CodeAnalysis struct - no allocation required.
 /// The caller must provide a pointer to an uninitialized CodeAnalysis struct.
-pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void {
-    const opcode = @import("../opcodes/opcode.zig");
-    const jump_table = @import("../jump_table/jump_table.zig");
-
+pub fn from_code(analysis: *CodeAnalysis, code: []const u8) !void {
     // Initialize analysis structure with fixed arrays
     analysis.* = CodeAnalysis{
         .code_segments = createCodeBitmap(code),
@@ -403,7 +196,7 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
         const op = code[i];
 
         // Mark JUMPDEST positions
-        if (op == @intFromEnum(opcode.Enum.JUMPDEST) and analysis.code_segments.isSet(i)) {
+        if (op == @intFromEnum(Opcode.Enum.JUMPDEST) and analysis.code_segments.isSet(i)) {
             analysis.jumpdest_bitmap.set(i);
             // JUMPDESTs always start new blocks (except at position 0)
             if (i > 0) {
@@ -412,7 +205,7 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
         }
 
         // Handle opcodes that end blocks - skip invalid opcodes
-        const maybe_opcode = std.meta.intToEnum(opcode.Enum, op) catch {
+        const maybe_opcode = std.meta.intToEnum(Opcode.Enum, op) catch {
             // Invalid opcode, skip it but MUST increment i to avoid infinite loop
             i += 1;
             continue;
@@ -426,7 +219,7 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
                 }
             },
             .STOP, .RETURN, .REVERT, .INVALID, .SELFDESTRUCT => {
-                if (op == @intFromEnum(opcode.Enum.SELFDESTRUCT)) {
+                if (op == @intFromEnum(Opcode.Enum.SELFDESTRUCT)) {
                     analysis.has_selfdestruct = true;
                 }
                 // Next instruction starts new block (if exists)
@@ -441,8 +234,8 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
         }
 
         // Advance PC
-        if (opcode.is_push(op)) {
-            const push_bytes = opcode.get_push_size(op);
+        if (Opcode.is_push(op)) {
+            const push_bytes = Opcode.get_push_size(op);
             i += 1 + push_bytes;
         } else {
             i += 1;
@@ -466,7 +259,7 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
     @memset(&analysis.pc_to_block, 0);
 
     // Initialize jump table for gas cost lookup
-    const table = jump_table.JumpTable.DEFAULT;
+    const table = JumpTable.DEFAULT;
 
     // Second pass: analyze each block
     var current_block: u16 = 0;
@@ -556,8 +349,8 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
         }
 
         // Advance PC
-        if (opcode.is_push(op)) {
-            const push_bytes = opcode.get_push_size(op);
+        if (Opcode.is_push(op)) {
+            const push_bytes = Opcode.get_push_size(op);
             var j: usize = 1;
             while (j <= push_bytes and i + j < code.len) : (j += 1) {
                 if (i + j < limits.MAX_CONTRACT_SIZE) {
@@ -581,8 +374,256 @@ pub fn analyze_bytecode_blocks(analysis: *CodeAnalysis, code: []const u8) !void 
         // Also populate SoA structure
         analysis.block_metadata_soa.setBlock(current_block, metadata.gas_cost, metadata.stack_req, metadata.stack_max);
     }
+}
 
-    // Analysis struct is already filled, nothing to return
+/// Convert analyzed bytecode to null-terminated instruction stream for block-based execution.
+/// Returns a heap-allocated null terminated array that must be freed by the caller.
+pub fn to_instructions(self: *const CodeAnalysis, allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable) ![*:null]Instruction {
+    _ = self; // Mark as used to suppress warning
+
+    // Allocate instruction array with space for null terminator
+    const instructions = try allocator.alloc(?Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
+    errdefer allocator.free(instructions);
+
+    var pc: usize = 0;
+    var instruction_count: usize = 0;
+
+    while (pc < code.len) {
+        if (instruction_count >= instruction_limits.MAX_INSTRUCTIONS) {
+            return error.InstructionLimitExceeded;
+        }
+
+        const opcode_byte = code[pc];
+
+        const opcode = std.meta.intToEnum(Opcode.Enum, opcode_byte) catch {
+            // Invalid opcode - add it as a regular instruction
+            instructions[instruction_count] = Instruction{
+                .opcode_fn = jump_table.execute_funcs[opcode_byte],
+                .arg = .none,
+            };
+            instruction_count += 1;
+            pc += 1;
+            continue;
+        };
+
+        switch (opcode) {
+            .STOP => {
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = jump_table.execute_funcs[opcode_byte],
+                    .arg = .none,
+                };
+                instruction_count += 1;
+                pc += 1;
+            },
+            .PUSH0 => {
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = jump_table.execute_funcs[opcode_byte],
+                    .arg = .{ .push_value = 0 },
+                };
+                instruction_count += 1;
+                pc += 1;
+            },
+            .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
+                // Calculate how many bytes to read
+                const push_size = Opcode.get_push_size(opcode_byte);
+
+                // Make sure we have enough bytes
+                if (pc + 1 + push_size > code.len) {
+                    // If not enough bytes, pad with zeros (EVM behavior)
+                    var value: u256 = 0;
+                    const available = code.len - (pc + 1);
+                    if (available > 0) {
+                        // Read what we can
+                        const bytes_to_read = @min(push_size, available);
+                        var i: usize = 0;
+                        while (i < bytes_to_read) : (i += 1) {
+                            value = (value << 8) | code[pc + 1 + i];
+                        }
+                        // Shift left for any missing bytes
+                        const missing_bytes = push_size - bytes_to_read;
+                        if (missing_bytes > 0) {
+                            value = value << (8 * missing_bytes);
+                        }
+                    }
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = jump_table.execute_funcs[opcode_byte],
+                        .arg = .{ .push_value = value },
+                    };
+                    instruction_count += 1;
+                    pc = code.len; // End of code
+                } else {
+                    // Read the push value from bytecode
+                    var value: u256 = 0;
+                    var i: usize = 0;
+                    while (i < push_size) : (i += 1) {
+                        value = (value << 8) | code[pc + 1 + i];
+                    }
+
+                    const opcode_fn = jump_table.execute_funcs[opcode_byte];
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = opcode_fn,
+                        .arg = .{ .push_value = value },
+                    };
+                    instruction_count += 1;
+                    pc += 1 + push_size;
+                }
+            },
+            // All other opcodes - no special args
+            else => {
+                // Check if it's an undefined opcode
+                if (jump_table.undefined_flags[opcode_byte]) {
+                    // Treat undefined opcodes as INVALID
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
+                        .arg = .none,
+                    };
+                    instruction_count += 1;
+                    pc += 1;
+                } else {
+                    const opcode_fn = jump_table.execute_funcs[opcode_byte];
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = opcode_fn,
+                        .arg = .none,
+                    };
+                    instruction_count += 1;
+                    pc += 1;
+                }
+            },
+        }
+    }
+
+    // Null-terminate the instruction stream
+    instructions[instruction_count] = null;
+
+    // Convert to slice of non-nullable instructions for jump target resolution
+    var non_null_instructions = try allocator.alloc(Instruction, instruction_count);
+    errdefer allocator.free(non_null_instructions);
+    
+    for (0..instruction_count) |i| {
+        non_null_instructions[i] = instructions[i].?; // Safe because we know they're not null
+    }
+
+    // Resolve jump targets after initial translation
+    resolve_jump_targets(code, non_null_instructions) catch {
+        // If we can't resolve jumps, it's still OK - runtime will handle it
+    };
+    
+    // Copy back the resolved instructions
+    for (0..instruction_count) |i| {
+        instructions[i] = non_null_instructions[i];
+    }
+    
+    allocator.free(non_null_instructions);
+
+    // Resize array to actual size + null terminator  
+    const final_instructions = try allocator.realloc(instructions, instruction_count + 1);
+    return @ptrCast(final_instructions.ptr);
+}
+
+/// Resolve jump targets in the instruction stream.
+/// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
+fn resolve_jump_targets(code: []const u8, instructions: []Instruction) !void {
+    const limits_mod = @import("../constants/code_analysis_limits.zig");
+
+    // Build a map from PC to instruction index using fixed array
+    // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
+    var pc_to_instruction: [limits_mod.MAX_CONTRACT_SIZE]u16 = undefined;
+    @memset(&pc_to_instruction, std.math.maxInt(u16));
+
+    var pc: usize = 0;
+    var inst_idx: usize = 0;
+
+    // First pass: map PC to instruction indices
+    while (inst_idx < instructions.len) : (inst_idx += 1) {
+        if (pc < pc_to_instruction.len) {
+            pc_to_instruction[pc] = @intCast(inst_idx);
+        }
+
+        // Calculate PC advancement based on the original bytecode
+        if (pc >= code.len) break;
+
+        const opcode_byte = code[pc];
+        if (opcode_byte >= 0x60 and opcode_byte <= 0x7F) {
+            // PUSH instruction
+            const push_size = opcode_byte - 0x5F;
+            pc += 1 + push_size;
+        } else {
+            pc += 1;
+        }
+    }
+
+    // Second pass: update JUMP and JUMPI instructions
+    pc = 0;
+    inst_idx = 0;
+
+    while (inst_idx < instructions.len) : (inst_idx += 1) {
+        if (pc >= code.len) break;
+
+        const opcode_byte = code[pc];
+
+        if (opcode_byte == 0x56 or opcode_byte == 0x57) { // JUMP or JUMPI
+            // Look for the target address in the previous PUSH instruction
+            if (inst_idx > 0 and instructions[inst_idx - 1].arg == .push_value) {
+                const target_pc = instructions[inst_idx - 1].arg.push_value;
+
+                // Check if it's within bounds
+                if (target_pc < code.len) {
+                    // Check if the target is a JUMPDEST opcode
+                    if (code[@intCast(target_pc)] == 0x5B) {
+                        // Find the instruction index for this PC
+                        if (target_pc < pc_to_instruction.len) {
+                            const target_idx = pc_to_instruction[@intCast(target_pc)];
+                            if (target_idx != std.math.maxInt(u16)) {
+                                // Update the JUMP/JUMPI with the target pointer
+                                instructions[inst_idx].arg = .{ .jump_target = &instructions[target_idx] };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Calculate PC advancement
+        if (opcode_byte >= 0x60 and opcode_byte <= 0x7F) {
+            const push_size = opcode_byte - 0x5F;
+            pc += 1 + push_size;
+        } else {
+            pc += 1;
+        }
+    }
+}
+
+test "Block analysis tracks stack effects" {
+
+    // Test stack tracking across blocks
+    const code = &[_]u8{
+        0x60, 0x01, // PUSH1 (stack: +1)
+        0x60, 0x02, // PUSH1 (stack: +1)
+        0x60, 0x03, // PUSH1 (stack: +1)
+        0x5b, // JUMPDEST - new block, inherits stack depth 3
+        0x01, // ADD (stack: -1)
+        0x02, // MUL (stack: -1)
+        0x5b, // JUMPDEST - new block, inherits stack depth 1
+        0x50, // POP (stack: -1)
+        0x00, // STOP
+    };
+
+    var analysis: CodeAnalysis = undefined;
+    try CodeAnalysis.from_code(&analysis, code);
+
+    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
+
+    // Block 0: starts with 0, max growth to 3
+    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[0].stack_req);
+    try std.testing.expectEqual(@as(i16, 3), analysis.block_metadata[0].stack_max);
+
+    // Block 1: needs 3 items (for ADD and MUL), ends with 1
+    try std.testing.expectEqual(@as(i16, 3), analysis.block_metadata[1].stack_req);
+    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[1].stack_max); // No growth, only consumption
+
+    // Block 2: needs 1 item (for POP)
+    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[2].stack_req);
+    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[2].stack_max);
 }
 
 test "pc_to_block mapping edge cases" {
@@ -634,4 +675,180 @@ test "BlockMetadata with contract deployment scenarios" {
         try std.testing.expectEqual(tc.blocks, analysis.block_count);
         try std.testing.expectEqual(tc.blocks, analysis.block_metadata_soa.count);
     }
+}
+
+test "CodeAnalysis with block data initializes and deinits correctly" {
+    var analysis = CodeAnalysis{
+        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_metadata = undefined,
+        .block_metadata_soa = BlockMetadataSoA.init(),
+        .pc_to_block = undefined,
+        .block_count = 10,
+        .max_stack_depth = 0,
+        .has_dynamic_jumps = false,
+        .has_static_jumps = false,
+        .has_selfdestruct = false,
+        .has_create = false,
+    };
+
+    // Initialize some test data
+    analysis.block_metadata_soa.count = 10;
+    @memset(&analysis.pc_to_block, 0);
+
+    // Verify fields are accessible
+    try std.testing.expectEqual(@as(u16, 10), analysis.block_count);
+    try std.testing.expectEqual(@as(usize, limits.MAX_BLOCKS), analysis.block_metadata.len);
+    try std.testing.expectEqual(@as(usize, limits.MAX_CONTRACT_SIZE), analysis.pc_to_block.len);
+
+    // Test pc_to_block mapping
+    analysis.pc_to_block[50] = 5;
+    try std.testing.expectEqual(@as(u16, 5), analysis.pc_to_block[50]);
+}
+
+test "CodeAnalysis deinit handles partially initialized state" {
+
+    // Test with empty block data
+    var analysis = CodeAnalysis{
+        .code_segments = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_starts = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty(),
+        .block_metadata = undefined,
+        .block_metadata_soa = BlockMetadataSoA.init(),
+        .pc_to_block = undefined,
+        .block_count = 0,
+        .max_stack_depth = 0,
+        .has_dynamic_jumps = false,
+        .has_static_jumps = false,
+        .has_selfdestruct = false,
+        .has_create = false,
+    };
+
+    // Should not crash on deinit
+    analysis.deinit();
+}
+
+test "Block analysis correctly identifies basic blocks" {
+
+    // Test bytecode with multiple basic blocks:
+    // Block 0: PUSH1 0x10 PUSH1 0x20 ADD
+    // Block 1: JUMPDEST PUSH1 0x30 MUL
+    // Block 2: JUMPDEST STOP
+    const code = &[_]u8{
+        0x60, 0x10, // PUSH1 0x10
+        0x60, 0x20, // PUSH1 0x20
+        0x01, // ADD
+        0x5b, // JUMPDEST (starts block 1)
+        0x60, 0x30, // PUSH1 0x30
+        0x02, // MUL
+        0x5b, // JUMPDEST (starts block 2)
+        0x00, // STOP
+    };
+
+    var analysis: CodeAnalysis = undefined;
+    try CodeAnalysis.from_code(&analysis, code);
+
+    // Verify block count
+    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
+
+    // Verify block starts
+    try std.testing.expect(!analysis.block_starts.isSet(0)); // Block 0 starts at 0 (implicit)
+    try std.testing.expect(!analysis.block_starts.isSet(1));
+    try std.testing.expect(!analysis.block_starts.isSet(2));
+    try std.testing.expect(!analysis.block_starts.isSet(3));
+    try std.testing.expect(!analysis.block_starts.isSet(4));
+    try std.testing.expect(analysis.block_starts.isSet(5)); // Block 1 starts at JUMPDEST
+    try std.testing.expect(!analysis.block_starts.isSet(6));
+    try std.testing.expect(!analysis.block_starts.isSet(7));
+    try std.testing.expect(!analysis.block_starts.isSet(8));
+    try std.testing.expect(analysis.block_starts.isSet(9)); // Block 2 starts at JUMPDEST
+
+    // Verify PC to block mapping
+    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[0]);
+    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[1]);
+    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[2]);
+    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[3]);
+    try std.testing.expectEqual(@as(u16, 0), analysis.pc_to_block[4]);
+    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[5]);
+    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[6]);
+    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[7]);
+    try std.testing.expectEqual(@as(u16, 1), analysis.pc_to_block[8]);
+    try std.testing.expectEqual(@as(u16, 2), analysis.pc_to_block[9]);
+    try std.testing.expectEqual(@as(u16, 2), analysis.pc_to_block[10]);
+
+    // Verify block metadata count
+    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
+
+    // Block 0: PUSH1 (3) + PUSH1 (3) + ADD (3) = 9 gas
+    try std.testing.expectEqual(@as(u32, 9), analysis.block_metadata[0].gas_cost);
+    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[0].stack_req);
+    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[0].stack_max); // Pushes 2, pops 2, net +1
+
+    // Block 1: JUMPDEST (1) + PUSH1 (3) + MUL (5) = 9 gas
+    try std.testing.expectEqual(@as(u32, 9), analysis.block_metadata[1].gas_cost);
+    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[1].stack_req); // Needs 1 from previous block
+    try std.testing.expectEqual(@as(i16, 1), analysis.block_metadata[1].stack_max); // Has 1, pushes 1, pops 2, net 0
+
+    // Block 2: JUMPDEST (1) + STOP (0) = 1 gas
+    try std.testing.expectEqual(@as(u32, 1), analysis.block_metadata[2].gas_cost);
+    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[2].stack_req);
+    try std.testing.expectEqual(@as(i16, 0), analysis.block_metadata[2].stack_max);
+}
+
+test "Block analysis handles jumps correctly" {
+
+    // Test bytecode with conditional and unconditional jumps:
+    // PUSH1 0x08 PUSH1 0x01 EQ PUSH1 0x0a JUMPI STOP JUMPDEST PUSH1 0x42 STOP
+    const code = &[_]u8{
+        0x60, 0x08, // PUSH1 0x08
+        0x60, 0x01, // PUSH1 0x01
+        0x14, // EQ
+        0x60, 0x0a, // PUSH1 0x0a (jump target)
+        0x57, // JUMPI (conditional jump)
+        0x00, // STOP
+        0x5b, // JUMPDEST (at position 0x0a)
+        0x60, 0x42, // PUSH1 0x42
+        0x00, // STOP
+    };
+
+    var analysis: CodeAnalysis = undefined;
+    try CodeAnalysis.from_code(&analysis, code);
+
+    // Should have 3 blocks:
+    // Block 0: 0-8 (up to JUMPI)
+    // Block 1: 9 (STOP after JUMPI)
+    // Block 2: 10-13 (JUMPDEST onwards)
+    try std.testing.expectEqual(@as(u16, 3), analysis.block_count);
+
+    // Verify JUMPI creates block boundaries
+    try std.testing.expect(analysis.block_starts.isSet(9)); // New block after JUMPI
+    try std.testing.expect(analysis.block_starts.isSet(10)); // JUMPDEST starts new block
+}
+
+test "Block analysis calculates gas costs correctly" {
+
+    // Test with various opcodes to verify gas calculation
+    const code = &[_]u8{
+        0x60, 0x01, // PUSH1 (3 gas)
+        0x60, 0x02, // PUSH1 (3 gas)
+        0x01, // ADD (3 gas)
+        0x60, 0x03, // PUSH1 (3 gas)
+        0x02, // MUL (5 gas)
+        0x5b, // JUMPDEST (1 gas) - new block
+        0x80, // DUP1 (3 gas)
+        0x50, // POP (2 gas)
+        0x00, // STOP (0 gas)
+    };
+
+    var analysis: CodeAnalysis = undefined;
+    try CodeAnalysis.from_code(&analysis, code);
+
+    try std.testing.expectEqual(@as(u16, 2), analysis.block_count);
+
+    // Block 0: 3+3+3+3+5 = 17 gas
+    try std.testing.expectEqual(@as(u32, 17), analysis.block_metadata[0].gas_cost);
+
+    // Block 1: 1+3+2+0 = 6 gas
+    try std.testing.expectEqual(@as(u32, 6), analysis.block_metadata[1].gas_cost);
 }

@@ -811,7 +811,7 @@ fn analyze_code_direct(allocator: std.mem.Allocator, code: []const u8) CodeAnaly
     errdefer allocator.destroy(analysis);
 
     // Use the comprehensive block analysis with static arrays
-    CodeAnalysis.analyze_bytecode_blocks(analysis, code) catch |err| {
+    CodeAnalysis.from_code(analysis, code) catch |err| {
         Log.debug("Failed to analyze bytecode: {any}", .{err});
         allocator.destroy(analysis);
         return error.OutOfMemory;
