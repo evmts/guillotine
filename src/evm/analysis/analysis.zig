@@ -14,20 +14,12 @@ const CodeAnalysis = @This();
 /// Must be freed by caller using deinit().
 instructions: [*]?Instruction,
 
-/// Allocator used for the instruction array (needed for cleanup)
-allocator: std.mem.Allocator,
-
 /// Bitmap marking all valid JUMPDEST positions in the bytecode.
 /// Required for JUMP/JUMPI validation during execution.
 jumpdest_bitmap: StaticBitSet(limits.MAX_CONTRACT_SIZE),
 
-/// Maximum stack depth required by the contract.
-max_stack_depth: u16,
-
-/// Contract property flags
-has_static_jumps: bool,
-has_selfdestruct: bool,
-has_create: bool,
+/// Allocator used for the instruction array (needed for cleanup)
+allocator: std.mem.Allocator,
 
 /// Creates a code bitmap that marks which bytes are opcodes vs data.
 fn createCodeBitmap(code: []const u8) StaticBitSet(limits.MAX_CONTRACT_SIZE) {
@@ -303,10 +295,6 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     // Create temporary analysis data that will be discarded
     var code_segments = createCodeBitmap(code);
     var jumpdest_bitmap = StaticBitSet(limits.MAX_CONTRACT_SIZE).initEmpty();
-    var max_stack_depth: u16 = 0;
-    var has_static_jumps = false;
-    var has_selfdestruct = false;
-    var has_create = false;
 
     if (code.len == 0) {
         // For empty code, just create empty instruction array
@@ -314,12 +302,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         empty_instructions[0] = null;
         return CodeAnalysis{
             .instructions = @ptrCast(empty_instructions.ptr),
-            .allocator = allocator,
             .jumpdest_bitmap = jumpdest_bitmap,
-            .max_stack_depth = 0,
-            .has_static_jumps = false,
-            .has_selfdestruct = false,
-            .has_create = false,
+            .allocator = allocator,
         };
     }
 
@@ -415,12 +399,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
 
     return CodeAnalysis{
         .instructions = instructions,
-        .allocator = allocator,
         .jumpdest_bitmap = jumpdest_bitmap,
-        .max_stack_depth = max_stack_depth,
-        .has_static_jumps = has_static_jumps,
-        .has_selfdestruct = has_selfdestruct,
-        .has_create = has_create,
+        .allocator = allocator,
     };
 }
 
@@ -452,11 +432,6 @@ test "from_code basic functionality" {
     try std.testing.expect(analysis.instructions[1] != null);
     try std.testing.expect(analysis.instructions[2] == null); // null terminator
 
-    // Verify basic properties
-    try std.testing.expectEqual(@as(u16, 1), analysis.max_stack_depth);
-    try std.testing.expectEqual(false, analysis.has_static_jumps);
-    try std.testing.expectEqual(false, analysis.has_selfdestruct);
-    try std.testing.expectEqual(false, analysis.has_create);
 }
 
 test "from_code with jumpdest" {
@@ -474,17 +449,3 @@ test "from_code with jumpdest" {
     try std.testing.expect(!analysis.jumpdest_bitmap.isSet(1));
 }
 
-test "from_code with contract properties" {
-    const allocator = std.testing.allocator;
-
-    // Bytecode with CREATE: CREATE, STOP
-    const code = &[_]u8{ 0xF0, 0x00 };
-
-    const table = JumpTable.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
-
-    // Verify CREATE flag is set
-    try std.testing.expectEqual(true, analysis.has_create);
-    try std.testing.expectEqual(false, analysis.has_selfdestruct);
-}
