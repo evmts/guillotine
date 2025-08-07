@@ -5,7 +5,7 @@
 /// eliminating circular dependencies.
 
 const std = @import("std");
-const primitives = @import("primitives");
+const primitives = @import("../primitives/root.zig");
 const Stack = @import("stack/stack.zig");
 const Memory = @import("memory/memory.zig");
 const ExecutionError = @import("execution/execution_error.zig");
@@ -239,7 +239,7 @@ test "ExecutionContext - address access tracking" {
         fn mockValidJumpdest(alloc: std.mem.Allocator, dest: u256) bool { _ = alloc; _ = dest; return false; }
         fn mockAccessAddress(addr: primitives.Address.Address) AccessError!u64 {
             // Simulate cold vs warm access costs
-            if (std.mem.eql(u8, &addr.bytes, &primitives.Address.ZERO_ADDRESS.bytes)) {
+            if (std.mem.eql(u8, &addr, &primitives.Address.ZERO_ADDRESS)) {
                 return 2600; // Cold access
             } else {
                 return 100;  // Warm access

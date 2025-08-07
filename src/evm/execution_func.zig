@@ -7,14 +7,10 @@
 const ExecutionError = @import("execution/execution_error.zig");
 const ExecutionResult = @import("execution/execution_result.zig");
 
-/// Forward declare the types to avoid circular dependencies
-const Evm = @import("evm.zig");
-const Frame = @import("frame/frame.zig");
-
-/// Function signature for EVM opcode execution.
+/// Function signature for EVM opcode execution using opaque pointers to break dependencies.
 ///
 /// @param pc Current program counter position
-/// @param interpreter VM interpreter context  
-/// @param state Execution state and environment
+/// @param interpreter VM interpreter context (opaque pointer)
+/// @param state Execution state and environment (opaque pointer) 
 /// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = *const fn (pc: usize, interpreter: *Evm, state: *Frame) ExecutionError.Error!ExecutionResult;
+pub const ExecutionFunc = *const fn (pc: usize, interpreter: *anyopaque, state: *anyopaque) ExecutionError.Error!ExecutionResult;
