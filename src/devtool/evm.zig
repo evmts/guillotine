@@ -43,8 +43,16 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
     errdefer database.deinit();
     
     const db_interface = database.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     errdefer evm.deinit();
     
     var storage_changes = std.AutoHashMap(StorageKey, u256).init(allocator);

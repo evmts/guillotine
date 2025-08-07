@@ -29,8 +29,16 @@ pub fn main() !void {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
+    var vm = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);

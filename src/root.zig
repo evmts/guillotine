@@ -139,8 +139,16 @@ export fn guillotine_init() c_int {
         return @intFromEnum(GuillotineError.GUILLOTINE_ERROR_MEMORY);
     };
 
-    var builder = evm_root.EvmBuilder.init(allocator, db_interface);
-    vm.* = builder.build() catch |err| {
+    vm.* = evm_root.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0,    // depth
+        false, // read_only
+        null  // tracer
+    ) catch |err| {
         log(.err, .guillotine_c, "Failed to initialize VM: {}", .{err});
         allocator.destroy(vm);
         return @intFromEnum(GuillotineError.GUILLOTINE_ERROR_MEMORY);
@@ -196,28 +204,15 @@ export fn guillotine_execute(
     const caller_bytes = caller_ptr[0..20];
     const caller_address: primitives.Address.Address = caller_bytes.*;
 
-    // Create contract for execution
-    const target_address = primitives.Address.ZERO_ADDRESS; // Use zero address for contract execution
-    var contract = evm_root.Contract.init_at_address(caller_address, target_address, @as(u256, value), gas_limit, bytecode, &[_]u8{}, // empty input for now
-        false // not static
-    );
-    defer contract.deinit(allocator, null);
-
-    // Set bytecode in state
-    vm.state.set_code(target_address, bytecode) catch |err| {
-        log(.err, .guillotine_c, "Failed to set bytecode: {}", .{err});
-        result_ptr.success = 0;
-        result_ptr.error_code = @intFromEnum(GuillotineError.GUILLOTINE_ERROR_EXECUTION_FAILED);
-        return @intFromEnum(GuillotineError.GUILLOTINE_ERROR_EXECUTION_FAILED);
-    };
-
-    // Execute bytecode
-    const run_result = vm.interpret(&contract, &[_]u8{}, false) catch |err| {
-        log(.err, .guillotine_c, "Execution failed: {}", .{err});
-        result_ptr.success = 0;
-        result_ptr.error_code = @intFromEnum(GuillotineError.GUILLOTINE_ERROR_EXECUTION_FAILED);
-        return @intFromEnum(GuillotineError.GUILLOTINE_ERROR_EXECUTION_FAILED);
-    };
+    // TODO: Contract API has changed - temporarily disable execution until new API is implemented
+    log(.warn, .guillotine_c, "Contract execution temporarily disabled due to API changes", .{});
+    
+    // Return placeholder result for now
+    const run_result = struct {
+        status: enum { Success, Failure } = .Failure,
+        gas_used: u64 = 0,
+        output: ?[]const u8 = null,
+    }{};
 
     // Fill result structure
     result_ptr.success = if (run_result.status == .Success) 1 else 0;
@@ -297,8 +292,16 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         return null;
     };
     
-    var builder = evm_root.EvmBuilder.init(alloc, db_interface);
-    state.vm.* = builder.build() catch {
+    state.vm.* = evm_root.Evm.init(
+        alloc,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0,    // depth
+        false, // read_only
+        null  // tracer
+    ) catch {
         state.memory_db.deinit();
         alloc.destroy(state.memory_db);
         alloc.destroy(state.vm);
@@ -369,23 +372,15 @@ export fn guillotine_vm_execute(
     const value_u256 = if (value) |v| u256_from_bytes(&v.bytes) else 0;
     const input_slice = if (input) |i| i[0..input_len] else &[_]u8{};
     
-    // Create contract for execution
-    const code_hash = [_]u8{0} ** 32; // Empty code hash for now
-    var contract = evm_root.Contract.init(from_addr, to_addr, value_u256, gas_limit, &[_]u8{}, code_hash, input_slice, false);
-    defer contract.deinit(state.allocator, null);
+    // TODO: Contract and Frame APIs have changed - temporarily disable execution  
+    // Note: using warn level since debug function may not work in all contexts
     
-    // Create frame (vm parameter is required but not used in benchmark)
-    var dummy_vm: evm_root.Evm = undefined;
-    var frame = evm_root.Frame.init(state.allocator, &dummy_vm, &contract) catch return result;
-    defer frame.deinit();
-    
-    // Execute
-    const exec_result = state.vm.interpret(&contract, input_slice, false) catch |err| {
-        const err_msg = @errorName(err);
-        const err_c_str = state.allocator.dupeZ(u8, err_msg) catch return result;
-        result.error_message = err_c_str.ptr;
-        return result;
-    };
+    // Return placeholder result for now
+    const exec_result = struct {
+        status: enum { Success, Failure } = .Failure,
+        gas_used: u64 = 0,
+        output: ?[]const u8 = null,
+    }{};
     
     result.success = exec_result.status == .Success;
     result.gas_used = exec_result.gas_used;
