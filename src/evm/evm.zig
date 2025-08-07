@@ -5,7 +5,7 @@ const primitives = @import("primitives");
 const AccessList = @import("access_list/access_list.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
-const ChainRules = @import("execution_context.zig").ChainRules;
+const ChainRules = @import("frame.zig").ChainRules;
 const GasConstants = @import("primitives").GasConstants;
 const opcode = @import("opcodes/opcode.zig");
 const Log = @import("log.zig");
@@ -15,6 +15,7 @@ const EvmState = @import("state/state.zig");
 const Memory = @import("memory/memory.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
 const EvmMemoryAllocator = @import("memory/evm_allocator.zig").EvmMemoryAllocator;
+const evm_limits = @import("constants/evm_limits.zig");
 pub const StorageKey = @import("primitives").StorageKey;
 pub const CreateResult = @import("evm/create_result.zig").CreateResult;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
@@ -31,7 +32,7 @@ const builtin = @import("builtin");
 const Evm = @This();
 
 /// Maximum call depth supported by EVM (per EIP-150)
-pub const MAX_CALL_DEPTH: u11 = 1024;
+pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
 // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
@@ -74,9 +75,8 @@ comptime {
 
 /// Create a new EVM with specified configuration.
 ///
-/// This is the single initialization method for EVM instances. All parameters except
+/// This is the initialization method for EVM instances. All parameters except
 /// allocator and database are optional and will use sensible defaults if not provided.
-/// For a more convenient API, use EvmBuilder.
 ///
 /// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
@@ -85,19 +85,20 @@ comptime {
 /// @param context Execution context (optional, defaults to Context.init())
 /// @param depth Current call depth (optional, defaults to 0)
 /// @param read_only Static call flag (optional, defaults to false)
+/// @param tracer Optional tracer for capturing execution traces
 /// @return Configured EVM instance
 /// @throws OutOfMemory if memory initialization fails
 ///
-/// Example using builder pattern:
+/// Example usage:
 /// ```zig
-/// var builder = EvmBuilder.init(allocator, database);
-/// var evm = try builder.with_depth(5).with_read_only(true).build();
-/// defer evm.deinit();
-/// ```
-///
-/// Example using direct initialization:
-/// ```zig
+/// // Basic initialization with defaults
 /// var evm = try Evm.init(allocator, database, null, null, null, 0, false, null);
+/// defer evm.deinit();
+///
+/// // With custom hardfork and configuration
+/// const table = JumpTable.init_from_hardfork(.LONDON);
+/// const rules = Frame.chainRulesForHardfork(.LONDON);
+/// var evm = try Evm.init(allocator, database, table, rules, null, 0, false, null);
 /// defer evm.deinit();
 /// ```
 pub fn init(
@@ -222,7 +223,7 @@ test "Evm.init with custom jump table and chain rules" {
 
     const db_interface = memory_db.to_database_interface();
     const custom_table = JumpTable.init_from_hardfork(.BERLIN);
-    const custom_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(.BERLIN);
+    const custom_rules = @import("frame.zig").Frame.chainRulesForHardfork(.BERLIN);
 
     var evm = try Evm.init(allocator, db_interface, custom_table, custom_rules, null, 0, false, null);
     defer evm.deinit();
@@ -241,7 +242,7 @@ test "Evm.init with hardfork" {
 
     const db_interface = memory_db.to_database_interface();
     const jump_table = JumpTable.init(Hardfork.LONDON);
-    const chain_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(Hardfork.LONDON);
+    const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(Hardfork.LONDON);
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
 
@@ -344,7 +345,7 @@ test "Evm initialization with different hardforks" {
 
     for (hardforks) |hardfork| {
         const jump_table = JumpTable.init(hardfork);
-        const chain_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(hardfork);
+        const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
         var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
         defer evm.deinit();
 
@@ -545,7 +546,7 @@ test "Evm fuzz: initialization with random hardforks" {
     while (i < 50) : (i += 1) {
         const hardfork = hardforks[random.intRangeAtMost(usize, 0, hardforks.len - 1)];
         const jump_table = JumpTable.init(hardfork);
-        const chain_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(hardfork);
+        const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
         var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
         defer evm.deinit();
 
@@ -715,7 +716,7 @@ test "Evm.init creates EVM with custom settings" {
 
     const db_interface = memory_db.to_database_interface();
     const custom_table = JumpTable.init_from_hardfork(.BERLIN);
-    const custom_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(.BERLIN);
+    const custom_rules = @import("frame.zig").Frame.chainRulesForHardfork(.BERLIN);
 
     var evm = try Evm.init(allocator, db_interface, custom_table, custom_rules, null, 42, true, null);
     defer evm.deinit();
@@ -819,7 +820,7 @@ test "Evm initialization with different hardforks using builder" {
 
     for (hardforks) |hardfork| {
         const table = JumpTable.init_from_hardfork(hardfork);
-        const rules = @import("execution_context.zig").Frame.chainRulesForHardfork(hardfork);
+        const rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
 
         var evm = try Evm.init(allocator, db_interface, table, rules, null, 0, false, null);
         defer evm.deinit();
@@ -870,7 +871,7 @@ test "fuzz_evm_initialization_states" {
 
             // Test initialization with various state combinations
             const jump_table = JumpTable.init(hardfork);
-            const chain_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(hardfork);
+            const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
             var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();
 
@@ -1058,7 +1059,7 @@ test "fuzz_evm_hardfork_configurations" {
             const hardfork = hardforks[hardfork_idx];
 
             const jump_table = JumpTable.init(hardfork);
-            const chain_rules = @import("execution_context.zig").Frame.chainRulesForHardfork(hardfork);
+            const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
             var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();
 
