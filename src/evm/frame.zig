@@ -9,7 +9,9 @@ const Stack = @import("stack/stack.zig");
 const Memory = @import("memory/memory.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const CodeAnalysis = @import("analysis.zig");
-const AccessList = @import("access_list.zig").AccessList;
+const AccessList = @import("call_frame_stack.zig").AccessList;
+const CallJournal = @import("call_frame_stack.zig").CallJournal;
+const Host = @import("host.zig").Host;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
@@ -89,8 +91,15 @@ pub const Frame = struct {
         _padding: u4 = 0, // 4 bits - align to byte boundary and room for future flags
     },
     
-    // Add 6 bytes padding here to align storage group to 8-byte boundary
-    _pad1: [6]u8 = [_]u8{0} ** 6,
+    // Call frame stack integration fields
+    journal: *CallJournal, // 8 bytes - shared journaling system
+    host: *Host, // 8 bytes - host interface for external operations
+    snapshot_id: u32, // 4 bytes - snapshot when this frame started
+    caller: primitives.Address.Address, // 20 bytes - caller address
+    value: u256, // 32 bytes - value transferred in this call
+    
+    // Add padding to align storage group to 8-byte boundary
+    _pad1: [4]u8 = [_]u8{0} ** 4,
     
     // Storage operation group (aligned to 8 bytes)
     // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together
@@ -121,8 +130,13 @@ pub const Frame = struct {
         static_call: bool,
         call_depth: u32,
         contract_address: primitives.Address.Address,
+        caller: primitives.Address.Address,
+        value: u256,
         analysis: *const CodeAnalysis,
         access_list: *AccessList,
+        journal: *CallJournal,
+        host: *Host,
+        snapshot_id: u32,
         state: DatabaseInterface,
         chain_rules: ChainRules,
         self_destruct: ?*SelfDestruct,
@@ -159,6 +173,13 @@ pub const Frame = struct {
                 .is_static = static_call,
                 .is_eip1153 = chain_rules.is_eip1153,
             },
+
+            // Call frame stack integration
+            .journal = journal,
+            .host = host,
+            .snapshot_id = snapshot_id,
+            .caller = caller,
+            .value = value,
 
             // Storage cluster
             .contract_address = contract_address,
@@ -218,6 +239,11 @@ pub const Frame = struct {
     }
 
     pub fn set_storage(self: *Frame, slot: u256, value: u256) !void {
+        // Record the original value in journal before changing
+        const original_value = self.state.get_storage(self.contract_address, slot) catch 0;
+        if (original_value != value) {
+            try self.journal.record_storage_change(self.snapshot_id, self.contract_address, slot, original_value);
+        }
         try self.state.set_storage(self.contract_address, slot, value);
     }
 
@@ -242,15 +268,6 @@ pub const Frame = struct {
         // TODO: Implement refund tracking when the refund system is integrated
     }
 
-    /// Emit a log event for LOG0, LOG1, LOG2, LOG3, LOG4 opcodes
-    /// TODO: This needs to be integrated with the VM's logging system
-    pub fn emit_log(self: *Frame, topics: []const u256, data: []const u8) !void {
-        _ = self;
-        _ = topics;
-        _ = data;
-        // TODO: Implement log emission when the logging system is integrated with ExecutionContext
-        // This will need access to the VM's state.emit_log method
-    }
 
     /// Backward compatibility accessors
     pub fn depth(self: *const Frame) u32 {
