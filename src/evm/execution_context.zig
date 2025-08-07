@@ -76,43 +76,39 @@ pub const Frame = struct {
     // ULTRA HOT - Accessed by virtually every opcode
     stack: Stack, // 33,536 bytes - accessed by every opcode (PUSH/POP/DUP/SWAP/arithmetic/etc)
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode for gas accounting
+    
     // HOT - Accessed by major opcode categories
     memory: *Memory, // 8 bytes - hot for memory ops (MLOAD/MSTORE/MSIZE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - hot for control flow (JUMP/JUMPI validation)
-    // Hot execution flags (only the bits that are actually checked frequently)
-    // Packed together to minimize cache footprint - these are checked by different opcode categories
+    
+    // Pack hot_flags to 2 bytes for better alignment
     hot_flags: packed struct {
         depth: u10, // 10 bits - call stack depth for CALL/CREATE operations
         is_static: bool, // 1 bit - static call restriction (checked by SSTORE/TSTORE)
         is_eip1153: bool, // 1 bit - transient storage validation (TLOAD/TSTORE)
         _padding: u4 = 0, // 4 bits - align to byte boundary and room for future flags
     },
-    // High correlation group
-    // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together so pack them together in struct
+    
+    // Add 6 bytes padding here to align storage group to 8-byte boundary
+    _pad1: [6]u8 = [_]u8{0} ** 6,
+    
+    // Storage operation group (aligned to 8 bytes)
+    // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together
     contract_address: primitives.Address.Address, // 20 bytes - FIRST: storage key = hash(contract_address, slot)
+    _pad2: [4]u8 = [_]u8{0} ** 4, // Align state to 8-byte boundary
     state: DatabaseInterface, // 16 bytes - actual storage read/write interface
     access_list: *AccessList, // 8 bytes - LAST: EIP-2929 warm/cold gas cost calculation
-    // Total: 44 bytes - all storage operations cause exactly one cache line fetch for this cluster
-    // TIER 4: COLD - Rarely accessed data
-    allocator: std.mem.Allocator, // 16
+    // Total: 48 bytes = exactly 3/4 of a cache line
+    
+    // COLD DATA
+    allocator: std.mem.Allocator, // 16 bytes
     input: []const u8, // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
     output: []const u8, // 16 bytes - only set by RETURN/REVERT at function exit
-    // Cold hardfork detection flags - only used by getHardfork() method for version detection
-    // Packed separately from hot flags to avoid polluting hot cache lines
-    cold_flags: packed struct {
-        is_prague: bool, // 1 bit
-        is_cancun: bool, // 1 bit
-        is_shanghai: bool, // 1 bit
-        is_merge: bool, // 1 bit
-        is_london: bool, // 1 bit
-        is_berlin: bool, // 1 bit
-        is_istanbul: bool, // 1 bit
-        is_petersburg: bool, // 1 bit
-        is_constantinople: bool, // 1 bit
-        is_byzantium: bool, // 1 bit
-        is_homestead: bool, // 1 bit
-        _reserved: u5 = 0, // 5 bits - future expansion
-    },
+    
+    // Use hardfork enum instead of boolean flags for better cache efficiency
+    hardfork: Hardfork, // 1 byte instead of 16 bits of boolean flags
+    _pad3: [7]u8 = [_]u8{0} ** 7, // Align to 8-byte boundary
+    
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
 
     /// Initialize a Frame with required parameters
@@ -129,6 +125,22 @@ pub const Frame = struct {
         input: []const u8,
         allocator: std.mem.Allocator,
     ) !Frame {
+        // Determine hardfork from chain rules
+        const hardfork = blk: {
+            if (chain_rules.is_prague) break :blk Hardfork.PRAGUE;
+            if (chain_rules.is_cancun) break :blk Hardfork.CANCUN;
+            if (chain_rules.is_shanghai) break :blk Hardfork.SHANGHAI;
+            if (chain_rules.is_merge) break :blk Hardfork.MERGE;
+            if (chain_rules.is_london) break :blk Hardfork.LONDON;
+            if (chain_rules.is_berlin) break :blk Hardfork.BERLIN;
+            if (chain_rules.is_istanbul) break :blk Hardfork.ISTANBUL;
+            if (chain_rules.is_petersburg) break :blk Hardfork.PETERSBURG;
+            if (chain_rules.is_constantinople) break :blk Hardfork.CONSTANTINOPLE;
+            if (chain_rules.is_byzantium) break :blk Hardfork.BYZANTIUM;
+            if (chain_rules.is_homestead) break :blk Hardfork.HOMESTEAD;
+            break :blk Hardfork.FRONTIER;
+        };
+
         return Frame{
             // Ultra hot data
             .stack = Stack.init(),
@@ -143,7 +155,7 @@ pub const Frame = struct {
                 .is_eip1153 = chain_rules.is_eip1153,
             },
 
-            // Storage cluster (warm)
+            // Storage cluster
             .contract_address = contract_address,
             .state = state,
             .access_list = access_list,
@@ -151,20 +163,8 @@ pub const Frame = struct {
             // Cold data
             .input = input,
             .output = &[_]u8{},
+            .hardfork = hardfork,
             .self_destruct = self_destruct,
-            .cold_flags = .{
-                .is_prague = chain_rules.is_prague,
-                .is_cancun = chain_rules.is_cancun,
-                .is_shanghai = chain_rules.is_shanghai,
-                .is_merge = chain_rules.is_merge,
-                .is_london = chain_rules.is_london,
-                .is_berlin = chain_rules.is_berlin,
-                .is_istanbul = chain_rules.is_istanbul,
-                .is_petersburg = chain_rules.is_petersburg,
-                .is_constantinople = chain_rules.is_constantinople,
-                .is_byzantium = chain_rules.is_byzantium,
-                .is_homestead = chain_rules.is_homestead,
-            },
             .allocator = allocator,
         };
     }
@@ -301,22 +301,24 @@ pub const Frame = struct {
         return rules;
     }
 
-    /// Get the hardfork that matches this frame's flags
-    /// Order matches the packed struct layout (newest first)
+    /// Get the hardfork for this frame
     pub fn getHardfork(self: *const Frame) Hardfork {
-        // Check in same order as packed struct - newest first
-        if (self.cold_flags.is_prague) return .PRAGUE;
-        if (self.cold_flags.is_cancun) return .CANCUN;
-        if (self.cold_flags.is_shanghai) return .SHANGHAI;
-        if (self.cold_flags.is_merge) return .MERGE;
-        if (self.cold_flags.is_london) return .LONDON;
-        if (self.cold_flags.is_berlin) return .BERLIN;
-        if (self.cold_flags.is_istanbul) return .ISTANBUL;
-        if (self.cold_flags.is_petersburg) return .PETERSBURG;
-        if (self.cold_flags.is_constantinople) return .CONSTANTINOPLE;
-        if (self.cold_flags.is_byzantium) return .BYZANTIUM;
-        if (self.cold_flags.is_homestead) return .HOMESTEAD;
-        return .FRONTIER;
+        return self.hardfork;
+    }
+
+    /// Check if this frame's hardfork is greater than or equal to the specified hardfork
+    pub fn is_at_least(self: *const Frame, target_hardfork: Hardfork) bool {
+        return @intFromEnum(self.hardfork) >= @intFromEnum(target_hardfork);
+    }
+
+    /// Check if this frame's hardfork is greater than the specified hardfork
+    pub fn is_greater_than(self: *const Frame, target_hardfork: Hardfork) bool {
+        return @intFromEnum(self.hardfork) > @intFromEnum(target_hardfork);
+    }
+
+    /// Check if this frame's hardfork exactly matches the specified hardfork
+    pub fn is_exactly(self: *const Frame, target_hardfork: Hardfork) bool {
+        return self.hardfork == target_hardfork;
     }
 
     /// Check if a specific hardfork feature is enabled
@@ -325,10 +327,20 @@ pub const Frame = struct {
         if (@hasField(@TypeOf(self.hot_flags), field_name)) {
             return @field(self.hot_flags, field_name);
         }
-        // Fall back to cold flags for hardfork markers
-        if (@hasField(@TypeOf(self.cold_flags), field_name)) {
-            return @field(self.cold_flags, field_name);
-        }
+        
+        // Handle hardfork checks using the enum comparison
+        if (std.mem.eql(u8, field_name, "is_prague")) return self.is_at_least(.PRAGUE);
+        if (std.mem.eql(u8, field_name, "is_cancun")) return self.is_at_least(.CANCUN);
+        if (std.mem.eql(u8, field_name, "is_shanghai")) return self.is_at_least(.SHANGHAI);
+        if (std.mem.eql(u8, field_name, "is_merge")) return self.is_at_least(.MERGE);
+        if (std.mem.eql(u8, field_name, "is_london")) return self.is_at_least(.LONDON);
+        if (std.mem.eql(u8, field_name, "is_berlin")) return self.is_at_least(.BERLIN);
+        if (std.mem.eql(u8, field_name, "is_istanbul")) return self.is_at_least(.ISTANBUL);
+        if (std.mem.eql(u8, field_name, "is_petersburg")) return self.is_at_least(.PETERSBURG);
+        if (std.mem.eql(u8, field_name, "is_constantinople")) return self.is_at_least(.CONSTANTINOPLE);
+        if (std.mem.eql(u8, field_name, "is_byzantium")) return self.is_at_least(.BYZANTIUM);
+        if (std.mem.eql(u8, field_name, "is_homestead")) return self.is_at_least(.HOMESTEAD);
+        
         @compileError("Unknown hardfork feature: " ++ field_name);
     }
 };
@@ -342,15 +354,15 @@ pub const ExecutionContext = Frame;
 
 comptime {
     // Assert that hot data is at the beginning of the struct for cache locality
-    std.debug.assert(@offsetOf(Frame, "stack") == 0);
-    std.debug.assert(@offsetOf(Frame, "gas_remaining") == @sizeOf(Stack));
+    if (@offsetOf(Frame, "stack") != 0) @compileError("Stack must be at offset 0 for cache locality");
+    if (@offsetOf(Frame, "gas_remaining") != @sizeOf(Stack)) @compileError("gas_remaining must immediately follow stack");
 
     // Assert proper alignment of hot data (should be naturally aligned)
-    std.debug.assert(@offsetOf(Frame, "memory") % @alignOf(*Memory) == 0);
-    std.debug.assert(@offsetOf(Frame, "analysis") % @alignOf(*const CodeAnalysis) == 0);
+    if (@offsetOf(Frame, "memory") % @alignOf(*Memory) != 0) @compileError("Memory pointer must be naturally aligned");
+    if (@offsetOf(Frame, "analysis") % @alignOf(*const CodeAnalysis) != 0) @compileError("Analysis pointer must be naturally aligned");
 
-    // Assert hot_flags comes before cold_flags (hot data first)
-    std.debug.assert(@offsetOf(Frame, "hot_flags") < @offsetOf(Frame, "cold_flags"));
+    // Assert hot_flags comes before hardfork (hot data first)
+    if (@offsetOf(Frame, "hot_flags") >= @offsetOf(Frame, "hardfork")) @compileError("hot_flags must come before hardfork for data locality");
 
     // Assert storage cluster is properly grouped together
     const contract_address_offset = @offsetOf(Frame, "contract_address");
@@ -358,29 +370,43 @@ comptime {
     const access_list_offset = @offsetOf(Frame, "access_list");
 
     // Storage cluster should be contiguous (within reasonable padding)
-    std.debug.assert(state_offset - contract_address_offset <= @sizeOf(primitives.Address.Address) + 8); // Allow up to 8 bytes padding
-    std.debug.assert(access_list_offset - state_offset <= @sizeOf(DatabaseInterface) + 8); // Allow up to 8 bytes padding
+    if (state_offset - contract_address_offset > @sizeOf(primitives.Address.Address) + 8) @compileError("Storage cluster not contiguous: contract_address to state gap too large");
+    if (access_list_offset - state_offset > @sizeOf(DatabaseInterface) + 8) @compileError("Storage cluster not contiguous: state to access_list gap too large");
 
     // Assert cold data comes after warm data
-    std.debug.assert(@offsetOf(Frame, "input") > @offsetOf(Frame, "access_list"));
-    std.debug.assert(@offsetOf(Frame, "output") > @offsetOf(Frame, "access_list"));
-    std.debug.assert(@offsetOf(Frame, "self_destruct") > @offsetOf(Frame, "access_list"));
+    if (@offsetOf(Frame, "input") <= @offsetOf(Frame, "access_list")) @compileError("Cold data (input) must come after warm data (access_list)");
+    if (@offsetOf(Frame, "output") <= @offsetOf(Frame, "access_list")) @compileError("Cold data (output) must come after warm data (access_list)");
+    if (@offsetOf(Frame, "self_destruct") <= @offsetOf(Frame, "access_list")) @compileError("Cold data (self_destruct) must come after warm data (access_list)");
 
     // Assert packed structs are properly sized
-    std.debug.assert(@sizeOf(@TypeOf(Frame.hot_flags)) == 2); // Should be 16 bits (2 bytes)
-    std.debug.assert(@sizeOf(@TypeOf(Frame.cold_flags)) == 2); // Should be 16 bits (2 bytes)
+    if (@sizeOf(@TypeOf(Frame.hot_flags)) != 2) @compileError("hot_flags must be exactly 2 bytes (16 bits)");
+    if (@sizeOf(Hardfork) != 1) @compileError("Hardfork enum must be exactly 1 byte");
 
     // Assert reasonable struct size (should be dominated by stack)
     const stack_size = @sizeOf(Stack);
     const total_size = @sizeOf(Frame);
 
     // Frame should be mostly stack + reasonable overhead
-    std.debug.assert(total_size >= stack_size); // At least as big as stack
-    std.debug.assert(total_size <= stack_size + 1024); // Not more than stack + 1KB overhead
+    if (total_size < stack_size) @compileError("Frame size cannot be smaller than stack size");
+    if (total_size > stack_size + 1024) @compileError("Frame overhead exceeds 1KB - struct layout needs optimization");
 
     // Assert natural alignment for performance-critical fields
-    std.debug.assert(@offsetOf(Frame, "gas_remaining") % @alignOf(u64) == 0);
-    std.debug.assert(@offsetOf(Frame, "contract_address") % @alignOf(primitives.Address.Address) == 0);
+    if (@offsetOf(Frame, "gas_remaining") % @alignOf(u64) != 0) @compileError("gas_remaining must be naturally aligned for performance");
+    if (@offsetOf(Frame, "contract_address") % @alignOf(primitives.Address.Address) != 0) @compileError("contract_address must be naturally aligned");
+    
+    // Assert that padding fields exist and are correctly positioned
+    if (!@hasField(Frame, "_pad1")) @compileError("Missing _pad1 field for storage cluster alignment");
+    if (!@hasField(Frame, "_pad2")) @compileError("Missing _pad2 field for state alignment");
+    if (!@hasField(Frame, "_pad3")) @compileError("Missing _pad3 field for hardfork alignment");
+    
+    // Assert storage cluster is 8-byte aligned (for better cache performance)
+    if (@offsetOf(Frame, "contract_address") % 8 != 0) @compileError("contract_address must be 8-byte aligned for cache efficiency");
+    if (@offsetOf(Frame, "state") % 8 != 0) @compileError("state must be 8-byte aligned for cache efficiency");
+    if (@offsetOf(Frame, "access_list") % 8 != 0) @compileError("access_list must be 8-byte aligned for cache efficiency");
+    
+    // Assert hardfork field comes after hot data but before allocator
+    if (@offsetOf(Frame, "hardfork") <= @offsetOf(Frame, "access_list")) @compileError("hardfork must come after storage cluster");
+    if (@offsetOf(Frame, "hardfork") >= @offsetOf(Frame, "allocator")) @compileError("hardfork must come before cold data (allocator)");
 }
 
 // ============================================================================
@@ -435,7 +461,6 @@ test "Frame - basic initialization" {
     const chain_rules = TestHelpers.createMockChainRules();
 
     var ctx = try Frame.init(
-        allocator,
         1000000, // gas
         false, // not static
         1, // depth
@@ -446,6 +471,7 @@ test "Frame - basic initialization" {
         chain_rules,
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx.deinit();
 
@@ -479,7 +505,6 @@ test "Frame - gas consumption" {
     defer db.deinit();
 
     var ctx = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -490,6 +515,7 @@ test "Frame - gas consumption" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx.deinit();
 
@@ -524,7 +550,6 @@ test "Frame - jumpdest validation" {
     defer db.deinit();
 
     var ctx = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -535,6 +560,7 @@ test "Frame - jumpdest validation" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx.deinit();
 
@@ -567,7 +593,6 @@ test "Frame - address access tracking" {
     defer db.deinit();
 
     var ctx = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -578,6 +603,7 @@ test "Frame - address access tracking" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx.deinit();
 
@@ -605,7 +631,6 @@ test "Frame - output data management" {
     defer db.deinit();
 
     var ctx = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -616,6 +641,7 @@ test "Frame - output data management" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx.deinit();
 
@@ -647,7 +673,6 @@ test "Frame - static call restrictions" {
 
     // Create static context
     var static_ctx = try Frame.init(
-        allocator,
         1000,
         true,
         0,
@@ -658,12 +683,12 @@ test "Frame - static call restrictions" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer static_ctx.deinit();
 
     // Create non-static context
     var normal_ctx = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -674,6 +699,7 @@ test "Frame - static call restrictions" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer normal_ctx.deinit();
 
@@ -701,7 +727,6 @@ test "Frame - selfdestruct availability" {
     defer db4.deinit();
 
     var ctx_with_selfdestruct = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -712,6 +737,7 @@ test "Frame - selfdestruct availability" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx_with_selfdestruct.deinit();
 
@@ -721,7 +747,6 @@ test "Frame - selfdestruct availability" {
 
     // Test without SelfDestruct (null)
     var ctx_without_selfdestruct = try Frame.init(
-        allocator,
         1000,
         false,
         0,
@@ -732,6 +757,7 @@ test "Frame - selfdestruct availability" {
         TestHelpers.createMockChainRules(),
         null,
         &[_]u8{}, // input
+        allocator,
     );
     defer ctx_without_selfdestruct.deinit();
 
