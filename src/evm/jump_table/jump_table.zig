@@ -3,7 +3,7 @@ const builtin = @import("builtin");
 const Opcode = @import("../opcodes/opcode.zig");
 const operation_module = @import("../opcodes/operation.zig");
 const Operation = operation_module.Operation;
-const ExecutionFunc = operation_module.ExecutionFunc;
+const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
 const GasFunc = operation_module.GasFunc;
 const MemorySizeFunc = operation_module.MemorySizeFunc;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
@@ -11,6 +11,7 @@ const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame/frame.zig");
 const Contract = @import("../frame/contract.zig");
+const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
 
@@ -50,7 +51,7 @@ const operation_config = @import("operation_config.zig");
 /// const table = JumpTable.init_from_hardfork(.CANCUN);
 /// const opcode = bytecode[pc];
 /// const operation = table.get_operation(opcode);
-/// const result = try table.execute(pc, interpreter, state, opcode);
+/// // Old execute method removed - see ExecutionContext pattern
 /// ```
 pub const JumpTable = @This();
 
@@ -136,79 +137,8 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) OperationView {
     };
 }
 
-/// Execute an opcode using the jump table.
-///
-/// This is the main dispatch function that:
-/// 1. Looks up the operation data for the opcode
-/// 2. Validates stack requirements
-/// 3. Consumes gas
-/// 4. Executes the operation
-///
-/// The parallel array structure provides better cache locality:
-/// - execute_funcs and constant_gas are accessed together (hot path)
-/// - Stack validation data is in separate cache lines
-/// - Cold path data (dynamic_gas, memory_size) doesn't pollute hot cache
-///
-/// @param self The jump table
-/// @param pc Current program counter
-/// @param interpreter VM interpreter context
-/// @param state Execution state (cast to Frame internally)
-/// @param opcode The opcode to execute
-/// @return Execution result with gas consumed
-/// @throws InvalidOpcode if opcode is undefined
-/// @throws StackUnderflow/Overflow if validation fails
-/// @throws OutOfGas if insufficient gas
-///
-/// Example:
-/// ```zig
-/// const result = try table.execute(pc, &interpreter, &state, bytecode[pc]);
-/// ```
-pub inline fn execute(self: *const JumpTable, pc: usize, interpreter: operation_module.Interpreter, frame: operation_module.State, opcode: u8) ExecutionError.Error!operation_module.ExecutionResult {
-    @branchHint(.likely);
-    
-    Log.debug("JumpTable.execute: Executing opcode 0x{x:0>2} at pc={}, gas={}, stack_size={}", .{ opcode, pc, frame.gas_remaining, frame.stack.size });
-
-    // Handle undefined opcodes (cold path)
-    if (self.undefined_flags[opcode]) {
-        @branchHint(.cold);
-        Log.debug("JumpTable.execute: Invalid opcode 0x{x:0>2}", .{opcode});
-        frame.gas_remaining = 0;
-        return ExecutionError.Error.InvalidOpcode;
-    }
-
-    // Use fast stack validation in ReleaseFast mode, traditional in other modes
-    if (comptime builtin.mode == .ReleaseFast) {
-        const stack_height_changes = @import("../opcodes/stack_height_changes.zig");
-        try stack_height_changes.validate_stack_requirements_fast(
-            @intCast(frame.stack.size),
-            opcode,
-            self.min_stack[opcode],
-            self.max_stack[opcode],
-        );
-    } else {
-        // Create temporary operation view for stack validation
-        const op_view = OperationView{
-            .execute = self.execute_funcs[opcode],
-            .constant_gas = self.constant_gas[opcode],
-            .min_stack = self.min_stack[opcode],
-            .max_stack = self.max_stack[opcode],
-            .dynamic_gas = self.dynamic_gas[opcode],
-            .memory_size = self.memory_size[opcode],
-            .undefined = self.undefined_flags[opcode],
-        };
-        const stack_validation = @import("../stack/stack_validation.zig");
-        try stack_validation.validate_stack_requirements(&frame.stack, &op_view);
-    }
-
-    // Gas consumption - consume_gas already handles zero cost efficiently
-    const gas_cost = self.constant_gas[opcode];
-    Log.debug("JumpTable.execute: Consuming {} gas for opcode 0x{x:0>2}", .{ gas_cost, opcode });
-    try frame.consume_gas(gas_cost);
-
-    const res = try self.execute_funcs[opcode](pc, interpreter, frame);
-    Log.debug("JumpTable.execute: Opcode 0x{x:0>2} completed, gas_remaining={}", .{ opcode, frame.gas_remaining });
-    return res;
-}
+// Note: The old execute method has been removed as it's unused in the new ExecutionContext pattern.
+// Opcode execution now happens through the ExecutionFunc signature with ExecutionContext only.
 
 /// Validate and fix the jump table.
 ///

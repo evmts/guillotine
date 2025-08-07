@@ -162,7 +162,7 @@ pub const NULL_OPERATION = Operation{
 ///
 /// Consumes all remaining gas and returns InvalidOpcode error.
 /// This ensures undefined opcodes cannot be used for computation.
-fn undefined_execute(pc: usize, interpreter: Interpreter, state: State) ExecutionError.Error!ExecutionResult {
+fn undefined_execute(pc: usize, interpreter: *anyopaque, state: *anyopaque) ExecutionError.Error!ExecutionResult {
     _ = pc;
     _ = interpreter;
     _ = state;

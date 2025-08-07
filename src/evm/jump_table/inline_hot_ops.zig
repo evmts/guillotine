@@ -37,11 +37,11 @@ pub inline fn execute_with_inline_hot_ops(
         0x60 => {
             if (comptime builtin.mode == .ReleaseFast) {
                 // Skip validation - we know PUSH1 needs 0 items and pushes 1
-                if (frame.stack.size > Stack.CAPACITY - 1) {
+                if (frame.stack.size() > Stack.CAPACITY - 1) {
                     return ExecutionError.Error.StackOverflow;
                 }
             } else {
-                if (frame.stack.size > Stack.CAPACITY - 1) {
+                if (frame.stack.size() > Stack.CAPACITY - 1) {
                     return ExecutionError.Error.StackOverflow;
                 }
             }
@@ -63,10 +63,10 @@ pub inline fn execute_with_inline_hot_ops(
         // DUP1 - Very common (~8-10%)
         0x80 => {
             // Validation
-            if (frame.stack.size < 1) {
+            if (frame.stack.size() < 1) {
                 return ExecutionError.Error.StackUnderflow;
             }
-            if (frame.stack.size > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.CAPACITY - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -83,7 +83,7 @@ pub inline fn execute_with_inline_hot_ops(
         // ADD - Common arithmetic (~5%)
         0x01 => {
             // Validation
-            if (frame.stack.size < 2) {
+            if (frame.stack.size() < 2) {
                 return ExecutionError.Error.StackUnderflow;
             }
             
@@ -102,7 +102,7 @@ pub inline fn execute_with_inline_hot_ops(
         // MSTORE - Common memory operation (~5%)
         0x52 => {
             // Validation
-            if (frame.stack.size < 2) {
+            if (frame.stack.size() < 2) {
                 return ExecutionError.Error.StackUnderflow;
             }
             
@@ -134,10 +134,10 @@ pub inline fn execute_with_inline_hot_ops(
         // MLOAD - Common memory operation (~5%)
         0x51 => {
             // Validation
-            if (frame.stack.size < 1) {
+            if (frame.stack.size() < 1) {
                 return ExecutionError.Error.StackUnderflow;
             }
-            if (frame.stack.size > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.CAPACITY - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -169,7 +169,7 @@ pub inline fn execute_with_inline_hot_ops(
         // POP - Common stack operation (~3%)
         0x50 => {
             // Validation
-            if (frame.stack.size < 1) {
+            if (frame.stack.size() < 1) {
                 return ExecutionError.Error.StackUnderflow;
             }
             
@@ -184,7 +184,7 @@ pub inline fn execute_with_inline_hot_ops(
         
         // PUSH2 - Common (~3%)
         0x61 => {
-            if (frame.stack.size > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.CAPACITY - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -211,7 +211,7 @@ pub inline fn execute_with_inline_hot_ops(
         // SWAP1 - Common (~2%)
         0x90 => {
             // Validation
-            if (frame.stack.size < 2) {
+            if (frame.stack.size() < 2) {
                 return ExecutionError.Error.StackUnderflow;
             }
             
@@ -227,10 +227,10 @@ pub inline fn execute_with_inline_hot_ops(
         // DUP2 - Common (~2%)
         0x81 => {
             // Validation
-            if (frame.stack.size < 2) {
+            if (frame.stack.size() < 2) {
                 return ExecutionError.Error.StackUnderflow;
             }
-            if (frame.stack.size > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.CAPACITY - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -247,7 +247,7 @@ pub inline fn execute_with_inline_hot_ops(
         // ISZERO - Common comparison (~2%)
         0x15 => {
             // Validation
-            if (frame.stack.size < 1) {
+            if (frame.stack.size() < 1) {
                 return ExecutionError.Error.StackUnderflow;
             }
             

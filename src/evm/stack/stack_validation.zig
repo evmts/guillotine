@@ -50,7 +50,7 @@ pub fn validate_stack_requirements(
     stack: *const Stack,
     operation: anytype,
 ) ExecutionError.Error!void {
-    const stack_size = stack.size;
+    const stack_size = stack.size();
     Log.debug("StackValidation.validate_stack_requirements: Validating stack, size={}, min_required={}, max_allowed={}", .{ stack_size, operation.min_stack, operation.max_stack });
 
     // Check minimum stack requirement
@@ -96,7 +96,7 @@ pub fn validate_stack_operation(
     pop_count: u32,
     push_count: u32,
 ) ExecutionError.Error!void {
-    const stack_size = stack.size;
+    const stack_size = stack.size();
     Log.debug("StackValidation.validate_stack_operation: Validating operation, stack_size={}, pop_count={}, push_count={}", .{ stack_size, pop_count, push_count });
 
     // Check if we have enough items to pop
@@ -178,16 +178,16 @@ pub fn calculate_max_stack(pop_count: u32, push_count: u32) u32 {
 /// ## Usage Examples
 /// ```zig
 /// // Binary operations (pop 2, push 1)
-/// try validateStackRequirements(2, 1, frame.stack.size);
+/// try validateStackRequirements(2, 1, frame.stack.size());
 ///
 /// // Push operations (pop 0, push 1) 
-/// try validateStackRequirements(0, 1, frame.stack.size);
+/// try validateStackRequirements(0, 1, frame.stack.size());
 ///
 /// // DUP operations (pop 0, push 1)
-/// try validateStackRequirements(0, 1, frame.stack.size);
+/// try validateStackRequirements(0, 1, frame.stack.size());
 ///
 /// // Ternary operations (pop 3, push 1)
-/// try validateStackRequirements(3, 1, frame.stack.size);
+/// try validateStackRequirements(3, 1, frame.stack.size());
 /// ```
 pub fn validateStackRequirements(
     comptime inputs: u8,
@@ -255,7 +255,7 @@ pub fn validateStackRequirements(
 const testing = std.testing;
 
 test "validate_stack_requirements" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test underflow
     const op_needs_2 = OperationView{
@@ -296,7 +296,7 @@ test "validate_stack_requirements" {
 }
 
 test "validate_stack_operation" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test underflow
     try testing.expectError(ExecutionError.Error.StackUnderflow, validate_stack_operation(&stack, 2, 1));
@@ -309,7 +309,11 @@ test "validate_stack_operation" {
     try validate_stack_operation(&stack, 2, 1);
 
     // Test overflow - fill stack almost to capacity
-    stack.size = Stack.CAPACITY - 1;
+    stack.clear();
+    var i: usize = 0;
+    while (i < Stack.CAPACITY - 1) : (i += 1) {
+        try stack.append(@intCast(i));
+    }
 
     // Operation that would overflow
     try testing.expectError(ExecutionError.Error.StackOverflow, validate_stack_operation(&stack, 0, 2));
@@ -330,7 +334,7 @@ test "calculate_max_stack" {
 }
 
 test "ValidationPatterns" {
-    var stack = Stack{};
+    var stack = Stack.init();
 
     // Test binary op validation
     try testing.expectError(ExecutionError.Error.StackUnderflow, ValidationPatterns.validate_binary_op(&stack));
@@ -347,38 +351,51 @@ test "ValidationPatterns" {
     try ValidationPatterns.validate_swap(&stack, 1);
 
     // Test PUSH validation at capacity
-    stack.size = Stack.CAPACITY;
+    stack.clear();
+    var j: usize = 0;
+    while (j < Stack.CAPACITY) : (j += 1) {
+        try stack.append(@intCast(j));
+    }
     try testing.expectError(ExecutionError.Error.StackOverflow, ValidationPatterns.validate_push(&stack));
 }
 
 test "validateStackRequirements comptime validation" {
-    var stack = Stack{};
+    var stack = Stack.init();
     
     // Test valid binary operation (pop 2, push 1)
     try stack.append(10);
     try stack.append(20);
-    try validateStackRequirements(2, 1, stack.size);
+    try validateStackRequirements(2, 1, stack.size());
     
     // Test valid push operation (pop 0, push 1)  
-    try validateStackRequirements(0, 1, stack.size);
+    try validateStackRequirements(0, 1, stack.size());
     
     // Test valid unary operation (pop 1, push 1)
-    try validateStackRequirements(1, 1, stack.size);
+    try validateStackRequirements(1, 1, stack.size());
     
     // Test valid ternary operation (pop 3, push 1) - need more stack items
     try stack.append(30);
-    try validateStackRequirements(3, 1, stack.size);
+    try validateStackRequirements(3, 1, stack.size());
     
-    // Test stack underflow
-    stack.size = 1;
-    try testing.expectError(ExecutionError.Error.StackUnderflow, validateStackRequirements(2, 1, stack.size));
+    // Test stack underflow - clear stack and add only 1 element
+    stack.clear();
+    try stack.append(42);
+    try testing.expectError(ExecutionError.Error.StackUnderflow, validateStackRequirements(2, 1, stack.size()));
     
     // Test stack overflow - fill stack to capacity
-    stack.size = Stack.CAPACITY;
-    try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 1, stack.size));
+    stack.clear();
+    var i: usize = 0;
+    while (i < Stack.CAPACITY) : (i += 1) {
+        try stack.append(@intCast(i));
+    }
+    try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 1, stack.size()));
     
-    // Test near-overflow case
-    stack.size = Stack.CAPACITY - 1;
-    try validateStackRequirements(0, 1, stack.size); // Should pass
-    try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 2, stack.size));
+    // Test near-overflow case - fill stack to capacity-1
+    stack.clear();
+    var k: usize = 0;
+    while (k < Stack.CAPACITY - 1) : (k += 1) {
+        try stack.append(@intCast(k));
+    }
+    try validateStackRequirements(0, 1, stack.size()); // Should pass
+    try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 2, stack.size()));
 }
