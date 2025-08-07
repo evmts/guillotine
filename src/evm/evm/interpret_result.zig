@@ -3,6 +3,7 @@ const std = @import("std");
 const RunResult = @import("run_result.zig").RunResult;
 const AccessList = @import("../access_list.zig").AccessList;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+const ExecutionError = @import("../execution/execution_error.zig");
 
 /// Comprehensive result from EVM interpret function
 /// Contains the basic execution result plus state tracking components
@@ -34,6 +35,22 @@ pub const InterpretResult = struct {
             .self_destruct = self_destruct,
             .allocator = allocator,
         };
+    }
+
+    /// Convenience method to create InterpretResult from execution parameters
+    /// Combines RunResult.init and InterpretResult.init in one call
+    pub fn from_execution(
+        allocator: std.mem.Allocator,
+        initial_gas: u64,
+        gas_left: u64,
+        status: RunResult.Status,
+        err: ?ExecutionError.Error,
+        output: ?[]const u8,
+        access_list: AccessList,
+        self_destruct: ?SelfDestruct,
+    ) InterpretResult {
+        const run_result = RunResult.init(initial_gas, gas_left, status, err, output);
+        return InterpretResult.init(allocator, run_result, access_list, self_destruct);
     }
 
     /// Recursively clean up all resources

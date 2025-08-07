@@ -6,16 +6,32 @@ const RunResult = @import("run_result.zig").RunResult;
 const InterpretResult = @import("interpret_result.zig").InterpretResult;
 const AccessList = @import("../access_list.zig").AccessList;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+const ChainRules = @import("../frame.zig").ChainRules;
 const Memory = @import("../memory/memory.zig");
 const ReturnData = @import("return_data.zig").ReturnData;
 const Log = @import("../log.zig");
 const Evm = @import("../evm.zig");
+const Contract = Evm.Contract;
 const primitives = @import("primitives");
 const execution = @import("../execution/package.zig");
 const Instruction = @import("../instruction.zig").Instruction;
 const CodeAnalysis = @import("../analysis.zig");
 const instruction_limits = @import("../constants/instruction_limits.zig");
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
+const builtin = @import("builtin");
+
+const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
+const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
+
+// Threshold for stack vs heap allocation optimization
+const STACK_ALLOCATION_THRESHOLD = 12800; // bytes of bytecode
+// Maximum stack buffer size for contracts up to 12,800 bytes
+// Calculated for worst case: 12,800 bytes of PUSH32 instructions = ~400 instructions
+// Instructions: 400 * 32 bytes = ~12.8KB
+// Bitmaps: 2 * (12,800/8) = 3.2KB
+// PC mapping: 12,800 * 2 = 25.6KB
+// Total with padding: ~42KB
+const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 
 // THE EVM has no actual limit on calldata. Only indirect practical limits like gas cost exist.
 // 128 KB is about the limit most rpc providers limit call data to so we use it as the default
@@ -33,7 +49,6 @@ pub const MAX_INPUT_SIZE: u18 = 128 * 1024; // 128 kb
 /// Making it comptime helps with stack and cache pressure helping performance by removing a boolean and also makes this
 /// API very explicit.
 pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comptime is_static: bool) ExecutionError.Error!InterpretResult {
-    // Input and environment validation
     {
         self.require_one_thread();
         if (contract.input.len > MAX_INPUT_SIZE) return ExecutionError.Error.InputSizeExceeded;
@@ -45,19 +60,21 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
 
     const initial_gas = contract.gas;
 
-    // Initialize state tracking components using GPA allocator
-    var access_list = AccessList.init(self.allocator);
-    // TODO: Determine if SelfDestruct should be available based on hardfork
-    var self_destruct = SelfDestruct.init(self.allocator);
-
-    // Analyze bytecode and get optimized instruction stream in one call
-    var analysis = try CodeAnalysis.from_code(self.allocator, contract.code[0..contract.code_size], &self.table);
+    // Do analysis on stack if contract is small
+    var stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined;
+    const analysis_allocator = if (contract.code_size <= STACK_ALLOCATION_THRESHOLD)
+        std.heap.FixedBufferAllocator.init(&stack_buffer)
+    else
+        self.allocator;
+    var analysis = try CodeAnalysis.from_code(analysis_allocator, contract.code[0..contract.code_size], &self.table);
     defer analysis.deinit();
+
     var current_instruction = analysis.instructions;
 
-    // Initialize the new execution context Frame
-    const ChainRules = @import("../frame.zig").ChainRules;
-    const chain_rules = ChainRules{}; // Use default values
+    // Use normal passed in allocator since we will be returning allocated data back to caller
+    var access_list = AccessList.init(self.allocator);
+    var self_destruct = SelfDestruct.init(self.allocator);
+
     var frame = try Frame.init(
         self.arena_allocator(),
         contract.gas,
@@ -67,40 +84,27 @@ pub inline fn interpret(self: *Evm, contract: *Contract, input: []const u8, comp
         &analysis,
         &access_list,
         self.state,
-        chain_rules,
+        ChainRules{},
         &self_destruct,
         input,
     );
     defer frame.deinit();
 
     var loop_iterations: usize = 0;
-    const MAX_ITERATIONS = if (@import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe) 10_000_000 else std.math.maxInt(usize);
-    var last_pc: usize = 0;
-    var same_pc_count: usize = 0;
 
     while (current_instruction[0]) |nextInstruction| {
         @branchHint(.likely);
 
-        // Debug infinite loops
-        loop_iterations += 1;
-        if (loop_iterations > MAX_ITERATIONS) {
-            Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}", .{ loop_iterations, current_instruction - analysis.instructions, self.depth, frame.gas_remaining });
-            unreachable;
-        }
-
-        // Detect stuck at same PC
-        const current_pc = current_instruction - analysis.instructions;
-        if (current_pc == last_pc) {
-            same_pc_count += 1;
-            if (same_pc_count > 1000) {
-                Log.err("interpret: Stuck at pc={} for {} iterations", .{ current_pc, same_pc_count });
+        // In safe mode we make sure we don't loop too much. If this happens
+        if (comptime SAFE) {
+            loop_iterations += 1;
+            if (loop_iterations > MAX_ITERATIONS) {
+                Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}. This should never happen and indicates either the limit was set too low or a high severity bug has been found in EVM", .{ loop_iterations, current_instruction - analysis.instructions, self.depth, frame.gas_remaining });
                 unreachable;
             }
-        } else {
-            last_pc = current_pc;
-            same_pc_count = 0;
         }
 
+        // Handle instruction
         switch (nextInstruction.arg) {
             .jump_target => |target| {
                 if (nextInstruction.opcode_fn == execution.control.op_jump) {
