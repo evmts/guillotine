@@ -5,7 +5,6 @@ const precompiles = @import("../precompiles/precompiles.zig");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
-const Contract = @import("../frame/contract.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
 

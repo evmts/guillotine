@@ -3,7 +3,6 @@ const primitives = @import("primitives");
 const CallResult = @import("call_result.zig").CallResult;
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
-const Contract = @import("../frame/contract.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
 

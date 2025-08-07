@@ -137,10 +137,8 @@ pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
 // Tests
 const testing = std.testing;
 const Operation = @import("../opcodes/operation.zig");
-const Frame = @import("../frame/frame.zig");
 const Vm = @import("../evm.zig");
 const MemoryDatabase = @import("../state/memory_database.zig");
-const Contract = @import("../frame/contract.zig");
 const Context = @import("../access_list/context.zig");
 const Address = primitives.Address;
 

@@ -60,9 +60,8 @@ const U256 = primitives.Uint(256, 4);
 // Imports for tests
 const Vm = @import("../evm.zig");
 const MemoryDatabase = @import("../state/memory_database.zig");
-const Contract = @import("../frame/contract.zig");
-const Frame = @import("../frame/frame.zig");
 const Operation = @import("../opcodes/operation.zig");
+
 
 /// ADD opcode (0x01) - Addition with wrapping overflow
 pub fn op_add(context: *ExecutionContext) ExecutionError.Error!void {

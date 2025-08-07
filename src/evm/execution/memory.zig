@@ -4,12 +4,11 @@ const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
 const GasConstants = @import("primitives").GasConstants;
 
 // Common copy operation helper - works with old Frame type for now
 // TODO: Update to use ExecutionContext when all operations are converted
-fn perform_copy_operation(frame: *Frame, mem_offset: usize, size: usize) !void {
+fn perform_copy_operation(frame: anytype, mem_offset: usize, size: usize) !void {
     // Calculate memory expansion gas cost
     const new_size = mem_offset + size;
     const new_size_u64 = @as(u64, @intCast(new_size));
@@ -451,7 +450,6 @@ const testing = std.testing;
 const MemoryDatabase = @import("../state/memory_database.zig");
 const primitives = @import("primitives");
 const Vm = @import("../evm.zig");
-const Contract = @import("../frame/contract.zig");
 const Address = primitives.Address;
 
 const FuzzMemoryOperation = struct {

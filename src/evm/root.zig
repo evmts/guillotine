@@ -64,8 +64,6 @@ pub const primitives = @import("primitives");
 /// Bytecode analysis for jump destination detection
 pub const CodeAnalysis = @import("analysis/analysis.zig");
 
-/// Contract code and storage management
-pub const Contract = @import("frame/contract.zig");
 
 /// Unified error types for EVM execution
 pub const ExecutionError = @import("execution/execution_error.zig");
@@ -73,8 +71,6 @@ pub const ExecutionError = @import("execution/execution_error.zig");
 /// Execution result type
 pub const ExecutionResult = @import("execution/execution_result.zig");
 
-/// Execution frame/context management
-pub const Frame = @import("frame/frame.zig");
 
 /// Execution context providing transaction and block information
 pub const Context = @import("access_list/context.zig");
@@ -107,8 +103,6 @@ pub const Stack = @import("stack/stack.zig");
 /// Stack depth validation utilities
 pub const stack_validation = @import("stack/stack_validation.zig");
 
-/// Storage slot pooling for gas optimization
-pub const StoragePool = @import("frame/storage_pool.zig");
 
 /// Main virtual machine implementation
 pub const Evm = @import("evm.zig");
@@ -176,8 +170,6 @@ pub const opcodes = execution;
 
 // Import utility modules
 
-/// Bit vector utilities for jump destination tracking
-pub const bitvec = @import("frame/bitvec.zig");
 
 /// Chain-specific validation rules
 pub const chain_rules = @import("execution_context.zig").ChainRules;
@@ -286,15 +278,6 @@ pub const MemoryError = Memory.MemoryError;
 /// Errors from stack operations (overflow, underflow)
 pub const StackError = Stack.Error;
 
-// Contract error types
-/// General contract operation errors
-pub const ContractError = Contract.ContractError;
-/// Storage access errors
-pub const StorageOperationError = Contract.StorageOperationError;
-/// Bytecode analysis errors
-pub const CodeAnalysisError = Contract.CodeAnalysisError;
-/// Storage warming errors (EIP-2929)
-pub const MarkStorageSlotWarmError = Contract.MarkStorageSlotWarmError;
 
 // Access List error types (imported via import statement to avoid circular deps)
 /// Access list module for EIP-2929/2930 support
@@ -325,9 +308,6 @@ pub const ExecutionErrorEnum = ExecutionError.Error;
 test "Evm module" {
     std.testing.refAllDecls(Evm);
 }
-test "Frame module" {
-    std.testing.refAllDecls(Frame);
-}
 test "Stack module" {
     std.testing.refAllDecls(Stack);
 }
@@ -336,9 +316,6 @@ test "Memory module" {
 }
 test "ExecutionError module" {
     std.testing.refAllDecls(ExecutionError);
-}
-test "Contract module" {
-    std.testing.refAllDecls(Contract);
 }
 test "JumpTable module" {
     std.testing.refAllDecls(JumpTable);

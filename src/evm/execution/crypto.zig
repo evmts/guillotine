@@ -7,8 +7,6 @@ const primitives = @import("primitives");
 const Vm = @import("../evm.zig");
 const Operation = @import("../opcodes/operation.zig");
 const MemoryDatabase = @import("../state/memory_database.zig");
-const Contract = @import("../frame/contract.zig");
-const Frame = @import("../frame/frame.zig");
 
 // Stack buffer sizes for common hash operations
 const SMALL_BUFFER_SIZE = 64;   // Most common (addresses, small data)

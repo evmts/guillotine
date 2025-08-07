@@ -1,6 +1,5 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
-const Contract = @import("../frame/contract.zig");
 const Frame = @import("../execution_context.zig").Frame;
 const Operation = @import("../opcodes/operation.zig");
 const RunResult = @import("run_result.zig").RunResult;

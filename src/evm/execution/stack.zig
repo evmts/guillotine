@@ -3,13 +3,8 @@ const Operation = @import("../opcodes/operation.zig");
 const ExecutionContext = @import("../execution_context.zig").ExecutionContext;
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame/frame.zig");
-const StackValidation = @import("../stack/stack_validation.zig");
 
-// Additional imports for fuzz tests
-const Vm = @import("../evm.zig");
-const MemoryDatabase = @import("../state/memory_database.zig");
-const Contract = @import("../frame/contract.zig");
+const StackValidation = @import("../stack/stack_validation.zig");
 const Address = @import("primitives").Address;
 
 pub fn op_pop(context: *ExecutionContext) ExecutionError.Error!void {

@@ -67,7 +67,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             // Invalid opcode - add it as a regular instruction
             instructions[instruction_count] = Instruction{
                 .opcode_fn = jump_table.execute_funcs[opcode_byte],
-                .arg = .none,
+                .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[opcode_byte]) },
             };
             instruction_count += 1;
             pc += 1;
@@ -78,7 +78,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             .STOP => {
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = jump_table.execute_funcs[opcode_byte],
-                    .arg = .none,
+                    .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[opcode_byte]) },
                 };
                 instruction_count += 1;
                 pc += 1;
@@ -150,9 +150,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Check if it's an undefined opcode
                 if (jump_table.undefined_flags[opcode_byte]) {
                     // Treat undefined opcodes as INVALID
+                    const invalid_opcode = @intFromEnum(Opcode.Enum.INVALID);
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
-                        .arg = .none,
+                        .opcode_fn = jump_table.execute_funcs[invalid_opcode],
+                        .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[invalid_opcode]) },
                     };
                     instruction_count += 1;
                     pc += 1;
@@ -161,21 +162,23 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     // Check opcode_byte and validate against chain rules:
                     // if (opcode_byte == @intFromEnum(Opcode.Enum.BASEFEE) and !chain_rules.is_eip3198) {
                     //     // Treat BASEFEE as INVALID if EIP-3198 not enabled
+                    //     const invalid_opcode = @intFromEnum(Opcode.Enum.INVALID);
                     //     instructions[instruction_count] = Instruction{
-                    //         .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
-                    //         .arg = .none,
+                    //         .opcode_fn = jump_table.execute_funcs[invalid_opcode],
+                    //         .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[invalid_opcode]) },
                     //     };
                     // } else if (opcode_byte == @intFromEnum(Opcode.Enum.MCOPY) and !chain_rules.is_eip5656) {
                     //     // Treat MCOPY as INVALID if EIP-5656 not enabled
+                    //     const invalid_opcode = @intFromEnum(Opcode.Enum.INVALID);
                     //     instructions[instruction_count] = Instruction{
-                    //         .opcode_fn = jump_table.execute_funcs[@intFromEnum(Opcode.Enum.INVALID)],
-                    //         .arg = .none,
+                    //         .opcode_fn = jump_table.execute_funcs[invalid_opcode],
+                    //         .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[invalid_opcode]) },
                     //     };
                     // } else {
                         const opcode_fn = jump_table.execute_funcs[opcode_byte];
                         instructions[instruction_count] = Instruction{
                             .opcode_fn = opcode_fn,
-                            .arg = .none,
+                            .arg = .{ .gas_cost = @intCast(jump_table.constant_gas[opcode_byte]) },
                         };
                     // }
                     instruction_count += 1;
@@ -332,15 +335,9 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
             continue;
         };
         switch (maybe_opcode) {
-            .JUMP, .JUMPI => {
-                has_static_jumps = true;
-            },
-            .SELFDESTRUCT => {
-                has_selfdestruct = true;
-            },
-            .CREATE, .CREATE2 => {
-                has_create = true;
-            },
+            .JUMP, .JUMPI => {},
+            .SELFDESTRUCT => {},
+            .CREATE, .CREATE2 => {},
             else => {},
         }
 
@@ -379,11 +376,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         // Update stack depth
         stack_depth = stack_depth - stack_inputs + stack_outputs;
 
-        // Track max stack depth
-        const abs_stack_depth = @as(u16, @intCast(@max(0, stack_depth)));
-        if (abs_stack_depth > max_stack_depth) {
-            max_stack_depth = abs_stack_depth;
-        }
+        // Track max stack depth (for potential future use)
+        _ = @as(u16, @intCast(@max(0, stack_depth)));
 
         // Advance PC
         if (Opcode.is_push(op)) {

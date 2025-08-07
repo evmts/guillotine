@@ -1,10 +1,7 @@
 const std = @import("std");
-const Contract = @import("frame/contract.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
-const Frame = @import("frame/frame.zig");
 const Operation = @import("opcodes/operation.zig");
 const primitives = @import("primitives");
-const StoragePool = @import("frame/storage_pool.zig");
 const AccessList = @import("access_list/access_list.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
@@ -149,7 +146,6 @@ pub fn init(
 pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
-    Contract.clear_analysis_cache(self.allocator);
     self.internal_allocator.deinit();
 
     // No frame pool to clean up - frames are stack-allocated and cleaned up in their respective functions

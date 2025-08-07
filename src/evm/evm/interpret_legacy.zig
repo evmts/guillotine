@@ -1,7 +1,5 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
-const Contract = @import("../frame/contract.zig");
-const Frame = @import("../frame/frame.zig");
 const Operation = @import("../opcodes/operation.zig");
 const RunResult = @import("run_result.zig").RunResult;
 const Memory = @import("../memory/memory.zig");
@@ -27,7 +25,7 @@ const primitives = @import("primitives");
 /// const result = try vm.interpret(&contract, input, false);
 /// defer if (result.output) |output| vm.allocator.free(output);
 /// ```
-pub fn interpret(self: *Vm, contract: *Contract, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
+pub fn interpret(self: *Vm, contract: anytype, input: []const u8, is_static: bool) ExecutionError.Error!RunResult {
     Log.debug("VM.interpret: Starting execution, depth={}, gas={}, static={}, code_size={}, input_size={}", .{ self.depth, contract.gas, is_static, contract.code_size, input.len });
 
     self.require_one_thread();

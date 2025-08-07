@@ -35,9 +35,9 @@ pub const ChainRules = struct {
     is_shanghai: bool = true,
     is_cancun: bool = true,
     is_prague: bool = false,
-    
+
     // EIPs that need runtime opcode validation (very few!)
-    is_eip1153: bool = true,     // Transient storage (TLOAD/TSTORE) - runtime validation
+    is_eip1153: bool = true, // Transient storage (TLOAD/TSTORE) - runtime validation
 
     /// Default chain rules for the latest hardfork (CANCUN).
     pub const DEFAULT = ChainRules{};
@@ -47,93 +47,80 @@ pub const ChainRules = struct {
 /// Only contains flags that are checked during opcode execution
 pub const Flags = packed struct {
     // Hot execution state - accessed every opcode
-    depth: u10,           // 10 bits (0-1023) - call stack depth
-    is_static: bool,      // 1 bit - static call restriction (checked by SSTORE, TSTORE, etc.)
-    
+    depth: u10, // 10 bits (0-1023) - call stack depth
+    is_static: bool, // 1 bit - static call restriction (checked by SSTORE, TSTORE, etc.)
+
     // EIP flags checked during execution (very few!)
-    is_eip1153: bool,     // 1 bit - Transient storage (TLOAD/TSTORE validation)
-    
+    is_eip1153: bool, // 1 bit - Transient storage (TLOAD/TSTORE validation)
+
     // Hardfork markers (only for getHardfork() method)
-    is_prague: bool,      // 1 bit
-    is_cancun: bool,      // 1 bit
-    is_shanghai: bool,    // 1 bit
-    is_merge: bool,       // 1 bit
-    is_london: bool,      // 1 bit
-    is_berlin: bool,      // 1 bit
-    is_istanbul: bool,    // 1 bit
-    is_petersburg: bool,  // 1 bit
+    is_prague: bool, // 1 bit
+    is_cancun: bool, // 1 bit
+    is_shanghai: bool, // 1 bit
+    is_merge: bool, // 1 bit
+    is_london: bool, // 1 bit
+    is_berlin: bool, // 1 bit
+    is_istanbul: bool, // 1 bit
+    is_petersburg: bool, // 1 bit
     is_constantinople: bool, // 1 bit
-    is_byzantium: bool,   // 1 bit
-    is_homestead: bool,   // 1 bit
-    
+    is_byzantium: bool, // 1 bit
+    is_homestead: bool, // 1 bit
+
     // Reserved for future expansion - remaining bits
-    _reserved: u41 = 0,   // Ensures exactly 64 bits total (11 + 1 + 1 + 10 + 1 + 41 = 64)
+    _reserved: u41 = 0, // Ensures exactly 64 bits total (11 + 1 + 1 + 10 + 1 + 41 = 64)
 };
 
 /// Data-oriented Frame struct optimized for cache performance
 /// Layout designed around actual opcode access patterns and data correlations
 pub const Frame = struct {
-    // ========================================================================
     // TIER 1: ULTRA HOT - Accessed by virtually every opcode
+    stack: Stack, // 33,536 bytes - accessed by every opcode (PUSH/POP/DUP/SWAP/arithmetic/etc)
+    gas_remaining: u64, // 8 bytes - checked/consumed by every opcode for gas accounting
+
+    // TIER 2: HOT - Accessed by major opcode categories
     // ========================================================================
-    stack: Stack,          // 33,536 bytes - accessed by every opcode (PUSH/POP/DUP/SWAP/arithmetic/etc)
-    gas_remaining: u64,    // 8 bytes - checked/consumed by every opcode for gas accounting
-    
-    // ========================================================================
-    // TIER 2: HOT - Accessed by major opcode categories  
-    // ========================================================================
-    memory: *Memory,       // 8 bytes - hot for memory ops (MLOAD/MSTORE/MSIZE/MCOPY/LOG*/KECCAK256)
+    memory: *Memory, // 8 bytes - hot for memory ops (MLOAD/MSTORE/MSIZE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - hot for control flow (JUMP/JUMPI validation)
-    
+
     // Hot execution flags (only the bits that are actually checked frequently)
     // Packed together to minimize cache footprint - these are checked by different opcode categories
     hot_flags: packed struct {
-        depth: u10,        // 10 bits - call stack depth for CALL/CREATE operations  
-        is_static: bool,   // 1 bit - static call restriction (checked by SSTORE/TSTORE)
-        is_eip1153: bool,  // 1 bit - transient storage validation (TLOAD/TSTORE)
-        _padding: u4 = 0,  // 4 bits - align to byte boundary
-    },                     // 2 bytes total - fits in 16 bits
-    
-    _hot_padding: [6]u8 = [_]u8{0} ** 6, // 6 bytes - align storage cluster to 8-byte boundary
-    
-    // ========================================================================
+        depth: u10, // 10 bits - call stack depth for CALL/CREATE operations
+        is_static: bool, // 1 bit - static call restriction (checked by SSTORE/TSTORE)
+        is_eip1153: bool, // 1 bit - transient storage validation (TLOAD/TSTORE)
+        _padding: u4 = 0, // 4 bits - align to byte boundary
+    }, // 2 bytes total - fits in 16 bits
+
     // TIER 3: WARM - Storage Operations Cluster (high correlation group)
-    // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together
-    // ========================================================================
+    // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together so pack them together in struct
     contract_address: primitives.Address.Address, // 20 bytes - FIRST: storage key = hash(contract_address, slot)
-    state: DatabaseInterface,       // 16 bytes - actual storage read/write interface  
-    access_list: *AccessList,       // 8 bytes - LAST: EIP-2929 warm/cold gas cost calculation
+    state: DatabaseInterface, // 16 bytes - actual storage read/write interface
+    access_list: *AccessList, // 8 bytes - LAST: EIP-2929 warm/cold gas cost calculation
     // Total: 44 bytes - all storage operations cause exactly one cache line fetch for this cluster
-    
-    // ========================================================================
     // TIER 4: COLD - Rarely accessed data
-    // ========================================================================
-    input: []const u8,     // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
-    output: []const u8,    // 16 bytes - only set by RETURN/REVERT at function exit
-    self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
-    
+    allocator: std.mem.Allocator, // 16
+    input: []const u8, // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
+    output: []const u8, // 16 bytes - only set by RETURN/REVERT at function exit
     // Cold hardfork detection flags - only used by getHardfork() method for version detection
     // Packed separately from hot flags to avoid polluting hot cache lines
     cold_flags: packed struct {
-        is_prague: bool,      // 1 bit
-        is_cancun: bool,      // 1 bit  
-        is_shanghai: bool,    // 1 bit
-        is_merge: bool,       // 1 bit
-        is_london: bool,      // 1 bit
-        is_berlin: bool,      // 1 bit
-        is_istanbul: bool,    // 1 bit
-        is_petersburg: bool,  // 1 bit
+        is_prague: bool, // 1 bit
+        is_cancun: bool, // 1 bit
+        is_shanghai: bool, // 1 bit
+        is_merge: bool, // 1 bit
+        is_london: bool, // 1 bit
+        is_berlin: bool, // 1 bit
+        is_istanbul: bool, // 1 bit
+        is_petersburg: bool, // 1 bit
         is_constantinople: bool, // 1 bit
-        is_byzantium: bool,   // 1 bit
-        is_homestead: bool,   // 1 bit
-        _reserved: u5 = 0,    // 5 bits - future expansion
-    },                        // 2 bytes total - fits in 16 bits
-    
-    _final_padding: [6]u8 = [_]u8{0} ** 6, // 6 bytes - struct alignment padding
+        is_byzantium: bool, // 1 bit
+        is_homestead: bool, // 1 bit
+        _reserved: u5 = 0, // 5 bits - future expansion
+    },
+    self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
 
     /// Initialize a Frame with required parameters
     pub fn init(
-        allocator: std.mem.Allocator,
         gas_remaining: u64,
         static_call: bool,
         call_depth: u32,
@@ -144,12 +131,13 @@ pub const Frame = struct {
         chain_rules: ChainRules,
         self_destruct: ?*SelfDestruct,
         input: []const u8,
+        allocator: std.mem.Allocator,
     ) !Frame {
         return Frame{
             // Ultra hot data
             .stack = Stack.init(),
             .gas_remaining = gas_remaining,
-            
+
             // Hot data
             .memory = try Memory.init_default(allocator),
             .analysis = analysis,
@@ -158,12 +146,12 @@ pub const Frame = struct {
                 .is_static = static_call,
                 .is_eip1153 = chain_rules.is_eip1153,
             },
-            
+
             // Storage cluster (warm)
             .contract_address = contract_address,
             .state = state,
             .access_list = access_list,
-            
+
             // Cold data
             .input = input,
             .output = &[_]u8{},
@@ -363,40 +351,40 @@ comptime {
     // Assert that hot data is at the beginning of the struct for cache locality
     std.debug.assert(@offsetOf(Frame, "stack") == 0);
     std.debug.assert(@offsetOf(Frame, "gas_remaining") == @sizeOf(Stack));
-    
+
     // Assert proper alignment of hot data (should be naturally aligned)
     std.debug.assert(@offsetOf(Frame, "memory") % @alignOf(*Memory) == 0);
     std.debug.assert(@offsetOf(Frame, "analysis") % @alignOf(*const CodeAnalysis) == 0);
-    
+
     // Assert hot_flags comes before cold_flags (hot data first)
     std.debug.assert(@offsetOf(Frame, "hot_flags") < @offsetOf(Frame, "cold_flags"));
-    
+
     // Assert storage cluster is properly grouped together
     const contract_address_offset = @offsetOf(Frame, "contract_address");
     const state_offset = @offsetOf(Frame, "state");
     const access_list_offset = @offsetOf(Frame, "access_list");
-    
+
     // Storage cluster should be contiguous (within reasonable padding)
     std.debug.assert(state_offset - contract_address_offset <= @sizeOf(primitives.Address.Address) + 8); // Allow up to 8 bytes padding
     std.debug.assert(access_list_offset - state_offset <= @sizeOf(DatabaseInterface) + 8); // Allow up to 8 bytes padding
-    
+
     // Assert cold data comes after warm data
     std.debug.assert(@offsetOf(Frame, "input") > @offsetOf(Frame, "access_list"));
     std.debug.assert(@offsetOf(Frame, "output") > @offsetOf(Frame, "access_list"));
     std.debug.assert(@offsetOf(Frame, "self_destruct") > @offsetOf(Frame, "access_list"));
-    
+
     // Assert packed structs are properly sized
     std.debug.assert(@sizeOf(@TypeOf(Frame.hot_flags)) == 2); // Should be 16 bits (2 bytes)
     std.debug.assert(@sizeOf(@TypeOf(Frame.cold_flags)) == 2); // Should be 16 bits (2 bytes)
-    
+
     // Assert reasonable struct size (should be dominated by stack)
     const stack_size = @sizeOf(Stack);
     const total_size = @sizeOf(Frame);
-    
+
     // Frame should be mostly stack + reasonable overhead
     std.debug.assert(total_size >= stack_size); // At least as big as stack
     std.debug.assert(total_size <= stack_size + 1024); // Not more than stack + 1KB overhead
-    
+
     // Assert natural alignment for performance-critical fields
     std.debug.assert(@offsetOf(Frame, "gas_remaining") % @alignOf(u64) == 0);
     std.debug.assert(@offsetOf(Frame, "contract_address") % @alignOf(primitives.Address.Address) == 0);

@@ -1,6 +1,5 @@
 const std = @import("std");
 const primitives = @import("primitives");
-const Contract = @import("../frame/contract.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const CreateResult = @import("create_result.zig").CreateResult;
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
