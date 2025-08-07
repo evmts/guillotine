@@ -13,6 +13,9 @@ const interpret = @import("interpret.zig");
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const primitives = @import("primitives");
+const precompiles = @import("../precompiles/precompiles.zig");
+const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
+const CallResult = @import("call_result.zig").CallResult;
 
 // Threshold for stack vs heap allocation optimization
 const STACK_ALLOCATION_THRESHOLD = 12800; // bytes of bytecode
@@ -30,6 +33,33 @@ pub inline fn call(self: *Evm, contract: *Contract, input: []const u8, comptime 
         if (contract.code_size != contract.code.len) return ExecutionError.Error.CodeSizeMismatch;
         if (contract.gas == 0) return ExecutionError.Error.OutOfGas;
         if (contract.code_size > 0 and contract.code.len == 0) return ExecutionError.Error.CodeSizeMismatch;
+    }
+
+    // Check if this is a precompile call
+    if (precompile_addresses.get_precompile_id_checked(contract.address)) |precompile_id| {
+        const precompile_result = self.execute_precompile_call_by_id(precompile_id, input, contract.gas, is_static) catch |err| {
+            return switch (err) {
+                else => ExecutionError.Error.PrecompileError,
+            };
+        };
+        
+        // Convert CallResult to InterpretResult
+        const status: RunResult.Status = if (precompile_result.success) .Success else .Revert;
+        const final_error = if (precompile_result.success) null else ExecutionError.Error.PrecompileError;
+        
+        var access_list = AccessList.init(self.allocator);
+        var self_destruct = SelfDestruct.init(self.allocator);
+        
+        return InterpretResult.init(
+            self.allocator,
+            contract.gas, // initial_gas
+            precompile_result.gas_left, // gas_remaining
+            status,
+            final_error,
+            precompile_result.output,
+            access_list,
+            self_destruct
+        );
     }
 
     const initial_gas = contract.gas;
