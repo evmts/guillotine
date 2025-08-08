@@ -9,6 +9,8 @@ const ExecutionError = @import("../execution/execution_error.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const CodeAnalysis = @import("../analysis.zig");
 const ChainRules = @import("../frame.zig").ChainRules;
+const Host = @import("../host.zig").Host;
+const CallFrameAccessList = @import("../call_frame_stack.zig").AccessList;
 const evm_limits = @import("../constants/evm_limits.zig");
 
 pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error || @import("../state/database_interface.zig").DatabaseError;
@@ -111,19 +113,37 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     };
     defer analysis.deinit();
 
+    // Create host interface from self
+    var host = Host.init(self);
+    
+    // Create temporary AccessList for Frame (different type from EVM's access_list)
+    var frame_access_list = CallFrameAccessList.init(self.allocator) catch |err| {
+        Log.debug("VM.call_contract: Failed to create frame access list: {}", .{err});
+        return CallResult{ .success = false, .gas_left = 0, .output = null };
+    };
+    defer frame_access_list.deinit();
+    
     // Create execution context for the contract
     var context = ExecutionContext.init(
         execution_gas, // gas remaining
         is_static, // static call flag 
         @intCast(self.depth), // call depth
         to, // contract address
+        caller, // caller address
+        value, // value being transferred
         &analysis, // code analysis
-        &self.access_list, // access list
-        self.state.to_database_interface(), // database interface
+        &frame_access_list, // access list
+        &self.journal, // call journal
+        &host, // host interface from self
+        self.journal.create_snapshot(), // create new snapshot id
+        self.state.database, // database interface
         self.chain_rules, // chain rules
         null, // self_destruct (not supported in this context)
         input, // input data
         self.allocator, // allocator
+        null, // next_frame (no nested calls)
+        false, // is_create_call
+        false, // is_delegate_call
     ) catch |err| {
         Log.debug("VM.call_contract: ExecutionContext creation failed with error: {}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };

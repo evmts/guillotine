@@ -7,6 +7,10 @@ const ExecutionError = @import("execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
 const ChainRules = @import("frame.zig").ChainRules;
 const GasConstants = @import("primitives").GasConstants;
+const CallJournal = @import("call_frame_stack.zig").CallJournal;
+const Host = @import("host.zig").Host;
+const BlockInfo = @import("host.zig").BlockInfo;
+const CallParams = @import("host.zig").CallParams;
 const opcode = @import("opcodes/opcode.zig");
 const Log = @import("log.zig");
 const EvmLog = @import("state/evm_log.zig");
@@ -80,6 +84,9 @@ self_destruct: SelfDestruct = undefined,
 
 /// Stack buffer for small contract analysis optimization
 analysis_stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined,
+
+/// Call journal for transaction revertibility
+journal: CallJournal = undefined,
 
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
@@ -166,6 +173,7 @@ pub fn init(
         .current_frame_depth = 0,
         .self_destruct = undefined,
         .analysis_stack_buffer = undefined,
+        .journal = CallJournal.init(allocator),
     };
 }
 
@@ -175,6 +183,7 @@ pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
     self.internal_allocator.deinit();
+    self.journal.deinit();
 
     // Execution state doesn't need cleanup in deinit:
     // - self_destruct: undefined or ownership transferred to caller
@@ -200,12 +209,55 @@ pub fn arena_allocator(self: *Evm) std.mem.Allocator {
     return self.internal_allocator.allocator();
 }
 
+// Host interface implementation - EVM acts as its own host
+/// Get account balance (Host interface)
+pub fn get_balance(self: *Evm, address: primitives.Address.Address) u256 {
+    return self.state.get_balance(address);
+}
+
+/// Check if account exists (Host interface)
+pub fn account_exists(self: *Evm, address: primitives.Address.Address) bool {
+    _ = self;
+    _ = address;
+    Log.err("Host.account_exists not implemented", .{});
+    unreachable;
+}
+
+/// Get account code (Host interface)
+pub fn get_code(self: *Evm, address: primitives.Address.Address) []const u8 {
+    return self.state.get_code(address);
+}
+
+/// Get block information (Host interface)
+pub fn get_block_info(self: *Evm) BlockInfo {
+    _ = self;
+    Log.err("Host.get_block_info not implemented", .{});
+    unreachable;
+}
+
+/// Emit log event (Host interface override)
+/// This overrides the emit_log from emit_log.zig to provide the correct signature for Host interface
+pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics: []const u256, data: []const u8) void {
+    // Delegate to the state's emit_log implementation
+    self.state.emit_log(contract_address, topics, data) catch |err| {
+        Log.debug("emit_log failed: {}", .{err});
+    };
+}
+
+/// Execute EVM call (Host interface)
+pub fn call(self: *Evm, params: CallParams) CallResult {
+    _ = self;
+    _ = params;
+    Log.err("Host.call not implemented", .{});
+    unreachable;
+}
+
 pub usingnamespace @import("evm/set_context.zig");
 
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
-pub usingnamespace @import("evm/emit_log.zig");
+// pub usingnamespace @import("evm/emit_log.zig"); // Commented out to avoid ambiguity with Host interface
 pub usingnamespace @import("evm/validate_static_context.zig");
 pub usingnamespace @import("evm/set_storage_protected.zig");
 pub usingnamespace @import("evm/set_transient_storage_protected.zig");

@@ -147,7 +147,8 @@ pub const Frame = struct {
     ) !Frame {
         // Determine hardfork from chain rules
         const hardfork = blk: {
-            if (chain_rules.is_prague) break :blk Hardfork.PRAGUE;
+            // Note: PRAGUE not yet defined in hardfork.zig, defaulting to CANCUN for now
+            if (chain_rules.is_prague) break :blk Hardfork.CANCUN;
             if (chain_rules.is_cancun) break :blk Hardfork.CANCUN;
             if (chain_rules.is_shanghai) break :blk Hardfork.SHANGHAI;
             if (chain_rules.is_merge) break :blk Hardfork.MERGE;
@@ -166,8 +167,13 @@ pub const Frame = struct {
             .stack = Stack.init(),
             .gas_remaining = gas_remaining,
 
-            // Hot data
-            .memory = try Memory.init_default(allocator),
+            // Hot data - allocate Memory on heap
+            .memory = blk: {
+                const memory_ptr = try allocator.create(Memory);
+                errdefer allocator.destroy(memory_ptr);
+                memory_ptr.* = try Memory.init_default(allocator);
+                break :blk memory_ptr;
+            },
             .analysis = analysis,
             .hot_flags = .{
                 .depth = @intCast(call_depth),
@@ -207,6 +213,7 @@ pub const Frame = struct {
 
     pub fn deinit(self: *Frame) void {
         self.memory.deinit();
+        self.allocator.destroy(self.memory);
     }
 
     /// Gas consumption with bounds checking - used by all opcodes that consume gas

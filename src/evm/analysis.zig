@@ -567,13 +567,13 @@ fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructio
                     // Find the instruction index for this PC
                     if (target_pc < pc_to_instruction.len) {
                         const target_idx = pc_to_instruction[@intCast(target_pc)];
-                        if (target_idx != std.math.maxInt(u16) and target_idx < instructions.len and instructions[target_idx] != null) {
+                        if (target_idx != std.math.maxInt(u16) and target_idx < instructions.len) {
                             // Determine jump type based on opcode
                             const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
                             
                             // Update the JUMP/JUMPI with the target pointer and type
-                            instructions[inst_idx].?.arg = .{ .jump_target = JumpTarget{
-                                .instruction = &instructions[target_idx].?,
+                            instructions[inst_idx].arg = .{ .jump_target = JumpTarget{
+                                .instruction = &instructions[target_idx],
                                 .jump_type = jump_type,
                             }};
                         }
