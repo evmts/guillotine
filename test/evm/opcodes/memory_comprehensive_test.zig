@@ -1048,7 +1048,7 @@ test "MSIZE (0x59): Basic memory size tracking" {
 //     defer test_frame.deinit();
 
 //     // Fill the stack to capacity
-//     while (test_frame.frame.stack.size < helpers.Stack.CAPACITY) {
+//     while (test_frame.frame.stack.size < helpers.Stack.capacity) {
 //         try test_frame.frame.stack.append(42);
 //     }
 

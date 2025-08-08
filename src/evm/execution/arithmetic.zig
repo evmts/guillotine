@@ -78,7 +78,8 @@ const Operation = @import("../opcodes/operation.zig");
 
 
 /// ADD opcode (0x01) - Addition with wrapping overflow
-pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_add(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -112,7 +113,8 @@ pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
 /// ## Example
 /// Stack: [10, 20] => [200]
 /// Stack: [2^128, 2^128] => [0] (overflow wraps)
-pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mul(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -152,7 +154,8 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
 /// ## Example
 /// Stack: [30, 10] => [20]
 /// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
-pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sub(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -195,7 +198,8 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
 /// Unlike most programming languages, EVM division by zero does not
 /// throw an error but returns 0. This is a deliberate design choice
 /// to avoid exceptional halting conditions.
-pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_div(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -247,7 +251,8 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
 /// The special case for MIN_I256 / -1 prevents integer overflow,
 /// as the mathematical result (2^255) cannot be represented in i256.
 /// In this case, we return MIN_I256 to match EVM behavior.
-pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sdiv(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -306,7 +311,8 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
 /// ## Note
 /// The result is always in range [0, b-1] for b > 0.
 /// Like DIV, modulo by zero returns 0 rather than throwing an error.
-pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mod(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -361,7 +367,8 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
 /// In signed modulo, the result has the same sign as the dividend (a).
 /// This follows the Euclidean division convention where:
 /// a = b * q + r, where |r| < |b| and sign(r) = sign(a)
-pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_smod(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -416,7 +423,8 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
 /// This operation correctly computes (a + b) mod n even when
 /// a + b exceeds 2^256, using specialized algorithms to avoid
 /// intermediate overflow.
-pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_addmod(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
@@ -478,7 +486,8 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
 /// ## Note
 /// This operation correctly computes (a * b) mod n even when
 /// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
-pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mulmod(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
@@ -543,7 +552,7 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
 /// - 2^10: 10 + 50*1 = 60 gas (exponent fits in 1 byte)
 /// - 2^256: 10 + 50*2 = 110 gas (exponent needs 2 bytes)
 /// - 2^(2^255): 10 + 50*32 = 1610 gas (huge exponent)
-pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_exp(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -553,7 +562,9 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     // Calculate gas cost based on exponent byte size
     var exp_copy = exp;
     var byte_size: u64 = 0;
-    while (exp_copy > 0) : (exp_copy >>= 8) {
+    var iterations: u32 = 0;
+    const max_iterations = if (@hasField(@TypeOf(config), "max_iterations")) config.max_iterations else 10_000_000;
+    while (exp_copy > 0 and iterations < max_iterations) : ({exp_copy >>= 8; iterations += 1;}) {
         byte_size += 1;
     }
     if (byte_size > 0) {
@@ -584,8 +595,9 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     var result: u256 = 1;
     var b = base;
     var e = exp;
-
-    while (e > 0) {
+    
+    iterations = 0;
+    while (e > 0 and iterations < max_iterations) : (iterations += 1) {
         if ((e & 1) == 1) {
             const mul_result = @mulWithOverflow(result, b);
             result = mul_result[0];
@@ -640,7 +652,8 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
 /// - Converting int8/int16/etc to int256
 /// - Arithmetic on mixed-width signed integers
 /// - Implementing higher-level language semantics
-pub fn op_signextend(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_signextend(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 

@@ -28,7 +28,7 @@ test "fuzz_stack_overflow" {
     
     // Fill stack to capacity
     var i: usize = 0;
-    while (i < evm.Stack.CAPACITY) : (i += 1) {
+    while (i < evm.Stack.capacity) : (i += 1) {
         try stack.append(@as(u256, i));
     }
     

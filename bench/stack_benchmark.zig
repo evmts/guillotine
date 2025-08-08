@@ -178,7 +178,7 @@ pub fn bench_stack_growth_linear(allocator: Allocator) void {
     
     // Linear growth from 0 to 1024
     var i: usize = 0;
-    while (i < Stack.CAPACITY) : (i += 1) {
+    while (i < Stack.capacity) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
     
@@ -347,7 +347,7 @@ pub fn bench_clear_full(allocator: Allocator) void {
     while (i < 10) : (i += 1) {
         // Fill stack
         var j: usize = 0;
-        while (j < Stack.CAPACITY) : (j += 1) {
+        while (j < Stack.capacity) : (j += 1) {
             stack.append_unsafe(@as(u256, j));
         }
         // Clear it
@@ -527,7 +527,7 @@ pub fn bench_unpredictable_pattern(allocator: Allocator) void {
         
         var j: usize = 0;
         while (j < push_count) : (j += 1) {
-            if (stack.size < Stack.CAPACITY) {
+            if (stack.size < Stack.capacity) {
                 stack.append_unsafe(@as(u256, j));
             }
         }

@@ -1,4 +1,4 @@
-const Memory = @import("./memory.zig").Memory;
+const Memory = @import("./memory.zig").DefaultMemory;
 const context = @import("context.zig");
 
 /// Get a mutable slice to the entire memory buffer (context-relative)

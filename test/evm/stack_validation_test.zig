@@ -44,7 +44,7 @@ test "Stack validation: PUSH operations" {
     var stack = Stack{};
 
     // Fill stack to capacity
-    stack.size = Stack.CAPACITY;
+    stack.size = Stack.capacity;
 
     // Should fail due to overflow
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, push1_op));
@@ -68,7 +68,7 @@ test "Stack validation: DUP operations" {
     try stack_validation.validate_stack_requirements(&stack, dup1_op);
 
     // Test overflow - fill stack to capacity
-    stack.size = Stack.CAPACITY;
+    stack.size = Stack.capacity;
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, dup1_op));
 }
 
@@ -97,26 +97,26 @@ test "Stack validation: max_stack calculations" {
     // Test correct max_stack values for different operation types
 
     // Binary operations (pop 2, push 1) - net effect -1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), stack_validation.calculate_max_stack(2, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity), stack_validation.calculate_max_stack(2, 1));
 
     // PUSH operations (pop 0, push 1) - net effect +1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), stack_validation.calculate_max_stack(0, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity - 1), stack_validation.calculate_max_stack(0, 1));
 
     // DUP operations (pop 0, push 1) - net effect +1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), stack_validation.calculate_max_stack(0, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity - 1), stack_validation.calculate_max_stack(0, 1));
 
     // POP operation (pop 1, push 0) - net effect -1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), stack_validation.calculate_max_stack(1, 0));
+    try testing.expectEqual(@as(u32, Stack.capacity), stack_validation.calculate_max_stack(1, 0));
 
     // SWAP/Comparison operations (pop n, push n) - net effect 0
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), stack_validation.calculate_max_stack(2, 2));
+    try testing.expectEqual(@as(u32, Stack.capacity), stack_validation.calculate_max_stack(2, 2));
 
     // Complex operations
     // ADDMOD (pop 3, push 1) - net effect -2
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), stack_validation.calculate_max_stack(3, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity), stack_validation.calculate_max_stack(3, 1));
 
     // CALL-like operations that pop 7 and push 1 - net effect -6
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), stack_validation.calculate_max_stack(7, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity), stack_validation.calculate_max_stack(7, 1));
 }
 
 test "Stack validation: jump table stack requirements verification" {
@@ -128,7 +128,7 @@ test "Stack validation: jump table stack requirements verification" {
     // Test ADD operation requirements
     const add_op = table.get_operation(0x01);
     try testing.expectEqual(@as(u32, 2), add_op.min_stack);
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), add_op.max_stack);
+    try testing.expectEqual(@as(u32, Stack.capacity), add_op.max_stack);
 
     // Test with a simple stack
     var stack = Stack{};
@@ -147,10 +147,10 @@ test "Stack validation: jump table stack requirements verification" {
     // Test PUSH1 operation
     const push1_op = table.get_operation(0x60);
     try testing.expectEqual(@as(u32, 0), push1_op.min_stack);
-    try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), push1_op.max_stack);
+    try testing.expectEqual(@as(u32, Stack.capacity - 1), push1_op.max_stack);
 
     // Test at capacity
-    stack.size = Stack.CAPACITY;
+    stack.size = Stack.capacity;
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, push1_op));
 }
 

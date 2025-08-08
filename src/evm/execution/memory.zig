@@ -3,7 +3,7 @@ const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const GasConstants = @import("primitives").GasConstants;
 
 // Common copy operation helper - works with old Frame type for now
@@ -23,7 +23,8 @@ fn perform_copy_operation(frame: anytype, mem_offset: usize, size: usize) !void 
     _ = try frame.memory.ensure_context_capacity(new_size);
 }
 
-pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mload(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     if (frame.stack.size() < 1) {
         @branchHint(.cold);
@@ -57,7 +58,8 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(value);
 }
 
-pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mstore(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     if (frame.stack.size() < 2) {
         @branchHint(.cold);
@@ -93,7 +95,8 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
     try frame.memory.set_data(offset_usize, &bytes);
 }
 
-pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mstore8(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     if (frame.stack.size() < 2) {
         @branchHint(.cold);
@@ -129,9 +132,10 @@ pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
     try frame.memory.set_data(offset_usize, &bytes);
 }
 
-pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_msize(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    if (frame.stack.size() >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.capacity) {
         @branchHint(.cold);
         unreachable;
     }
@@ -145,7 +149,8 @@ pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.append_unsafe(@as(u256, @intCast(aligned_size)));
 }
 
-pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_mcopy(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // EIP-5656 validation should be handled during bytecode analysis phase,
     // not at runtime. Invalid MCOPY opcodes should be rejected during code analysis.
@@ -212,7 +217,7 @@ pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
 
 // TODO: Update to ExecutionContext pattern when input data access is available
 // Currently ExecutionContext doesn't have input field needed for calldata operations
-pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldataload(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
     _ = pc;
     _ = interpreter;
 
@@ -239,7 +244,8 @@ pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Ope
     var result: u256 = 0;
 
     var i: isize = -32;
-    while (i < 0) : (i += 1) {
+    var iterations: u32 = 0;
+    while (i < 0 and iterations < config.max_iterations) : ({i += 1; iterations += 1;}) {
         const idx = @as(usize, @intCast(i + 32));
         if (offset_usize + idx < frame.input.len) {
             @branchHint(.likely);
@@ -257,13 +263,14 @@ pub fn op_calldataload(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
 // TODO: Update to ExecutionContext pattern when input data access is available
 // Currently ExecutionContext doesn't have input field needed for calldata operations
-pub fn op_calldatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldatasize(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = config; // Config parameter available for future use
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size() >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.capacity) {
         @branchHint(.cold);
         unreachable;
     }
@@ -276,7 +283,8 @@ pub fn op_calldatasize(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
 // TODO: Update to ExecutionContext pattern when input data access is available
 // Currently ExecutionContext doesn't have input field needed for calldata operations
-pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_calldatacopy(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = config; // Config parameter available for future use
     _ = pc;
     _ = interpreter;
 
@@ -318,13 +326,14 @@ pub fn op_calldatacopy(pc: usize, interpreter: Operation.Interpreter, state: Ope
 
 // TODO: Update to ExecutionContext pattern when contract access is available
 // Currently ExecutionContext doesn't have contract field needed for code operations
-pub fn op_codesize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_codesize(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = config; // Config parameter available for future use
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size() >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.capacity) {
         @branchHint(.cold);
         unreachable;
     }
@@ -337,7 +346,8 @@ pub fn op_codesize(pc: usize, interpreter: Operation.Interpreter, state: Operati
 
 // TODO: Update to ExecutionContext pattern when contract access is available
 // Currently ExecutionContext doesn't have contract field needed for code operations
-pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_codecopy(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = config; // Config parameter available for future use
     _ = pc;
     _ = interpreter;
 
@@ -384,13 +394,14 @@ pub fn op_codecopy(pc: usize, interpreter: Operation.Interpreter, state: Operati
 
 // TODO: Update to ExecutionContext pattern when return data access is available
 // Currently ExecutionContext doesn't have return_data field needed for return data operations
-pub fn op_returndatasize(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_returndatasize(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = config; // Config parameter available for future use
     _ = pc;
     _ = interpreter;
 
     const frame = state;
 
-    if (frame.stack.size() >= Stack.CAPACITY) {
+    if (frame.stack.size() >= Stack.capacity) {
         @branchHint(.cold);
         unreachable;
     }
@@ -403,7 +414,8 @@ pub fn op_returndatasize(pc: usize, interpreter: Operation.Interpreter, state: O
 
 // TODO: Update to ExecutionContext pattern when return data access is available
 // Currently ExecutionContext doesn't have return_data field needed for return data operations
-pub fn op_returndatacopy(pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+pub fn op_returndatacopy(comptime config: anytype, pc: usize, interpreter: Operation.Interpreter, state: Operation.State) ExecutionError.Error!Operation.ExecutionResult {
+    _ = config; // Config parameter available for future use
     _ = pc;
     _ = interpreter;
 

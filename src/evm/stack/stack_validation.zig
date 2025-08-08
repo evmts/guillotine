@@ -1,5 +1,5 @@
 const std = @import("std");
-const Stack = @import("stack.zig");
+const Stack = @import("stack.zig").DefaultStack;
 const Operation = @import("../opcodes/operation.zig").Operation;
 const OperationView = @import("../jump_table/jump_table.zig").OperationView;
 const ExecutionError = @import("../execution/execution_error.zig");
@@ -110,9 +110,9 @@ pub fn validate_stack_operation(
     const new_size = stack_size - pop_count + push_count;
 
     // Check if result would overflow
-    if (new_size > Stack.CAPACITY) {
+    if (new_size > Stack.capacity) {
         @branchHint(.cold);
-        Log.debug("StackValidation.validate_stack_operation: Stack overflow, new_size={} > capacity={}", .{ new_size, Stack.CAPACITY });
+        Log.debug("StackValidation.validate_stack_operation: Stack overflow, new_size={} > capacity={}", .{ new_size, Stack.capacity });
         return ExecutionError.Error.StackOverflow;
     }
 
@@ -140,10 +140,10 @@ pub fn calculate_max_stack(pop_count: u32, push_count: u32) u32 {
     if (push_count > pop_count) {
         @branchHint(.likely);
         const net_growth = push_count - pop_count;
-        return @intCast(Stack.CAPACITY - net_growth);
+        return @intCast(Stack.capacity - net_growth);
     }
     // If operation reduces stack or is neutral, max is CAPACITY
-    return Stack.CAPACITY;
+    return Stack.capacity;
 }
 
 /// Validates stack requirements at compile time when inputs/outputs are known constants.
@@ -240,10 +240,10 @@ pub fn validateStackRequirements(
     const new_size = stack_size - inputs + outputs;
     
     // Check stack overflow
-    if (new_size > Stack.CAPACITY) {
+    if (new_size > Stack.capacity) {
         @branchHint(.cold);
         Log.debug("StackValidation.validateStackRequirements: Stack overflow, " ++
-            "new_size={} > capacity={}", .{ new_size, Stack.CAPACITY });
+            "new_size={} > capacity={}", .{ new_size, Stack.capacity });
         return ExecutionError.Error.StackOverflow;
     }
     
@@ -262,7 +262,7 @@ test "validate_stack_requirements" {
         .execute = undefined,
         .constant_gas = 3,
         .min_stack = 2,
-        .max_stack = Stack.CAPACITY - 1,
+        .max_stack = Stack.capacity - 1,
         .dynamic_gas = null,
         .memory_size = null,
         .undefined = false,
@@ -311,7 +311,7 @@ test "validate_stack_operation" {
     // Test overflow - fill stack almost to capacity
     stack.clear();
     var i: usize = 0;
-    while (i < Stack.CAPACITY - 1) : (i += 1) {
+    while (i < Stack.capacity - 1) : (i += 1) {
         try stack.append(@intCast(i));
     }
 
@@ -321,16 +321,16 @@ test "validate_stack_operation" {
 
 test "calculate_max_stack" {
     // Binary operations (pop 2, push 1) - net decrease of 1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY), calculate_max_stack(2, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity), calculate_max_stack(2, 1));
 
     // Push operations (pop 0, push 1) - net increase of 1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), calculate_max_stack(0, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity - 1), calculate_max_stack(0, 1));
 
     // DUP operations (pop 0, push 1) - net increase of 1
-    try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), calculate_max_stack(0, 1));
+    try testing.expectEqual(@as(u32, Stack.capacity - 1), calculate_max_stack(0, 1));
 
     // Operations that push more than pop
-    try testing.expectEqual(@as(u32, Stack.CAPACITY - 3), calculate_max_stack(1, 4));
+    try testing.expectEqual(@as(u32, Stack.capacity - 3), calculate_max_stack(1, 4));
 }
 
 test "ValidationPatterns" {
@@ -353,7 +353,7 @@ test "ValidationPatterns" {
     // Test PUSH validation at capacity
     stack.clear();
     var j: usize = 0;
-    while (j < Stack.CAPACITY) : (j += 1) {
+    while (j < Stack.capacity) : (j += 1) {
         try stack.append(@intCast(j));
     }
     try testing.expectError(ExecutionError.Error.StackOverflow, ValidationPatterns.validate_push(&stack));
@@ -385,7 +385,7 @@ test "validateStackRequirements comptime validation" {
     // Test stack overflow - fill stack to capacity
     stack.clear();
     var i: usize = 0;
-    while (i < Stack.CAPACITY) : (i += 1) {
+    while (i < Stack.capacity) : (i += 1) {
         try stack.append(@intCast(i));
     }
     try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 1, stack.size()));
@@ -393,7 +393,7 @@ test "validateStackRequirements comptime validation" {
     // Test near-overflow case - fill stack to capacity-1
     stack.clear();
     var k: usize = 0;
-    while (k < Stack.CAPACITY - 1) : (k += 1) {
+    while (k < Stack.capacity - 1) : (k += 1) {
         try stack.append(@intCast(k));
     }
     try validateStackRequirements(0, 1, stack.size()); // Should pass

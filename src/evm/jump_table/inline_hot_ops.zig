@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const ExecutionError = @import("../execution/execution_error.zig");
 const operation_module = @import("../opcodes/operation.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const Log = @import("../log.zig");
 const primitives = @import("primitives");
 
@@ -37,11 +37,11 @@ pub inline fn execute_with_inline_hot_ops(
         0x60 => {
             if (comptime builtin.mode == .ReleaseFast) {
                 // Skip validation - we know PUSH1 needs 0 items and pushes 1
-                if (frame.stack.size() > Stack.CAPACITY - 1) {
+                if (frame.stack.size() > Stack.capacity - 1) {
                     return ExecutionError.Error.StackOverflow;
                 }
             } else {
-                if (frame.stack.size() > Stack.CAPACITY - 1) {
+                if (frame.stack.size() > Stack.capacity - 1) {
                     return ExecutionError.Error.StackOverflow;
                 }
             }
@@ -66,7 +66,7 @@ pub inline fn execute_with_inline_hot_ops(
             if (frame.stack.size() < 1) {
                 return ExecutionError.Error.StackUnderflow;
             }
-            if (frame.stack.size() > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.capacity - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -137,7 +137,7 @@ pub inline fn execute_with_inline_hot_ops(
             if (frame.stack.size() < 1) {
                 return ExecutionError.Error.StackUnderflow;
             }
-            if (frame.stack.size() > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.capacity - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -184,7 +184,7 @@ pub inline fn execute_with_inline_hot_ops(
         
         // PUSH2 - Common (~3%)
         0x61 => {
-            if (frame.stack.size() > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.capacity - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             
@@ -230,7 +230,7 @@ pub inline fn execute_with_inline_hot_ops(
             if (frame.stack.size() < 2) {
                 return ExecutionError.Error.StackUnderflow;
             }
-            if (frame.stack.size() > Stack.CAPACITY - 1) {
+            if (frame.stack.size() > Stack.capacity - 1) {
                 return ExecutionError.Error.StackOverflow;
             }
             

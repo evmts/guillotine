@@ -14,7 +14,7 @@ test "Error mapping: Stack errors mapped correctly" {
 
     // Fill stack to capacity
     var i: usize = 0;
-    while (i < Stack.CAPACITY) : (i += 1) {
+    while (i < Stack.capacity) : (i += 1) {
         try stack.append(@intCast(i));
     }
 

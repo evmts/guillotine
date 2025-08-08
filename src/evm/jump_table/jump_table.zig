@@ -8,7 +8,7 @@ const GasFunc = operation_module.GasFunc;
 const MemorySizeFunc = operation_module.MemorySizeFunc;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const ExecutionError = @import("../execution/execution_error.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
@@ -18,6 +18,15 @@ pub const execute_with_inline_hot_ops = @import("inline_hot_ops.zig").execute_wi
 
 const execution = @import("../execution/package.zig");
 const stack_ops = execution.stack;
+
+// Helper function to wrap generic execution functions for direct assignment
+fn wrap_generic_fn(comptime OpFn: *const fn (comptime anytype, *anyopaque) ExecutionError.Error!void) ExecutionFunc {
+    return struct {
+        pub fn f(ctx: *anyopaque) ExecutionError.Error!void {
+            return OpFn(.{}, ctx);
+        }
+    }.f;
+}
 const log = execution.log;
 const operation_config = @import("operation_config.zig");
 
@@ -92,7 +101,7 @@ pub fn init() JumpTable {
         .execute_funcs = [_]ExecutionFunc{undefined_execute} ** 256,
         .constant_gas = [_]u64{0} ** 256,
         .min_stack = [_]u32{0} ** 256,
-        .max_stack = [_]u32{Stack.CAPACITY} ** 256,
+        .max_stack = [_]u32{Stack.capacity} ** 256,
         .dynamic_gas = [_]?GasFunc{null} ** 256,
         .memory_size = [_]?MemorySizeFunc{null} ** 256,
         .undefined_flags = [_]bool{true} ** 256,
@@ -226,50 +235,50 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     // 0x60s & 0x70s: Push operations
     if (comptime builtin.mode == .ReleaseSmall) {
         // PUSH0 - EIP-3855
-        jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+        jt.execute_funcs[0x5f] = wrap_generic_fn(execution.null_opcode.op_invalid);
         jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
         jt.min_stack[0x5f] = 0;
-        jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+        jt.max_stack[0x5f] = Stack.capacity - 1;
         jt.undefined_flags[0x5f] = false;
         
         // PUSH1 - most common
-        jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
+        jt.execute_funcs[0x60] = wrap_generic_fn(execution.null_opcode.op_invalid);
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
-        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.max_stack[0x60] = Stack.capacity - 1;
         jt.undefined_flags[0x60] = false;
         
         // PUSH2-PUSH32 - temporarily disabled during refactor
         for (1..32) |i| {
-            jt.execute_funcs[0x60 + i] = execution.null_opcode.op_invalid;
+            jt.execute_funcs[0x60 + i] = wrap_generic_fn(execution.null_opcode.op_invalid);
             jt.constant_gas[0x60 + i] = execution.GasConstants.GasFastestStep;
             jt.min_stack[0x60 + i] = 0;
-            jt.max_stack[0x60 + i] = Stack.CAPACITY - 1;
+            jt.max_stack[0x60 + i] = Stack.capacity - 1;
             jt.undefined_flags[0x60 + i] = true;
         }
     } else {
         // PUSH0 - EIP-3855
-        jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+        jt.execute_funcs[0x5f] = wrap_generic_fn(execution.null_opcode.op_invalid);
         jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
         jt.min_stack[0x5f] = 0;
-        jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+        jt.max_stack[0x5f] = Stack.capacity - 1;
         jt.undefined_flags[0x5f] = false;
         
         // PUSH1 - most common, optimized with direct byte access
-        jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
+        jt.execute_funcs[0x60] = wrap_generic_fn(execution.null_opcode.op_invalid);
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
-        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.max_stack[0x60] = Stack.capacity - 1;
         jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH32 - temporarily disabled during refactor
         // TODO: Implement new-style PUSH operations for PUSH2-32
         inline for (1..32) |i| {
             const opcode_idx = 0x60 + i;
-            jt.execute_funcs[opcode_idx] = execution.null_opcode.op_invalid;
+            jt.execute_funcs[opcode_idx] = wrap_generic_fn(execution.null_opcode.op_invalid);
             jt.constant_gas[opcode_idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[opcode_idx] = 0;
-            jt.max_stack[opcode_idx] = Stack.CAPACITY - 1;
+            jt.max_stack[opcode_idx] = Stack.capacity - 1;
             jt.undefined_flags[opcode_idx] = true; // Mark as undefined until implemented
         }
     }
@@ -278,10 +287,10 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each DUP operation to avoid opcode detection issues
         const dup_functions = [_]ExecutionFunc{
-            stack_ops.op_dup1,  stack_ops.op_dup2,  stack_ops.op_dup3,  stack_ops.op_dup4,
-            stack_ops.op_dup5,  stack_ops.op_dup6,  stack_ops.op_dup7,  stack_ops.op_dup8,
-            stack_ops.op_dup9,  stack_ops.op_dup10, stack_ops.op_dup11, stack_ops.op_dup12,
-            stack_ops.op_dup13, stack_ops.op_dup14, stack_ops.op_dup15, stack_ops.op_dup16,
+            wrap_generic_fn(stack_ops.op_dup1),  wrap_generic_fn(stack_ops.op_dup2),  wrap_generic_fn(stack_ops.op_dup3),  wrap_generic_fn(stack_ops.op_dup4),
+            wrap_generic_fn(stack_ops.op_dup5),  wrap_generic_fn(stack_ops.op_dup6),  wrap_generic_fn(stack_ops.op_dup7),  wrap_generic_fn(stack_ops.op_dup8),
+            wrap_generic_fn(stack_ops.op_dup9),  wrap_generic_fn(stack_ops.op_dup10), wrap_generic_fn(stack_ops.op_dup11), wrap_generic_fn(stack_ops.op_dup12),
+            wrap_generic_fn(stack_ops.op_dup13), wrap_generic_fn(stack_ops.op_dup14), wrap_generic_fn(stack_ops.op_dup15), wrap_generic_fn(stack_ops.op_dup16),
         };
 
         inline for (1..17) |n| {
@@ -289,16 +298,16 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.execute_funcs[idx] = dup_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n);
-            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.max_stack[idx] = Stack.capacity - 1;
             jt.undefined_flags[idx] = false;
         }
     } else {
         // Use the same new-style functions for optimized mode
         const dup_functions = [_]ExecutionFunc{
-            stack_ops.op_dup1,  stack_ops.op_dup2,  stack_ops.op_dup3,  stack_ops.op_dup4,
-            stack_ops.op_dup5,  stack_ops.op_dup6,  stack_ops.op_dup7,  stack_ops.op_dup8,
-            stack_ops.op_dup9,  stack_ops.op_dup10, stack_ops.op_dup11, stack_ops.op_dup12,
-            stack_ops.op_dup13, stack_ops.op_dup14, stack_ops.op_dup15, stack_ops.op_dup16,
+            wrap_generic_fn(stack_ops.op_dup1),  wrap_generic_fn(stack_ops.op_dup2),  wrap_generic_fn(stack_ops.op_dup3),  wrap_generic_fn(stack_ops.op_dup4),
+            wrap_generic_fn(stack_ops.op_dup5),  wrap_generic_fn(stack_ops.op_dup6),  wrap_generic_fn(stack_ops.op_dup7),  wrap_generic_fn(stack_ops.op_dup8),
+            wrap_generic_fn(stack_ops.op_dup9),  wrap_generic_fn(stack_ops.op_dup10), wrap_generic_fn(stack_ops.op_dup11), wrap_generic_fn(stack_ops.op_dup12),
+            wrap_generic_fn(stack_ops.op_dup13), wrap_generic_fn(stack_ops.op_dup14), wrap_generic_fn(stack_ops.op_dup15), wrap_generic_fn(stack_ops.op_dup16),
         };
         
         inline for (1..17) |n| {
@@ -306,7 +315,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.execute_funcs[idx] = dup_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n);
-            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.max_stack[idx] = Stack.capacity - 1;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -315,10 +324,10 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each SWAP operation to avoid opcode detection issues
         const swap_functions = [_]ExecutionFunc{
-            stack_ops.op_swap1,  stack_ops.op_swap2,  stack_ops.op_swap3,  stack_ops.op_swap4,
-            stack_ops.op_swap5,  stack_ops.op_swap6,  stack_ops.op_swap7,  stack_ops.op_swap8,
-            stack_ops.op_swap9,  stack_ops.op_swap10, stack_ops.op_swap11, stack_ops.op_swap12,
-            stack_ops.op_swap13, stack_ops.op_swap14, stack_ops.op_swap15, stack_ops.op_swap16,
+            wrap_generic_fn(stack_ops.op_swap1),  wrap_generic_fn(stack_ops.op_swap2),  wrap_generic_fn(stack_ops.op_swap3),  wrap_generic_fn(stack_ops.op_swap4),
+            wrap_generic_fn(stack_ops.op_swap5),  wrap_generic_fn(stack_ops.op_swap6),  wrap_generic_fn(stack_ops.op_swap7),  wrap_generic_fn(stack_ops.op_swap8),
+            wrap_generic_fn(stack_ops.op_swap9),  wrap_generic_fn(stack_ops.op_swap10), wrap_generic_fn(stack_ops.op_swap11), wrap_generic_fn(stack_ops.op_swap12),
+            wrap_generic_fn(stack_ops.op_swap13), wrap_generic_fn(stack_ops.op_swap14), wrap_generic_fn(stack_ops.op_swap15), wrap_generic_fn(stack_ops.op_swap16),
         };
 
         inline for (1..17) |n| {
@@ -326,16 +335,16 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.execute_funcs[idx] = swap_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n + 1);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = Stack.capacity;
             jt.undefined_flags[idx] = false;
         }
     } else {
         // Use the same new-style functions for optimized mode
         const swap_functions = [_]ExecutionFunc{
-            stack_ops.op_swap1,  stack_ops.op_swap2,  stack_ops.op_swap3,  stack_ops.op_swap4,
-            stack_ops.op_swap5,  stack_ops.op_swap6,  stack_ops.op_swap7,  stack_ops.op_swap8,
-            stack_ops.op_swap9,  stack_ops.op_swap10, stack_ops.op_swap11, stack_ops.op_swap12,
-            stack_ops.op_swap13, stack_ops.op_swap14, stack_ops.op_swap15, stack_ops.op_swap16,
+            wrap_generic_fn(stack_ops.op_swap1),  wrap_generic_fn(stack_ops.op_swap2),  wrap_generic_fn(stack_ops.op_swap3),  wrap_generic_fn(stack_ops.op_swap4),
+            wrap_generic_fn(stack_ops.op_swap5),  wrap_generic_fn(stack_ops.op_swap6),  wrap_generic_fn(stack_ops.op_swap7),  wrap_generic_fn(stack_ops.op_swap8),
+            wrap_generic_fn(stack_ops.op_swap9),  wrap_generic_fn(stack_ops.op_swap10), wrap_generic_fn(stack_ops.op_swap11), wrap_generic_fn(stack_ops.op_swap12),
+            wrap_generic_fn(stack_ops.op_swap13), wrap_generic_fn(stack_ops.op_swap14), wrap_generic_fn(stack_ops.op_swap15), wrap_generic_fn(stack_ops.op_swap16),
         };
         
         inline for (1..17) |n| {
@@ -343,7 +352,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.execute_funcs[idx] = swap_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n + 1);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = Stack.capacity;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -352,7 +361,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each LOG operation to avoid opcode detection issues
         const log_functions = [_]ExecutionFunc{
-            log.log_0, log.log_1, log.log_2, log.log_3, log.log_4,
+            wrap_generic_fn(log.log_0), wrap_generic_fn(log.log_1), wrap_generic_fn(log.log_2), wrap_generic_fn(log.log_3), wrap_generic_fn(log.log_4),
         };
 
         inline for (0..5) |n| {
@@ -360,13 +369,13 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.execute_funcs[idx] = log_functions[n];
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = Stack.capacity;
             jt.undefined_flags[idx] = false;
         }
     } else {
         // Use the same static functions for optimized mode  
         const log_functions = [_]ExecutionFunc{
-            log.log_0, log.log_1, log.log_2, log.log_3, log.log_4,
+            wrap_generic_fn(log.log_0), wrap_generic_fn(log.log_1), wrap_generic_fn(log.log_2), wrap_generic_fn(log.log_3), wrap_generic_fn(log.log_4),
         };
         
         inline for (0..5) |n| {
@@ -374,7 +383,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.execute_funcs[idx] = log_functions[n];
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = Stack.capacity;
             jt.undefined_flags[idx] = false;
         }
     }

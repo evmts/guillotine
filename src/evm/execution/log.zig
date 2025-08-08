@@ -1,7 +1,7 @@
 const std = @import("std");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const ExecutionError = @import("execution_error.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const Frame = @import("../frame.zig").Frame;
 const Vm = @import("../evm.zig");
 const GasConstants = @import("primitives").GasConstants;
@@ -90,27 +90,32 @@ pub fn make_log(comptime num_topics: u8) fn (*ExecutionContext) ExecutionError.E
 // Runtime dispatch versions for LOG operations (used in ReleaseSmall mode)
 // Each LOG operation gets its own function to avoid opcode detection issues
 
-pub fn log_0(context: *anyopaque) ExecutionError.Error!void {
+pub fn log_0(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return log_impl(0, frame);
 }
 
-pub fn log_1(context: *anyopaque) ExecutionError.Error!void {
+pub fn log_1(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return log_impl(1, frame);
 }
 
-pub fn log_2(context: *anyopaque) ExecutionError.Error!void {
+pub fn log_2(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return log_impl(2, frame);
 }
 
-pub fn log_3(context: *anyopaque) ExecutionError.Error!void {
+pub fn log_3(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return log_impl(3, frame);
 }
 
-pub fn log_4(context: *anyopaque) ExecutionError.Error!void {
+pub fn log_4(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return log_impl(4, frame);
 }

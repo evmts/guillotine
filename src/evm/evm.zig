@@ -15,11 +15,13 @@ const opcode = @import("opcodes/opcode.zig");
 const Log = @import("log.zig");
 const EvmLog = @import("state/evm_log.zig");
 const Context = @import("access_list/context.zig");
-const EvmState = @import("state/state.zig");
-const Memory = @import("memory/memory.zig");
+const EvmState = @import("state/state.zig").DefaultEvmState;
+const memory_module = @import("memory/memory.zig");
+const stack_module = @import("stack/stack.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
 const evm_limits = @import("constants/evm_limits.zig");
-const Frame = @import("frame.zig").Frame;
+const frame_module = @import("frame.zig");
+const Frame = frame_module.Frame;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 pub const StorageKey = @import("primitives").StorageKey;
 pub const CreateResult = @import("evm/create_result.zig").CreateResult;
@@ -35,7 +37,15 @@ const ComptimeConfig = @import("comptime_config.zig").ComptimeConfig;
 /// Manages contract execution, gas accounting, state access, and protocol enforcement
 /// according to the configured hardfork rules. Supports the full EVM instruction set
 /// including contract creation, calls, and state modifications.
-const Evm = @This();
+///
+/// Generic over a comptime config parameter that determines component behavior.
+pub fn EvmImpl(comptime config: anytype) type {
+    _ = memory_module.Memory(config);
+    _ = stack_module.Stack(config);
+    _ = frame_module.FrameImpl(config);
+    
+    return struct {
+        const Self = @This();
 
 /// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
@@ -69,6 +79,12 @@ context: Context,
 /// Optional tracer for capturing execution traces
 tracer: ?std.io.AnyWriter = null,
 
+/// Return data from the last call operation
+return_data: []const u8 = &[_]u8{},
+
+/// Main execution stack for EVM operations
+stack: stack_module.DefaultStack,
+
 // Large state structures (placed last to minimize offset impact)
 /// World state including accounts, storage, and code
 state: EvmState,
@@ -97,11 +113,6 @@ journal: CallJournal = undefined,
 /// Before we can remove this restriction
 initial_thread_id: std.Thread.Id,
 
-// Compile-time validation and optimizations
-comptime {
-    std.debug.assert(@alignOf(Evm) >= 8); // Ensure proper alignment for performance
-    std.debug.assert(@sizeOf(Evm) > 0); // Struct must have size
-}
 
 /// Create a new EVM with a ComptimeConfig.
 ///
@@ -110,7 +121,7 @@ comptime {
 ///
 /// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
-/// @param config Comptime configuration (use ComptimeConfig.default() for defaults)
+/// @param evm_config Comptime configuration (use ComptimeConfig.default() for defaults)
 /// @param context Execution context (optional, defaults to Context.init())
 /// @param depth Current call depth (optional, defaults to 0)
 /// @param read_only Static call flag (optional, defaults to false)
@@ -121,33 +132,33 @@ comptime {
 /// Example usage:
 /// ```zig
 /// // Basic initialization with default config
-/// const config = ComptimeConfig.default();
-/// var evm = try Evm.initWithConfig(allocator, database, config, null, 0, false, null);
+/// const evm_config = ComptimeConfig.default();
+/// var evm = try Evm.initWithConfig(allocator, database, evm_config, null, 0, false, null);
 /// defer evm.deinit();
 ///
 /// // With custom hardfork configuration
-/// const config = ComptimeConfig.forHardfork(.LONDON);
-/// var evm = try Evm.initWithConfig(allocator, database, config, null, 0, false, null);
+/// const evm_config = ComptimeConfig.forHardfork(.LONDON);
+/// var evm = try Evm.initWithConfig(allocator, database, evm_config, null, 0, false, null);
 /// defer evm.deinit();
 /// ```
 pub fn initWithConfig(
     allocator: std.mem.Allocator,
-    database: @import("state/database_interface.zig").DatabaseInterface,
-    config: ComptimeConfig,
+    database: @import("state/database_interface.zig").DefaultDatabaseInterface,
+    evm_config: ComptimeConfig,
     context: ?Context,
     depth: u16,
     read_only: bool,
     tracer: ?std.io.AnyWriter,
-) !Evm {
+) !Self {
     Log.debug("Evm.initWithConfig: Initializing EVM with ComptimeConfig", .{});
 
     // Validate config consistency
-    try config.validate();
+    try evm_config.validate();
 
     // Initialize internal arena allocator for temporary data with preallocated capacity
     var internal_arena = std.heap.ArenaAllocator.init(allocator);
     // Preallocate memory to avoid frequent allocations during execution
-    _ = try internal_arena.allocator().alloc(u8, config.arena_initial_capacity);
+    _ = try internal_arena.allocator().alloc(u8, evm_config.arena_initial_capacity);
     _ = internal_arena.reset(.retain_capacity);
 
     var state = try EvmState.init(allocator, database);
@@ -158,12 +169,12 @@ pub fn initWithConfig(
     errdefer access_list.deinit();
 
     Log.debug("Evm.initWithConfig: EVM initialization complete", .{});
-    return Evm{
-        .config = config,
+    return Self{
+        .config = evm_config,
         .allocator = allocator,
         .internal_arena = internal_arena,
-        .table = config.jump_table,
-        .chain_rules = config.chain_rules,
+        .table = evm_config.jump_table,
+        .chain_rules = evm_config.chain_rules,
         .state = state,
         .access_list = access_list,
         .context = ctx,
@@ -172,6 +183,7 @@ pub fn initWithConfig(
         .read_only = read_only,
         .tracer = tracer,
         // Execution state fields (initialized fresh in each call)
+        .stack = stack_module.DefaultStack.init(),
         .frame_stack = undefined,
         .current_frame_depth = 0,
         .self_destruct = undefined,
@@ -197,24 +209,24 @@ pub fn initWithConfig(
 /// @throws OutOfMemory if memory initialization fails
 pub fn init(
     allocator: std.mem.Allocator,
-    database: @import("state/database_interface.zig").DatabaseInterface,
+    database: @import("state/database_interface.zig").DefaultDatabaseInterface,
     table: ?JumpTable,
     chain_rules: ?ChainRules,
     context: ?Context,
     depth: u16,
     read_only: bool,
     tracer: ?std.io.AnyWriter,
-) !Evm {
+) !Self {
     // Create a ComptimeConfig from the legacy parameters
-    var config = ComptimeConfig.default();
+    var evm_config = ComptimeConfig.default();
     if (table) |t| {
-        config.jump_table = t;
+        evm_config.jump_table = t;
     }
     if (chain_rules) |r| {
-        config.chain_rules = r;
+        evm_config.chain_rules = r;
     }
     
-    return initWithConfig(allocator, database, config, context, depth, read_only, tracer);
+    return initWithConfig(allocator, database, evm_config, context, depth, read_only, tracer);
 }
 
 /// Free all VM resources.
@@ -311,7 +323,7 @@ pub usingnamespace @import("evm/require_one_thread.zig");
 pub const ConsumeGasError = ExecutionError.Error;
 
 const testing = std.testing;
-const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
+const MemoryDatabase = @import("state/memory_database.zig").DefaultMemoryDatabase;
 
 test "Evm.init default configuration" {
     const allocator = testing.allocator;
@@ -1217,3 +1229,12 @@ test "fuzz_evm_hardfork_configurations" {
     const input = "test_input_data_for_fuzzing";
     try global.testEvmHardforkConfigurations(input);
 }
+
+    }; // End of EvmImpl struct
+} // End of EvmImpl function
+
+/// Default EVM configuration for backward compatibility
+pub const DefaultEvm = EvmImpl(ComptimeConfig.default());
+
+/// Backward compatibility alias (pointing to the concrete type)
+pub const Evm = DefaultEvm;

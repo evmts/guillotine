@@ -15,13 +15,13 @@ pub fn call_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void,
 }
 
 /// Adapter for op_returndatasize which uses the old Operation signature
-pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_returndatasize_adapter(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = try memory.op_returndatasize(0, @ptrCast(@alignCast(frame)), frame);
+    _ = try memory.op_returndatasize(config, 0, @ptrCast(@alignCast(frame)), frame);
 }
 
 /// Adapter for op_returndatacopy which uses the old Operation signature
-pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_returndatacopy_adapter(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = try memory.op_returndatacopy(0, @ptrCast(@alignCast(frame)), frame);
+    _ = try memory.op_returndatacopy(config, 0, @ptrCast(@alignCast(frame)), frame);
 }

@@ -41,7 +41,8 @@ inline fn hash_with_stack_buffer(data: []const u8) [32]u8 {
     return hash;
 }
 
-pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sha3(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 

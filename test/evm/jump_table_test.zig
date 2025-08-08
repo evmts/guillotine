@@ -220,7 +220,7 @@ test "JumpTable Shanghai opcodes" {
     const push0_op = jt_shanghai.get_operation(0x5f);
     try std.testing.expectEqual(@as(u64, gas_constants.GasQuickStep), push0_op.constant_gas);
     try std.testing.expectEqual(@as(u32, 0), push0_op.min_stack);
-    try std.testing.expectEqual(@as(u32, Stack.CAPACITY - 1), push0_op.max_stack);
+    try std.testing.expectEqual(@as(u32, Stack.capacity - 1), push0_op.max_stack);
 }
 
 test "JumpTable Cancun opcodes" {

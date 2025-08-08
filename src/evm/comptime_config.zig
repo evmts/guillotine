@@ -1,8 +1,9 @@
 const std = @import("std");
-const JumpTable = @import("jump_table/jump_table.zig").JumpTable;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
-const ChainRules = @import("frame.zig").ChainRules;
-const Frame = @import("frame.zig").Frame;
+
+// Forward declarations to avoid circular dependencies
+const JumpTable = @import("jump_table/jump_table.zig").JumpTable;
+const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
 
 /// Centralized comptime configuration for the EVM.
 /// All configurable constants and parameters are consolidated here.
@@ -40,6 +41,8 @@ pub const ComptimeConfig = struct {
     /// Initial arena capacity for temporary allocations (256KB)
     /// This covers most common contract executions without reallocation
     arena_initial_capacity: usize = 256 * 1024,
+    /// Small memory lookup table size for gas cost optimization
+    small_memory_lookup_size: usize = 128, // Covers 0-4KB in 32-byte words
 
     // Stack Configuration
     /// Stack capacity (must match max_stack_size for consistency)
@@ -99,9 +102,9 @@ pub const ComptimeConfig = struct {
 
     // Jump Table (comptime data)
     /// Opcode dispatch table for the configured hardfork
-    jump_table: JumpTable = JumpTable.CANCUN,
+    jump_table: JumpTable = JumpTable.init_from_hardfork(.CANCUN),
     /// Chain rules for the configured hardfork
-    chain_rules: ChainRules = Frame.chainRulesForHardfork(.CANCUN),
+    chain_rules: ChainRules = ChainRules.for_hardfork(.CANCUN),
 
     /// Create a default configuration for mainnet Cancun
     pub fn default() ComptimeConfig {
@@ -110,11 +113,11 @@ pub const ComptimeConfig = struct {
 
     /// Create a configuration for a specific hardfork
     pub fn forHardfork(hardfork: Hardfork) ComptimeConfig {
-        return .{
-            .hardfork = hardfork,
-            .jump_table = JumpTable.init_from_hardfork(hardfork),
-            .chain_rules = Frame.chainRulesForHardfork(hardfork),
-        };
+        var config = ComptimeConfig.default();
+        config.hardfork = hardfork;
+        config.jump_table = JumpTable.init_from_hardfork(hardfork);
+        config.chain_rules = ChainRules.for_hardfork(hardfork);
+        return config;
     }
 
     /// Create a test configuration with relaxed limits

@@ -6,14 +6,16 @@ const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
 
-pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_address(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // Push contract address as u256
     const addr = to_u256(frame.contract_address);
     try frame.stack.append(addr);
 }
 
-pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_balance(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
     const address = from_u256(address_u256);
@@ -27,7 +29,8 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(balance);
 }
 
-pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_origin(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need tx_origin field in ExecutionContext
     // Push transaction origin address
@@ -38,7 +41,8 @@ pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_caller(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need caller field in ExecutionContext
     // Push caller address
@@ -49,7 +53,8 @@ pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_callvalue(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need call_value field in ExecutionContext
     // Push call value
@@ -59,7 +64,8 @@ pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_gasprice(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need gas_price field in ExecutionContext
     // Push gas price from transaction context
@@ -69,7 +75,8 @@ pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_extcodesize(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
     const address = from_u256(address_u256);
@@ -83,7 +90,8 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(@as(u256, @intCast(code.len)));
 }
 
-pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_extcodecopy(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
     const mem_offset = try frame.stack.pop();
@@ -126,7 +134,8 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
 
-pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_extcodehash(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
     const address = from_u256(address_u256);
@@ -152,7 +161,8 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     }
 }
 
-pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_selfbalance(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // Get balance of current executing contract
     const self_address = frame.contract_address;
@@ -160,7 +170,8 @@ pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(balance);
 }
 
-pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_chainid(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need chain_id field in ExecutionContext
     // Push chain ID from transaction context
@@ -170,7 +181,8 @@ pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(1);
 }
 
-pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_calldatasize(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need input/calldata field in ExecutionContext
     // Push size of calldata
@@ -180,7 +192,8 @@ pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_codesize(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need contract_code field in ExecutionContext
     // Push size of current contract's code
@@ -190,7 +203,8 @@ pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_calldataload(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need input/calldata field in ExecutionContext
     // Pop offset from stack
@@ -212,7 +226,8 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_calldatacopy(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need input/calldata field in ExecutionContext
     // Pop memory offset, data offset, and size
@@ -246,7 +261,8 @@ pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
     // try frame.memory.set_data_bounded(mem_offset_usize, calldata, data_offset_usize, size_usize);
 }
 
-pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_codecopy(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need contract_code field in ExecutionContext
     // Pop memory offset, code offset, and size
@@ -284,7 +300,8 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
 }
 /// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data
 /// This is an EOF opcode that allows reading from the return data buffer
-pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_returndataload(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Need return_data field in ExecutionContext
     // Pop offset from stack

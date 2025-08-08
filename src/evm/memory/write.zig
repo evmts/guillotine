@@ -12,7 +12,7 @@ const context = @import("context.zig");
 // No further optimizations are needed.
 
 /// Write arbitrary data at context-relative offset.
-pub inline fn set_data(self: *memory.Memory, relative_offset: usize, data: []const u8) errors.MemoryError!void {
+pub inline fn set_data(self: *memory.DefaultMemory, relative_offset: usize, data: []const u8) errors.MemoryError!void {
     // Debug logging removed for fuzz testing compatibility
     if (data.len == 0) return;
 
@@ -30,7 +30,7 @@ pub inline fn set_data(self: *memory.Memory, relative_offset: usize, data: []con
 
 /// Write data with source offset and length (handles partial copies and zero-fills).
 pub fn set_data_bounded(
-    self: *memory.Memory,
+    self: *memory.DefaultMemory,
     relative_memory_offset: usize,
     data: []const u8,
     data_offset: usize,
@@ -69,7 +69,7 @@ pub fn set_data_bounded(
 }
 
 /// Write u256 value at context-relative offset (for test compatibility)
-pub inline fn set_u256(self: *memory.Memory, relative_offset: usize, value: u256) errors.MemoryError!void {
+pub inline fn set_u256(self: *memory.DefaultMemory, relative_offset: usize, value: u256) errors.MemoryError!void {
     _ = try self.ensure_context_capacity(relative_offset + 32);
     const abs_offset = self.my_checkpoint + relative_offset;
     const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + 32].ptr);

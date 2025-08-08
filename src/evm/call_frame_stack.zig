@@ -8,7 +8,7 @@ const primitives = @import("../primitives/primitives.zig");
 const Host = @import("root.zig").Host;
 
 const Frame = @import("frame.zig").Frame;
-const Memory = @import("memory/memory.zig").Memory;
+const Memory = @import("memory/memory.zig").DefaultMemory;
 const ExecutionError = @import("execution/execution_error.zig").ExecutionError;
 const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 

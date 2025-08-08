@@ -7,7 +7,7 @@ const primitives = @import("primitives");
 const Vm = @import("../evm.zig");
 const Operation = @import("../opcodes/operation.zig");
 const MemoryDatabase = @import("../state/memory_database.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 
 /// Comparison operations for the Ethereum Virtual Machine
 ///
@@ -15,7 +15,8 @@ const Stack = @import("../stack/stack.zig");
 /// unsigned comparisons (LT, GT), signed comparisons (SLT, SGT),
 /// equality checking (EQ), and zero testing (ISZERO).
 
-pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_lt(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -34,7 +35,8 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_gt(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -53,7 +55,8 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_slt(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -75,7 +78,8 @@ pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sgt(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -94,7 +98,8 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_eq(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_eq(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -109,7 +114,8 @@ pub fn op_eq(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_iszero(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_iszero(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
 

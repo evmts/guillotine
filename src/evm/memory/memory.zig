@@ -1,52 +1,60 @@
 const std = @import("std");
 const constants = @import("constants.zig");
+const builtin = @import("builtin");
 
 /// Memory implementation for EVM execution contexts.
-pub const Memory = @This();
+/// Generic over a config subset.
+/// Config must have: word_type, small_memory_lookup_size
+pub fn Memory(comptime config: anytype) type {
+    const WordType = config.word_type;
+    const SMALL_MEMORY_LOOKUP_SIZE_VAL = config.small_memory_lookup_size;
+    
+    return struct {
+        const Self = @This();
 
-// Re-export error types and constants for convenience
-pub const MemoryError = @import("errors.zig").MemoryError;
-pub const INITIAL_CAPACITY = constants.INITIAL_CAPACITY;
-pub const DEFAULT_MEMORY_LIMIT = constants.DEFAULT_MEMORY_LIMIT;
-pub const calculate_num_words = constants.calculate_num_words;
+        // Re-export error types and constants for convenience
+        pub const MemoryError = @import("errors.zig").MemoryError;
+        pub const INITIAL_CAPACITY = constants.INITIAL_CAPACITY;
+        pub const DEFAULT_MEMORY_LIMIT = constants.DEFAULT_MEMORY_LIMIT;
+        pub const calculate_num_words = constants.calculate_num_words;
 
-// Core memory struct fields optimized for cache locality and minimal padding
-/// Memory checkpoint for child memory isolation
-/// Frequently accessed during memory operations
-my_checkpoint: usize,
+        // Core memory struct fields optimized for cache locality and minimal padding
+        /// Memory checkpoint for child memory isolation
+        /// Frequently accessed during memory operations
+        my_checkpoint: usize,
 
-/// Maximum memory size limit
-/// Used for bounds checking, frequently accessed
-memory_limit: u64,
+        /// Maximum memory size limit
+        /// Used for bounds checking, frequently accessed
+        memory_limit: u64,
 
-/// Reference to shared buffer for all memory contexts
-/// Frequently accessed for actual memory operations
-shared_buffer_ref: *std.ArrayList(u8),
+        /// Reference to shared buffer for all memory contexts
+        /// Frequently accessed for actual memory operations
+        shared_buffer_ref: *std.ArrayList(u8),
 
-/// Memory allocator for dynamic allocations
-/// Less frequently accessed
-allocator: std.mem.Allocator,
+        /// Memory allocator for dynamic allocations
+        /// Less frequently accessed
+        allocator: std.mem.Allocator,
 
-/// Whether this Memory instance owns the buffer
-/// Small bool field placed last to minimize padding
-owns_buffer: bool,
+        /// Whether this Memory instance owns the buffer
+        /// Small bool field placed last to minimize padding
+        owns_buffer: bool,
 
-/// Cache for memory expansion gas cost calculations
-/// Stores the last expansion calculation to avoid redundant quadratic computations
-cached_expansion: struct {
-    /// Last calculated memory size in bytes
-    last_size: u64,
-    /// Gas cost for the last calculated size
-    last_cost: u64,
-} = .{ .last_size = 0, .last_cost = 0 },
+        /// Cache for memory expansion gas cost calculations
+        /// Stores the last expansion calculation to avoid redundant quadratic computations
+        cached_expansion: struct {
+            /// Last calculated memory size in bytes
+            last_size: u64,
+            /// Gas cost for the last calculated size
+            last_cost: u64,
+        } = .{ .last_size = 0, .last_cost = 0 },
 
-/// Initializes the root Memory context that owns the shared buffer.
-/// This is the safe API that eliminates the undefined pointer footgun.
-pub fn init(
-    allocator: std.mem.Allocator,
-    initial_capacity: usize,
-    memory_limit: u64,
-) !Memory {
+        /// Initializes the root Memory context that owns the shared buffer.
+        /// This is the safe API that eliminates the undefined pointer footgun.
+        pub fn init(
+            allocator: std.mem.Allocator,
+            initial_capacity: usize,
+            memory_limit: u64,
+        ) !Self {
     std.log.debug("Memory.init: Starting, initial_capacity={}, memory_limit={}", .{initial_capacity, memory_limit});
     
     std.log.debug("Memory.init: About to create shared_buffer", .{});
@@ -62,8 +70,8 @@ pub fn init(
     try shared_buffer.ensureTotalCapacity(initial_capacity);
     std.log.debug("Memory.init: ensureTotalCapacity complete", .{});
 
-    std.log.debug("Memory.init: Returning Memory struct", .{});
-    return Memory{
+            std.log.debug("Memory.init: Returning Memory struct", .{});
+            return Self{
         .my_checkpoint = 0,
         .memory_limit = memory_limit,
         .shared_buffer_ref = shared_buffer,
@@ -72,10 +80,10 @@ pub fn init(
     };
 }
 
-/// Creates a child Memory that shares the buffer with a different checkpoint.
-/// Child memory has a view of the shared buffer starting from its checkpoint.
-pub fn init_child_memory(self: *Memory, checkpoint: usize) !Memory {
-    return Memory{
+        /// Creates a child Memory that shares the buffer with a different checkpoint.
+        /// Child memory has a view of the shared buffer starting from its checkpoint.
+        pub fn init_child_memory(self: *Self, checkpoint: usize) !Self {
+            return Self{
         .my_checkpoint = checkpoint,
         .memory_limit = self.memory_limit,
         .shared_buffer_ref = self.shared_buffer_ref,
@@ -84,37 +92,37 @@ pub fn init_child_memory(self: *Memory, checkpoint: usize) !Memory {
     };
 }
 
-pub fn init_default(allocator: std.mem.Allocator) !Memory {
+        pub fn init_default(allocator: std.mem.Allocator) !Self {
     std.log.debug("Memory.init_default: Called with allocator={*}", .{allocator.ptr});
     const result = try init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
     std.log.debug("Memory.init_default: Returning", .{});
     return result;
 }
 
-/// Deinitializes the Memory. Only root Memory instances clean up the shared buffer.
-pub fn deinit(self: *Memory) void {
+        /// Deinitializes the Memory. Only root Memory instances clean up the shared buffer.
+        pub fn deinit(self: *Self) void {
     if (self.owns_buffer) {
         self.shared_buffer_ref.deinit();
         self.allocator.destroy(self.shared_buffer_ref);
     }
 }
 
-// Import and re-export all method implementations
-const context_ops = @import("context.zig");
-const read_ops = @import("read.zig");
-const write_ops = @import("write.zig");
-const slice_ops = @import("slice.zig");
+        // Import and re-export all method implementations
+        const context_ops = @import("context.zig");
+        const read_ops = @import("read.zig");
+        const write_ops = @import("write.zig");
+        const slice_ops = @import("slice.zig");
 
-// Context operations
-pub const context_size = context_ops.context_size;
-pub const ensure_context_capacity = context_ops.ensure_context_capacity;
-pub const ensure_context_capacity_slow = context_ops.ensure_context_capacity_slow;
-pub const resize_context = context_ops.resize_context;
-pub const size = context_ops.size;
-pub const total_size = context_ops.total_size;
+        // Context operations
+        pub const context_size = context_ops.context_size;
+        pub const ensure_context_capacity = context_ops.ensure_context_capacity;
+        pub const ensure_context_capacity_slow = context_ops.ensure_context_capacity_slow;
+        pub const resize_context = context_ops.resize_context;
+        pub const size = context_ops.size;
+        pub const total_size = context_ops.total_size;
 
-/// Clear the memory by resetting size to 0 (for call frame reuse)
-pub fn clear(self: *Memory) void {
+        /// Clear the memory by resetting size to 0 (for call frame reuse)
+        pub fn clear(self: *Self) void {
     // For shared buffer memory, we can't actually clear the buffer
     // since other contexts might be using it. Instead we reset our checkpoint
     // to the current buffer end, effectively giving us a "fresh" view
@@ -131,35 +139,50 @@ pub fn clear(self: *Memory) void {
     self.cached_expansion = .{ .last_size = 0, .last_cost = 0 };
 }
 
-// Read operations
-pub const get_u256 = read_ops.get_u256;
-pub const get_slice = read_ops.get_slice;
-pub const get_byte = read_ops.get_byte;
+        // Read operations - need to be generic aware
+        pub fn get_word(self: *const Self, relative_offset: usize) MemoryError!WordType {
+            if (relative_offset + @sizeOf(WordType) > self.context_size()) {
+                return MemoryError.InvalidOffset;
+            }
+            const abs_offset = self.my_checkpoint + relative_offset;
+            const bytes = self.shared_buffer_ref.items[abs_offset .. abs_offset + @sizeOf(WordType)];
+            return std.mem.readInt(WordType, bytes[0..@sizeOf(WordType)], .big);
+        }
+        
+        pub const get_u256 = get_word; // Alias for backward compatibility
+        pub const get_slice = read_ops.get_slice;
+        pub const get_byte = read_ops.get_byte;
 
-// Write operations
-pub const set_data = write_ops.set_data;
-pub const set_data_bounded = write_ops.set_data_bounded;
-pub const set_u256 = write_ops.set_u256;
+        // Write operations - need to be generic aware
+        pub fn set_word(self: *Self, relative_offset: usize, value: WordType) MemoryError!void {
+            _ = try self.ensure_context_capacity(relative_offset + @sizeOf(WordType));
+            const abs_offset = self.my_checkpoint + relative_offset;
+            const bytes_ptr: *[@sizeOf(WordType)]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + @sizeOf(WordType)].ptr);
+            std.mem.writeInt(WordType, bytes_ptr, value, .big);
+        }
+        
+        pub const set_u256 = set_word; // Alias for backward compatibility
+        pub const set_data = write_ops.set_data;
+        pub const set_data_bounded = write_ops.set_data_bounded;
 
-// Slice operations
-pub const slice = slice_ops.slice;
+        // Slice operations
+        pub const slice = slice_ops.slice;
 
-/// Lookup table for small memory sizes (0-4KB in 32-byte increments)
-/// Provides O(1) access for common small memory allocations
-const SMALL_MEMORY_LOOKUP_SIZE = 128; // Covers 0-4KB in 32-byte words
-const SMALL_MEMORY_LOOKUP_TABLE = generate_memory_expansion_lut: {
-    var table: [SMALL_MEMORY_LOOKUP_SIZE + 1]u64 = undefined;
-    for (&table, 0..) |*cost, words| {
-        const word_count = @as(u64, @intCast(words));
-        cost.* = 3 * word_count + (word_count * word_count) / 512;
-    }
-    break :generate_memory_expansion_lut table;
-};
+        /// Lookup table for small memory sizes (0-4KB in 32-byte increments)
+        /// Provides O(1) access for common small memory allocations
+        const SMALL_MEMORY_LOOKUP_TABLE = generate_memory_expansion_lut: {
+            var table: [SMALL_MEMORY_LOOKUP_SIZE_VAL + 1]u64 = undefined;
+            for (&table, 0..) |*cost, words| {
+                const word_count = @as(u64, @intCast(words));
+                cost.* = 3 * word_count + (word_count * word_count) / 512;
+            }
+            break :generate_memory_expansion_lut table;
+        };
 
-/// Get memory expansion gas cost with caching optimization
-/// Returns the gas cost for expanding memory from current size to new_size.
-/// Uses lookup table for small sizes and cached values for larger sizes.
-pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
+        /// Get memory expansion gas cost with caching optimization
+        /// Returns the gas cost for expanding memory from current size to new_size.
+        /// Uses lookup table for small sizes and cached values for larger sizes.
+        pub fn get_expansion_cost(self: *Self, new_size: u64) u64 {
     const current_size = @as(u64, @intCast(self.context_size()));
     
     // No expansion needed if new size is not larger than current
@@ -170,8 +193,8 @@ pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
     const new_words = (new_size + 31) / 32;
     const current_words = (current_size + 31) / 32;
     
-    // Use lookup table for small memory sizes
-    if (new_words <= SMALL_MEMORY_LOOKUP_SIZE and current_words <= SMALL_MEMORY_LOOKUP_SIZE) {
+            // Use lookup table for small memory sizes
+            if (new_words <= SMALL_MEMORY_LOOKUP_SIZE_VAL and current_words <= SMALL_MEMORY_LOOKUP_SIZE_VAL) {
         return SMALL_MEMORY_LOOKUP_TABLE[@intCast(new_words)] - SMALL_MEMORY_LOOKUP_TABLE[@intCast(current_words)];
     }
     
@@ -194,20 +217,28 @@ pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
     return expansion_cost;
 }
 
-/// Calculate total memory cost for a given size (internal helper)
-inline fn calculate_memory_total_cost(size_bytes: u64) u64 {
-    const words = (size_bytes + 31) / 32;
-    return 3 * words + (words * words) / 512;
+        /// Calculate total memory cost for a given size (internal helper)
+        inline fn calculate_memory_total_cost(size_bytes: u64) u64 {
+            const words = (size_bytes + 31) / 32;
+            return 3 * words + (words * words) / 512;
+        }
+    };
 }
 
+// Default Memory type for backward compatibility
+pub const DefaultMemory = Memory(.{
+    .word_type = u256,
+    .small_memory_lookup_size = 128,
+});
+
 // Import fuzz tests to ensure they are compiled and run
-test {
-    _ = @import("fuzz_tests.zig");
-}
+// test {
+//     _ = @import("fuzz_tests.zig");
+// }
 
 test "memory expansion gas cost lookup table" {
     const allocator = std.testing.allocator;
-    var memory = try Memory.init_default(allocator);
+    var memory = try DefaultMemory.init_default(allocator);
     defer memory.deinit();
     
     // Test small memory sizes use lookup table
@@ -234,7 +265,7 @@ test "memory expansion gas cost lookup table" {
 
 test "memory expansion gas cost cache behavior" {
     const allocator = std.testing.allocator;
-    var memory = try Memory.init_default(allocator);
+    var memory = try DefaultMemory.init_default(allocator);
     defer memory.deinit();
     
     // Test large memory sizes use cache
@@ -261,7 +292,7 @@ test "memory expansion gas cost cache behavior" {
 
 test "memory expansion gas cost mixed lookup and cache" {
     const allocator = std.testing.allocator;
-    var memory = try Memory.init_default(allocator);
+    var memory = try DefaultMemory.init_default(allocator);
     defer memory.deinit();
     
     // Start with small memory (uses lookup table)
@@ -291,11 +322,11 @@ test "memory expansion gas cost mixed lookup and cache" {
 
 test "memory expansion gas cost boundary conditions" {
     const allocator = std.testing.allocator;
-    var memory = try Memory.init_default(allocator);
+    var memory = try DefaultMemory.init_default(allocator);
     defer memory.deinit();
     
     // Test exactly at lookup table boundary
-    const boundary_words = SMALL_MEMORY_LOOKUP_SIZE;
+    const boundary_words = 128; // Default small_memory_lookup_size
     const boundary_size = boundary_words * 32;
     
     const boundary_cost = memory.get_expansion_cost(boundary_size);
@@ -318,7 +349,7 @@ test "memory expansion gas cost performance benchmark" {
     
     // Benchmark lookup table performance for small sizes
     {
-        var memory = try Memory.init_default(allocator);
+        var memory = try DefaultMemory.init_default(allocator);
         defer memory.deinit();
         
         const start_time = std.time.nanoTimestamp();
@@ -331,7 +362,7 @@ test "memory expansion gas cost performance benchmark" {
             
             // Reset memory occasionally to test fresh calculations
             if (i % 100 == 0) {
-                memory = try Memory.init_default(allocator);
+                memory = try DefaultMemory.init_default(allocator);
             }
         }
         

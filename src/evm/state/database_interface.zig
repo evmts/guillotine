@@ -101,8 +101,20 @@ pub const Account = struct {
     }
 };
 
-/// Database interface using vtable pattern for pluggable implementations
-pub const DatabaseInterface = struct {
+/// Database interface factory function using vtable pattern for pluggable implementations
+///
+/// Creates a generic database interface type that can be configured with different
+/// limits and settings via the comptime config parameter.
+///
+/// ## Parameters
+/// - `config`: Comptime configuration struct containing limits and settings
+///
+/// ## Returns
+/// A configured database interface type
+pub fn DatabaseInterface(comptime config: anytype) type {
+    _ = config; // Config parameter may be used in future for customization
+    return struct {
+        const Self = @This();
     /// Pointer to the actual implementation
     ptr: *anyopaque,
     /// Function pointer table for the implementation
@@ -161,7 +173,7 @@ pub const DatabaseInterface = struct {
     ///
     /// ## Type Requirements
     /// The implementation must provide all required methods with correct signatures
-    pub fn init(implementation: anytype) DatabaseInterface {
+    pub fn init(implementation: anytype) Self {
         const Impl = @TypeOf(implementation);
         const impl_info = @typeInfo(Impl);
 
@@ -300,7 +312,7 @@ pub const DatabaseInterface = struct {
             };
         };
 
-        return DatabaseInterface{
+        return Self{
             .ptr = implementation,
             .vtable = &gen.vtable,
         };
@@ -309,122 +321,124 @@ pub const DatabaseInterface = struct {
     // Account operations
 
     /// Get account data for the given address
-    pub fn get_account(self: DatabaseInterface, address: [20]u8) DatabaseError!?Account {
+    pub fn get_account(self: Self, address: [20]u8) DatabaseError!?Account {
         return self.vtable.get_account(self.ptr, address);
     }
 
     /// Set account data for the given address
-    pub fn set_account(self: DatabaseInterface, address: [20]u8, account: Account) DatabaseError!void {
+    pub fn set_account(self: Self, address: [20]u8, account: Account) DatabaseError!void {
         return self.vtable.set_account(self.ptr, address, account);
     }
 
     /// Delete account and all associated data
-    pub fn delete_account(self: DatabaseInterface, address: [20]u8) DatabaseError!void {
+    pub fn delete_account(self: Self, address: [20]u8) DatabaseError!void {
         return self.vtable.delete_account(self.ptr, address);
     }
 
     /// Check if account exists in the database
-    pub fn account_exists(self: DatabaseInterface, address: [20]u8) bool {
+    pub fn account_exists(self: Self, address: [20]u8) bool {
         return self.vtable.account_exists(self.ptr, address);
     }
 
     /// Get account balance
-    pub fn get_balance(self: DatabaseInterface, address: [20]u8) DatabaseError!u256 {
+    pub fn get_balance(self: Self, address: [20]u8) DatabaseError!u256 {
         return self.vtable.get_balance(self.ptr, address);
     }
 
     // Storage operations
 
     /// Get storage value for the given address and key
-    pub fn get_storage(self: DatabaseInterface, address: [20]u8, key: u256) DatabaseError!u256 {
+    pub fn get_storage(self: Self, address: [20]u8, key: u256) DatabaseError!u256 {
         return self.vtable.get_storage(self.ptr, address, key);
     }
 
     /// Set storage value for the given address and key
-    pub fn set_storage(self: DatabaseInterface, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+    pub fn set_storage(self: Self, address: [20]u8, key: u256, value: u256) DatabaseError!void {
         return self.vtable.set_storage(self.ptr, address, key, value);
     }
 
     /// Get transient storage value for the given address and key (EIP-1153)
-    pub fn get_transient_storage(self: DatabaseInterface, address: [20]u8, key: u256) DatabaseError!u256 {
+    pub fn get_transient_storage(self: Self, address: [20]u8, key: u256) DatabaseError!u256 {
         return self.vtable.get_transient_storage(self.ptr, address, key);
     }
 
     /// Set transient storage value for the given address and key (EIP-1153)
-    pub fn set_transient_storage(self: DatabaseInterface, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+    pub fn set_transient_storage(self: Self, address: [20]u8, key: u256, value: u256) DatabaseError!void {
         return self.vtable.set_transient_storage(self.ptr, address, key, value);
     }
 
     // Code operations
 
     /// Get contract code by hash
-    pub fn get_code(self: DatabaseInterface, code_hash: [32]u8) DatabaseError![]const u8 {
+    pub fn get_code(self: Self, code_hash: [32]u8) DatabaseError![]const u8 {
         return self.vtable.get_code(self.ptr, code_hash);
     }
 
     /// Get contract code by address
-    pub fn get_code_by_address(self: DatabaseInterface, address: [20]u8) DatabaseError![]const u8 {
+    pub fn get_code_by_address(self: Self, address: [20]u8) DatabaseError![]const u8 {
         return self.vtable.get_code_by_address(self.ptr, address);
     }
 
     /// Store contract code and return its hash
-    pub fn set_code(self: DatabaseInterface, code: []const u8) DatabaseError![32]u8 {
+    pub fn set_code(self: Self, code: []const u8) DatabaseError![32]u8 {
         return self.vtable.set_code(self.ptr, code);
     }
 
     // State root operations
 
     /// Get current state root hash
-    pub fn get_state_root(self: DatabaseInterface) DatabaseError![32]u8 {
+    pub fn get_state_root(self: Self) DatabaseError![32]u8 {
         return self.vtable.get_state_root(self.ptr);
     }
 
     /// Commit pending changes and return new state root
-    pub fn commit_changes(self: DatabaseInterface) DatabaseError![32]u8 {
+    pub fn commit_changes(self: Self) DatabaseError![32]u8 {
         return self.vtable.commit_changes(self.ptr);
     }
 
     // Snapshot operations
 
     /// Create a state snapshot and return its ID
-    pub fn create_snapshot(self: DatabaseInterface) DatabaseError!u64 {
+    pub fn create_snapshot(self: Self) DatabaseError!u64 {
         return self.vtable.create_snapshot(self.ptr);
     }
 
     /// Revert state to the given snapshot
-    pub fn revert_to_snapshot(self: DatabaseInterface, snapshot_id: u64) DatabaseError!void {
+    pub fn revert_to_snapshot(self: Self, snapshot_id: u64) DatabaseError!void {
         return self.vtable.revert_to_snapshot(self.ptr, snapshot_id);
     }
 
     /// Commit a snapshot (discard it without reverting)
-    pub fn commit_snapshot(self: DatabaseInterface, snapshot_id: u64) DatabaseError!void {
+    pub fn commit_snapshot(self: Self, snapshot_id: u64) DatabaseError!void {
         return self.vtable.commit_snapshot(self.ptr, snapshot_id);
     }
 
     // Batch operations
 
     /// Begin a batch operation for efficient bulk updates
-    pub fn begin_batch(self: DatabaseInterface) DatabaseError!void {
+    pub fn begin_batch(self: Self) DatabaseError!void {
         return self.vtable.begin_batch(self.ptr);
     }
 
     /// Commit all changes in the current batch
-    pub fn commit_batch(self: DatabaseInterface) DatabaseError!void {
+    pub fn commit_batch(self: Self) DatabaseError!void {
         return self.vtable.commit_batch(self.ptr);
     }
 
     /// Rollback all changes in the current batch
-    pub fn rollback_batch(self: DatabaseInterface) DatabaseError!void {
+    pub fn rollback_batch(self: Self) DatabaseError!void {
         return self.vtable.rollback_batch(self.ptr);
     }
 
     // Lifecycle
 
     /// Clean up database resources
-    pub fn deinit(self: DatabaseInterface) void {
+    pub fn deinit(self: Self) void {
         return self.vtable.deinit(self.ptr);
     }
-};
+
+    }; // End of struct returned by DatabaseInterface(config)
+}
 
 // Compile-time validation helper
 /// Validates that a type can be used as a database implementation
@@ -451,3 +465,9 @@ pub fn validate_database_implementation(comptime T: type) void {
     if (!@hasDecl(T, "rollback_batch")) @compileError("Database implementation missing rollback_batch method");
     if (!@hasDecl(T, "deinit")) @compileError("Database implementation missing deinit method");
 }
+
+// Default configuration for backward compatibility
+pub const DefaultConfig = struct {};
+
+// Default type alias for backward compatibility
+pub const DefaultDatabaseInterface = DatabaseInterface(DefaultConfig);

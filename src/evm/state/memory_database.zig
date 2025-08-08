@@ -131,8 +131,19 @@ const BatchOperation = struct {
     code_data: ?[]const u8 = null,
 };
 
-/// Memory-based database implementation
-pub const MemoryDatabase = struct {
+/// Memory-based database implementation factory function
+///
+/// Creates a generic memory database type that can be configured with different
+/// limits and settings via the comptime config parameter.
+///
+/// ## Parameters
+/// - `config`: Comptime configuration struct containing limits and settings
+///
+/// ## Returns
+/// A configured memory database type
+pub fn MemoryDatabase(comptime config: anytype) type {
+    return struct {
+        const Self = @This();
     /// Memory allocator for all database allocations
     allocator: std.mem.Allocator,
 
@@ -161,8 +172,8 @@ pub const MemoryDatabase = struct {
     batch_in_progress: bool,
 
     /// Initialize a new memory database
-    pub fn init(allocator: std.mem.Allocator) MemoryDatabase {
-        return MemoryDatabase{
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return Self{
             .allocator = allocator,
             .accounts = std.HashMap([20]u8, Account, HashContext([20]u8), 80).init(allocator),
             .storage = std.HashMap(StorageKey, u256, HashContext(StorageKey), 80).init(allocator),
@@ -176,7 +187,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Clean up all allocated resources
-    pub fn deinit(self: *MemoryDatabase) void {
+    pub fn deinit(self: *Self) void {
         self.accounts.deinit();
         self.storage.deinit();
         self.transient_storage.deinit();
@@ -203,12 +214,12 @@ pub const MemoryDatabase = struct {
     // Account operations
 
     /// Get account data for the given address
-    pub fn get_account(self: *MemoryDatabase, address: [20]u8) DatabaseError!?Account {
+    pub fn get_account(self: *Self, address: [20]u8) DatabaseError!?Account {
         return self.accounts.get(address);
     }
 
     /// Set account data for the given address
-    pub fn set_account(self: *MemoryDatabase, address: [20]u8, account: Account) DatabaseError!void {
+    pub fn set_account(self: *Self, address: [20]u8, account: Account) DatabaseError!void {
         if (self.batch_in_progress) {
             return self.add_batch_operation(.{
                 .operation_type = .SetAccount,
@@ -221,7 +232,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Delete account and all associated data
-    pub fn delete_account(self: *MemoryDatabase, address: [20]u8) DatabaseError!void {
+    pub fn delete_account(self: *Self, address: [20]u8) DatabaseError!void {
         if (self.batch_in_progress) {
             return self.add_batch_operation(.{
                 .operation_type = .DeleteAccount,
@@ -248,12 +259,12 @@ pub const MemoryDatabase = struct {
     }
 
     /// Check if account exists in the database
-    pub fn account_exists(self: *MemoryDatabase, address: [20]u8) bool {
+    pub fn account_exists(self: *Self, address: [20]u8) bool {
         return self.accounts.contains(address);
     }
 
     /// Get account balance
-    pub fn get_balance(self: *MemoryDatabase, address: [20]u8) DatabaseError!u256 {
+    pub fn get_balance(self: *Self, address: [20]u8) DatabaseError!u256 {
         if (self.accounts.get(address)) |account| {
             return account.balance;
         } else {
@@ -264,13 +275,13 @@ pub const MemoryDatabase = struct {
     // Storage operations
 
     /// Get storage value for the given address and key
-    pub fn get_storage(self: *MemoryDatabase, address: [20]u8, key: u256) DatabaseError!u256 {
+    pub fn get_storage(self: *Self, address: [20]u8, key: u256) DatabaseError!u256 {
         const storage_key = StorageKey{ .address = address, .slot = key };
         return self.storage.get(storage_key) orelse 0;
     }
 
     /// Set storage value for the given address and key
-    pub fn set_storage(self: *MemoryDatabase, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+    pub fn set_storage(self: *Self, address: [20]u8, key: u256, value: u256) DatabaseError!void {
         if (self.batch_in_progress) {
             return self.add_batch_operation(.{
                 .operation_type = .SetStorage,
@@ -287,13 +298,13 @@ pub const MemoryDatabase = struct {
     // Transient storage operations (EIP-1153)
 
     /// Get transient storage value for the given address and key
-    pub fn get_transient_storage(self: *MemoryDatabase, address: [20]u8, key: u256) DatabaseError!u256 {
+    pub fn get_transient_storage(self: *Self, address: [20]u8, key: u256) DatabaseError!u256 {
         const storage_key = StorageKey{ .address = address, .slot = key };
         return self.transient_storage.get(storage_key) orelse 0;
     }
 
     /// Set transient storage value for the given address and key
-    pub fn set_transient_storage(self: *MemoryDatabase, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+    pub fn set_transient_storage(self: *Self, address: [20]u8, key: u256, value: u256) DatabaseError!void {
         const storage_key = StorageKey{ .address = address, .slot = key };
         if (value == 0) {
             // Storing zero effectively removes the entry
@@ -306,12 +317,12 @@ pub const MemoryDatabase = struct {
     // Code operations
 
     /// Get contract code by hash
-    pub fn get_code(self: *MemoryDatabase, code_hash: [32]u8) DatabaseError![]const u8 {
+    pub fn get_code(self: *Self, code_hash: [32]u8) DatabaseError![]const u8 {
         return self.code_storage.get(code_hash) orelse &[_]u8{};
     }
 
     /// Get contract code by address
-    pub fn get_code_by_address(self: *MemoryDatabase, address: [20]u8) DatabaseError![]const u8 {
+    pub fn get_code_by_address(self: *Self, address: [20]u8) DatabaseError![]const u8 {
         // Get account to find the code hash
         if (self.get_account(address)) |maybe_account| {
             if (maybe_account) |account| {
@@ -328,7 +339,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Store contract code and return its hash
-    pub fn set_code(self: *MemoryDatabase, code: []const u8) DatabaseError![32]u8 {
+    pub fn set_code(self: *Self, code: []const u8) DatabaseError![32]u8 {
         // Calculate keccak256 hash of the code
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
@@ -360,7 +371,7 @@ pub const MemoryDatabase = struct {
     // State root operations
 
     /// Get current state root hash (simplified implementation)
-    pub fn get_state_root(self: *MemoryDatabase) DatabaseError![32]u8 {
+    pub fn get_state_root(self: *Self) DatabaseError![32]u8 {
         // In a real implementation, this would compute the Merkle root
         // For now, return a deterministic hash based on state content
         var hasher = std.crypto.hash.sha3.Keccak256.init(.{});
@@ -383,7 +394,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Commit pending changes and return new state root
-    pub fn commit_changes(self: *MemoryDatabase) DatabaseError![32]u8 {
+    pub fn commit_changes(self: *Self) DatabaseError![32]u8 {
         // In this implementation, changes are committed immediately
         // So we just return the current state root
         return self.get_state_root();
@@ -392,7 +403,7 @@ pub const MemoryDatabase = struct {
     // Snapshot operations
 
     /// Create a state snapshot and return its ID
-    pub fn create_snapshot(self: *MemoryDatabase) DatabaseError!u64 {
+    pub fn create_snapshot(self: *Self) DatabaseError!u64 {
         const snapshot_id = self.next_snapshot_id;
         self.next_snapshot_id += 1;
 
@@ -403,7 +414,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Revert state to the given snapshot
-    pub fn revert_to_snapshot(self: *MemoryDatabase, snapshot_id: u64) DatabaseError!void {
+    pub fn revert_to_snapshot(self: *Self, snapshot_id: u64) DatabaseError!void {
         // Find the snapshot
         var snapshot_index: ?usize = null;
         for (self.snapshots.items, 0..) |snapshot, i| {
@@ -453,7 +464,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Commit a snapshot (remove it without reverting)
-    pub fn commit_snapshot(self: *MemoryDatabase, snapshot_id: u64) DatabaseError!void {
+    pub fn commit_snapshot(self: *Self, snapshot_id: u64) DatabaseError!void {
         // Find and remove the snapshot
         for (self.snapshots.items, 0..) |*snapshot, i| {
             if (snapshot.id == snapshot_id) {
@@ -469,7 +480,7 @@ pub const MemoryDatabase = struct {
     // Batch operations
 
     /// Begin a batch operation for efficient bulk updates
-    pub fn begin_batch(self: *MemoryDatabase) DatabaseError!void {
+    pub fn begin_batch(self: *Self) DatabaseError!void {
         if (self.batch_in_progress) {
             return DatabaseError.NoBatchInProgress; // Already in batch
         }
@@ -479,7 +490,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Commit all changes in the current batch
-    pub fn commit_batch(self: *MemoryDatabase) DatabaseError!void {
+    pub fn commit_batch(self: *Self) DatabaseError!void {
         if (!self.batch_in_progress) {
             return DatabaseError.NoBatchInProgress;
         }
@@ -533,7 +544,7 @@ pub const MemoryDatabase = struct {
     }
 
     /// Rollback all changes in the current batch
-    pub fn rollback_batch(self: *MemoryDatabase) DatabaseError!void {
+    pub fn rollback_batch(self: *Self) DatabaseError!void {
         if (!self.batch_in_progress) {
             return DatabaseError.NoBatchInProgress;
         }
@@ -548,18 +559,26 @@ pub const MemoryDatabase = struct {
 
     // Helper methods
 
-    fn add_batch_operation(self: *MemoryDatabase, operation: BatchOperation) DatabaseError!void {
+    fn add_batch_operation(self: *Self, operation: BatchOperation) DatabaseError!void {
         const batch_ops = &(self.batch_operations orelse return DatabaseError.NoBatchInProgress);
         try batch_ops.append(operation);
     }
 
     /// Convert this memory database to a database interface
-    pub fn to_database_interface(self: *MemoryDatabase) DatabaseInterface {
-        return DatabaseInterface.init(self);
+    pub fn to_database_interface(self: *Self) DatabaseInterface(config) {
+        return DatabaseInterface(config).init(self);
     }
-};
+
+    }; // End of struct returned by MemoryDatabase(config)
+}
+
+// Default configuration for backward compatibility
+pub const DefaultConfig = struct {};
+
+// Default type alias for backward compatibility
+pub const DefaultMemoryDatabase = MemoryDatabase(DefaultConfig);
 
 // Compile-time validation
 comptime {
-    @import("database_interface.zig").validate_database_implementation(MemoryDatabase);
+    @import("database_interface.zig").validate_database_implementation(DefaultMemoryDatabase);
 }

@@ -1,9 +1,9 @@
 const std = @import("std");
 const Opcode = @import("opcode.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
-const Memory = @import("../memory/memory.zig");
+const Memory = @import("../memory/memory.zig").DefaultMemory;
 
 /// Operation metadata and execution functions for EVM opcodes.
 ///
@@ -36,7 +36,7 @@ const Memory = @import("../memory/memory.zig");
 ///     .execute = execute_add,
 ///     .constant_gas = 3,
 ///     .min_stack = 2,
-///     .max_stack = Stack.CAPACITY - 1,
+///     .max_stack = Stack.capacity - 1,
 /// };
 /// ```
 pub const ExecutionResult = @import("../execution/execution_result.zig");
@@ -61,7 +61,13 @@ pub const State = *ExecutionContext;
 /// @param interpreter VM interpreter context
 /// @param state Execution state and environment
 /// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
+pub fn ExecutionFuncType(comptime config: anytype) type {
+    _ = config;
+    return @import("../execution_func.zig").ExecutionFunc;
+}
+
+/// Default ExecutionFunc for backward compatibility
+pub const DefaultExecutionFunc = ExecutionFuncType(.{});
 
 /// Function signature for dynamic gas calculation.
 ///
@@ -77,7 +83,14 @@ pub const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
 /// @param requested_size Additional memory requested by operation
 /// @return Dynamic gas cost to add to constant gas
 /// @throws OutOfGas if gas calculation overflows
-pub const GasFunc = *const fn (interpreter: Interpreter, state: State, stack: *Stack, memory: *Memory, requested_size: u64) error{OutOfGas}!u64;
+pub fn GasFuncType(comptime config: anytype) type {
+    _ = config;
+    return *const fn (interpreter: Interpreter, state: State, stack: *Stack, memory: *Memory, requested_size: u64) error{OutOfGas}!u64;
+}
+
+/// Default GasFunc for backward compatibility
+pub const DefaultGasFunc = GasFuncType(.{});
+pub const GasFunc = DefaultGasFunc;
 
 /// Function signature for memory size calculation.
 ///
@@ -89,7 +102,17 @@ pub const GasFunc = *const fn (interpreter: Interpreter, state: State, stack: *S
 ///
 /// @param stack Stack containing operation parameters
 /// @return Required memory size for the operation
-pub const MemorySizeFunc = *const fn (stack: *Stack) Opcode.MemorySize;
+pub fn MemorySizeFuncType(comptime config: anytype) type {
+    _ = config;
+    return *const fn (stack: *Stack) Opcode.MemorySize;
+}
+
+/// Default MemorySizeFunc for backward compatibility
+pub const DefaultMemorySizeFunc = MemorySizeFuncType(.{});
+pub const MemorySizeFunc = DefaultMemorySizeFunc;
+
+/// Backward compatibility aliases
+/// Note: Use Default* versions for backward compatibility
 
 /// EVM operation definition containing all metadata and functions.
 ///
@@ -102,45 +125,47 @@ pub const MemorySizeFunc = *const fn (stack: *Stack) Opcode.MemorySize;
 /// - Hot fields (frequently accessed during execution) first
 /// - Function pointers grouped together for better locality
 /// - Smaller fields grouped to minimize padding
-pub const Operation = struct {
-    // Hot fields: Most frequently accessed during opcode execution
-    /// Execution function implementing the opcode logic.
-    /// This is called after all validations pass.
-    execute: ExecutionFunc,
+pub fn OperationType(comptime config: anytype) type {
+    return struct {
+        // Hot fields: Most frequently accessed during opcode execution
+        /// Execution function implementing the opcode logic.
+        /// This is called after all validations pass.
+        execute: ExecutionFuncType(config),
 
-    /// Base gas cost for this operation.
-    /// This is the minimum gas charged regardless of parameters.
-    /// Defined by the Ethereum Yellow Paper and EIPs.
-    constant_gas: u64,
+        /// Base gas cost for this operation.
+        /// This is the minimum gas charged regardless of parameters.
+        /// Defined by the Ethereum Yellow Paper and EIPs.
+        constant_gas: u64,
 
-    // Validation fields: Accessed during stack validation (hot path)
-    /// Minimum stack items required before execution.
-    /// The operation will fail with StackUnderflow if the stack
-    /// has fewer than this many items.
-    min_stack: u32,
+        // Validation fields: Accessed during stack validation (hot path)
+        /// Minimum stack items required before execution.
+        /// The operation will fail with StackUnderflow if the stack
+        /// has fewer than this many items.
+        min_stack: u32,
 
-    /// Maximum stack size allowed before execution.
-    /// Ensures the operation won't cause stack overflow.
-    /// Calculated as: CAPACITY - (pushes - pops)
-    max_stack: u32,
+        /// Maximum stack size allowed before execution.
+        /// Ensures the operation won't cause stack overflow.
+        /// Calculated as: CAPACITY - (pushes - pops)
+        max_stack: u32,
 
-    // Function pointers: Grouped together for better cache locality
-    /// Optional dynamic gas calculation function.
-    /// Operations with variable costs (storage, memory, calls) use this
-    /// to calculate additional gas based on runtime parameters.
-    dynamic_gas: ?GasFunc = null,
+        // Function pointers: Grouped together for better cache locality
+        /// Optional dynamic gas calculation function.
+        /// Operations with variable costs (storage, memory, calls) use this
+        /// to calculate additional gas based on runtime parameters.
+        dynamic_gas: ?GasFuncType(config) = null,
 
-    /// Optional memory size calculation function.
-    /// Operations that access memory use this to determine
-    /// memory expansion requirements before execution.
-    memory_size: ?MemorySizeFunc = null,
+        /// Optional memory size calculation function.
+        /// Operations that access memory use this to determine
+        /// memory expansion requirements before execution.
+        memory_size: ?MemorySizeFuncType(config) = null,
 
-    // Flags: Smaller field placed last to minimize padding
-    /// Indicates if this is an undefined/invalid opcode.
-    /// Undefined opcodes consume all gas and fail execution.
-    /// Used for opcodes not assigned in the current hardfork.
-    undefined: bool = false,
-};
+        // Flags: Smaller field placed last to minimize padding
+        /// Indicates if this is an undefined/invalid opcode.
+        /// Undefined opcodes consume all gas and fail execution.
+        /// Used for opcodes not assigned in the current hardfork.
+        undefined: bool = false,
+    };
+}
 
 /// Singleton NULL operation for unassigned opcode slots.
 ///
@@ -150,13 +175,33 @@ pub const Operation = struct {
 /// - Are reserved for future use
 ///
 /// Executing NULL always results in InvalidOpcode error.
-pub const NULL_OPERATION = Operation{
-    .execute = undefined_execute,
-    .constant_gas = 0,
-    .min_stack = 0,
-    .max_stack = Stack.CAPACITY,
-    .undefined = true,
-};
+pub fn NULL_OPERATION_FUNC(comptime config: anytype) OperationType(config) {
+    return OperationType(config){
+        .execute = undefined_execute,
+        .constant_gas = 0,
+        .min_stack = 0,
+        .max_stack = Stack.capacity,
+        .undefined = true,
+    };
+}
+
+/// Default Operation type for backward compatibility
+pub const DefaultOperation = OperationType(.{});
+
+/// Default NULL operation for backward compatibility
+pub const DefaultNullOperation = NULL_OPERATION_FUNC(.{});
+
+/// Generic Operation function as requested by user
+pub fn OperationWithConfig(comptime config: anytype) type {
+    return OperationType(config);
+}
+
+/// The generic Operation function as requested by user  
+pub const Operation = OperationWithConfig;
+
+/// Default Operation type for existing code that doesn't specify a config
+pub const DefaultOperationStruct = DefaultOperation;
+pub const NULL_OPERATION = DefaultNullOperation; // Default alias for backward compatibility
 
 /// Execution function for undefined opcodes.
 ///

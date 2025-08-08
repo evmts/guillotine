@@ -85,7 +85,7 @@ pub const JumpTable = @import("jump_table/jump_table.zig");
 pub const SoaJumpTable = @import("jump_table/soa_jump_table.zig").SoaJumpTable;
 
 /// Byte-addressable memory implementation
-pub const Memory = @import("memory/memory.zig");
+pub const Memory = @import("memory/memory.zig").DefaultMemory;
 /// Memory module package for additional memory utilities
 pub const memory = @import("memory/package.zig");
 
@@ -103,7 +103,7 @@ pub const stack_validation = @import("stack/stack_validation.zig");
 
 
 /// Main virtual machine implementation
-pub const Evm = @import("evm.zig");
+pub const Evm = @import("evm.zig").DefaultEvm;
 
 
 /// Execution context and frame management
@@ -112,10 +112,10 @@ pub const ExecutionContext = @import("frame.zig").ExecutionContext;
 
 
 /// EVM state management (accounts, storage, logs)
-pub const EvmState = @import("state/state.zig");
+pub const EvmState = @import("state/state.zig").DefaultEvmState;
 
 /// Database interface for pluggable state storage
-pub const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
+pub const DatabaseInterface = @import("state/database_interface.zig").DefaultDatabaseInterface;
 
 /// Database error types
 pub const DatabaseError = @import("state/database_interface.zig").DatabaseError;
@@ -124,7 +124,7 @@ pub const DatabaseError = @import("state/database_interface.zig").DatabaseError;
 pub const Account = @import("state/database_interface.zig").Account;
 
 /// Memory database implementation
-pub const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
+pub const MemoryDatabase = @import("state/memory_database.zig").DefaultMemoryDatabase;
 
 /// Database factory for creating different implementations
 pub const DatabaseFactory = @import("state/database_factory.zig");

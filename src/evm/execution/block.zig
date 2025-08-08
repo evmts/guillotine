@@ -3,7 +3,8 @@ const ExecutionError = @import("execution_error.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const primitives = @import("primitives");
 
-pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_blockhash(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     const block_number = try context.stack.pop();
 
@@ -28,7 +29,8 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     }
 }
 
-pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_coinbase(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     
     // EIP-3651 (Shanghai) COINBASE warming should be handled during pre-execution setup,
@@ -42,7 +44,8 @@ pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_timestamp(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     // TODO: Need block_timestamp field in ExecutionContext
     // try context.stack.append(@as(u256, @intCast(context.block_timestamp)));
@@ -51,7 +54,8 @@ pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_number(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     // TODO: Need block_number field in ExecutionContext
     // try context.stack.append(@as(u256, @intCast(context.block_number)));
@@ -60,7 +64,8 @@ pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_difficulty(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     // TODO: Need block_difficulty field in ExecutionContext
     // Get difficulty/prevrandao from block context
@@ -71,12 +76,13 @@ pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_prevrandao(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
     // Same as difficulty post-merge
-    return op_difficulty(context_ptr);
+    return op_difficulty(config, context_ptr);
 }
 
-pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_gaslimit(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     // TODO: Need block_gas_limit field in ExecutionContext
     // try context.stack.append(@as(u256, @intCast(context.block_gas_limit)));
@@ -85,7 +91,8 @@ pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_basefee(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     
     // EIP-3198 validation should be handled during bytecode analysis phase,
@@ -104,7 +111,8 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_blobhash(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     const index = try context.stack.pop();
 
@@ -123,7 +131,8 @@ pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
-pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_blobbasefee(comptime config: anytype, context_ptr: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     // TODO: Need blob_base_fee field in ExecutionContext
     // Get blob base fee from block context
@@ -137,8 +146,8 @@ pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
 // Tests
 const testing = std.testing;
 const Address = primitives.Address;
-const Stack = @import("../stack/stack.zig");
-const Memory = @import("../memory/memory.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
+const Memory = @import("../memory/memory.zig").DefaultMemory;
 const CodeAnalysis = @import("../analysis.zig");
 const AccessList = @import("../access_list.zig").AccessList;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;

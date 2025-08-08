@@ -676,7 +676,7 @@ test "PC: Stack overflow protection" {
     defer frame.deinit();
 
     // Fill stack to capacity - 1 (so PC can still push one value)
-    const stack_capacity = Evm.Stack.CAPACITY;
+    const stack_capacity = Evm.Stack.capacity;
     for (0..stack_capacity - 1) |_| {
         try frame.stack.append(0);
     }
@@ -895,7 +895,7 @@ test "GAS: Stack overflow protection" {
     defer frame.deinit();
 
     // Fill stack to capacity
-    const stack_capacity = Evm.Stack.CAPACITY;
+    const stack_capacity = Evm.Stack.capacity;
     for (0..stack_capacity) |_| {
         try frame.stack.append(0);
     }

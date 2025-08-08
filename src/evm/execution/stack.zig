@@ -2,13 +2,14 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const ExecutionError = @import("execution_error.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const Vm = @import("../evm.zig");
 
 const StackValidation = @import("../stack/stack_validation.zig");
 const Address = @import("primitives").Address;
 
-pub fn op_pop(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_pop(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     _ = try frame.stack.pop();
 }
@@ -48,82 +49,98 @@ fn dup_impl_context(n: u8, context: *ExecutionContext) ExecutionError.Error!void
 
 
 // ExecutionContext versions of DUP operations (new pattern)
-pub fn op_dup1(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup1(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(1, frame);
 }
 
-pub fn op_dup2(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup2(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(2, frame);
 }
 
-pub fn op_dup3(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup3(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(3, frame);
 }
 
-pub fn op_dup4(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup4(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(4, frame);
 }
 
-pub fn op_dup5(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup5(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(5, frame);
 }
 
-pub fn op_dup6(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup6(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(6, frame);
 }
 
-pub fn op_dup7(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup7(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(7, frame);
 }
 
-pub fn op_dup8(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup8(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(8, frame);
 }
 
-pub fn op_dup9(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup9(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(9, frame);
 }
 
-pub fn op_dup10(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup10(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(10, frame);
 }
 
-pub fn op_dup11(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup11(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(11, frame);
 }
 
-pub fn op_dup12(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup12(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(12, frame);
 }
 
-pub fn op_dup13(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup13(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(13, frame);
 }
 
-pub fn op_dup14(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup14(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(14, frame);
 }
 
-pub fn op_dup15(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup15(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(15, frame);
 }
 
-pub fn op_dup16(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_dup16(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return dup_impl_context(16, frame);
 }
@@ -151,82 +168,98 @@ fn swap_impl_context(n: u8, context: *ExecutionContext) ExecutionError.Error!voi
 }
 
 // ExecutionContext versions of SWAP operations (new pattern)
-pub fn op_swap1(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap1(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(1, frame);
 }
 
-pub fn op_swap2(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap2(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(2, frame);
 }
 
-pub fn op_swap3(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap3(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(3, frame);
 }
 
-pub fn op_swap4(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap4(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(4, frame);
 }
 
-pub fn op_swap5(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap5(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(5, frame);
 }
 
-pub fn op_swap6(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap6(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(6, frame);
 }
 
-pub fn op_swap7(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap7(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(7, frame);
 }
 
-pub fn op_swap8(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap8(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(8, frame);
 }
 
-pub fn op_swap9(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap9(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(9, frame);
 }
 
-pub fn op_swap10(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap10(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(10, frame);
 }
 
-pub fn op_swap11(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap11(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(11, frame);
 }
 
-pub fn op_swap12(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap12(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(12, frame);
 }
 
-pub fn op_swap13(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap13(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(13, frame);
 }
 
-pub fn op_swap14(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap14(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(14, frame);
 }
 
-pub fn op_swap15(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap15(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(15, frame);
 }
 
-pub fn op_swap16(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_swap16(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     return swap_impl_context(16, frame);
 }

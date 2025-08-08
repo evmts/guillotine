@@ -5,7 +5,8 @@ const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const storage_costs = @import("../gas/storage_costs.zig");
 
-pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sload(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
 
@@ -28,7 +29,8 @@ pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
 }
 
 /// SSTORE opcode - Store value in persistent storage
-pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sstore(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     if (frame.is_static()) {
         @branchHint(.unlikely);
@@ -78,7 +80,8 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     }
 }
 
-pub fn op_tload(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_tload(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Add hardfork validation for EIP-1153 (Cancun)
     // if (!frame.flags.is_eip1153) {
@@ -98,7 +101,8 @@ pub fn op_tload(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(value);
 }
 
-pub fn op_tstore(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_tstore(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // TODO: Add hardfork validation for EIP-1153 (Cancun)
     // if (!frame.flags.is_eip1153) {

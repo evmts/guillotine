@@ -1,7 +1,7 @@
 const std = @import("std");
 const Opcode = @import("opcode.zig");
 const operation_config = @import("../jump_table/operation_config.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 
 /// Pre-computed net stack height change for each opcode.
 /// Positive values indicate net stack growth, negative indicate net decrease.

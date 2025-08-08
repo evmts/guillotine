@@ -2,13 +2,11 @@ const std = @import("std");
 const stack_constants = @import("../constants/stack_constants.zig");
 const builtin = @import("builtin");
 
-const CLEAR_ON_POP = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
-
 /// High-performance EVM stack implementation using pointer arithmetic.
 ///
 /// The Stack is a core component of the EVM execution model, providing a
-/// Last-In-First-Out (LIFO) data structure for 256-bit values. All EVM
-/// computations operate on this stack, making its performance critical.
+/// Last-In-First-Out (LIFO) data structure for configurable word-sized values.
+/// All EVM computations operate on this stack, making its performance critical.
 ///
 /// ## Design Rationale
 /// - Fixed capacity of 1024 elements (per EVM specification)
@@ -53,51 +51,59 @@ const CLEAR_ON_POP = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 /// try stack.append(100); // Safe variant (for error_mapping)
 /// stack.append_unsafe(200); // Unsafe variant (for opcodes)
 /// ```
-pub const Stack = @This();
+/// Generic stack implementation parameterized by a config subset
+/// Config must have: word_type, stack_capacity, clear_on_pop
+pub fn Stack(comptime config: anytype) type {
+    const WordType = config.word_type;
+    const CAPACITY = config.stack_capacity;
+    const CLEAR_ON_POP_VAL = config.clear_on_pop;
+    
+    return struct {
+        const Self = @This();
 
-/// Maximum stack capacity as defined by the EVM specification.
-/// This limit prevents stack-based DoS attacks.
-pub const CAPACITY: usize = stack_constants.CAPACITY;
+        /// Maximum stack capacity from configuration.
+        /// This limit prevents stack-based DoS attacks.
+        pub const capacity = CAPACITY;
 
-/// Error types for stack operations.
-/// These map directly to EVM execution errors.
-pub const Error = error{
-    /// Stack would exceed 1024 elements
-    StackOverflow,
-    /// Attempted to pop from empty stack
-    StackUnderflow,
-};
+        /// Error types for stack operations.
+        /// These map directly to EVM execution errors.
+        pub const Error = error{
+            /// Stack would exceed configured capacity
+            StackOverflow,
+            /// Attempted to pop from empty stack
+            StackUnderflow,
+        };
 
-// ============================================================================
-// Hot data - accessed on every stack operation (cache-friendly)
-// ============================================================================
+        // ============================================================================
+        // Hot data - accessed on every stack operation (cache-friendly)
+        // ============================================================================
 
-/// Points to the next free slot (top of stack + 1)
-current: [*]u256,
+        /// Points to the next free slot (top of stack + 1)
+        current: [*]WordType,
 
-/// Points to the base of the stack (data[0])
-base: [*]u256,
+        /// Points to the base of the stack (data[0])
+        base: [*]WordType,
 
-/// Points to the limit (data[1024]) for bounds checking
-limit: [*]u256,
+        /// Points to the limit (data[capacity]) for bounds checking
+        limit: [*]WordType,
 
-// ============================================================================
-// Cold data - large preallocated storage
-// ============================================================================
+        // ============================================================================
+        // Cold data - large preallocated storage
+        // ============================================================================
 
-/// Stack-allocated storage for optimal performance
-/// Architecture-appropriate alignment for optimal access
-data: [CAPACITY]u256 align(@alignOf(u256)) = undefined,
+        /// Stack-allocated storage for optimal performance
+        /// Architecture-appropriate alignment for optimal access
+        data: [CAPACITY]WordType align(@alignOf(WordType)) = undefined,
 
-// Compile-time validations for stack design assumptions
-comptime {
-    // Ensure stack capacity matches EVM specification
-    std.debug.assert(CAPACITY == 1024);
-}
+        // Compile-time validations for stack design assumptions
+        comptime {
+            // Ensure stack capacity is reasonable
+            std.debug.assert(CAPACITY > 0 and CAPACITY <= 2048);
+        }
 
-/// Initialize a new stack with pointer setup
-pub fn init() Stack {
-    var stack = Stack{
+        /// Initialize a new stack with pointer setup
+        pub fn init() Self {
+            var stack = Self{
         .data = undefined,
         .current = undefined,
         .base = undefined,
@@ -111,43 +117,43 @@ pub fn init() Stack {
     return stack;
 }
 
-/// Clear the stack without deallocating memory - resets to initial empty state
-pub fn clear(self: *Stack) void {
+        /// Clear the stack without deallocating memory - resets to initial empty state
+        pub fn clear(self: *Self) void {
     // Reset current pointer to base (empty stack)
     self.current = self.base;
 
     // In debug/safe modes, zero out all values for security
-    if (comptime CLEAR_ON_POP) {
+            if (comptime CLEAR_ON_POP_VAL) {
         @memset(std.mem.asBytes(&self.data), 0);
     }
 }
 
-/// Get current stack size using pointer arithmetic
-pub inline fn size(self: *const Stack) usize {
-    return (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-}
+        /// Get current stack size using pointer arithmetic
+        pub inline fn size(self: *const Self) usize {
+            return (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(WordType);
+        }
 
-/// Check if stack is empty
-pub inline fn is_empty(self: *const Stack) bool {
+        /// Check if stack is empty
+        pub inline fn is_empty(self: *const Self) bool {
     return self.current == self.base;
 }
 
-/// Check if stack is at capacity
-pub inline fn is_full(self: *const Stack) bool {
+        /// Check if stack is at capacity
+        pub inline fn is_full(self: *const Self) bool {
     return self.current >= self.limit;
 }
 
-/// Push a value onto the stack (safe version).
-///
-/// @param self The stack to push onto
-/// @param value The 256-bit value to push
-/// @throws Overflow if stack is at capacity
-///
-/// Example:
-/// ```zig
-/// try stack.append(0x1234);
-/// ```
-pub fn append(self: *Stack, value: u256) Error!void {
+        /// Push a value onto the stack (safe version).
+        ///
+        /// @param self The stack to push onto
+        /// @param value The word-sized value to push
+        /// @throws Overflow if stack is at capacity
+        ///
+        /// Example:
+        /// ```zig
+        /// try stack.append(0x1234);
+        /// ```
+        pub fn append(self: *Self, value: WordType) Error!void {
     if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
         @branchHint(.cold);
         return Error.StackOverflow;
@@ -155,33 +161,33 @@ pub fn append(self: *Stack, value: u256) Error!void {
     self.append_unsafe(value);
 }
 
-/// Push a value onto the stack (unsafe version).
-///
-/// Caller must ensure stack has capacity. Used in hot paths
-/// after validation has already been performed.
-///
-/// @param self The stack to push onto
-/// @param value The 256-bit value to push
-pub inline fn append_unsafe(self: *Stack, value: u256) void {
+        /// Push a value onto the stack (unsafe version).
+        ///
+        /// Caller must ensure stack has capacity. Used in hot paths
+        /// after validation has already been performed.
+        ///
+        /// @param self The stack to push onto
+        /// @param value The word-sized value to push
+        pub inline fn append_unsafe(self: *Self, value: WordType) void {
     @branchHint(.likely);
     self.current[0] = value;
     self.current += 1;
 }
 
-/// Pop a value from the stack (safe version).
-///
-/// Removes and returns the top element. Clears the popped
-/// slot to prevent information leakage.
-///
-/// @param self The stack to pop from
-/// @return The popped value
-/// @throws Underflow if stack is empty
-///
-/// Example:
-/// ```zig
-/// const value = try stack.pop();
-/// ```
-pub fn pop(self: *Stack) Error!u256 {
+        /// Pop a value from the stack (safe version).
+        ///
+        /// Removes and returns the top element. Clears the popped
+        /// slot to prevent information leakage.
+        ///
+        /// @param self The stack to pop from
+        /// @return The popped value
+        /// @throws Underflow if stack is empty
+        ///
+        /// Example:
+        /// ```zig
+        /// const value = try stack.pop();
+        /// ```
+        pub fn pop(self: *Self) Error!WordType {
     if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
         @branchHint(.cold);
         return Error.StackUnderflow;
@@ -189,55 +195,55 @@ pub fn pop(self: *Stack) Error!u256 {
     return self.pop_unsafe();
 }
 
-/// Pop a value from the stack (unsafe version).
-///
-/// Caller must ensure stack is not empty. Used in hot paths
-/// after validation.
-///
-/// @param self The stack to pop from
-/// @return The popped value
-pub inline fn pop_unsafe(self: *Stack) u256 {
+        /// Pop a value from the stack (unsafe version).
+        ///
+        /// Caller must ensure stack is not empty. Used in hot paths
+        /// after validation.
+        ///
+        /// @param self The stack to pop from
+        /// @return The popped value
+        pub inline fn pop_unsafe(self: *Self) WordType {
     @branchHint(.likely);
     self.current -= 1;
     const value = self.current[0];
-    if (comptime CLEAR_ON_POP) {
+            if (comptime CLEAR_ON_POP_VAL) {
         self.current[0] = 0; // Clear for security
     }
     return value;
 }
 
-/// Peek at the top value without removing it (unsafe version).
-///
-/// Caller must ensure stack is not empty.
-///
-/// @param self The stack to peek at
-/// @return Pointer to the top value
-pub inline fn peek_unsafe(self: *const Stack) *const u256 {
+        /// Peek at the top value without removing it (unsafe version).
+        ///
+        /// Caller must ensure stack is not empty.
+        ///
+        /// @param self The stack to peek at
+        /// @return Pointer to the top value
+        pub inline fn peek_unsafe(self: *const Self) *const WordType {
     @branchHint(.likely);
     return &(self.current - 1)[0];
 }
 
-/// Duplicate the nth element onto the top of stack (unsafe version).
-///
-/// Caller must ensure preconditions are met.
-///
-/// @param self The stack to operate on
-/// @param n Position to duplicate from (1-16)
-pub inline fn dup_unsafe(self: *Stack, n: usize) void {
+        /// Duplicate the nth element onto the top of stack (unsafe version).
+        ///
+        /// Caller must ensure preconditions are met.
+        ///
+        /// @param self The stack to operate on
+        /// @param n Position to duplicate from (1-16)
+        pub inline fn dup_unsafe(self: *Self, n: usize) void {
     @branchHint(.likely);
     @setRuntimeSafety(false);
     const value = (self.current - n)[0];
     self.append_unsafe(value);
 }
 
-/// Pop 2 values without pushing (unsafe version)
-pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
+        /// Pop 2 values without pushing (unsafe version)
+        pub inline fn pop2_unsafe(self: *Self) struct { a: WordType, b: WordType } {
     @branchHint(.likely);
     @setRuntimeSafety(false);
     self.current -= 2;
     const a = self.current[0];
     const b = self.current[1];
-    if (comptime CLEAR_ON_POP) {
+            if (comptime CLEAR_ON_POP_VAL) {
         // Clear for security
         self.current[0] = 0;
         self.current[1] = 0;
@@ -245,15 +251,15 @@ pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
     return .{ .a = a, .b = b };
 }
 
-/// Pop 3 values without pushing (unsafe version)
-pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
+        /// Pop 3 values without pushing (unsafe version)
+        pub inline fn pop3_unsafe(self: *Self) struct { a: WordType, b: WordType, c: WordType } {
     @branchHint(.likely);
     @setRuntimeSafety(false);
     self.current -= 3;
     const a = self.current[0];
     const b = self.current[1];
     const c = self.current[2];
-    if (comptime CLEAR_ON_POP) {
+            if (comptime CLEAR_ON_POP_VAL) {
         // Clear for security
         self.current[0] = 0;
         self.current[1] = 0;
@@ -262,27 +268,27 @@ pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
     return .{ .a = a, .b = b, .c = c };
 }
 
-/// Set the top element (unsafe version)
-pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
+        /// Set the top element (unsafe version)
+        pub inline fn set_top_unsafe(self: *Self, value: WordType) void {
     @branchHint(.likely);
     (self.current - 1)[0] = value;
 }
 
-/// Swap the top element with the nth element below it (unsafe version).
-///
-/// Swaps the top stack element with the element n positions below it.
-/// For SWAP1, n=1 swaps top with second element.
-/// For SWAP2, n=2 swaps top with third element, etc.
-///
-/// @param self The stack to operate on
-/// @param n Position below top to swap with (1-16)
-pub inline fn swap_unsafe(self: *Stack, n: usize) void {
-    @branchHint(.likely);
-    std.mem.swap(u256, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
-}
+        /// Swap the top element with the nth element below it (unsafe version).
+        ///
+        /// Swaps the top stack element with the element n positions below it.
+        /// For SWAP1, n=1 swaps top with second element.
+        /// For SWAP2, n=2 swaps top with third element, etc.
+        ///
+        /// @param self The stack to operate on
+        /// @param n Position below top to swap with (1-16)
+        pub inline fn swap_unsafe(self: *Self, n: usize) void {
+            @branchHint(.likely);
+            std.mem.swap(WordType, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
+        }
 
-/// Peek at the nth element from the top (for test compatibility)
-pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
+        /// Peek at the nth element from the top (for test compatibility)
+        pub fn peek_n(self: *const Self, n: usize) Error!WordType {
     const stack_size = self.size();
     if (n >= stack_size) {
         @branchHint(.cold);
@@ -293,8 +299,8 @@ pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
 
 // Note: test-compatibility clear consolidated with main clear() above
 
-/// Peek at the top value (for test compatibility)
-pub fn peek(self: *const Stack) Error!u256 {
+        /// Peek at the top value (for test compatibility)
+        pub fn peek(self: *const Self) Error!WordType {
     if (self.current <= self.base) {
         @branchHint(.cold);
         return Error.StackUnderflow;
@@ -302,14 +308,14 @@ pub fn peek(self: *const Stack) Error!u256 {
     return (self.current - 1)[0];
 }
 
-// ============================================================================
-// Test and compatibility functions
-// ============================================================================
+        // ============================================================================
+        // Test and compatibility functions
+        // ============================================================================
 
-// Fuzz testing functions
-pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const FuzzOperation) !void {
-    _ = allocator;
-    var stack = Stack.init();
+        // Fuzz testing functions
+        pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const FuzzOperation) !void {
+            _ = allocator;
+            var stack = Self.init();
     const testing = std.testing;
 
     for (operations) |op| {
@@ -358,24 +364,38 @@ pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const F
     }
 }
 
-const FuzzOperation = union(enum) {
-    push: u256,
-    pop: void,
-    peek: void,
-    clear: void,
-};
+        const FuzzOperation = union(enum) {
+            push: WordType,
+            pop: void,
+            peek: void,
+            clear: void,
+        };
 
-fn validate_stack_invariants(stack: *const Stack) !void {
-    const testing = std.testing;
+        fn validate_stack_invariants(stack: *const Self) !void {
+            const testing = std.testing;
 
-    // Check pointer relationships
-    try testing.expect(@intFromPtr(stack.current) >= @intFromPtr(stack.base));
-    try testing.expect(@intFromPtr(stack.current) <= @intFromPtr(stack.limit));
-    try testing.expect(stack.size() <= CAPACITY);
+            // Check pointer relationships
+            try testing.expect(@intFromPtr(stack.current) >= @intFromPtr(stack.base));
+            try testing.expect(@intFromPtr(stack.current) <= @intFromPtr(stack.limit));
+            try testing.expect(stack.size() <= CAPACITY);
+        }
+    };
 }
 
+// Default Stack type for backward compatibility (uses u256)
+pub const DefaultStack = Stack(.{
+    .word_type = u256,
+    .stack_capacity = 1024,
+    .clear_on_pop = builtin.mode == .Debug or builtin.mode == .ReleaseSafe,
+});
+
 test "fuzz_stack_basic_operations" {
-    const operations = [_]FuzzOperation{
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    const operations = [_]TestStack.FuzzOperation{
         .{ .push = 100 },
         .{ .push = 200 },
         .{ .peek = {} },
@@ -386,23 +406,33 @@ test "fuzz_stack_basic_operations" {
         .{ .push = 42 },
     };
 
-    try fuzz_stack_operations(std.testing.allocator, &operations);
+    try TestStack.fuzz_stack_operations(std.testing.allocator, &operations);
 }
 
 test "fuzz_stack_overflow_boundary" {
-    var operations = std.ArrayList(FuzzOperation).init(std.testing.allocator);
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    var operations = std.ArrayList(TestStack.FuzzOperation).init(std.testing.allocator);
     defer operations.deinit();
 
     var i: usize = 0;
-    while (i <= CAPACITY + 10) : (i += 1) {
+    while (i <= TestStack.capacity + 10) : (i += 1) {
         try operations.append(.{ .push = @as(u256, i) });
     }
 
-    try fuzz_stack_operations(std.testing.allocator, operations.items);
+    try TestStack.fuzz_stack_operations(std.testing.allocator, operations.items);
 }
 
 test "fuzz_stack_underflow_boundary" {
-    const operations = [_]FuzzOperation{
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    const operations = [_]TestStack.FuzzOperation{
         .{ .pop = {} },
         .{ .pop = {} },
         .{ .peek = {} },
@@ -411,11 +441,16 @@ test "fuzz_stack_underflow_boundary" {
         .{ .pop = {} },
     };
 
-    try fuzz_stack_operations(std.testing.allocator, &operations);
+    try TestStack.fuzz_stack_operations(std.testing.allocator, &operations);
 }
 
 test "pointer_arithmetic_correctness" {
-    var stack = Stack.init();
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    var stack = TestStack.init();
 
     // Test initial state
     try std.testing.expectEqual(@as(usize, 0), stack.size());
@@ -442,7 +477,12 @@ test "pointer_arithmetic_correctness" {
 }
 
 test "stack_dup_operations" {
-    var stack = Stack.init();
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    var stack = TestStack.init();
 
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -458,7 +498,12 @@ test "stack_dup_operations" {
 }
 
 test "stack_swap_operations" {
-    var stack = Stack.init();
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    var stack = TestStack.init();
 
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -474,7 +519,12 @@ test "stack_swap_operations" {
 }
 
 test "stack_multi_pop_operations" {
-    var stack = Stack.init();
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    var stack = TestStack.init();
 
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -495,7 +545,12 @@ test "stack_multi_pop_operations" {
 }
 
 test "performance_comparison_pointer_vs_indexing" {
-    var stack = Stack.init();
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = false,
+    });
+    var stack = TestStack.init();
 
     // Fill stack for testing
     var i: usize = 0;
@@ -510,7 +565,7 @@ test "performance_comparison_pointer_vs_indexing" {
     timer.reset();
     i = 0;
     while (i < 1000000) : (i += 1) {
-        if (stack.size() < CAPACITY / 2) {
+        if (stack.size() < TestStack.capacity / 2) {
             stack.append_unsafe(i);
         } else {
             _ = stack.pop_unsafe();
@@ -525,12 +580,17 @@ test "performance_comparison_pointer_vs_indexing" {
 }
 
 test "memory_layout_verification" {
-    var stack = Stack.init();
+    const TestStack = Stack(.{
+        .word_type = u256,
+        .stack_capacity = 1024,
+        .clear_on_pop = true,
+    });
+    var stack = TestStack.init();
 
     // Verify pointer setup
     try std.testing.expectEqual(@intFromPtr(stack.base), @intFromPtr(&stack.data[0]));
     try std.testing.expectEqual(@intFromPtr(stack.current), @intFromPtr(stack.base));
-    try std.testing.expectEqual(@intFromPtr(stack.limit), @intFromPtr(stack.base + CAPACITY));
+    try std.testing.expectEqual(@intFromPtr(stack.limit), @intFromPtr(stack.base + TestStack.capacity));
 
     // Verify data layout
     const data_ptr = @intFromPtr(&stack.data[0]);

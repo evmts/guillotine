@@ -3,7 +3,8 @@ const ExecutionError = @import("execution_error.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const primitives = @import("primitives");
 
-pub fn op_and(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_and(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const b = frame.stack.pop_unsafe();
@@ -11,7 +12,8 @@ pub fn op_and(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(a & b);
 }
 
-pub fn op_or(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_or(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const b = frame.stack.pop_unsafe();
@@ -19,7 +21,8 @@ pub fn op_or(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(a | b);
 }
 
-pub fn op_xor(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_xor(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const b = frame.stack.pop_unsafe();
@@ -27,14 +30,16 @@ pub fn op_xor(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(a ^ b);
 }
 
-pub fn op_not(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_not(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
     const a = frame.stack.peek_unsafe().*;
     frame.stack.set_top_unsafe(~a);
 }
 
-pub fn op_byte(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_byte(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const i = frame.stack.pop_unsafe();
@@ -49,7 +54,8 @@ pub fn op_byte(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_shl(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_shl(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const shift = frame.stack.pop_unsafe();
@@ -60,7 +66,8 @@ pub fn op_shl(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_shr(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_shr(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const shift = frame.stack.pop_unsafe();
@@ -71,7 +78,8 @@ pub fn op_shr(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.set_top_unsafe(result);
 }
 
-pub fn op_sar(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_sar(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
     const shift = frame.stack.pop_unsafe();

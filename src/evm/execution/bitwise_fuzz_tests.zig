@@ -1,7 +1,7 @@
 const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const ExecutionError = @import("execution_error.zig");
-const Stack = @import("../stack/stack.zig");
+const Stack = @import("../stack/stack.zig").DefaultStack;
 const primitives = @import("primitives");
 const bitwise = @import("bitwise.zig");
 

@@ -267,7 +267,7 @@ pub const GuillotineExecutionResult = extern struct {
 
 // Internal VM structure
 const VmState = struct {
-    vm: *evm_root.Evm,
+    vm: *evm_root.Evm.DefaultEvm,
     memory_db: *MemoryDatabase,
     allocator: std.mem.Allocator,
 };
@@ -286,14 +286,14 @@ export fn guillotine_vm_create() ?*GuillotineVm {
     state.memory_db.* = MemoryDatabase.init(alloc);
 
     const db_interface = state.memory_db.to_database_interface();
-    state.vm = alloc.create(evm_root.Evm) catch {
+    state.vm = alloc.create(evm_root.Evm.DefaultEvm) catch {
         state.memory_db.deinit();
         alloc.destroy(state.memory_db);
         alloc.destroy(state);
         return null;
     };
 
-    state.vm.* = evm_root.Evm.init(alloc, db_interface, null, // table
+    state.vm.* = evm_root.Evm.DefaultEvm.init(alloc, db_interface, null, // table
         null, // chain_rules
         null, // context
         0, // depth

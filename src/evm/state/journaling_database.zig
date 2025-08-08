@@ -4,11 +4,19 @@ const DatabaseError = @import("database_interface.zig").DatabaseError;
 const Account = @import("database_interface.zig").Account;
 const CallJournal = @import("../call_frame_stack.zig").CallJournal;
 
-/// Journaling database wrapper that records all state changes for revert capability
+/// Journaling database wrapper factory function that records all state changes for revert capability
 /// This wraps any DatabaseInterface and adds journaling functionality on top
-pub const JournalingDatabase = struct {
+///
+/// ## Parameters
+/// - `config`: Comptime configuration struct containing limits and settings
+///
+/// ## Returns
+/// A configured journaling database type
+pub fn JournalingDatabase(comptime config: anytype) type {
+    return struct {
+        const Self = @This();
     /// Underlying database implementation
-    inner: DatabaseInterface,
+    inner: DatabaseInterface(config),
     /// Journal for tracking state changes
     journal: *CallJournal,
     /// Current snapshot ID for this database session
@@ -16,8 +24,8 @@ pub const JournalingDatabase = struct {
     /// Allocator for internal operations
     allocator: std.mem.Allocator,
     
-    pub fn init(inner: DatabaseInterface, journal: *CallJournal, snapshot_id: u32, allocator: std.mem.Allocator) JournalingDatabase {
-        return JournalingDatabase{
+    pub fn init(inner: DatabaseInterface(config), journal: *CallJournal, snapshot_id: u32, allocator: std.mem.Allocator) Self {
+        return Self{
             .inner = inner,
             .journal = journal,
             .current_snapshot_id = snapshot_id,
@@ -25,18 +33,18 @@ pub const JournalingDatabase = struct {
         };
     }
     
-    pub fn deinit(self: *JournalingDatabase) void {
+    pub fn deinit(self: *Self) void {
         // We don't own the inner database or journal, so just cleanup our own resources
         _ = self;
     }
     
     // Account operations with journaling
     
-    pub fn get_account(self: *JournalingDatabase, address: [20]u8) DatabaseError!?Account {
+    pub fn get_account(self: *Self, address: [20]u8) DatabaseError!?Account {
         return self.inner.get_account(address);
     }
     
-    pub fn set_account(self: *JournalingDatabase, address: [20]u8, account: Account) DatabaseError!void {
+    pub fn set_account(self: *Self, address: [20]u8, account: Account) DatabaseError!void {
         // Check if we need to journal the original account state
         const original_account = self.inner.get_account(address) catch null;
         
@@ -77,7 +85,7 @@ pub const JournalingDatabase = struct {
         return self.inner.set_account(address, account);
     }
     
-    pub fn delete_account(self: *JournalingDatabase, address: [20]u8) DatabaseError!void {
+    pub fn delete_account(self: *Self, address: [20]u8) DatabaseError!void {
         // Journal the original account state before deletion
         if (self.inner.get_account(address)) |original_account| {
             self.journal.record_balance_change(
@@ -98,17 +106,17 @@ pub const JournalingDatabase = struct {
         return self.inner.delete_account(address);
     }
     
-    pub fn account_exists(self: *JournalingDatabase, address: [20]u8) bool {
+    pub fn account_exists(self: *Self, address: [20]u8) bool {
         return self.inner.account_exists(address);
     }
     
     // Storage operations with journaling
     
-    pub fn get_storage(self: *JournalingDatabase, address: [20]u8, key: u256) DatabaseError!u256 {
+    pub fn get_storage(self: *Self, address: [20]u8, key: u256) DatabaseError!u256 {
         return self.inner.get_storage(address, key);
     }
     
-    pub fn set_storage(self: *JournalingDatabase, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+    pub fn set_storage(self: *Self, address: [20]u8, key: u256, value: u256) DatabaseError!void {
         // Journal the original storage value
         const original_value = self.inner.get_storage(address, key) catch 0;
         
@@ -127,61 +135,61 @@ pub const JournalingDatabase = struct {
     
     // Code operations (pass through - code changes are rare and complex to journal)
     
-    pub fn get_code(self: *JournalingDatabase, code_hash: [32]u8) DatabaseError![]const u8 {
+    pub fn get_code(self: *Self, code_hash: [32]u8) DatabaseError![]const u8 {
         return self.inner.get_code(code_hash);
     }
     
-    pub fn set_code(self: *JournalingDatabase, code: []const u8) DatabaseError![32]u8 {
+    pub fn set_code(self: *Self, code: []const u8) DatabaseError![32]u8 {
         // TODO: In a full implementation, we might want to journal code changes too
         return self.inner.set_code(code);
     }
     
     // State root operations (pass through)
     
-    pub fn get_state_root(self: *JournalingDatabase) DatabaseError![32]u8 {
+    pub fn get_state_root(self: *Self) DatabaseError![32]u8 {
         return self.inner.get_state_root();
     }
     
-    pub fn commit_changes(self: *JournalingDatabase) DatabaseError![32]u8 {
+    pub fn commit_changes(self: *Self) DatabaseError![32]u8 {
         return self.inner.commit_changes();
     }
     
     // Snapshot operations (delegate to inner database)
     
-    pub fn create_snapshot(self: *JournalingDatabase) DatabaseError!u64 {
+    pub fn create_snapshot(self: *Self) DatabaseError!u64 {
         return self.inner.create_snapshot();
     }
     
-    pub fn revert_to_snapshot(self: *JournalingDatabase, snapshot_id: u64) DatabaseError!void {
+    pub fn revert_to_snapshot(self: *Self, snapshot_id: u64) DatabaseError!void {
         return self.inner.revert_to_snapshot(snapshot_id);
     }
     
-    pub fn commit_snapshot(self: *JournalingDatabase, snapshot_id: u64) DatabaseError!void {
+    pub fn commit_snapshot(self: *Self, snapshot_id: u64) DatabaseError!void {
         return self.inner.commit_snapshot(snapshot_id);
     }
     
     // Batch operations (pass through)
     
-    pub fn begin_batch(self: *JournalingDatabase) DatabaseError!void {
+    pub fn begin_batch(self: *Self) DatabaseError!void {
         return self.inner.begin_batch();
     }
     
-    pub fn commit_batch(self: *JournalingDatabase) DatabaseError!void {
+    pub fn commit_batch(self: *Self) DatabaseError!void {
         return self.inner.commit_batch();
     }
     
-    pub fn rollback_batch(self: *JournalingDatabase) DatabaseError!void {
+    pub fn rollback_batch(self: *Self) DatabaseError!void {
         return self.inner.rollback_batch();
     }
     
     /// Convert this journaling database to a DatabaseInterface
-    pub fn to_database_interface(self: *JournalingDatabase) DatabaseInterface {
-        return DatabaseInterface.init(self);
+    pub fn to_database_interface(self: *Self) DatabaseInterface(config) {
+        return DatabaseInterface(config).init(self);
     }
     
     /// Apply journal reverts to restore state
     /// This is called by the CallFrameStack when reverting to a snapshot
-    pub fn apply_journal_reverts(self: *JournalingDatabase, journal_entries: []const @import("../call_frame_stack.zig").JournalEntry) DatabaseError!void {
+    pub fn apply_journal_reverts(self: *Self, journal_entries: []const @import("../call_frame_stack.zig").JournalEntry) DatabaseError!void {
         // Apply journal entries in reverse order to restore original state
         var i: usize = journal_entries.len;
         while (i > 0) {
@@ -229,16 +237,24 @@ pub const JournalingDatabase = struct {
             }
         }
     }
-};
+
+    }; // End of struct returned by JournalingDatabase(config)
+}
+
+// Default configuration for backward compatibility
+pub const DefaultConfig = struct {};
+
+// Default type alias for backward compatibility
+pub const DefaultJournalingDatabase = JournalingDatabase(DefaultConfig);
 
 test "JournalingDatabase storage operations" {
     const std = @import("std");
-    const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
+    const MemoryDatabase = @import("memory_database.zig").MemoryDatabase(DefaultConfig);
     
     const allocator = std.testing.allocator;
     
     // Create underlying database
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     
@@ -249,7 +265,7 @@ test "JournalingDatabase storage operations" {
     const snapshot_id = journal.create_snapshot();
     
     // Create journaling wrapper
-    var journaling_db = JournalingDatabase.init(db_interface, &journal, snapshot_id, allocator);
+    var journaling_db = DefaultJournalingDatabase.init(db_interface, &journal, snapshot_id, allocator);
     defer journaling_db.deinit();
     
     const test_address = [_]u8{0x01} ++ [_]u8{0} ** 19;
@@ -284,7 +300,7 @@ test "JournalingDatabase account operations" {
     const allocator = std.testing.allocator;
     
     // Create underlying database
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     
@@ -295,7 +311,7 @@ test "JournalingDatabase account operations" {
     const snapshot_id = journal.create_snapshot();
     
     // Create journaling wrapper
-    var journaling_db = JournalingDatabase.init(db_interface, &journal, snapshot_id, allocator);
+    var journaling_db = DefaultJournalingDatabase.init(db_interface, &journal, snapshot_id, allocator);
     defer journaling_db.deinit();
     
     const test_address = [_]u8{0x01} ++ [_]u8{0} ** 19;

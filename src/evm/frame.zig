@@ -5,15 +5,15 @@
 /// eliminating circular dependencies.
 const std = @import("std");
 const primitives = @import("primitives");
-const Stack = @import("stack/stack.zig");
-const Memory = @import("memory/memory.zig");
+const stack_module = @import("stack/stack.zig");
+const memory_module = @import("memory/memory.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const CodeAnalysis = @import("analysis.zig");
 const AccessList = @import("call_frame_stack.zig").AccessList;
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
 const Host = @import("root.zig").Host;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
-const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
+const DatabaseInterface = @import("state/database_interface.zig").DefaultDatabaseInterface;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 
 /// Error types for Frame operations
@@ -75,15 +75,19 @@ pub const Flags = packed struct {
     _reserved: u41 = 0, // Ensures exactly 64 bits total (11 + 1 + 1 + 10 + 1 + 41 = 64)
 };
 
-/// Frame represents the entire execution state of the EVM as it executes opcodes
-/// Layout optimized for actual opcode access patterns and cache performance
-pub const Frame = struct {
-    // ULTRA HOT - First cache line priority (accessed by virtually every opcode)
-    stack: Stack, // 33,536 bytes - accessed by every opcode 
-    gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
+/// Generic Frame implementation parameterized by ComptimeConfig
+pub fn FrameImpl(comptime config: anytype) type {
+    const Stack = stack_module.Stack(config);
+    const Memory = memory_module.Memory(config);
+    
+    return struct {
+        const Self = @This();
+        // ULTRA HOT - First cache line priority (accessed by virtually every opcode)
+        stack: Stack, // accessed by every opcode 
+        gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
 
-    // HOT - Second cache line priority (accessed by major opcode categories)  
-    memory: *Memory, // 8 bytes - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
+        // HOT - Second cache line priority (accessed by major opcode categories)  
+        memory: *Memory, // 8 bytes - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
     hot_flags: packed struct {
         depth: u10, // 10 bits - call stack depth 
@@ -409,8 +413,18 @@ pub const Frame = struct {
         next_frame.output = &[_]u8{}; // Reset output
 
         return next_frame;
-    }
-};
+        }
+    };
+}
+
+// Default Frame type for backward compatibility
+const builtin = @import("builtin");
+pub const Frame = FrameImpl(.{
+    .word_type = u256,
+    .stack_capacity = 1024,
+    .clear_on_pop = builtin.mode == .Debug or builtin.mode == .ReleaseSafe,
+    .small_memory_lookup_size = 128,
+});
 
 /// Type alias for backward compatibility
 pub const ExecutionContext = Frame;
@@ -455,7 +469,7 @@ comptime {
     if (@sizeOf(Hardfork) != 1) @compileError("Hardfork enum must be exactly 1 byte");
 
     // Assert reasonable struct size (should be dominated by stack)
-    const stack_size = @sizeOf(Stack);
+    const stack_size = @sizeOf(@TypeOf(@as(Frame, undefined).stack));
     const total_size = @sizeOf(Frame);
 
     // Frame should be mostly stack + reasonable overhead
@@ -845,8 +859,8 @@ test "Frame - selfdestruct availability" {
 test "Frame - memory footprint" {
     // Debug: Print component sizes
     std.debug.print("Component sizes:\n", .{});
-    std.debug.print("  Stack: {} bytes\n", .{@sizeOf(Stack)});
-    std.debug.print("  Memory: {} bytes\n", .{@sizeOf(Memory)});
+    std.debug.print("  Stack: {} bytes\n", .{@sizeOf(@TypeOf(@as(Frame, undefined).stack))});
+    std.debug.print("  Memory: {} bytes\n", .{@sizeOf(*@TypeOf(@as(Frame, undefined).memory).*)});
     std.debug.print("  Frame total: {} bytes\n", .{@sizeOf(Frame)});
 
     // Verify hot data is at the beginning for better cache locality

@@ -39,18 +39,26 @@ const DatabaseError = @import("database_interface.zig").DatabaseError;
 const Account = @import("database_interface.zig").Account;
 const Log = @import("../log.zig");
 
-/// EVM state container
+/// EVM state container factory function
 ///
-/// Manages all mutable blockchain state during EVM execution.
-/// This includes account data, storage, and transaction artifacts.
-const EvmState = @This();
+/// Creates a generic EVM state type that can be configured with different
+/// limits and settings via the comptime config parameter.
+///
+/// ## Parameters
+/// - `config`: Comptime configuration struct containing limits and settings
+///
+/// ## Returns
+/// A configured EVM state type
+pub fn EvmState(comptime config: anytype) type {
+    return struct {
+        const Self = @This();
 
 /// Memory allocator for local allocations (transient storage, logs)
 allocator: std.mem.Allocator,
 
 /// Pluggable database interface for persistent state
 /// Handles accounts, storage, and code persistence
-database: DatabaseInterface,
+database: DatabaseInterface(config),
 
 /// Transient storage (EIP-1153: TSTORE/TLOAD)
 /// Maps (address, slot) -> value
@@ -88,10 +96,10 @@ selfdestructs: std.AutoHashMap(Address, Address),
 /// var state = try EvmState.init(allocator, db_interface);
 /// defer state.deinit();
 /// ```
-pub fn init(allocator: std.mem.Allocator, database: DatabaseInterface) std.mem.Allocator.Error!EvmState {
+pub fn init(allocator: std.mem.Allocator, database: DatabaseInterface(config)) std.mem.Allocator.Error!Self {
     Log.debug("EvmState.init: Initializing EVM state with database interface", .{});
 
-    var state = EvmState{
+    var state = Self{
         .allocator = allocator,
         .database = database,
         .transient_storage = std.AutoHashMap(StorageKey, u256).init(allocator),
@@ -118,7 +126,7 @@ pub fn init(allocator: std.mem.Allocator, database: DatabaseInterface) std.mem.A
 /// After calling deinit(), the state instance is invalid and
 /// must not be used. The database interface is NOT cleaned up
 /// as it may be owned by the caller.
-pub fn deinit(self: *EvmState) void {
+pub fn deinit(self: *Self) void {
     Log.debug("EvmState.deinit: Cleaning up EVM state, logs_count={}", .{self.logs.items.len});
 
     self.transient_storage.deinit();
@@ -150,7 +158,7 @@ pub fn deinit(self: *EvmState) void {
 ///
 /// ## Gas Cost
 /// In real EVM: 100-2100 gas depending on cold/warm access
-pub fn get_storage(self: *const EvmState, address: Address, slot: u256) u256 {
+pub fn get_storage(self: *const Self, address: Address, slot: u256) u256 {
     // Use database interface to get storage value
     const value = self.database.get_storage(address, slot) catch |err| {
         @branchHint(.cold);
@@ -178,7 +186,7 @@ pub fn get_storage(self: *const EvmState, address: Address, slot: u256) u256 {
 ///
 /// ## Gas Cost
 /// In real EVM: 2900-20000 gas depending on current/new value
-pub fn set_storage(self: *EvmState, address: Address, slot: u256, value: u256) DatabaseError!void {
+pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) DatabaseError!void {
     Log.debug("EvmState.set_storage: addr={x}, slot={}, value={}", .{ primitives.Address.to_u256(address), slot, value });
     try self.database.set_storage(address, slot, value);
 }
@@ -193,7 +201,7 @@ pub fn set_storage(self: *EvmState, address: Address, slot: u256, value: u256) D
 ///
 /// ## Returns
 /// Balance in wei (0 for non-existent accounts or on error)
-pub fn get_balance(self: *const EvmState, address: Address) u256 {
+pub fn get_balance(self: *const Self, address: Address) u256 {
     // Get account from database
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
@@ -227,7 +235,7 @@ pub fn get_balance(self: *const EvmState, address: Address) u256 {
 ///
 /// ## Note
 /// Balance can exceed total ETH supply in test scenarios
-pub fn set_balance(self: *EvmState, address: Address, balance: u256) DatabaseError!void {
+pub fn set_balance(self: *Self, address: Address, balance: u256) DatabaseError!void {
     Log.debug("EvmState.set_balance: addr={x}, balance={}", .{ primitives.Address.to_u256(address), balance });
 
     // Get existing account or create new one
@@ -252,7 +260,7 @@ pub fn set_balance(self: *EvmState, address: Address, balance: u256) DatabaseErr
 /// ## Returns
 /// - Success: void
 /// - Error: DatabaseError if account operation fails
-pub fn remove_balance(self: *EvmState, address: Address) DatabaseError!void {
+pub fn remove_balance(self: *Self, address: Address) DatabaseError!void {
     // Set balance to 0 instead of removing - database interface handles persistence
     try self.set_balance(address, 0);
 }
@@ -270,7 +278,7 @@ pub fn remove_balance(self: *EvmState, address: Address) DatabaseError!void {
 ///
 /// ## Note
 /// The returned slice is owned by the database - do not free
-pub fn get_code(self: *const EvmState, address: Address) []const u8 {
+pub fn get_code(self: *const Self, address: Address) []const u8 {
     // Get account to find code hash
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
@@ -318,7 +326,7 @@ pub fn get_code(self: *const EvmState, address: Address) []const u8 {
 ///
 /// ## Important
 /// The database interface handles code storage and copying
-pub fn set_code(self: *EvmState, address: Address, code: []const u8) DatabaseError!void {
+pub fn set_code(self: *Self, address: Address, code: []const u8) DatabaseError!void {
     Log.debug("EvmState.set_code: addr={x}, code_len={}", .{ primitives.Address.to_u256(address), code.len });
 
     // Store code in database and get its hash
@@ -346,7 +354,7 @@ pub fn set_code(self: *EvmState, address: Address, code: []const u8) DatabaseErr
 /// ## Returns
 /// - Success: void
 /// - Error: DatabaseError if account operation fails
-pub fn remove_code(self: *EvmState, address: Address) DatabaseError!void {
+pub fn remove_code(self: *Self, address: Address) DatabaseError!void {
     // Set empty code instead of removing - database interface handles persistence
     try self.set_code(address, &[_]u8{});
 }
@@ -364,7 +372,7 @@ pub fn remove_code(self: *EvmState, address: Address) DatabaseError!void {
 ///
 /// ## Note
 /// Nonce prevents transaction replay attacks
-pub fn get_nonce(self: *const EvmState, address: Address) u64 {
+pub fn get_nonce(self: *const Self, address: Address) u64 {
     // Get account from database
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
@@ -397,7 +405,7 @@ pub fn get_nonce(self: *const EvmState, address: Address) u64 {
 ///
 /// ## Warning
 /// Setting nonce below current value can enable replay attacks
-pub fn set_nonce(self: *EvmState, address: Address, nonce: u64) DatabaseError!void {
+pub fn set_nonce(self: *Self, address: Address, nonce: u64) DatabaseError!void {
     Log.debug("EvmState.set_nonce: addr={x}, nonce={}", .{ primitives.Address.to_u256(address), nonce });
 
     // Get existing account or create new one
@@ -422,7 +430,7 @@ pub fn set_nonce(self: *EvmState, address: Address, nonce: u64) DatabaseError!vo
 /// ## Returns
 /// - Success: void
 /// - Error: DatabaseError if account operation fails
-pub fn remove_nonce(self: *EvmState, address: Address) DatabaseError!void {
+pub fn remove_nonce(self: *Self, address: Address) DatabaseError!void {
     // Set nonce to 0 instead of removing - database interface handles persistence
     try self.set_nonce(address, 0);
 }
@@ -446,7 +454,7 @@ pub fn remove_nonce(self: *EvmState, address: Address) DatabaseError!void {
 /// // tx_nonce is used for the transaction
 /// // account nonce is now tx_nonce + 1
 /// ```
-pub fn increment_nonce(self: *EvmState, address: Address) DatabaseError!u64 {
+pub fn increment_nonce(self: *Self, address: Address) DatabaseError!u64 {
     const current_nonce = self.get_nonce(address);
     const new_nonce = current_nonce + 1;
     Log.debug("EvmState.increment_nonce: addr={x}, old_nonce={}, new_nonce={}", .{ primitives.Address.to_u256(address), current_nonce, new_nonce });
@@ -471,7 +479,7 @@ pub fn increment_nonce(self: *EvmState, address: Address) DatabaseError!u64 {
 ///
 /// ## Gas Cost
 /// TLOAD: 100 gas (always warm)
-pub fn get_transient_storage(self: *const EvmState, address: Address, slot: u256) u256 {
+pub fn get_transient_storage(self: *const Self, address: Address, slot: u256) u256 {
     const key = StorageKey{ .address = address, .slot = slot };
     // Hot path: transient storage hit
     if (self.transient_storage.get(key)) |value| {
@@ -507,7 +515,7 @@ pub fn get_transient_storage(self: *const EvmState, address: Address, slot: u256
 /// - Reentrancy locks
 /// - Temporary computation results
 /// - Cross-contract communication within a transaction
-pub fn set_transient_storage(self: *EvmState, address: Address, slot: u256, value: u256) std.mem.Allocator.Error!void {
+pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) std.mem.Allocator.Error!void {
     Log.debug("EvmState.set_transient_storage: addr={x}, slot={}, value={}", .{ primitives.Address.to_u256(address), slot, value });
 
     const key = StorageKey{ .address = address, .slot = slot };
@@ -545,7 +553,7 @@ pub fn set_transient_storage(self: *EvmState, address: Address, slot: u256, valu
 /// const data = encode_u256(amount);
 /// try state.emit_log(contract_addr, &topics, data);
 /// ```
-pub fn emit_log(self: *EvmState, address: Address, topics: []const u256, data: []const u8) std.mem.Allocator.Error!void {
+pub fn emit_log(self: *Self, address: Address, topics: []const u256, data: []const u8) std.mem.Allocator.Error!void {
     Log.debug("EvmState.emit_log: addr={x}, topics_len={}, data_len={}", .{ primitives.Address.to_u256(address), topics.len, data.len });
 
     // Clone the data to ensure it persists
@@ -579,7 +587,7 @@ pub fn emit_log(self: *EvmState, address: Address, topics: []const u256, data: [
 /// ## Returns
 /// - Success: void
 /// - Error: If log_index is invalid
-pub fn remove_log(self: *EvmState, log_index: usize) !void {
+pub fn remove_log(self: *Self, log_index: usize) !void {
     if (log_index >= self.logs.items.len) {
         @branchHint(.cold);
         unreachable;
@@ -620,7 +628,7 @@ pub fn remove_log(self: *EvmState, log_index: usize) !void {
 /// ## Note
 /// Multiple SELFDESTRUCT calls on the same contract only record
 /// the latest recipient address.
-pub fn mark_for_destruction(self: *EvmState, contract_address: Address, recipient: Address) std.mem.Allocator.Error!void {
+pub fn mark_for_destruction(self: *Self, contract_address: Address, recipient: Address) std.mem.Allocator.Error!void {
     Log.debug("EvmState.mark_for_destruction: contract={x}, recipient={x}", .{ primitives.Address.to_u256(contract_address), primitives.Address.to_u256(recipient) });
     try self.selfdestructs.put(contract_address, recipient);
 }
@@ -635,7 +643,7 @@ pub fn mark_for_destruction(self: *EvmState, contract_address: Address, recipien
 ///
 /// ## Returns
 /// true if marked for destruction, false otherwise
-pub fn is_marked_for_destruction(self: *const EvmState, address: Address) bool {
+pub fn is_marked_for_destruction(self: *const Self, address: Address) bool {
     return self.selfdestructs.contains(address);
 }
 
@@ -650,7 +658,7 @@ pub fn is_marked_for_destruction(self: *const EvmState, address: Address) bool {
 /// ## Returns
 /// - Some(recipient): If contract is marked for destruction
 /// - None: If contract is not marked for destruction
-pub fn get_destruction_recipient(self: *const EvmState, address: Address) ?Address {
+pub fn get_destruction_recipient(self: *const Self, address: Address) ?Address {
     return self.selfdestructs.get(address);
 }
 
@@ -664,7 +672,7 @@ pub fn get_destruction_recipient(self: *const EvmState, address: Address) ?Addre
 /// // At end of transaction
 /// state.clear_transient_storage();
 /// ```
-pub fn clear_transient_storage(self: *EvmState) void {
+pub fn clear_transient_storage(self: *Self) void {
     Log.debug("EvmState.clear_transient_storage: Clearing transient storage", .{});
     self.transient_storage.clearAndFree();
 }
@@ -684,7 +692,7 @@ pub fn clear_transient_storage(self: *EvmState) void {
 /// // At start of new transaction
 /// state.clear_logs();
 /// ```
-pub fn clear_logs(self: *EvmState) void {
+pub fn clear_logs(self: *Self) void {
     Log.debug("EvmState.clear_logs: Clearing {} logs", .{self.logs.items.len});
     
     // Free allocated memory for each log
@@ -707,7 +715,7 @@ pub fn clear_logs(self: *EvmState) void {
 /// // After processing selfdestructs
 /// state.clear_selfdestructs();
 /// ```
-pub fn clear_selfdestructs(self: *EvmState) void {
+pub fn clear_selfdestructs(self: *Self) void {
     Log.debug("EvmState.clear_selfdestructs: Clearing {} selfdestructs", .{self.selfdestructs.count()});
     self.selfdestructs.clearRetainingCapacity();
 }
@@ -722,17 +730,26 @@ pub fn clear_selfdestructs(self: *EvmState) void {
 /// // At end of transaction
 /// state.clear_transaction_state();
 /// ```
-pub fn clear_transaction_state(self: *EvmState) void {
+pub fn clear_transaction_state(self: *Self) void {
     Log.debug("EvmState.clear_transaction_state: Clearing all transaction state", .{});
     self.clear_transient_storage();
     self.clear_logs();
     self.clear_selfdestructs();
 }
 
+    }; // End of struct returned by EvmState(config)
+}
+
+// Default configuration for backward compatibility
+pub const DefaultConfig = struct {};
+
+// Default type alias for backward compatibility
+pub const DefaultEvmState = EvmState(DefaultConfig);
+
 // Tests
 
 const testing = std.testing;
-const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
+const MemoryDatabase = @import("memory_database.zig").MemoryDatabase(DefaultConfig);
 
 // Helper function to create test addresses
 fn testAddress(value: u160) Address {
@@ -746,7 +763,7 @@ test "EvmState initialization and deinitialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     // Verify initial state
@@ -762,7 +779,7 @@ test "EvmState account creation and retrieval" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0x1234567890123456789012345678901234567890);
@@ -787,7 +804,7 @@ test "EvmState balance operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr1 = testAddress(0x1111);
@@ -824,7 +841,7 @@ test "EvmState storage operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0x3333);
@@ -868,7 +885,7 @@ test "EvmState code operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0x4444);
@@ -914,7 +931,7 @@ test "EvmState nonce operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0x5555);
@@ -960,7 +977,7 @@ test "EvmState transient storage operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr1 = testAddress(0x6666);
@@ -1003,7 +1020,7 @@ test "EvmState log operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0x8888);
@@ -1053,7 +1070,7 @@ test "EvmState selfdestruct operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const contract = testAddress(0x9999);
@@ -1090,7 +1107,7 @@ test "EvmState combined operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0xDDDD);
@@ -1136,7 +1153,7 @@ test "EvmState edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     // Test zero address
@@ -1177,7 +1194,7 @@ test "EvmState fuzz: storage operations with random addresses and slots" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(42);
@@ -1237,7 +1254,7 @@ test "EvmState fuzz: transient storage lifecycle with random data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(123);
@@ -1302,7 +1319,7 @@ test "EvmState fuzz: log operations with random data sizes" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(456);
@@ -1367,7 +1384,7 @@ test "EvmState fuzz: account state consistency with random operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(789);
@@ -1430,7 +1447,7 @@ test "EvmState fuzz: selfdestruct operations with random contracts" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(999);
@@ -1482,7 +1499,7 @@ test "EvmState fuzz: memory pressure with many accounts" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(1234);
@@ -1561,7 +1578,7 @@ test "EvmState fuzz: state transitions with random operation sequences" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(5678);
@@ -1654,7 +1671,7 @@ test "EvmState fuzz: invariant testing - destroyed contracts cannot be modified"
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     var prng = std.Random.DefaultPrng.init(9999);
@@ -1699,7 +1716,7 @@ test "EvmState fuzz: edge value testing with extreme values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     // Test extreme addresses
@@ -1763,7 +1780,7 @@ test "EvmState clear_logs properly frees memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr = testAddress(0x1234);
@@ -1799,7 +1816,7 @@ test "EvmState clear_selfdestructs" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     // Mark multiple accounts for selfdestruct
@@ -1829,7 +1846,7 @@ test "EvmState clear_transaction_state clears all transaction data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     const addr1 = testAddress(0x1111);
@@ -1876,7 +1893,7 @@ test "EvmState memory leak prevention in transaction simulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var state = try EvmState.init(allocator, db_interface);
+    var state = try DefaultEvmState.init(allocator, db_interface);
     defer state.deinit();
 
     // Simulate multiple transactions

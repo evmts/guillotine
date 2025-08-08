@@ -15,7 +15,7 @@ fn setup_stack(allocator: std.mem.Allocator, items: []const u256) !Stack {
 test "Stack: initialization" {
     const stack = Stack{};
     try testing.expectEqual(@as(usize, 0), stack.size);
-    try testing.expectEqual(@as(usize, Stack.CAPACITY), Stack.CAPACITY);
+    try testing.expectEqual(@as(usize, Stack.capacity), Stack.capacity);
 }
 
 test "Stack: basic push and pop operations" {
@@ -154,14 +154,14 @@ test "Stack: overflow protection" {
     var stack = Stack{};
 
     // Fill stack to capacity - 1
-    for (0..Stack.CAPACITY - 1) |i| {
+    for (0..Stack.capacity - 1) |i| {
         try stack.append(@intCast(i));
     }
-    try testing.expectEqual(@as(usize, Stack.CAPACITY - 1), stack.size);
+    try testing.expectEqual(@as(usize, Stack.capacity - 1), stack.size);
 
     // This should succeed
     try stack.append(999);
-    try testing.expectEqual(@as(usize, Stack.CAPACITY), stack.size);
+    try testing.expectEqual(@as(usize, Stack.capacity), stack.size);
 
     // This should fail
     try testing.expectError(Stack.Error.StackOverflow, stack.append(1000));

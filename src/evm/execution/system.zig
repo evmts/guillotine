@@ -440,7 +440,8 @@ pub fn calculate_call_gas(
 // ============================================================================
 
 // Gas opcode handler
-pub fn gas_op(context: *ExecutionContext) ExecutionError.Error!void {
+pub fn gas_op(comptime config: anytype, context: *ExecutionContext) ExecutionError.Error!void {
+    _ = config;
     try context.stack.append(@as(u256, @intCast(context.gas_remaining)));
 }
 
@@ -500,7 +501,8 @@ pub fn revert_to_snapshot(vm: *Vm, snapshot_id: usize) !void {
     try vm.revert_to_snapshot(snapshot_id);
 }
 
-pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_create(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack
@@ -608,7 +610,8 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
 }
 
 /// CREATE2 opcode - Create contract with deterministic address
-pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_create2(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack
@@ -720,7 +723,8 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     }
 }
 
-pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_call(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack
@@ -846,7 +850,8 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
-pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_callcode(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     _ = ctx;
 
@@ -858,7 +863,8 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     // - handle_call_result integration
 }
 
-pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_delegatecall(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack (DELEGATECALL has no value parameter)
@@ -948,7 +954,8 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
-pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_staticcall(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack (STATICCALL has no value parameter)
@@ -1053,7 +1060,8 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// Gas: Variable based on hardfork and account creation
 /// Memory: No memory access
 /// Storage: Contract marked for destruction
-pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_selfdestruct(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
     // Check static call restriction
@@ -1083,7 +1091,8 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
 /// EXTCALL opcode (0xF8): External call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extcall(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_extcall(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     _ = context;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
@@ -1092,7 +1101,8 @@ pub fn op_extcall(context: *anyopaque) ExecutionError.Error!void {
 
 /// EXTDELEGATECALL opcode (0xF9): External delegate call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extdelegatecall(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_extdelegatecall(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     _ = context;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
@@ -1101,7 +1111,8 @@ pub fn op_extdelegatecall(context: *anyopaque) ExecutionError.Error!void {
 
 /// EXTSTATICCALL opcode (0xFB): External static call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extstaticcall(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_extstaticcall(comptime config: anytype, context: *anyopaque) ExecutionError.Error!void {
+    _ = config; // Config parameter available for future use
     _ = context;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented

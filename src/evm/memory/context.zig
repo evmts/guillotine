@@ -1,6 +1,6 @@
 const std = @import("std");
 const Log = @import("../log.zig");
-const Memory = @import("./memory.zig").Memory;
+const Memory = @import("./memory.zig").DefaultMemory;
 const MemoryError = @import("errors.zig").MemoryError;
 const constants = @import("constants.zig");
 
