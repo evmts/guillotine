@@ -31,8 +31,9 @@ pub const RuntimeConfig = struct {
     default_memory_limit: u64 = 32 * 1024 * 1024, // 32 MB
     /// Maximum memory size
     max_memory_size: u64 = 32 * 1024 * 1024, // 32 MB
-    /// Initial allocator size for EVM memory allocator
-    initial_allocator_size: usize = 64 * 1024, // 64 KB
+    /// Initial arena capacity for temporary allocations (256KB)
+    /// This covers most common contract executions without reallocation
+    arena_initial_capacity: usize = 256 * 1024,
 
     // Stack Configuration
     /// Stack capacity (must match max_stack_size for consistency)

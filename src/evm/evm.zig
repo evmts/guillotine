@@ -44,10 +44,6 @@ pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
 /// Maximum stack buffer size for contracts up to 12,800 bytes
 const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 
-/// Initial arena capacity for temporary allocations (256KB)
-/// This covers most common contract executions without reallocation
-const ARENA_INITIAL_CAPACITY = 256 * 1024;
-
 // Runtime configuration
 /// Runtime configuration containing all EVM constants and settings
 config: RuntimeConfig,
@@ -151,7 +147,7 @@ pub fn initWithConfig(
     // Initialize internal arena allocator for temporary data with preallocated capacity
     var internal_arena = std.heap.ArenaAllocator.init(allocator);
     // Preallocate memory to avoid frequent allocations during execution
-    _ = try internal_arena.allocator().alloc(u8, ARENA_INITIAL_CAPACITY);
+    _ = try internal_arena.allocator().alloc(u8, config.arena_initial_capacity);
     _ = internal_arena.reset(.retain_capacity);
 
     var state = try EvmState.init(allocator, database);
