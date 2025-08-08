@@ -142,6 +142,9 @@ pub const MemoryDatabase = struct {
     /// Contract storage (address, slot) -> value mapping
     storage: std.HashMap(StorageKey, u256, HashContext(StorageKey), 80),
 
+    /// Transient storage (EIP-1153) - cleared at end of transaction
+    transient_storage: std.HashMap(StorageKey, u256, HashContext(StorageKey), 80),
+
     /// Code storage by hash
     code_storage: std.HashMap([32]u8, []u8, HashContext([32]u8), 80),
 
@@ -163,6 +166,7 @@ pub const MemoryDatabase = struct {
             .allocator = allocator,
             .accounts = std.HashMap([20]u8, Account, HashContext([20]u8), 80).init(allocator),
             .storage = std.HashMap(StorageKey, u256, HashContext(StorageKey), 80).init(allocator),
+            .transient_storage = std.HashMap(StorageKey, u256, HashContext(StorageKey), 80).init(allocator),
             .code_storage = std.HashMap([32]u8, []u8, HashContext([32]u8), 80).init(allocator),
             .snapshots = std.ArrayList(Snapshot).init(allocator),
             .next_snapshot_id = 1,
@@ -175,6 +179,7 @@ pub const MemoryDatabase = struct {
     pub fn deinit(self: *MemoryDatabase) void {
         self.accounts.deinit();
         self.storage.deinit();
+        self.transient_storage.deinit();
 
         // Free all stored code
         var code_iter = self.code_storage.iterator();
@@ -247,6 +252,15 @@ pub const MemoryDatabase = struct {
         return self.accounts.contains(address);
     }
 
+    /// Get account balance
+    pub fn get_balance(self: *MemoryDatabase, address: [20]u8) DatabaseError!u256 {
+        if (self.accounts.get(address)) |account| {
+            return account.balance;
+        } else {
+            return 0; // Non-existent accounts have zero balance
+        }
+    }
+
     // Storage operations
 
     /// Get storage value for the given address and key
@@ -270,11 +284,47 @@ pub const MemoryDatabase = struct {
         try self.storage.put(storage_key, value);
     }
 
+    // Transient storage operations (EIP-1153)
+
+    /// Get transient storage value for the given address and key
+    pub fn get_transient_storage(self: *MemoryDatabase, address: [20]u8, key: u256) DatabaseError!u256 {
+        const storage_key = StorageKey{ .address = address, .slot = key };
+        return self.transient_storage.get(storage_key) orelse 0;
+    }
+
+    /// Set transient storage value for the given address and key
+    pub fn set_transient_storage(self: *MemoryDatabase, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+        const storage_key = StorageKey{ .address = address, .slot = key };
+        if (value == 0) {
+            // Storing zero effectively removes the entry
+            _ = self.transient_storage.remove(storage_key);
+        } else {
+            try self.transient_storage.put(storage_key, value);
+        }
+    }
+
     // Code operations
 
     /// Get contract code by hash
     pub fn get_code(self: *MemoryDatabase, code_hash: [32]u8) DatabaseError![]const u8 {
         return self.code_storage.get(code_hash) orelse &[_]u8{};
+    }
+
+    /// Get contract code by address
+    pub fn get_code_by_address(self: *MemoryDatabase, address: [20]u8) DatabaseError![]const u8 {
+        // Get account to find the code hash
+        if (self.get_account(address)) |maybe_account| {
+            if (maybe_account) |account| {
+                // Use the code hash from the account to get the actual code
+                return self.get_code(account.code_hash);
+            }
+        } else |_| {
+            // Error occurred, return empty code
+            return &[_]u8{};
+        }
+        
+        // Account doesn't exist, return empty code
+        return &[_]u8{};
     }
 
     /// Store contract code and return its hash
