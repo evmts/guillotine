@@ -105,6 +105,10 @@ pub const stack_validation = @import("stack/stack_validation.zig");
 /// Main virtual machine implementation
 pub const Evm = @import("evm.zig");
 
+/// EVM configuration system
+pub const config = @import("config/package.zig");
+pub const EvmConfig = config.EvmConfig;
+
 
 /// Execution context and frame management
 pub const Frame = @import("frame.zig").Frame;
