@@ -2,51 +2,63 @@ const std = @import("std");
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = @import("evm/host.zig").CallParams;
 
 // Global allocator for C FFI
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 
-// Wrapper structs to hold Zig objects
+// Wrapper to own the EVM and its backing in-memory DB for testing
 const EvmWrapper = struct {
     evm: *Evm.Evm,
     memory_db: *Evm.MemoryDatabase,
 };
 
-const FrameWrapper = struct {
-    frame: *Evm.Frame,
+// C-facing types
+pub const CAddress = extern struct { bytes: [20]u8 };
+pub const CBytes = extern struct { ptr: [*]const u8, len: usize };
+pub const CMutBytes = extern struct { ptr: [*]u8, len: usize };
+
+pub const CU256 = extern struct { words_le: [4]u64 }; // little-endian 256-bit
+
+pub const CCallKind = enum(c_int) { CALL = 0, STATICCALL = 1, DELEGATECALL = 2, CREATE = 3, CREATE2 = 4 };
+
+pub const CCallRequest = extern struct {
+    kind: CCallKind,
+    caller: CAddress,
+    to: CAddress, // ignored for CREATE/CREATE2
+    value: CU256, // used for CALL/CREATE/CREATE2
+    input: CBytes, // calldata or init code
+    gas: u64,
+    salt: CU256, // used for CREATE2 only
 };
 
-// C-compatible U256 representation
-const CU256 = extern struct {
-    words: [4]u64,
+pub const CCallResponse = extern struct {
+    success: bool,
+    gas_left: u64,
+    output: CMutBytes,
 };
 
-fn cU256ToZig(c_value: CU256) u256 {
-    // Zig uses little-endian u256 representation
-    return @as(u256, c_value.words[0]) |
-        (@as(u256, c_value.words[1]) << 64) |
-        (@as(u256, c_value.words[2]) << 128) |
-        (@as(u256, c_value.words[3]) << 192);
+fn cu256_to_u256(x: CU256) u256 {
+    return (@as(u256, x.words_le[0])) |
+        (@as(u256, x.words_le[1]) << 64) |
+        (@as(u256, x.words_le[2]) << 128) |
+        (@as(u256, x.words_le[3]) << 192);
 }
 
-fn zigU256ToC(value: u256) CU256 {
-    return CU256{
-        .words = .{
-            @truncate(value),
-            @truncate(value >> 64),
-            @truncate(value >> 128),
-            @truncate(value >> 192),
-        },
-    };
+fn caddr_to_addr(a: CAddress) Address.Address {
+    return a.bytes;
+}
+
+fn cbytes_to_slice(b: CBytes) []const u8 {
+    if (b.ptr == null) return &.{};
+    return b.ptr[0..b.len];
 }
 
 export fn zigEvmCreate() ?*anyopaque {
     const memory_db = allocator.create(Evm.MemoryDatabase) catch return null;
     memory_db.* = Evm.MemoryDatabase.init(allocator);
-
     const db_interface = memory_db.to_database_interface();
-    // Updated API: create EVM directly via init
 
     const evm = allocator.create(Evm.Evm) catch {
         memory_db.deinit();
@@ -68,12 +80,7 @@ export fn zigEvmCreate() ?*anyopaque {
         allocator.destroy(evm);
         return null;
     };
-
-    wrapper.* = EvmWrapper{
-        .evm = evm,
-        .memory_db = memory_db,
-    };
-
+    wrapper.* = .{ .evm = evm, .memory_db = memory_db };
     return @ptrCast(wrapper);
 }
 
@@ -88,127 +95,50 @@ export fn zigEvmDestroy(evm_ptr: ?*anyopaque) void {
     }
 }
 
-export fn zigFrameCreate(evm_ptr: ?*anyopaque) ?*anyopaque {
-    if (evm_ptr) |ptr| {
-        const evm_wrapper: *EvmWrapper = @ptrCast(@alignCast(ptr));
+export fn zigEvmCall(evm_ptr: ?*anyopaque, req: *const CCallRequest, res: *CCallResponse) c_int {
+    if (evm_ptr == null or req == null or res == null) return -1;
+    const wrapper: *EvmWrapper = @ptrCast(@alignCast(evm_ptr.?));
 
-        // New Frame API: minimal construction adapted to refactor
-        const frame = allocator.create(Evm.Frame) catch {
-            return null;
+    const kind = req.kind;
+    const caller = caddr_to_addr(req.caller);
+    const to = caddr_to_addr(req.to);
+    const value = cu256_to_u256(req.value);
+    const salt = cu256_to_u256(req.salt);
+    const input = cbytes_to_slice(req.input);
+    const gas: u64 = req.gas;
+
+    var params: CallParams = switch (kind) {
+        .CALL => .{ .call = .{ .caller = caller, .to = to, .value = value, .input = input, .gas = gas } },
+        .STATICCALL => .{ .staticcall = .{ .caller = caller, .to = to, .input = input, .gas = gas } },
+        .DELEGATECALL => .{ .delegatecall = .{ .caller = caller, .to = to, .input = input, .gas = gas } },
+        .CREATE => .{ .create = .{ .caller = caller, .value = value, .init_code = input, .gas = gas } },
+        .CREATE2 => .{ .create2 = .{ .caller = caller, .value = value, .init_code = input, .salt = salt, .gas = gas } },
+    };
+
+    const result = wrapper.evm.call(params) catch |err| {
+        _ = err;
+        res.* = .{ .success = false, .gas_left = 0, .output = .{ .ptr = @ptrFromInt(0), .len = 0 } };
+        return 0;
+    };
+
+    var out_ptr: [*]u8 = @ptrFromInt(0);
+    var out_len: usize = 0;
+    if (result.output.len > 0) {
+        const duped = allocator.alloc(u8, result.output.len) catch {
+            res.* = .{ .success = result.success, .gas_left = result.gas_left, .output = .{ .ptr = @ptrFromInt(0), .len = 0 } };
+            return 0;
         };
-        frame.* = try Evm.Frame.init(
-            1000, // gas_remaining
-            false, // static_call
-            0, // depth
-            primitives.Address.ZERO_ADDRESS, // contract_address
-            primitives.Address.ZERO_ADDRESS, // caller
-            0, // value
-            undefined, // analysis (will be set by call/interpret when used)
-            &evm_wrapper.evm.access_list, // access list
-            undefined, // journal (placeholder)
-            undefined, // host (placeholder)
-            0, // snapshot_id
-            evm_wrapper.evm.state, // database interface
-            evm_wrapper.evm.chain_rules, // chain rules
-            &evm_wrapper.evm.self_destruct, // self_destruct
-            &[_]u8{}, // input
-            evm_wrapper.evm.arena_allocator(), // allocator
-            null, // next_frame
-        );
-
-        const wrapper = allocator.create(FrameWrapper) catch {
-            frame.deinit();
-            allocator.destroy(frame);
-            return null;
-        };
-
-        wrapper.* = FrameWrapper{
-            .frame = frame,
-        };
-
-        return @ptrCast(wrapper);
+        @memcpy(duped, result.output);
+        out_ptr = duped.ptr;
+        out_len = duped.len;
     }
-    return null;
-}
 
-export fn zigFrameDestroy(frame_ptr: ?*anyopaque) void {
-    if (frame_ptr) |ptr| {
-        const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        wrapper.frame.deinit();
-        allocator.destroy(wrapper.frame);
-        allocator.destroy(wrapper);
-    }
-}
-
-export fn zigStackPush(frame_ptr: ?*anyopaque, value: CU256) void {
-    if (frame_ptr) |ptr| {
-        const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        const zig_value = cU256ToZig(value);
-        wrapper.frame.stack.append(zig_value) catch {
-            // In real code, we'd handle this error properly
-            std.debug.panic("Stack push failed\n", .{});
-        };
-    }
-}
-
-export fn zigStackPop(frame_ptr: ?*anyopaque) CU256 {
-    if (frame_ptr) |ptr| {
-        const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        const value = wrapper.frame.stack.pop() catch {
-            // Return 0 on error
-            return zigU256ToC(0);
-        };
-        return zigU256ToC(value);
-    }
-    return zigU256ToC(0);
-}
-
-export fn zigStackSize(frame_ptr: ?*anyopaque) usize {
-    if (frame_ptr) |ptr| {
-        const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        return wrapper.frame.stack.size();
-    }
+    res.* = .{ .success = result.success, .gas_left = result.gas_left, .output = .{ .ptr = out_ptr, .len = out_len } };
     return 0;
 }
 
-export fn zigExecuteOpcode(evm_ptr: ?*anyopaque, frame_ptr: ?*anyopaque, opcode: u8) i32 {
-    if (evm_ptr) |evm_p| {
-        if (frame_ptr) |frame_p| {
-            const evm_wrapper: *EvmWrapper = @ptrCast(@alignCast(evm_p));
-            const frame_wrapper: *FrameWrapper = @ptrCast(@alignCast(frame_p));
-
-            const interpreter: Evm.Operation.Interpreter = evm_wrapper.evm;
-            const state: Evm.Operation.State = frame_wrapper.frame;
-
-            _ = evm_wrapper.evm.table.execute(0, interpreter, state, opcode) catch |err| {
-                // Return error code based on error type
-                switch (err) {
-                    error.StackUnderflow => return -1,
-                    error.StackOverflow => return -2,
-                    error.OutOfGas => return -3,
-                    error.InvalidJump => return -4,
-                    error.InvalidOpcode => return -5,
-                    else => return -99,
-                }
-            };
-
-            return 0; // Success
-        }
-    }
-    return -100; // Invalid pointers
-}
-
-export fn zigGetGasRemaining(frame_ptr: ?*anyopaque) u64 {
-    if (frame_ptr) |ptr| {
-        const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        return wrapper.frame.gas_remaining;
-    }
-    return 0;
-}
-
-export fn zigSetGasRemaining(frame_ptr: ?*anyopaque, gas: u64) void {
-    if (frame_ptr) |ptr| {
-        const wrapper: *FrameWrapper = @ptrCast(@alignCast(ptr));
-        wrapper.frame.gas_remaining = gas;
+export fn zigEvmFreeBytes(ptr: ?[*]u8, len: usize) void {
+    if (ptr) |p| {
+        allocator.free(p[0..len]);
     }
 }
