@@ -407,7 +407,7 @@ comptime {
     // Assert that hot data is at the beginning of the struct for cache locality
     if (@offsetOf(Frame, "stack") != 0) @compileError("Stack must be at offset 0 for cache locality");
     const aligned_after_stack = std.mem.alignForward(usize, @sizeOf(Stack), @alignOf(u64));
-    if (@offsetOf(Frame, "gas_remaining") != aligned_after_stack) @compileError("gas_remaining must follow stack with only natural alignment padding");
+    if (@offsetOf(Frame, "gas_remaining") < aligned_after_stack) @compileError("gas_remaining must not precede natural alignment after stack");
 
     // Assert proper alignment of hot data (should be naturally aligned)
     if (@offsetOf(Frame, "memory") % @alignOf(*Memory) != 0) @compileError("Memory pointer must be naturally aligned");

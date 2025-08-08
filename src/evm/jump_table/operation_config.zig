@@ -1,6 +1,7 @@
 const std = @import("std");
 const execution = @import("../execution/package.zig");
 const adapter = @import("../execution/adapter.zig");
+const ExecutionError = @import("../execution/execution_error.zig");
 
 // Anyopaque thunk wrappers for adapter.call_op
 fn wrap(comptime OpFn: anytype) operation_module.ExecutionFunc {

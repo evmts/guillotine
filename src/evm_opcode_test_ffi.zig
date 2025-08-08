@@ -107,7 +107,7 @@ export fn zigEvmCall(evm_ptr: ?*anyopaque, req: *const CCallRequest, res: *CCall
     const input = cbytes_to_slice(req.input);
     const gas: u64 = req.gas;
 
-    var params: CallParams = switch (kind) {
+    const params: CallParams = switch (kind) {
         .CALL => .{ .call = .{ .caller = caller, .to = to, .value = value, .input = input, .gas = gas } },
         .STATICCALL => .{ .staticcall = .{ .caller = caller, .to = to, .input = input, .gas = gas } },
         .DELEGATECALL => .{ .delegatecall = .{ .caller = caller, .to = to, .input = input, .gas = gas } },
