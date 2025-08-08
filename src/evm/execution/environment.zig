@@ -19,7 +19,7 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
-    const access_cost = try frame.access_list.access_address(address);
+    const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
     // Get balance from state database
@@ -75,7 +75,7 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
-    const access_cost = try frame.access_list.access_address(address);
+    const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
     // Get code size from state database
@@ -106,7 +106,7 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const size_usize = @as(usize, @intCast(size));
 
     // EIP-2929: Check if address is cold and consume appropriate gas
-    const access_cost = try frame.access_list.access_address(address);
+    const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
     // Calculate memory expansion gas cost
@@ -132,7 +132,7 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
-    const access_cost = try frame.access_list.access_address(address);
+    const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
     // Get code from state database and compute hash
