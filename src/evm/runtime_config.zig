@@ -8,6 +8,10 @@ const Frame = @import("frame.zig").Frame;
 /// All configurable constants and runtime parameters are consolidated here.
 /// This struct is designed to be created at comptime for optimal performance.
 pub const RuntimeConfig = struct {
+    // Type Configuration
+    /// The word type used for EVM stack and arithmetic operations
+    /// Standard EVM uses u256, but this can be configured for different use cases
+    word_type: type = u256,
     // Execution Limits
     /// Maximum call depth (EIP-150)
     max_call_depth: u11 = 1024,
@@ -15,6 +19,8 @@ pub const RuntimeConfig = struct {
     max_stack_size: usize = 1024,
     /// Maximum stack buffer size for contract analysis
     max_stack_buffer_size: usize = 43008, // 42KB with alignment padding
+    /// Stack allocation threshold for using stack vs heap
+    stack_allocation_threshold: usize = 12800, // bytes of bytecode
     /// Maximum input size for calls
     max_input_size: u32 = 128 * 1024, // 128 KB
     /// Maximum iterations for interpreter loop
@@ -76,6 +82,14 @@ pub const RuntimeConfig = struct {
     enable_memory_limits: bool = true,
     /// Enable gas accounting
     enable_gas_accounting: bool = true,
+    /// Enable safety checks (equivalent to Debug/ReleaseSafe modes)
+    enable_safety_checks: bool = @import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe,
+    /// Enable thread safety checks
+    enable_thread_checks: bool = @import("builtin").mode == .Debug or @import("builtin").mode == .ReleaseSafe,
+    /// Optimize for size (ReleaseSmall mode)
+    optimize_for_size: bool = @import("builtin").mode == .ReleaseSmall,
+    /// Optimize for speed (ReleaseFast mode)
+    optimize_for_speed: bool = @import("builtin").mode == .ReleaseFast,
 
     // Chain Configuration
     /// Hardfork version
@@ -111,6 +125,10 @@ pub const RuntimeConfig = struct {
             .enable_memory_limits = false,
             .enable_gas_accounting = false,
             .clear_on_pop = true,
+            .enable_safety_checks = true,
+            .enable_thread_checks = false, // Disable for test performance
+            .optimize_for_size = false,
+            .optimize_for_speed = false,
         };
     }
 
