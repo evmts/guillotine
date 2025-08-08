@@ -22,17 +22,19 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
     self.require_one_thread();
 
     // Frame is provided by caller, get the analysis from it
-    var current_instruction = frame.analysis.instructions;
+    const instructions = frame.analysis.instructions;
+    var current_index: usize = 0;
     var loop_iterations: usize = 0;
 
-    while (current_instruction[0]) |nextInstruction| {
+    while (current_index < instructions.len) {
         @branchHint(.likely);
+        const nextInstruction = instructions[current_index];
 
         // In safe mode we make sure we don't loop too much. If this happens
         if (comptime SAFE) {
             loop_iterations += 1;
             if (loop_iterations > MAX_ITERATIONS) {
-                Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}. This should never happen and indicates either the limit was set too low or a high severity bug has been found in EVM", .{ loop_iterations, current_instruction - frame.analysis.instructions, self.depth, frame.gas_remaining });
+                Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}. This should never happen and indicates either the limit was set too low or a high severity bug has been found in EVM", .{ loop_iterations, current_index, self.depth, frame.gas_remaining });
                 unreachable;
             }
         }
@@ -42,7 +44,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // BEGINBLOCK instructions - validate entire basic block upfront
             // This eliminates per-instruction gas and stack validation for the entire block
             .block_info => {
-                current_instruction += 1;
+                current_index += 1;
                 nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
                     return err;
                 };
@@ -58,7 +60,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                         if (!frame.valid_jumpdest(dest)) {
                             return ExecutionError.Error.InvalidJump;
                         }
-                        current_instruction = @ptrCast(jump_target.instruction);
+                        current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
                     },
                     .jumpi => {
                         const pops = frame.stack.pop2_unsafe();
@@ -68,25 +70,25 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                             if (!frame.valid_jumpdest(dest)) {
                                 return ExecutionError.Error.InvalidJump;
                             }
-                            current_instruction = @ptrCast(jump_target.instruction);
+                            current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
                         } else {
-                            current_instruction += 1;
+                            current_index += 1;
                         }
                     },
                     .other => {
-                        current_instruction = @ptrCast(jump_target.instruction);
+                        current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
                     },
                 }
             },
             .push_value => |value| {
-                current_instruction += 1;
+                current_index += 1;
                 try frame.stack.append(value);
             },
             .none => {
                 @branchHint(.likely);
                 // Most opcodes now have .none - no individual gas/stack validation needed
                 // Gas and stack validation is handled by BEGINBLOCK instructions
-                current_instruction += 1;
+                current_index += 1;
                 nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
                     // Frame already manages its own output, no need to copy
 
@@ -100,7 +102,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             },
             .gas_cost => |cost| {
                 // Keep for special opcodes that need individual gas tracking (GAS, CALL, etc.)
-                current_instruction += 1;
+                current_index += 1;
                 if (frame.gas_remaining < cost) {
                     @branchHint(.cold);
                     frame.gas_remaining = 0;
