@@ -234,7 +234,7 @@ fn calculate_call_gas_amount(frame: *ExecutionContext, gas: u256, value: u256) u
     gas_for_call = @min(gas_for_call, frame.gas_remaining - (frame.gas_remaining / GasConstants.CALL_GAS_RETENTION_DIVISOR));
 
     if (value != 0) {
-        gas_for_call += GasConstants.GAS_STIPEND_VALUE_TRANSFER;
+        gas_for_call = @max(gas_for_call, GasConstants.GAS_STIPEND_VALUE_TRANSFER);
     }
 
     return gas_for_call;
@@ -930,7 +930,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
 
@@ -1019,7 +1019,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
 
@@ -1505,5 +1505,61 @@ fn validate_system_result(frame: *const ExecutionContext, op: FuzzSystemOperatio
         );
         // Should return at least base cost even if can't forward
         try testing.expect(gas >= 100);
+    }
+}
+
+test "CALL with value guarantees minimum 2300 gas stipend to callee" {
+    // Test with simple frame struct that has only what calculate_call_gas_amount needs
+    var frame = struct {
+        gas_remaining: u64,
+    }{
+        .gas_remaining = 1000, // Low gas remaining
+    };
+    
+    // Test 1: With value transfer, should guarantee minimum 2300 gas
+    {
+        const gas_requested: primitives.u256 = 50; // Request only 50 gas
+        const value: primitives.u256 = 1; // Non-zero value triggers stipend
+        
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value);
+        
+        // Should receive at least 2300 gas (the stipend), not 50
+        try testing.expectEqual(@as(u64, GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
+    }
+    
+    // Test 2: With value transfer and high gas request, should use requested amount if higher than stipend
+    {
+        frame.gas_remaining = 10000; // Plenty of gas available
+        const gas_requested: primitives.u256 = 5000; // Request more than stipend
+        const value: primitives.u256 = 1; // Non-zero value
+        
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value);
+        
+        // Should receive the requested amount (after 63/64 rule), which is higher than stipend
+        const max_allowed = frame.gas_remaining - (frame.gas_remaining / 64);
+        const expected = @min(5000, max_allowed);
+        try testing.expectEqual(expected, gas_for_call);
+        try testing.expect(gas_for_call >= GasConstants.GAS_STIPEND_VALUE_TRANSFER);
+    }
+}
+
+test "CALL without value respects gas limit without stipend" {
+    // Test with simple frame struct that has only what calculate_call_gas_amount needs
+    var frame = struct {
+        gas_remaining: u64,
+    }{
+        .gas_remaining = 1000,
+    };
+    
+    // Test: Without value transfer, no stipend should be applied
+    {
+        const gas_requested: primitives.u256 = 50; // Request only 50 gas
+        const value: primitives.u256 = 0; // Zero value - no stipend
+        
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value);
+        
+        // Should receive only what was requested (50 gas), no stipend boost
+        try testing.expectEqual(@as(u64, 50), gas_for_call);
+        try testing.expect(gas_for_call < GasConstants.GAS_STIPEND_VALUE_TRANSFER);
     }
 }
