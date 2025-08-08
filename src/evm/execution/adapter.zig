@@ -3,30 +3,25 @@ const ExecutionContext = @import("../frame.zig").ExecutionContext;
 const Operation = @import("../opcodes/operation.zig");
 const memory = @import("memory.zig");
 
-/// Adapter that allows calling either a legacy handler (fn(*ExecutionContext) !void)
-/// or a migrated handler (fn(*anyopaque) !void) through a single entry point.
-pub fn call_op(comptime OpFn: anytype, context: *anyopaque) ExecutionError.Error!void {
-    const FnInfo = @typeInfo(@TypeOf(OpFn)).Fn;
-    const ParamType = FnInfo.params[0].type.?;
+/// Wrapper for opcode handlers that accept *ExecutionContext
+pub fn call_ctx(comptime OpFn: *const fn (*ExecutionContext) ExecutionError.Error!void, context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
+    return OpFn(frame);
+}
 
-    if (ParamType == *ExecutionContext) {
-        const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-        return OpFn(frame);
-    } else if (ParamType == *anyopaque) {
-        return OpFn(context);
-    } else {
-        @compileError("Unsupported opcode handler parameter type for adapter");
-    }
+/// Wrapper for opcode handlers that accept *anyopaque
+pub fn call_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void, context: *anyopaque) ExecutionError.Error!void {
+    return OpFn(context);
 }
 
 /// Adapter for op_returndatasize which uses the old Operation signature
 pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = try memory.op_returndatasize(0, @ptrCast(frame), @ptrCast(frame));
+    _ = try memory.op_returndatasize(0, @ptrCast(@alignCast(frame)), frame);
 }
 
 /// Adapter for op_returndatacopy which uses the old Operation signature
 pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = try memory.op_returndatacopy(0, @ptrCast(frame), @ptrCast(frame));
+    _ = try memory.op_returndatacopy(0, @ptrCast(@alignCast(frame)), frame);
 }

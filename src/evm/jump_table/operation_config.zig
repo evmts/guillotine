@@ -4,10 +4,18 @@ const adapter = @import("../execution/adapter.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 
 // Anyopaque thunk wrappers for adapter.call_op
-fn wrap(comptime OpFn: anytype) operation_module.ExecutionFunc {
+fn wrap_ctx(comptime OpFn: *const fn (*operation_module.State) ExecutionError.Error!void) operation_module.ExecutionFunc {
     return struct {
         pub fn f(ctx: *anyopaque) ExecutionError.Error!void {
-            return adapter.call_op(OpFn, ctx);
+            return adapter.call_ctx(OpFn, ctx);
+        }
+    }.f;
+}
+
+fn wrap_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void) operation_module.ExecutionFunc {
+    return struct {
+        pub fn f(ctx: *anyopaque) ExecutionError.Error!void {
+            return adapter.call_any(OpFn, ctx);
         }
     }.f;
 }
@@ -43,22 +51,22 @@ pub const OpSpec = struct {
 /// Operations are ordered by opcode for clarity and maintainability.
 pub const ALL_OPERATIONS = [_]OpSpec{
     // 0x00s: Stop and Arithmetic Operations
-    .{ .name = "STOP", .opcode = 0x00, .execute = wrap(execution.control.op_stop), .gas = 0, .min_stack = 0, .max_stack = Stack.CAPACITY },
-    .{ .name = "ADD", .opcode = 0x01, .execute = wrap(execution.arithmetic.op_add), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "MUL", .opcode = 0x02, .execute = wrap(execution.arithmetic.op_mul), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "SUB", .opcode = 0x03, .execute = wrap(execution.arithmetic.op_sub), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "DIV", .opcode = 0x04, .execute = wrap(execution.arithmetic.op_div), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "SDIV", .opcode = 0x05, .execute = wrap(execution.arithmetic.op_sdiv), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "MOD", .opcode = 0x06, .execute = wrap(execution.arithmetic.op_mod), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "SMOD", .opcode = 0x07, .execute = wrap(execution.arithmetic.op_smod), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "ADDMOD", .opcode = 0x08, .execute = wrap(execution.arithmetic.op_addmod), .gas = GasConstants.GasMidStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
-    .{ .name = "MULMOD", .opcode = 0x09, .execute = wrap(execution.arithmetic.op_mulmod), .gas = GasConstants.GasMidStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
-    .{ .name = "EXP", .opcode = 0x0a, .execute = wrap(execution.arithmetic.op_exp), .gas = 10, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "SIGNEXTEND", .opcode = 0x0b, .execute = wrap(execution.arithmetic.op_signextend), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "STOP", .opcode = 0x00, .execute = wrap_ctx(execution.control.op_stop), .gas = 0, .min_stack = 0, .max_stack = Stack.CAPACITY },
+    .{ .name = "ADD", .opcode = 0x01, .execute = wrap_ctx(execution.arithmetic.op_add), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "MUL", .opcode = 0x02, .execute = wrap_ctx(execution.arithmetic.op_mul), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "SUB", .opcode = 0x03, .execute = wrap_ctx(execution.arithmetic.op_sub), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "DIV", .opcode = 0x04, .execute = wrap_ctx(execution.arithmetic.op_div), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "SDIV", .opcode = 0x05, .execute = wrap_ctx(execution.arithmetic.op_sdiv), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "MOD", .opcode = 0x06, .execute = wrap_ctx(execution.arithmetic.op_mod), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "SMOD", .opcode = 0x07, .execute = wrap_ctx(execution.arithmetic.op_smod), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "ADDMOD", .opcode = 0x08, .execute = wrap_ctx(execution.arithmetic.op_addmod), .gas = GasConstants.GasMidStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
+    .{ .name = "MULMOD", .opcode = 0x09, .execute = wrap_ctx(execution.arithmetic.op_mulmod), .gas = GasConstants.GasMidStep, .min_stack = 3, .max_stack = Stack.CAPACITY },
+    .{ .name = "EXP", .opcode = 0x0a, .execute = wrap_ctx(execution.arithmetic.op_exp), .gas = 10, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "SIGNEXTEND", .opcode = 0x0b, .execute = wrap_ctx(execution.arithmetic.op_signextend), .gas = GasConstants.GasFastStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
 
     // 0x10s: Comparison & Bitwise Logic Operations
-    .{ .name = "LT", .opcode = 0x10, .execute = wrap(execution.comparison.op_lt), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
-    .{ .name = "GT", .opcode = 0x11, .execute = wrap(execution.comparison.op_gt), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "LT", .opcode = 0x10, .execute = wrap_ctx(execution.comparison.op_lt), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
+    .{ .name = "GT", .opcode = 0x11, .execute = wrap_ctx(execution.comparison.op_gt), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
     .{ .name = "SLT", .opcode = 0x12, .execute = wrap(execution.comparison.op_slt), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
     .{ .name = "SGT", .opcode = 0x13, .execute = wrap(execution.comparison.op_sgt), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
     .{ .name = "EQ", .opcode = 0x14, .execute = wrap(execution.comparison.op_eq), .gas = GasConstants.GasFastestStep, .min_stack = 2, .max_stack = Stack.CAPACITY },
@@ -98,8 +106,8 @@ pub const ALL_OPERATIONS = [_]OpSpec{
     .{ .name = "EXTCODECOPY_TANGERINE", .opcode = 0x3c, .execute = execution.environment.op_extcodecopy, .gas = 700, .min_stack = 4, .max_stack = Stack.CAPACITY, .variant = .TANGERINE_WHISTLE },
     .{ .name = "EXTCODECOPY_ISTANBUL", .opcode = 0x3c, .execute = execution.environment.op_extcodecopy, .gas = 700, .min_stack = 4, .max_stack = Stack.CAPACITY, .variant = .ISTANBUL },
     .{ .name = "EXTCODECOPY", .opcode = 0x3c, .execute = execution.environment.op_extcodecopy, .gas = 0, .min_stack = 4, .max_stack = Stack.CAPACITY, .variant = .BERLIN },
-    .{ .name = "RETURNDATASIZE", .opcode = 0x3d, .execute = adapter.op_returndatasize_adapter, .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1, .variant = .BYZANTIUM },
-    .{ .name = "RETURNDATACOPY", .opcode = 0x3e, .execute = adapter.op_returndatacopy_adapter, .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY, .variant = .BYZANTIUM },
+    .{ .name = "RETURNDATASIZE", .opcode = 0x3d, .execute = wrap_any(adapter.op_returndatasize_adapter), .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1, .variant = .BYZANTIUM },
+    .{ .name = "RETURNDATACOPY", .opcode = 0x3e, .execute = wrap_any(adapter.op_returndatacopy_adapter), .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY, .variant = .BYZANTIUM },
     .{ .name = "EXTCODEHASH", .opcode = 0x3f, .execute = execution.environment.op_extcodehash, .gas = 0, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .CONSTANTINOPLE },
 
     // 0x40s: Block Information
