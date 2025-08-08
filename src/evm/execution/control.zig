@@ -157,10 +157,9 @@ pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     const frame = ctx;
-    const vm = ctx.vm;
 
     // Check if we're in a static call
-    if (frame.is_static) {
+    if (frame.is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
@@ -173,7 +172,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if recipient address is cold and consume appropriate gas
     // Note: Jump table already consumes base SELFDESTRUCT gas cost
-    const access_cost = vm.access_list.access_address(recipient) catch |err| switch (err) {
+    const access_cost = frame.access_list.access_address(recipient) catch |err| switch (err) {
         error.OutOfMemory => return ExecutionError.Error.OutOfGas,
     };
     const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
@@ -184,9 +183,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Mark contract for destruction at end of transaction
-    vm.state.mark_for_destruction(frame.contract.address, recipient) catch |err| switch (err) {
-        error.OutOfMemory => return ExecutionError.Error.OutOfGas,
-    };
+    try frame.mark_for_destruction(recipient);
 
     // Halt execution
     return ExecutionError.Error.STOP;
