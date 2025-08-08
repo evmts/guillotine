@@ -1,6 +1,10 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+
+// Updated to new API - migration in progress, tests not run yet
 
 test "Simple bytecode works with block execution" {
     std.testing.log_level = .debug;
@@ -31,8 +35,7 @@ test "Simple bytecode works with block execution" {
     
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm_builder = evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try evm_builder.build();
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
     
     // Set up caller account
@@ -43,33 +46,24 @@ test "Simple bytecode works with block execution" {
     // Set contract code directly
     try vm.state.set_code(contract_address, bytecode);
     
-    // Get contract code
-    const code = vm.state.get_code(contract_address);
-    const code_hash = [_]u8{0} ** 32;
+    // Execute using new call API
+    std.log.info("TEST: Starting execution with new call API", .{});
+    const call_params = CallParams{ .call = .{
+        .caller = caller_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &.{},
+        .gas = 1_000_000,
+    }};
     
-    // Create contract
-    var contract = evm.Contract.init(
-        caller_address, // caller
-        contract_address, // address
-        0, // value
-        1_000_000, // gas
-        code, // code
-        code_hash, // code_hash
-        &.{}, // empty input
-        false // is_static
-    );
-    defer contract.deinit(allocator, null);
-    
-    // Execute with block interpreter to test
-    std.log.info("TEST: Starting block execution with interpret_block", .{});
-    const result = try vm.interpret_block(&contract, &.{}, false);
-    std.log.info("TEST: Block execution completed, status={}", .{result.status});
+    const result = try vm.call(call_params);
+    std.log.info("TEST: Call execution completed, success={}", .{result.success});
     
     // Verify success
-    try std.testing.expect(result.status == .Success);
+    try std.testing.expect(result.success);
     
     if (result.output) |output| {
         defer allocator.free(output);
-        std.log.info("Simple block execution output size: {}", .{output.len});
+        std.log.info("Simple execution output size: {}", .{output.len});
     }
 }
