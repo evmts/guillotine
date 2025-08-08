@@ -6,7 +6,7 @@ const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
-const ExecutionContext = @import("../frame.zig").ExecutionContext;
+const Frame = @import("../frame.zig").Frame;
 const CodeAnalysis = @import("../analysis.zig");
 const ChainRules = @import("../frame.zig").ChainRules;
 const Host = @import("../host.zig").Host;
@@ -124,7 +124,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     defer frame_access_list.deinit();
     
     // Create execution context for the contract
-    var context = ExecutionContext.init(
+    var context = Frame.init(
         execution_gas, // gas remaining
         is_static, // static call flag 
         @intCast(self.depth), // call depth
@@ -145,15 +145,15 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         false, // is_create_call
         false, // is_delegate_call
     ) catch |err| {
-        Log.debug("VM.call_contract: ExecutionContext creation failed with error: {}", .{err});
+        Log.debug("VM.call_contract: Frame creation failed with error: {}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
     defer context.deinit();
 
-    // TODO: Execute the contract using the ExecutionContext
-    // This would require implementing a new execution method that works with ExecutionContext
+    // TODO: Execute the contract using the Frame
+    // This would require implementing a new execution method that works with Frame
     // For now, return a failure indicating this isn't implemented yet
-    Log.debug("VM.call_contract: Contract execution with ExecutionContext not yet implemented", .{});
+    Log.debug("VM.call_contract: Contract execution with Frame not yet implemented", .{});
     const result = CallResult{ .success = false, .gas_left = execution_gas, .output = null };
     
     // Handle execution errors (placeholder)

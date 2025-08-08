@@ -276,12 +276,15 @@ pub const Frame = struct {
         return self.access_list.access_storage_key(self.contract_address, slot);
     }
 
-    /// Add gas refund for storage operations (e.g., SSTORE refunds)
-    /// TODO: This needs to be integrated with the refund tracking system
+    /// Add gas refund for storage operations (e.g., SSTORE refunds).
+    /// Forwards the refund to the EVM's transaction-level accumulator.
+    /// The refunds will be applied at transaction end with EIP-3529 cap.
     pub fn add_gas_refund(self: *Frame, amount: u64) void {
-        _ = self;
-        _ = amount;
-        // TODO: Implement refund tracking when the refund system is integrated
+        // For now, we need to cast the host back to Evm to access gas refunds
+        // This is safe because Evm acts as its own host
+        const Evm = @import("evm.zig");
+        const evm = @as(*Evm, @ptrCast(@alignCast(self.host.ptr)));
+        evm.add_gas_refund(amount);
     }
 
     /// Backward compatibility accessors

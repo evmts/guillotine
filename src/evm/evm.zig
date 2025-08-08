@@ -91,6 +91,10 @@ analysis_stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined,
 /// Call journal for transaction revertibility
 journal: CallJournal = undefined,
 
+/// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
+/// This tracks refunds to be applied at transaction end per EIP-3529
+gas_refunds: u64 = 0,
+
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
@@ -179,6 +183,7 @@ pub fn init(
         .self_destruct = undefined,
         .analysis_stack_buffer = undefined,
         .journal = CallJournal.init(allocator),
+        .gas_refunds = 0,
     };
 }
 
@@ -206,12 +211,54 @@ pub fn reset(self: *Evm) void {
     // Reset execution state
     self.depth = 0;
     self.read_only = false;
+    self.gas_refunds = 0; // Reset refunds for new transaction
 }
 
 /// Get the internal arena allocator for temporary EVM data
 /// Use this for allocations that are reset between EVM executions
 pub fn arena_allocator(self: *Evm) std.mem.Allocator {
     return self.internal_arena.allocator();
+}
+
+// ============================================================================
+// Gas Refund System (EIP-3529)
+// ============================================================================
+
+/// Add gas refund for storage operations (SSTORE) and SELFDESTRUCT.
+/// Refunds are accumulated at the transaction level and applied at the end.
+///
+/// @param amount The amount of gas to refund
+pub fn add_gas_refund(self: *Evm, amount: u64) void {
+    // Use saturating addition to prevent overflow
+    self.gas_refunds = self.gas_refunds +| amount;
+    Log.debug("Gas refund added: {} (total: {})", .{ amount, self.gas_refunds });
+}
+
+/// Apply gas refunds at transaction end with EIP-3529 cap.
+/// Maximum refund is gas_used / 5 as per London hardfork.
+///
+/// @param total_gas_used The total gas used in the transaction
+/// @return The actual refund amount after applying the cap
+pub fn apply_gas_refunds(self: *Evm, total_gas_used: u64) u64 {
+    // EIP-3529: Maximum refund is gas_used / 5 (London hardfork)
+    // Pre-London: Maximum refund is gas_used / 2
+    const max_refund_quotient: u64 = if (self.chain_rules.is_london) 5 else 2;
+    const max_refund = total_gas_used / max_refund_quotient;
+    const actual_refund = @min(self.gas_refunds, max_refund);
+    
+    Log.debug("Applying gas refunds: requested={}, max={}, actual={}", .{ 
+        self.gas_refunds, max_refund, actual_refund 
+    });
+    
+    // Reset refunds after application
+    self.gas_refunds = 0;
+    return actual_refund;
+}
+
+/// Reset gas refunds for a new transaction.
+/// Called at the start of each transaction execution.
+pub fn reset_gas_refunds(self: *Evm) void {
+    self.gas_refunds = 0;
 }
 
 // Host interface implementation - EVM acts as its own host
@@ -1181,4 +1228,93 @@ test "fuzz_evm_hardfork_configurations" {
     };
     const input = "test_input_data_for_fuzzing";
     try global.testEvmHardforkConfigurations(input);
+}
+
+// ============================================================================
+// Gas Refund System Tests
+// ============================================================================
+
+test "gas refund accumulation" {
+    const allocator = std.testing.allocator;
+    const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    const db_interface = db.to_database_interface();
+    
+    var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
+    defer evm.deinit();
+    
+    // Initially no refunds
+    try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    
+    // Add some refunds
+    evm.add_gas_refund(1000);
+    try std.testing.expectEqual(@as(u64, 1000), evm.gas_refunds);
+    
+    evm.add_gas_refund(500);
+    try std.testing.expectEqual(@as(u64, 1500), evm.gas_refunds);
+    
+    // Test saturating addition
+    evm.add_gas_refund(std.math.maxInt(u64));
+    try std.testing.expectEqual(std.math.maxInt(u64), evm.gas_refunds);
+}
+
+test "gas refund application with EIP-3529 cap" {
+    const allocator = std.testing.allocator;
+    const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    const db_interface = db.to_database_interface();
+    
+    // Test London hardfork (gas_used / 5 cap)
+    {
+        var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
+        defer evm.deinit();
+        
+        // Set up refunds
+        evm.gas_refunds = 10000;
+        
+        // Apply refunds with total gas used = 30000
+        // Max refund should be 30000 / 5 = 6000
+        const refund = evm.apply_gas_refunds(30000);
+        try std.testing.expectEqual(@as(u64, 6000), refund);
+        
+        // Refunds should be reset after application
+        try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    }
+    
+    // Test pre-London hardfork (gas_used / 2 cap)
+    {
+        var evm = try Evm.init_with_hardfork(allocator, db_interface, .BERLIN);
+        defer evm.deinit();
+        
+        // Set up refunds
+        evm.gas_refunds = 10000;
+        
+        // Apply refunds with total gas used = 10000
+        // Max refund should be 10000 / 2 = 5000
+        const refund = evm.apply_gas_refunds(10000);
+        try std.testing.expectEqual(@as(u64, 5000), refund);
+        
+        // Refunds should be reset after application
+        try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    }
+}
+
+test "gas refund reset" {
+    const allocator = std.testing.allocator;
+    const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    const db_interface = db.to_database_interface();
+    
+    var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
+    defer evm.deinit();
+    
+    // Add refunds
+    evm.add_gas_refund(5000);
+    try std.testing.expectEqual(@as(u64, 5000), evm.gas_refunds);
+    
+    // Reset should clear refunds
+    evm.reset_gas_refunds();
+    try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    
+    // Reset in general reset function
+    evm.add_gas_refund(3000);
+    evm.reset();
+    try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
 }
