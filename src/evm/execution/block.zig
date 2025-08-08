@@ -7,9 +7,7 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
     const block_number = try context.stack.pop();
 
-    // TODO: Need block_number field in ExecutionContext
-    // const current_block = context.block_number;
-    const current_block: u64 = 1000; // Placeholder
+    const current_block = context.block_number;
 
     if (block_number >= current_block) {
         @branchHint(.unlikely);
@@ -21,8 +19,8 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
         @branchHint(.unlikely);
         try context.stack.append(0);
     } else {
-        // Return a pseudo-hash based on block number for testing
-        // In production, this would retrieve the actual block hash from chain history
+        // TODO: In production, this would retrieve the actual block hash from chain history
+        // For now, return a pseudo-hash based on block number for testing
         const hash = std.hash.Wyhash.hash(0, std.mem.asBytes(&block_number));
         try context.stack.append(hash);
     }
@@ -35,40 +33,24 @@ pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     // not at runtime. The coinbase address should be pre-warmed in the access list
     // before execution begins if EIP-3651 is enabled.
     
-    // TODO: Need block_coinbase field in ExecutionContext
-    // try context.stack.append(primitives.Address.to_u256(context.block_coinbase));
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    try context.stack.append(primitives.Address.to_u256(context.block_coinbase));
 }
 
 pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
-    // TODO: Need block_timestamp field in ExecutionContext
-    // try context.stack.append(@as(u256, @intCast(context.block_timestamp)));
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    try context.stack.append(@as(u256, @intCast(context.block_timestamp)));
 }
 
 pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
-    // TODO: Need block_number field in ExecutionContext
-    // try context.stack.append(@as(u256, @intCast(context.block_number)));
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    try context.stack.append(@as(u256, @intCast(context.block_number)));
 }
 
 pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
-    // TODO: Need block_difficulty field in ExecutionContext
-    // Get difficulty/prevrandao from block context
-    // Post-merge this returns PREVRANDAO
-    // try context.stack.append(context.block_difficulty);
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    // Post-merge this returns PREVRANDAO, pre-merge it returns difficulty
+    // The host is responsible for providing the correct value based on hardfork
+    try context.stack.append(context.block_difficulty);
 }
 
 pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -78,11 +60,7 @@ pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
-    // TODO: Need block_gas_limit field in ExecutionContext
-    // try context.stack.append(@as(u256, @intCast(context.block_gas_limit)));
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    try context.stack.append(@as(u256, @intCast(context.block_gas_limit)));
 }
 
 pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -96,12 +74,7 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     // transaction/client layer, not in the EVM interpreter itself.
     // The EVM only needs to expose the base fee value via this opcode.
     
-    // TODO: Need block_base_fee field in ExecutionContext or pass via block context
-    // The base fee should be provided by the client/block processing layer
-    // try context.stack.append(context.block_base_fee);
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    try context.stack.append(context.block_base_fee);
 }
 
 pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -125,28 +98,237 @@ pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *ExecutionContext = @ptrCast(@alignCast(context_ptr));
-    // TODO: Need blob_base_fee field in ExecutionContext
-    // Get blob base fee from block context
-    // Push blob base fee (EIP-4844)
-    // try context.stack.append(context.blob_base_fee);
-    
-    // Placeholder implementation - push zero for now
-    try context.stack.append(0);
+    // Push blob base fee (EIP-4844, Cancun+)
+    // If not available (pre-Cancun), should be handled by jump table gating
+    const blob_base_fee = context.block_blob_base_fee orelse 0;
+    try context.stack.append(blob_base_fee);
 }
 
 // Tests
 const testing = std.testing;
 const Address = primitives.Address;
-const Stack = @import("../stack/stack.zig");
-const Memory = @import("../memory/memory.zig");
-const CodeAnalysis = @import("../analysis.zig");
-const AccessList = @import("../access_list.zig").AccessList;
-const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
-const DatabaseInterface = @import("../state/database_interface.zig").DatabaseInterface;
-const MemoryDatabase = @import("../state/memory_database.zig");
+const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 
-// FIXME: All test functions that used Frame/Contract have been removed
-// They need to be rewritten to use ExecutionContext when the migration is complete
+test "COINBASE returns block coinbase address" {
+    // Create a minimal test context with only required fields
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_coinbase = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_coinbase: Address.Address,
+    }{
+        .stack = &stack,
+        .block_coinbase = test_coinbase,
+    };
+    
+    // Execute COINBASE opcode
+    try op_coinbase(&context);
+    
+    // Verify coinbase address was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(Address.to_u256(test_coinbase), result);
+}
+
+test "TIMESTAMP returns block timestamp" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_timestamp: u64 = 1234567890;
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_timestamp: u64,
+    }{
+        .stack = &stack,
+        .block_timestamp = test_timestamp,
+    };
+    
+    // Execute TIMESTAMP opcode
+    try op_timestamp(&context);
+    
+    // Verify timestamp was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(@as(primitives.u256, test_timestamp), result);
+}
+
+test "NUMBER returns block number" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_block_number: u64 = 15537393;
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_number: u64,
+    }{
+        .stack = &stack,
+        .block_number = test_block_number,
+    };
+    
+    // Execute NUMBER opcode
+    try op_number(&context);
+    
+    // Verify block number was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(@as(primitives.u256, test_block_number), result);
+}
+
+test "DIFFICULTY returns block difficulty/prevrandao" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_difficulty: primitives.u256 = 0x123456789ABCDEF;
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_difficulty: primitives.u256,
+    }{
+        .stack = &stack,
+        .block_difficulty = test_difficulty,
+    };
+    
+    // Execute DIFFICULTY opcode
+    try op_difficulty(&context);
+    
+    // Verify difficulty was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(test_difficulty, result);
+}
+
+test "GASLIMIT returns block gas limit" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_gas_limit: u64 = 30_000_000;
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_gas_limit: u64,
+    }{
+        .stack = &stack,
+        .block_gas_limit = test_gas_limit,
+    };
+    
+    // Execute GASLIMIT opcode
+    try op_gaslimit(&context);
+    
+    // Verify gas limit was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(@as(primitives.u256, test_gas_limit), result);
+}
+
+test "BASEFEE returns block base fee" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_base_fee: primitives.u256 = 1_000_000_000; // 1 gwei
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_base_fee: primitives.u256,
+    }{
+        .stack = &stack,
+        .block_base_fee = test_base_fee,
+    };
+    
+    // Execute BASEFEE opcode
+    try op_basefee(&context);
+    
+    // Verify base fee was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(test_base_fee, result);
+}
+
+test "BLOBBASEFEE returns blob base fee when available" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    const test_blob_base_fee: primitives.u256 = 100_000_000; // 0.1 gwei
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_blob_base_fee: ?u256,
+    }{
+        .stack = &stack,
+        .block_blob_base_fee = test_blob_base_fee,
+    };
+    
+    // Execute BLOBBASEFEE opcode
+    try op_blobbasefee(&context);
+    
+    // Verify blob base fee was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(test_blob_base_fee, result);
+}
+
+test "BLOBBASEFEE returns 0 when not available (pre-Cancun)" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_blob_base_fee: ?u256,
+    }{
+        .stack = &stack,
+        .block_blob_base_fee = null, // Pre-Cancun, no blob base fee
+    };
+    
+    // Execute BLOBBASEFEE opcode
+    try op_blobbasefee(&context);
+    
+    // Verify 0 was pushed to stack
+    const result = try stack.pop();
+    try testing.expectEqual(@as(primitives.u256, 0), result);
+}
+
+test "BLOCKHASH returns 0 for future blocks" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_number: u64,
+    }{
+        .stack = &stack,
+        .block_number = 1000,
+    };
+    
+    // Push future block number
+    try stack.append(1001);
+    
+    // Execute BLOCKHASH opcode
+    try op_blockhash(&context);
+    
+    // Verify 0 was pushed for future block
+    const result = try stack.pop();
+    try testing.expectEqual(@as(primitives.u256, 0), result);
+}
+
+test "BLOCKHASH returns 0 for blocks too far in past" {
+    var stack = @import("../stack/stack.zig").init();
+    defer stack.deinit();
+    
+    var context = struct {
+        stack: *@TypeOf(stack),
+        block_number: u64,
+    }{
+        .stack = &stack,
+        .block_number = 1000,
+    };
+    
+    // Push block number more than 256 blocks in past
+    try stack.append(700);
+    
+    // Execute BLOCKHASH opcode
+    try op_blockhash(&context);
+    
+    // Verify 0 was pushed for old block
+    const result = try stack.pop();
+    try testing.expectEqual(@as(primitives.u256, 0), result);
+}
 
 // TODO: Convert all tests to ExecutionContext after VM refactor complete
 // All block opcode tests have been temporarily disabled due to Frame/Contract refactor

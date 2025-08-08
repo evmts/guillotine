@@ -104,6 +104,15 @@ pub const Frame = struct {
     snapshot_id: u32, // 4 bytes
     caller: primitives.Address.Address, // 20 bytes  
     value: u256, // 32 bytes
+    
+    // Block context - accessed by block opcodes (COINBASE, TIMESTAMP, etc.)
+    block_number: u64, // 8 bytes
+    block_timestamp: u64, // 8 bytes
+    block_difficulty: u256, // 32 bytes - pre-merge: difficulty, post-merge: prevrandao
+    block_gas_limit: u64, // 8 bytes
+    block_coinbase: primitives.Address.Address, // 20 bytes
+    block_base_fee: u256, // 32 bytes - EIP-1559
+    block_blob_base_fee: ?u256, // 32 bytes - EIP-4844 (None for pre-Cancun)
 
     // COLD - Validation flags and rarely accessed data
     hardfork: Hardfork, // 1 byte - hardfork validation  
@@ -164,6 +173,9 @@ pub const Frame = struct {
             if (chain_rules.is_homestead) break :blk Hardfork.HOMESTEAD;
             break :blk Hardfork.FRONTIER;
         };
+        
+        // Fetch block info from host
+        const block_info = host.get_block_info();
 
         return Frame{
             // Ultra hot data
@@ -190,6 +202,15 @@ pub const Frame = struct {
             .snapshot_id = snapshot_id,
             .caller = caller,
             .value = value,
+            
+            // Block context from host
+            .block_number = block_info.number,
+            .block_timestamp = block_info.timestamp,
+            .block_difficulty = block_info.difficulty, // pre-merge: difficulty, post-merge: prevrandao
+            .block_gas_limit = block_info.gas_limit,
+            .block_coinbase = block_info.coinbase,
+            .block_base_fee = block_info.base_fee,
+            .block_blob_base_fee = if (chain_rules.is_cancun) block_info.base_fee else null, // TODO: Add blob_base_fee to BlockInfo
 
             // Storage cluster
             .contract_address = contract_address,
