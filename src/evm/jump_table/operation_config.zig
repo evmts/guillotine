@@ -142,7 +142,7 @@ pub const ALL_OPERATIONS = [_]OpSpec{
     .{ .name = "TLOAD", .opcode = 0x5c, .execute = wrap_any(execution.storage.op_tload), .gas = GasConstants.WarmStorageReadCost, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .CANCUN },
     .{ .name = "TSTORE", .opcode = 0x5d, .execute = wrap_any(execution.storage.op_tstore), .gas = GasConstants.WarmStorageReadCost, .min_stack = 2, .max_stack = Stack.CAPACITY, .variant = .CANCUN },
     .{ .name = "MCOPY", .opcode = 0x5e, .execute = wrap_any(execution.memory.op_mcopy), .gas = GasConstants.GasFastestStep, .min_stack = 3, .max_stack = Stack.CAPACITY, .variant = .CANCUN },
-    .{ .name = "PUSH0", .opcode = 0x5f, .execute = wrap_any(execution.stack.op_push0), .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1, .variant = .SHANGHAI },
+    .{ .name = "PUSH0", .opcode = 0x5f, .execute = wrap_any(execution.null_opcode.op_invalid), .gas = GasConstants.GasQuickStep, .min_stack = 0, .max_stack = Stack.CAPACITY - 1, .variant = .SHANGHAI },
 
     // 0x60s & 0x70s: Push operations (generated dynamically in jump table)
     // 0x80s: Duplication operations (generated dynamically in jump table)
