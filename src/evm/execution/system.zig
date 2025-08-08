@@ -946,7 +946,7 @@ pub fn op_delegatecall(comptime config: anytype, context: *anyopaque) ExecutionE
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
 
@@ -1036,7 +1036,7 @@ pub fn op_staticcall(comptime config: anytype, context: *anyopaque) ExecutionErr
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
 

@@ -265,11 +265,16 @@ pub const GuillotineExecutionResult = extern struct {
     error_message: ?[*:0]const u8,
 };
 
+// Import concrete EVM types
+const concrete_evms = @import("evm/concrete_evms.zig");
+const AnyEvm = concrete_evms.AnyEvm;
+
 // Internal VM structure
 const VmState = struct {
-    vm: *evm_root.Evm.DefaultEvm,
+    vm: AnyEvm,
     memory_db: *MemoryDatabase,
     allocator: std.mem.Allocator,
+    hardfork: evm_root.Hardfork,
 };
 
 // VM creation and destruction

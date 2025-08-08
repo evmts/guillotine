@@ -245,7 +245,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         jt.execute_funcs[0x60] = wrap_generic_fn(execution.null_opcode.op_invalid);
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
-        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.max_stack[0x60] = Stack.capacity - 1;
         jt.undefined_flags[0x60] = false;
         
         // PUSH2-PUSH32 - temporarily disabled during refactor
@@ -268,7 +268,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         jt.execute_funcs[0x60] = wrap_generic_fn(execution.null_opcode.op_invalid);
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
-        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.max_stack[0x60] = Stack.capacity - 1;
         jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH32 - temporarily disabled during refactor
