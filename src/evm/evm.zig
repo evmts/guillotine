@@ -28,6 +28,7 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const builtin = @import("builtin");
+const RuntimeConfig = @import("runtime_config.zig").RuntimeConfig;
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -46,6 +47,10 @@ const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 /// Initial arena capacity for temporary allocations (256KB)
 /// This covers most common contract executions without reallocation
 const ARENA_INITIAL_CAPACITY = 256 * 1024;
+
+// Runtime configuration
+/// Runtime configuration containing all EVM constants and settings
+config: RuntimeConfig,
 // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
@@ -102,15 +107,14 @@ comptime {
     std.debug.assert(@sizeOf(Evm) > 0); // Struct must have size
 }
 
-/// Create a new EVM with specified configuration.
+/// Create a new EVM with a RuntimeConfig.
 ///
-/// This is the initialization method for EVM instances. All parameters except
-/// allocator and database are optional and will use sensible defaults if not provided.
+/// This is the recommended initialization method that uses the centralized
+/// RuntimeConfig for all EVM constants and settings.
 ///
 /// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
-/// @param table Opcode dispatch table (optional, defaults to JumpTable.DEFAULT)
-/// @param chain_rules Protocol rules (optional, defaults to ChainRules.DEFAULT)
+/// @param config Runtime configuration (use RuntimeConfig.default() for defaults)
 /// @param context Execution context (optional, defaults to Context.init())
 /// @param depth Current call depth (optional, defaults to 0)
 /// @param read_only Static call flag (optional, defaults to false)
@@ -120,27 +124,29 @@ comptime {
 ///
 /// Example usage:
 /// ```zig
-/// // Basic initialization with defaults
-/// var evm = try Evm.init(allocator, database, null, null, null, 0, false, null);
+/// // Basic initialization with default config
+/// const config = RuntimeConfig.default();
+/// var evm = try Evm.initWithConfig(allocator, database, config, null, 0, false, null);
 /// defer evm.deinit();
 ///
-/// // With custom hardfork and configuration
-/// const table = JumpTable.init_from_hardfork(.LONDON);
-/// const rules = Frame.chainRulesForHardfork(.LONDON);
-/// var evm = try Evm.init(allocator, database, table, rules, null, 0, false, null);
+/// // With custom hardfork configuration
+/// const config = RuntimeConfig.forHardfork(.LONDON);
+/// var evm = try Evm.initWithConfig(allocator, database, config, null, 0, false, null);
 /// defer evm.deinit();
 /// ```
-pub fn init(
+pub fn initWithConfig(
     allocator: std.mem.Allocator,
     database: @import("state/database_interface.zig").DatabaseInterface,
-    table: ?JumpTable,
-    chain_rules: ?ChainRules,
+    config: RuntimeConfig,
     context: ?Context,
     depth: u16,
     read_only: bool,
     tracer: ?std.io.AnyWriter,
 ) !Evm {
-    Log.debug("Evm.init: Initializing EVM with configuration", .{});
+    Log.debug("Evm.initWithConfig: Initializing EVM with RuntimeConfig", .{});
+
+    // Validate config consistency
+    try config.validate();
 
     // Initialize internal arena allocator for temporary data with preallocated capacity
     var internal_arena = std.heap.ArenaAllocator.init(allocator);
@@ -155,17 +161,13 @@ pub fn init(
     var access_list = AccessList.init(allocator, ctx);
     errdefer access_list.deinit();
 
-    // NOTE: Execution state is left undefined - will be initialized fresh in each call
-    // - frame_stack: initialized in call execution
-    // - self_destruct: initialized in call execution  
-    // - analysis_stack_buffer: initialized in call execution
-
-    Log.debug("Evm.init: EVM initialization complete", .{});
+    Log.debug("Evm.initWithConfig: EVM initialization complete", .{});
     return Evm{
+        .config = config,
         .allocator = allocator,
         .internal_arena = internal_arena,
-        .table = table orelse JumpTable.DEFAULT,
-        .chain_rules = chain_rules orelse ChainRules.DEFAULT,
+        .table = config.jump_table,
+        .chain_rules = config.chain_rules,
         .state = state,
         .access_list = access_list,
         .context = ctx,
@@ -173,13 +175,50 @@ pub fn init(
         .depth = @intCast(depth),
         .read_only = read_only,
         .tracer = tracer,
-        // New execution state fields (initialized fresh in each call)
+        // Execution state fields (initialized fresh in each call)
         .frame_stack = undefined,
         .current_frame_depth = 0,
         .self_destruct = undefined,
         .analysis_stack_buffer = undefined,
         .journal = CallJournal.init(allocator),
     };
+}
+
+/// Create a new EVM with specified configuration (legacy method).
+///
+/// This is the legacy initialization method that maintains backward compatibility.
+/// It internally creates a RuntimeConfig from the provided parameters.
+///
+/// @param allocator Memory allocator for VM operations
+/// @param database Database interface for state management
+/// @param table Opcode dispatch table (optional, defaults to JumpTable.DEFAULT)
+/// @param chain_rules Protocol rules (optional, defaults to ChainRules.DEFAULT)
+/// @param context Execution context (optional, defaults to Context.init())
+/// @param depth Current call depth (optional, defaults to 0)
+/// @param read_only Static call flag (optional, defaults to false)
+/// @param tracer Optional tracer for capturing execution traces
+/// @return Configured EVM instance
+/// @throws OutOfMemory if memory initialization fails
+pub fn init(
+    allocator: std.mem.Allocator,
+    database: @import("state/database_interface.zig").DatabaseInterface,
+    table: ?JumpTable,
+    chain_rules: ?ChainRules,
+    context: ?Context,
+    depth: u16,
+    read_only: bool,
+    tracer: ?std.io.AnyWriter,
+) !Evm {
+    // Create a RuntimeConfig from the legacy parameters
+    var config = RuntimeConfig.default();
+    if (table) |t| {
+        config.jump_table = t;
+    }
+    if (chain_rules) |r| {
+        config.chain_rules = r;
+    }
+    
+    return initWithConfig(allocator, database, config, context, depth, read_only, tracer);
 }
 
 /// Free all VM resources.
