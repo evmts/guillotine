@@ -18,7 +18,6 @@ const Context = @import("access_list/context.zig");
 const EvmState = @import("state/state.zig");
 const Memory = @import("memory/memory.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
-const EvmMemoryAllocator = @import("memory/evm_allocator.zig").EvmMemoryAllocator;
 const evm_limits = @import("constants/evm_limits.zig");
 const Frame = @import("frame.zig").Frame;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
@@ -43,11 +42,15 @@ pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
 // Constants from call.zig for frame management
 /// Maximum stack buffer size for contracts up to 12,800 bytes
 const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
+
+/// Initial arena capacity for temporary allocations (256KB)
+/// This covers most common contract executions without reallocation
+const ARENA_INITIAL_CAPACITY = 256 * 1024;
 // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
 /// Internal arena allocator for temporary data that's reset between executions
-internal_allocator: EvmMemoryAllocator,
+internal_arena: std.heap.ArenaAllocator,
 /// Opcode dispatch table for the configured hardfork
 table: JumpTable,
 /// Current call depth for overflow protection
@@ -139,9 +142,11 @@ pub fn init(
 ) !Evm {
     Log.debug("Evm.init: Initializing EVM with configuration", .{});
 
-    // Initialize internal arena allocator for temporary data
-    var internal_allocator = try EvmMemoryAllocator.init(allocator);
-    errdefer internal_allocator.deinit();
+    // Initialize internal arena allocator for temporary data with preallocated capacity
+    var internal_arena = std.heap.ArenaAllocator.init(allocator);
+    // Preallocate memory to avoid frequent allocations during execution
+    _ = try internal_arena.allocator().alloc(u8, ARENA_INITIAL_CAPACITY);
+    _ = internal_arena.reset(.retain_capacity);
 
     var state = try EvmState.init(allocator, database);
     errdefer state.deinit();
@@ -158,7 +163,7 @@ pub fn init(
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
         .allocator = allocator,
-        .internal_allocator = internal_allocator,
+        .internal_arena = internal_arena,
         .table = table orelse JumpTable.DEFAULT,
         .chain_rules = chain_rules orelse ChainRules.DEFAULT,
         .state = state,
@@ -182,7 +187,7 @@ pub fn init(
 pub fn deinit(self: *Evm) void {
     self.state.deinit();
     self.access_list.deinit();
-    self.internal_allocator.deinit();
+    self.internal_arena.deinit();
     self.journal.deinit();
 
     // Execution state doesn't need cleanup in deinit:
@@ -196,7 +201,7 @@ pub fn deinit(self: *Evm) void {
 /// Clears all state but keeps the allocated memory for reuse.
 pub fn reset(self: *Evm) void {
     // Reset internal arena allocator to reuse memory
-    self.internal_allocator.reset();
+    _ = self.internal_arena.reset(.retain_capacity);
 
     // Reset execution state
     self.depth = 0;
@@ -206,7 +211,7 @@ pub fn reset(self: *Evm) void {
 /// Get the internal arena allocator for temporary EVM data
 /// Use this for allocations that are reset between EVM executions
 pub fn arena_allocator(self: *Evm) std.mem.Allocator {
-    return self.internal_allocator.allocator();
+    return self.internal_arena.allocator();
 }
 
 // Host interface implementation - EVM acts as its own host
