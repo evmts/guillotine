@@ -6,6 +6,8 @@ const Instruction = @import("instruction.zig").Instruction;
 const BlockInfo = @import("instruction.zig").BlockInfo;
 const JumpType = @import("instruction.zig").JumpType;
 const JumpTarget = @import("instruction.zig").JumpTarget;
+const DynamicGas = @import("instruction.zig").DynamicGas;
+const DynamicGasFunc = @import("instruction.zig").DynamicGasFunc;
 const Opcode = @import("opcodes/opcode.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
 const instruction_limits = @import("constants/instruction_limits.zig");
@@ -14,6 +16,7 @@ const execution = @import("execution/package.zig");
 const Frame = @import("frame.zig").Frame;
 const Log = @import("log.zig");
 const stack_height_changes = @import("opcodes/stack_height_changes.zig");
+const dynamic_gas = @import("gas/dynamic_gas.zig");
 
 /// Optimized code analysis for EVM bytecode execution.
 /// Contains only the essential data needed during execution.
@@ -246,6 +249,21 @@ pub fn deinit(self: *CodeAnalysis) void {
     self.jumpdest_bitmap.deinit();
 }
 
+/// Get the dynamic gas function for a specific opcode
+fn getDynamicGasFunction(opcode: Opcode.Enum) ?DynamicGasFunc {
+    return switch (opcode) {
+        .CALL => dynamic_gas.call_dynamic_gas,
+        .CALLCODE => dynamic_gas.callcode_dynamic_gas,
+        .DELEGATECALL => dynamic_gas.delegatecall_dynamic_gas,
+        .STATICCALL => dynamic_gas.staticcall_dynamic_gas,
+        .CREATE => dynamic_gas.create_dynamic_gas,
+        .CREATE2 => dynamic_gas.create2_dynamic_gas,
+        .SSTORE => dynamic_gas.sstore_dynamic_gas,
+        .GAS => dynamic_gas.gas_dynamic_gas,
+        else => null,
+    };
+}
+
 /// Creates a code bitmap that marks which bytes are opcodes vs data.
 fn createCodeBitmap(allocator: std.mem.Allocator, code: []const u8) !DynamicBitSet {
     std.debug.assert(code.len <= limits.MAX_CONTRACT_SIZE);
@@ -454,12 +472,17 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             // Special opcodes that need individual gas tracking for dynamic calculations
             .GAS, .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL, .CREATE, .CREATE2, .SSTORE => {
                 const operation = jump_table.get_operation(opcode_byte);
-                block.gas_cost += @intCast(operation.constant_gas);
+                // Don't accumulate static gas in block - it will be handled individually
                 block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = operation.execute,
-                    .arg = .{ .gas_cost = block.gas_cost }, // Pass accumulated gas for precise calculations
+                    .arg = .{ 
+                        .dynamic_gas = DynamicGas{
+                            .static_cost = @intCast(operation.constant_gas),
+                            .gas_fn = getDynamicGasFunction(opcode),
+                        },
+                    },
                 };
                 instruction_count += 1;
                 pc += 1;
