@@ -241,7 +241,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         
         // PUSH2-PUSH32 - temporarily disabled during refactor
         for (1..32) |i| {
-            jt.execute_funcs[0x60 + i] = execution.system.invalid_operation;
+            jt.execute_funcs[0x60 + i] = execution.null_opcode.op_invalid;
             jt.constant_gas[0x60 + i] = execution.GasConstants.GasFastestStep;
             jt.min_stack[0x60 + i] = 0;
             jt.max_stack[0x60 + i] = Stack.CAPACITY - 1;
@@ -266,7 +266,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         // TODO: Implement new-style PUSH operations for PUSH2-32
         inline for (1..32) |i| {
             const opcode_idx = 0x60 + i;
-            jt.execute_funcs[opcode_idx] = execution.control.op_invalid;
+            jt.execute_funcs[opcode_idx] = execution.null_opcode.op_invalid;
             jt.constant_gas[opcode_idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[opcode_idx] = 0;
             jt.max_stack[opcode_idx] = Stack.CAPACITY - 1;
@@ -364,9 +364,14 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.undefined_flags[idx] = false;
         }
     } else {
+        // Use the same static functions for optimized mode  
+        const log_functions = [_]ExecutionFunc{
+            log.log_0, log.log_1, log.log_2, log.log_3, log.log_4,
+        };
+        
         inline for (0..5) |n| {
             const idx = 0xa0 + n;
-            jt.execute_funcs[idx] = log.make_log(n);
+            jt.execute_funcs[idx] = log_functions[n];
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
             jt.max_stack[idx] = Stack.CAPACITY;

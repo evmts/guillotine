@@ -11,6 +11,7 @@ pub const crypto = @import("crypto.zig");
 pub const environment = @import("environment.zig");
 pub const log = @import("log.zig");
 pub const memory = @import("memory.zig");
+pub const null_opcode = @import("null_opcode.zig");
 pub const stack = @import("stack.zig");
 pub const storage = @import("storage.zig");
 pub const system = @import("system.zig");
