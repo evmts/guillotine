@@ -83,7 +83,7 @@ pub const Host = struct {
         /// Emit log event (for LOG0-LOG4 opcodes)
         emit_log: *const fn (ptr: *anyopaque, contract_address: Address, topics: []const u256, data: []const u8) void,
         /// Execute EVM call (CALL, DELEGATECALL, STATICCALL, CREATE, CREATE2)
-        call: *const fn (ptr: *anyopaque, params: CallParams) CallResult,
+        call: *const fn (ptr: *anyopaque, params: CallParams) anyerror!CallResult,
     };
 
     /// Initialize a Host interface from any implementation
@@ -121,7 +121,7 @@ pub const Host = struct {
                 return self.emit_log(contract_address, topics, data);
             }
 
-            fn vtable_call(ptr: *anyopaque, params: CallParams) CallResult {
+            fn vtable_call(ptr: *anyopaque, params: CallParams) anyerror!CallResult {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.call(params);
             }
@@ -168,7 +168,7 @@ pub const Host = struct {
     }
 
     /// Execute EVM call
-    pub fn call(self: Host, params: CallParams) CallResult {
+    pub fn call(self: Host, params: CallParams) !CallResult {
         return self.vtable.call(self.ptr, params);
     }
 };

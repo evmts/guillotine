@@ -4,7 +4,7 @@ const primitives = @import("primitives");
 
 const print = std.debug.print;
 const Address = primitives.Address.Address;
-const CallParams = evm.Host.CallParams;
+const CallParams = evm.CallParams;
 const CallResult = evm.CallResult;
 
 const CALLER_ADDRESS = "0x1000000000000000000000000000000000000001";

@@ -245,7 +245,7 @@ pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics
 }
 
 /// Execute EVM call (Host interface)
-pub fn call(self: *Evm, params: CallParams) CallResult {
+pub fn call(self: *Evm, params: CallParams) !CallResult {
     _ = self;
     _ = params;
     Log.err("Host.call not implemented", .{});

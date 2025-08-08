@@ -51,7 +51,7 @@ fn caddr_to_addr(a: CAddress) Address.Address {
 }
 
 fn cbytes_to_slice(b: CBytes) []const u8 {
-    if (b.ptr == null) return &.{};
+    if (b.len == 0) return &.{};
     return b.ptr[0..b.len];
 }
 
@@ -96,7 +96,7 @@ export fn zigEvmDestroy(evm_ptr: ?*anyopaque) void {
 }
 
 export fn zigEvmCall(evm_ptr: ?*anyopaque, req: *const CCallRequest, res: *CCallResponse) c_int {
-    if (evm_ptr == null or req == null or res == null) return -1;
+    if (evm_ptr == null) return -1;
     const wrapper: *EvmWrapper = @ptrCast(@alignCast(evm_ptr.?));
 
     const kind = req.kind;
@@ -117,20 +117,22 @@ export fn zigEvmCall(evm_ptr: ?*anyopaque, req: *const CCallRequest, res: *CCall
 
     const result = wrapper.evm.call(params) catch |err| {
         _ = err;
-        res.* = .{ .success = false, .gas_left = 0, .output = .{ .ptr = @ptrFromInt(0), .len = 0 } };
+        res.* = .{ .success = false, .gas_left = 0, .output = .{ .ptr = undefined, .len = 0 } };
         return 0;
     };
 
-    var out_ptr: [*]u8 = @ptrFromInt(0);
+    var out_ptr: [*]u8 = undefined;
     var out_len: usize = 0;
-    if (result.output.len > 0) {
-        const duped = allocator.alloc(u8, result.output.len) catch {
-            res.* = .{ .success = result.success, .gas_left = result.gas_left, .output = .{ .ptr = @ptrFromInt(0), .len = 0 } };
-            return 0;
-        };
-        @memcpy(duped, result.output);
-        out_ptr = duped.ptr;
-        out_len = duped.len;
+    if (result.output) |output| {
+        if (output.len > 0) {
+            const duped = allocator.alloc(u8, output.len) catch {
+                res.* = .{ .success = result.success, .gas_left = result.gas_left, .output = .{ .ptr = undefined, .len = 0 } };
+                return 0;
+            };
+            @memcpy(duped, output);
+            out_ptr = duped.ptr;
+            out_len = duped.len;
+        }
     }
 
     res.* = .{ .success = result.success, .gas_left = result.gas_left, .output = .{ .ptr = out_ptr, .len = out_len } };
