@@ -210,7 +210,7 @@ pub const Frame = struct {
     }
 
     /// Gas consumption with bounds checking - used by all opcodes that consume gas
-    pub fn consume_gas(self: *Frame, amount: u64) ExecutionError!void {
+    pub fn consume_gas(self: *Frame, amount: u64) ExecutionError.Error!void {
         if (self.gas_remaining < amount) return ExecutionError.Error.OutOfGas;
         self.gas_remaining -= amount;
     }
