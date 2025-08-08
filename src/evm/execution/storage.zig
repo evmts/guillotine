@@ -11,7 +11,7 @@ pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
 
     const slot = frame.stack.peek_unsafe().*;
 
-    if (frame.chain_rules.is_berlin) {
+    if (frame.is_at_least(.BERLIN)) {
         const is_cold = frame.mark_storage_slot_warm(slot) catch {
             return ExecutionError.Error.OutOfMemory;
         };
@@ -30,14 +30,14 @@ pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
 /// SSTORE opcode - Store value in persistent storage
 pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    if (frame.hot_flags.is_static) {
+    if (frame.is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
     // EIP-1706: Disable SSTORE with gasleft lower than call stipend (2300)
     // This prevents reentrancy attacks by ensuring enough gas remains for exception handling
-    if (frame.chain_rules.is_istanbul and frame.gas_remaining <= GasConstants.SstoreSentryGas) {
+    if (frame.is_at_least(.ISTANBUL) and frame.gas_remaining <= GasConstants.SstoreSentryGas) {
         @branchHint(.unlikely);
         return ExecutionError.Error.OutOfGas;
     }
@@ -63,7 +63,7 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Get storage cost based on current hardfork and value change
-    const hardfork = frame.chain_rules.getHardfork();
+    const hardfork = frame.getHardfork();
     const cost = storage_costs.calculateStorageCost(hardfork, current_value, value);
     total_gas += cost.gas;
 
@@ -105,7 +105,7 @@ pub fn op_tstore(context: *anyopaque) ExecutionError.Error!void {
     //     return ExecutionError.Error.InvalidOpcode;
     // }
     
-    if (frame.hot_flags.is_static) {
+    if (frame.is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
