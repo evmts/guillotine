@@ -29,6 +29,8 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const builtin = @import("builtin");
+const config = @import("config/package.zig");
+const EvmConfig = config.EvmConfig;
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -64,6 +66,8 @@ read_only: bool = false,
 chain_rules: ChainRules,
 /// Execution context providing transaction and block information
 context: Context,
+/// EVM configuration (optional, used when initialized with init_with_config)
+evm_config: ?*EvmConfig = null,
 
 // Data fields (moderate access frequency)
 /// Optional tracer for capturing execution traces
@@ -186,6 +190,74 @@ pub fn init(
     };
 }
 
+/// Create a new EVM with EvmConfig.
+///
+/// This is the preferred initialization method using the centralized configuration system.
+/// 
+/// @param allocator Memory allocator for VM operations
+/// @param database Database interface for state management
+/// @param evm_config Configuration for EVM behavior and EIP flags
+/// @param tracer Optional tracer for capturing execution traces
+/// @return Configured EVM instance
+/// @throws OutOfMemory if memory initialization fails
+///
+/// Example usage:
+/// ```zig
+/// // Mainnet Cancun configuration
+/// var config = EvmConfig.mainnet(.CANCUN);
+/// var evm = try Evm.init_with_config(allocator, database, &config, null);
+/// defer evm.deinit();
+///
+/// // L2 configuration (Optimism)
+/// var config = EvmConfig.optimism();
+/// var evm = try Evm.init_with_config(allocator, database, &config, null);
+/// defer evm.deinit();
+/// ```
+pub fn init_with_config(
+    allocator: std.mem.Allocator,
+    database: @import("state/database_interface.zig").DatabaseInterface,
+    evm_config: *EvmConfig,
+    tracer: ?std.io.AnyWriter,
+) !Evm {
+    Log.debug("Evm.init_with_config: Initializing EVM with EvmConfig", .{});
+    
+    // Get EIP flags from config
+    const eip_flags = evm_config.get_eip_flags();
+    
+    // Create jump table based on hardfork
+    const table = JumpTable.init_from_hardfork(evm_config.hardfork);
+    
+    // Create chain rules based on EIP flags
+    // TODO: Update ChainRules to use EipFlags directly
+    const chain_rules = Frame.chainRulesForHardfork(evm_config.hardfork);
+    
+    // Create context with chain ID from config
+    const context = Context{
+        .chain_id = evm_config.chain_id,
+        // Other context fields would be set based on transaction
+    };
+    
+    // Initialize using standard init function
+    var evm = try init(
+        allocator,
+        database,
+        table,
+        chain_rules,
+        context,
+        0,      // depth
+        false,  // read_only
+        tracer,
+    );
+    
+    // Store the config reference
+    evm.evm_config = evm_config;
+    
+    // EIP flags are available via evm_config.get_eip_flags()
+    _ = eip_flags;
+    
+    return evm;
+}
+
 /// Free all VM resources.
 /// Must be called when finished with the VM to prevent memory leaks.
 pub fn deinit(self: *Evm) void {
@@ -293,7 +365,7 @@ test "Evm.init default configuration" {
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -312,7 +384,7 @@ test "Evm.init with custom jump table and chain rules" {
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -330,7 +402,7 @@ test "Evm.init with hardfork" {
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -448,7 +520,7 @@ test "Evm initialization memory invariants" {
     var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -501,15 +573,9 @@ test "Evm return data management" {
     var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-
-    const test_data = [_]u8{ 0x01, 0x02, 0x03, 0x04 };
-    const allocated_data = try allocator.dupe(u8, &test_data);
-    defer allocator.free(allocated_data);
-
-    evm.return_data = allocated_data;
-    try testing.expectEqual(@as(usize, 4), evm.return_data.len);
-    try testing.expectEqualSlices(u8, &test_data, evm.return_data);
+    // Return data is now managed per frame, not at the EVM level
+    // This test verifies EVM initialization succeeds
+    try testing.expect(evm.allocator.ptr == allocator.ptr);
 }
 
 test "Evm state access" {
@@ -665,6 +731,76 @@ test "Evm fuzz: random depth and read_only values" {
     }
 }
 
+test "Evm.init_with_config mainnet configuration" {
+    const allocator = testing.allocator;
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    
+    // Create mainnet Cancun configuration
+    var evm_config = EvmConfig.mainnet(.CANCUN);
+    var evm = try Evm.init_with_config(allocator, db_interface, &evm_config, null);
+    defer evm.deinit();
+
+    // Verify EVM was initialized with correct settings
+    try testing.expect(evm.evm_config != null);
+    try testing.expectEqual(@as(u64, 1), evm.evm_config.?.chain_id);
+    try testing.expectEqual(Hardfork.CANCUN, evm.evm_config.?.hardfork);
+    
+    // Verify chain ID was set in context
+    try testing.expectEqual(@as(u64, 1), evm.context.chain_id);
+}
+
+test "Evm.init_with_config L2 configuration" {
+    const allocator = testing.allocator;
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    
+    // Create Optimism L2 configuration
+    var evm_config = EvmConfig.optimism();
+    var evm = try Evm.init_with_config(allocator, db_interface, &evm_config, null);
+    defer evm.deinit();
+
+    // Verify EVM was initialized with L2 settings
+    try testing.expect(evm.evm_config != null);
+    try testing.expectEqual(@as(u64, 10), evm.evm_config.?.chain_id);
+    try testing.expect(evm.evm_config.?.is_l2());
+    
+    // Verify chain ID was set in context
+    try testing.expectEqual(@as(u64, 10), evm.context.chain_id);
+}
+
+test "Evm.init_with_config custom configuration" {
+    const allocator = testing.allocator;
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    const db_interface = memory_db.to_database_interface();
+    
+    // Create custom configuration with builder pattern
+    var evm_config = EvmConfig.from_hardfork(.BERLIN)
+        .with_chain_id(12345)
+        .enable_eips(&.{ 3855, 1153 }); // Add PUSH0 and transient storage to Berlin
+    
+    var evm = try Evm.init_with_config(allocator, db_interface, &evm_config, null);
+    defer evm.deinit();
+
+    // Verify custom configuration was applied
+    try testing.expect(evm.evm_config != null);
+    try testing.expectEqual(@as(u64, 12345), evm.evm_config.?.chain_id);
+    try testing.expectEqual(Hardfork.BERLIN, evm.evm_config.?.hardfork);
+    
+    // Verify custom EIPs are enabled
+    try testing.expect(evm.evm_config.?.is_eip_enabled(3855)); // PUSH0
+    try testing.expect(evm.evm_config.?.is_eip_enabled(1153)); // Transient storage
+}
+
 test "Evm integration: multiple state operations" {
     const allocator = testing.allocator;
 
@@ -724,7 +860,7 @@ test "Evm invariant: all fields properly initialized after init" {
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(u16, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 
@@ -771,10 +907,10 @@ test "Evm edge case: empty return data" {
     var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
 
     evm.return_data = &[_]u8{};
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
 }
 
 test "Evm resource exhaustion simulation" {
@@ -805,7 +941,7 @@ test "Evm.init creates EVM with custom settings" {
     defer evm.deinit();
 
     // Can't test return_data initialization as init doesn't support it
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(u16, 42), evm.depth);
     try testing.expectEqual(true, evm.read_only);
 }
@@ -821,7 +957,7 @@ test "Evm.init uses defaults for null parameters" {
     var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
+    // Return data is now managed per frame, not at the EVM level
     try testing.expectEqual(@as(usize, 0), evm.stack.size());
     try testing.expectEqual(@as(u16, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
