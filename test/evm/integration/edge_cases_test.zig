@@ -1,29 +1,32 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
-const opcodes = Evm.opcodes;
-const ExecutionError = Evm.ExecutionError;
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
+const opcodes = evm.opcodes;
+const ExecutionError = evm.ExecutionError;
 
 // Test stack limit edge cases
 test "Integration: stack limit boundary conditions" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -34,7 +37,7 @@ test "Integration: stack limit boundary conditions" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -52,8 +55,8 @@ test "Integration: stack limit boundary conditions" {
     try frame.stack.push(1023);
     try testing.expectEqual(@as(usize, 1024), frame.stack.size());
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // DUP1 should fail (would exceed 1024)
     const dup_result = vm.table.execute(0, interpreter, state, 0x80);
@@ -76,21 +79,21 @@ test "Integration: memory expansion limits" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -101,7 +104,7 @@ test "Integration: memory expansion limits" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -115,8 +118,8 @@ test "Integration: memory expansion limits" {
 
     const gas_before = frame.gas_remaining;
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     try vm.table.execute(0, interpreter, state, 0x52);
 
@@ -138,21 +141,21 @@ test "Integration: arithmetic overflow and underflow" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -163,7 +166,7 @@ test "Integration: arithmetic overflow and underflow" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -173,8 +176,8 @@ test "Integration: arithmetic overflow and underflow" {
 
     const max_u256 = std.math.maxInt(u256);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Test addition overflow (wraps around)
     try frame.stack.push(max_u256);
@@ -212,21 +215,21 @@ test "Integration: signed arithmetic boundaries" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -237,7 +240,7 @@ test "Integration: signed arithmetic boundaries" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -250,8 +253,8 @@ test "Integration: signed arithmetic boundaries" {
     // Minimum negative signed value (-2^255)
     const min_signed: u256 = @as(u256, 1) << 255;
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Test SLT with boundary values
     try frame.stack.push(max_signed); // Maximum positive
@@ -277,21 +280,21 @@ test "Integration: bitwise operation boundaries" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -302,7 +305,7 @@ test "Integration: bitwise operation boundaries" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -310,8 +313,8 @@ test "Integration: bitwise operation boundaries" {
         .build();
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Test shift operations with large shift amounts
     try frame.stack.push(0xFF);
@@ -353,22 +356,22 @@ test "Integration: call gas calculation edge cases" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
-    const to_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000003");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const to_address = evm.Address.fromHex("0x0000000000000000000000000000000000000003");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -379,7 +382,7 @@ test "Integration: call gas calculation edge cases" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -394,8 +397,8 @@ test "Integration: call gas calculation edge cases" {
         .output = null,
     };
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Request more gas than available
     try frame.stack.push(0); // ret_size
@@ -421,21 +424,21 @@ test "Integration: return data boundary conditions" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -446,7 +449,7 @@ test "Integration: return data boundary conditions" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -458,8 +461,8 @@ test "Integration: return data boundary conditions" {
     const return_data = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
     try frame.return_data.set(&return_data);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Test 1: Copy within bounds
     try frame.stack.push(2); // size
@@ -502,21 +505,21 @@ test "Integration: exponentiation edge cases" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -527,7 +530,7 @@ test "Integration: exponentiation edge cases" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -535,8 +538,8 @@ test "Integration: exponentiation edge cases" {
         .build();
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Test 0^0 = 1
     try frame.stack.push(0); // base
@@ -574,18 +577,18 @@ test "Integration: jump destination validation" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create code with JUMPDEST in data section of PUSH
     const code = [_]u8{
@@ -596,7 +599,7 @@ test "Integration: jump destination validation" {
     };
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -607,7 +610,7 @@ test "Integration: jump destination validation" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -615,8 +618,8 @@ test "Integration: jump destination validation" {
         .build();
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Mark position 3 as valid jump destination
     try contract.mark_jumpdests();
@@ -640,21 +643,21 @@ test "Integration: storage slot temperature transitions" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -665,7 +668,7 @@ test "Integration: storage slot temperature transitions" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -673,8 +676,8 @@ test "Integration: storage slot temperature transitions" {
         .build();
     defer frame.deinit();
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // First access to slot 100 - cold
     try frame.stack.push(100); // slot
@@ -712,21 +715,21 @@ test "Integration: MCOPY overlap handling" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.fromHex("0x0000000000000000000000000000000000000002");
+    const contract_address = evm.Address.fromHex("0x0000000000000000000000000000000000000001");
+    const owner_address = evm.Address.fromHex("0x0000000000000000000000000000000000000002");
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -737,7 +740,7 @@ test "Integration: MCOPY overlap handling" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -751,8 +754,8 @@ test "Integration: MCOPY overlap handling" {
         try frame.memory.write_byte(i, @intCast(i + 1)); // 1,2,3,4,5,6,7,8,9,10
     }
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Test forward overlap (source < dest, overlapping)
     try frame.stack.push(6); // length

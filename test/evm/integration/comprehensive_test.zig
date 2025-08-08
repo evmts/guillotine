@@ -1,13 +1,16 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
-const opcodes = Evm.opcodes;
-const MemoryDatabase = Evm.MemoryDatabase;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
-const Address = Evm.Address;
-const Operation = Evm.Operation;
-const ExecutionError = Evm.ExecutionError;
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
+const opcodes = evm.opcodes;
+const MemoryDatabase = evm.MemoryDatabase;
+const Contract = evm.Contract;
+const Frame = evm.Frame;
+const Address = evm.Address;
+const Operation = evm.Operation;
+const ExecutionError = evm.ExecutionError;
 
 // Comprehensive integration tests combining multiple opcode categories
 
@@ -19,7 +22,7 @@ test "Integration: Complete ERC20 transfer simulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -150,7 +153,7 @@ test "Integration: Smart contract deployment flow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -272,7 +275,7 @@ test "Integration: Complex control flow with nested conditions" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -485,7 +488,7 @@ test "Integration: Gas metering across operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -587,7 +590,7 @@ test "Integration: Error propagation and recovery" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -669,7 +672,7 @@ test "Integration: Error propagation and recovery" {
     _ = try vm.table.execute(0, &interpreter2, state2, 0x55);
 
     // Verify storage was updated
-    const storage_key = Evm.Evm.StorageKey{ .address = contract_address, .slot = 0 };
+    const storage_key = evm.evm.StorageKey{ .address = contract_address, .slot = 0 };
     const stored_value = vm.storage.get(storage_key) orelse 0;
     try testing.expectEqual(@as(u256, 42), stored_value);
 }

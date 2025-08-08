@@ -1,14 +1,17 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 const primitives = @import("primitives");
-const opcodes = Evm.opcodes;
-const MemoryDatabase = Evm.MemoryDatabase;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
-const Address = Evm.Address;
-const Operation = Evm.Operation;
-const ExecutionError = Evm.ExecutionError;
+const opcodes = evm.opcodes;
+const MemoryDatabase = evm.MemoryDatabase;
+const Contract = evm.Contract;
+const Frame = evm.Frame;
+const Address = evm.Address;
+const Operation = evm.Operation;
+const ExecutionError = evm.ExecutionError;
 
 // Integration tests for crypto operations and logging
 
@@ -20,7 +23,7 @@ test "Integration: SHA3 with dynamic data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -110,7 +113,7 @@ test "Integration: Logging with topics and data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -186,7 +189,7 @@ test "Integration: LOG operations with multiple topics" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -265,7 +268,7 @@ test "Integration: Hash-based address calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -352,7 +355,7 @@ test "Integration: Event emission patterns" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -452,7 +455,7 @@ test "Integration: Dynamic log data with memory expansion" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -532,7 +535,7 @@ test "Integration: SHA3 for signature verification" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -597,7 +600,7 @@ test "Integration: Log in static context fails" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();

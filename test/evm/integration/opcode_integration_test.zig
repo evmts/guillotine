@@ -1,13 +1,16 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
-const Address = Evm.Address;
-const ExecutionError = Evm.ExecutionError;
-const opcodes = Evm.opcodes;
-const MemoryDatabase = Evm.MemoryDatabase;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
-const Operation = Evm.Operation;
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
+const Address = evm.Address;
+const ExecutionError = evm.ExecutionError;
+const opcodes = evm.opcodes;
+const MemoryDatabase = evm.MemoryDatabase;
+const Contract = evm.Contract;
+const Frame = evm.Frame;
+const Operation = evm.Operation;
 
 // Helper function to convert u256 to 32-byte big-endian array
 fn u256_to_bytes32(value: u256) [32]u8 {
@@ -31,7 +34,7 @@ test "integration: simple arithmetic sequence" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -89,7 +92,7 @@ test "integration: memory operations sequence" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -149,7 +152,7 @@ test "integration: storage operations sequence" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -211,7 +214,7 @@ test "integration: control flow with jumps" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -273,7 +276,7 @@ test "integration: environment access sequence" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -337,7 +340,7 @@ test "integration: stack operations sequence" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -401,7 +404,7 @@ test "integration: return data handling" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -462,7 +465,7 @@ test "integration: revert with reason" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -523,7 +526,7 @@ test "integration: gas consumption tracking" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -581,7 +584,7 @@ test "integration: out of gas scenario" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -633,7 +636,7 @@ test "integration: invalid opcode handling" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -684,7 +687,7 @@ test "integration: transient storage operations" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -746,7 +749,7 @@ test "integration: logging operations" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -813,7 +816,7 @@ test "integration: cold/warm storage access (EIP-2929)" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -875,7 +878,7 @@ test "integration: push0 operation (Shanghai)" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -933,7 +936,7 @@ test "integration: mcopy operation (Cancun)" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();

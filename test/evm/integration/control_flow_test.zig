@@ -6,15 +6,18 @@ const testing = std.testing;
 // }
 
 // Import EVM components directly
-const Evm = @import("evm");
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 const primitives = @import("primitives");
-const Frame = Evm.Frame;
-const Contract = Evm.Contract;
+const Frame = evm.Frame;
+const Contract = evm.Contract;
 const Address = primitives.Address;
-const Operation = Evm.Operation;
-const ExecutionError = Evm.ExecutionError;
-const MemoryDatabase = Evm.MemoryDatabase;
-const opcodes = Evm.opcodes;
+const Operation = evm.Operation;
+const ExecutionError = evm.ExecutionError;
+const MemoryDatabase = evm.MemoryDatabase;
+const opcodes = evm.opcodes;
 
 test "Integration: Conditional jump patterns" {
     // Test JUMPI with various conditions
@@ -25,7 +28,7 @@ test "Integration: Conditional jump patterns" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -116,7 +119,7 @@ test "Integration: Loop implementation with JUMP" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -203,7 +206,7 @@ test "Integration: Return data handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -269,7 +272,7 @@ test "Integration: Revert with reason" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -334,7 +337,7 @@ test "Integration: PC tracking through operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -398,7 +401,7 @@ test "Integration: Invalid opcode handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -455,7 +458,7 @@ test "Integration: Nested conditions with jumps" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -546,7 +549,7 @@ test "Integration: Self-destruct with beneficiary" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();

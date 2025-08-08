@@ -1,13 +1,16 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 const primitives = @import("primitives");
-const opcodes = Evm.opcodes;
-const ExecutionError = Evm.ExecutionError;
-const MemoryDatabase = Evm.MemoryDatabase;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
-const Operation = Evm.Operation;
+const opcodes = evm.opcodes;
+const ExecutionError = evm.ExecutionError;
+const MemoryDatabase = evm.MemoryDatabase;
+const Contract = evm.Contract;
+const Frame = evm.Frame;
+const Operation = evm.Operation;
 const Address = primitives.Address;
 
 // Test addresses
@@ -35,7 +38,7 @@ test "Integration: ERC20 Transfer event logging" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -113,7 +116,7 @@ test "Integration: multiple event emissions" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -209,7 +212,7 @@ test "Integration: event with dynamic array data" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -282,7 +285,7 @@ test "Integration: log gas consumption patterns" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -359,7 +362,7 @@ test "Integration: logging restrictions in static calls" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -417,7 +420,7 @@ test "Integration: event topics for bloom filter" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -504,7 +507,7 @@ test "Integration: log memory expansion costs" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -560,7 +563,7 @@ test "Integration: event filtering by topics" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
     var evm = try builder.build();
     defer evm.deinit();
 

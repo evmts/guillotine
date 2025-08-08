@@ -2,21 +2,24 @@ const std = @import("std");
 const testing = std.testing;
 
 // Import EVM components directly
-const Evm = @import("evm");
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 const primitives = @import("primitives");
-const MemoryDatabase = Evm.MemoryDatabase;
-const Frame = Evm.Frame;
-const Contract = Evm.Contract;
+const MemoryDatabase = evm.MemoryDatabase;
+const Frame = evm.Frame;
+const Contract = evm.Contract;
 const Address = primitives.Address;
-const Operation = Evm.Operation;
-const ExecutionError = Evm.ExecutionError;
-const environment = Evm.opcodes.environment;
-const system = Evm.opcodes.system;
-const block = Evm.opcodes.block;
-const stack = Evm.opcodes.stack;
-const arithmetic = Evm.opcodes.arithmetic;
-const memory_ops = Evm.opcodes.memory;
-const log = Evm.opcodes.log;
+const Operation = evm.Operation;
+const ExecutionError = evm.ExecutionError;
+const environment = evm.opcodes.environment;
+const system = evm.opcodes.system;
+const block = evm.opcodes.block;
+const stack = evm.opcodes.stack;
+const arithmetic = evm.opcodes.arithmetic;
+const memory_ops = evm.opcodes.memory;
+const log = evm.opcodes.log;
 
 test "Integration: Contract deployment simulation" {
     // Simulate CREATE operation with constructor
@@ -27,7 +30,7 @@ test "Integration: Contract deployment simulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -93,7 +96,7 @@ test "Integration: Call with value transfer" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -159,7 +162,7 @@ test "Integration: Environment data access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -171,7 +174,7 @@ test "Integration: Environment data access" {
     const contract_addr = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
     const charlie_addr = primitives.Address.from_u256(0x4444444444444444444444444444444444444444);
 
-    const context = Evm.Context.init_with_values(alice_addr, 20 * 1_000_000_000, // 20 Gwei
+    const context = evm.Context.init_with_values(alice_addr, 20 * 1_000_000_000, // 20 Gwei
         15000000, 1234567890, charlie_addr, 0, 30000000, 1, 0, &[_]u256{}, 0);
     vm.set_context(context);
 
@@ -239,7 +242,7 @@ test "Integration: Block information access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -250,7 +253,7 @@ test "Integration: Block information access" {
     const contract_addr = primitives.Address.from_u256(0x3333333333333333333333333333333333333333);
     const charlie_addr = primitives.Address.from_u256(0x4444444444444444444444444444444444444444);
 
-    const context = Evm.Context.init_with_values(alice_addr, 0, 17000000, 1683000000, charlie_addr, 0, 30000000, 1, 30 * 1_000_000_000, // 30 Gwei
+    const context = evm.Context.init_with_values(alice_addr, 0, 17000000, 1683000000, charlie_addr, 0, 30000000, 1, 30 * 1_000_000_000, // 30 Gwei
         &[_]u256{}, 0);
     vm.set_context(context);
 
@@ -319,7 +322,7 @@ test "Integration: Log emission with topics" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -399,7 +402,7 @@ test "Integration: External code operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -486,7 +489,7 @@ test "Integration: Calldata operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -572,7 +575,7 @@ test "Integration: Self balance and code operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var vm = try builder.build();
     defer vm.deinit();

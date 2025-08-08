@@ -1,12 +1,15 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
-const Address = Evm.Address;
-const ExecutionError = Evm.ExecutionError;
-const MemoryDatabase = Evm.MemoryDatabase;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
-const Operation = Evm.Operation;
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
+const Address = evm.Address;
+const ExecutionError = evm.ExecutionError;
+const MemoryDatabase = evm.MemoryDatabase;
+const Contract = evm.Contract;
+const Frame = evm.Frame;
+const Operation = evm.Operation;
 
 // Helper function to convert u256 to 32-byte big-endian array
 fn u256_to_bytes32(value: u256) [32]u8 {
@@ -30,7 +33,7 @@ test "complex: fibonacci calculation" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -131,7 +134,7 @@ test "complex: storage-based counter with access patterns" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -216,7 +219,7 @@ test "complex: memory expansion with large offsets" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -286,7 +289,7 @@ test "complex: nested conditionals with multiple jumps" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -382,7 +385,7 @@ test "complex: event emission with multiple topics" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -459,7 +462,7 @@ test "complex: keccak256 hash computation" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -530,7 +533,7 @@ test "complex: call depth limit enforcement" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -588,7 +591,7 @@ test "complex: bit manipulation operations" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
@@ -695,7 +698,7 @@ test "complex: modular arithmetic edge cases" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var builder = evm.EvmBuilder.init(allocator, db_interface);
 
     var evm = try builder.build();
     defer evm.deinit();
