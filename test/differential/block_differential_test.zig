@@ -3,9 +3,13 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
 
 // Import REVM wrapper from module
 const revm_wrapper = @import("revm");
+
+// Updated to new API - migration in progress, tests not run yet
 
 // COINBASE test removed - fails due to environment setup differences between revm and Guillotine
 

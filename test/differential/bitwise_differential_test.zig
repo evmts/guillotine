@@ -3,9 +3,13 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
 
 // Import REVM wrapper from module
 const revm_wrapper = @import("revm");
+
+// Updated to new API - migration in progress, tests not run yet
 
 test "AND opcode 0xFF & 0x0F = 0x0F" {
     const allocator = testing.allocator;
@@ -53,35 +57,29 @@ test "AND opcode 0xFF & 0x0F = 0x0F" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -154,35 +152,29 @@ test "OR opcode 0x0F | 0xF0 = 0xFF" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -255,35 +247,29 @@ test "SHL opcode 1 << 4 = 16" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -356,35 +342,29 @@ test "XOR opcode 0xF0 ^ 0x0F = 0xFF" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -451,35 +431,29 @@ test "NOT opcode ~0x0F = 0xFF...F0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -551,35 +525,29 @@ test "SHR opcode 16 >> 2 = 4" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -652,35 +620,29 @@ test "SAR opcode arithmetic right shift with sign" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -753,35 +715,29 @@ test "BYTE opcode extract byte from word" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
