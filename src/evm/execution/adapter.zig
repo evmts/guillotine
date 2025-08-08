@@ -44,7 +44,7 @@ pub fn call_old_op(comptime OpFn: anytype, context: *anyopaque) ExecutionError.E
     // For now, we need to extract the frame and interpreter from context
     // Since this is a temporary adapter, we'll cast context as ExecutionContext
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    
+
     // Call the old-style function with dummy values
     // TODO: This needs proper implementation when we have the right context structure
     _ = OpFn(0, undefined, frame) catch |err| {
@@ -63,7 +63,7 @@ pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void 
 
 pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    // This is a temporary stub - the actual operation needs proper implementation  
+    // This is a temporary stub - the actual operation needs proper implementation
     _ = memory.op_returndatacopy(0, undefined, frame) catch |err| {
         return err;
     };
