@@ -65,12 +65,13 @@ pub fn BeginBlockHandler(frame: *anyopaque) ExecutionError.Error!void {
     //     return ExecutionError.Error.StackUnderflow;
     // }
     // if (stack_size + block.stack_max_growth > 1024) {
-        return ExecutionError.Error.StackOverflow;
-    }
+    //     return ExecutionError.Error.StackOverflow;
+    // }
     
-    Log.debug("BeginBlock: gas_cost={}, stack_req={}, stack_max_growth={}, current_stack={}", .{
-        block.gas_cost, block.stack_req, block.stack_max_growth, stack_size
-    });
+    // Log.debug("BeginBlock: gas_cost={}, stack_req={}, stack_max_growth={}, current_stack={}", .{
+    //     block.gas_cost, block.stack_req, block.stack_max_growth, stack_size
+    // });
+    Log.debug("BeginBlock: placeholder implementation consuming {} gas", .{placeholder_gas});
 }
 
 /// Block analysis structure used during instruction stream generation.
@@ -558,8 +559,8 @@ fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructio
 
         if (opcode_byte == 0x56 or opcode_byte == 0x57) { // JUMP or JUMPI
             // Look for the target address in the previous PUSH instruction
-            if (inst_idx > 0 and instructions[inst_idx - 1] != null and instructions[inst_idx - 1].?.arg == .push_value) {
-                const target_pc = instructions[inst_idx - 1].?.arg.push_value;
+            if (inst_idx > 0 and instructions[inst_idx - 1].arg == .push_value) {
+                const target_pc = instructions[inst_idx - 1].arg.push_value;
 
                 // Check if it's within bounds and is a valid jumpdest
                 if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {
