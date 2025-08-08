@@ -78,11 +78,11 @@ pub const Frame = struct {
     // ULTRA HOT - Accessed by virtually every opcode
     stack: Stack, // 33,536 bytes - accessed by every opcode (PUSH/POP/DUP/SWAP/arithmetic/etc)
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode for gas accounting
-    
+
     // HOT - Accessed by major opcode categories
     memory: *Memory, // 8 bytes - hot for memory ops (MLOAD/MSTORE/MSIZE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - hot for control flow (JUMP/JUMPI validation)
-    
+
     // Pack hot_flags to 2 bytes for better alignment
     hot_flags: packed struct {
         depth: u10, // 10 bits - call stack depth for CALL/CREATE operations
@@ -90,17 +90,17 @@ pub const Frame = struct {
         is_eip1153: bool, // 1 bit - transient storage validation (TLOAD/TSTORE)
         _padding: u4 = 0, // 4 bits - align to byte boundary and room for future flags
     },
-    
+
     // Call frame stack integration fields
     journal: *CallJournal, // 8 bytes - shared journaling system
     host: *Host, // 8 bytes - host interface for external operations
     snapshot_id: u32, // 4 bytes - snapshot when this frame started
     caller: primitives.Address.Address, // 20 bytes - caller address
     value: u256, // 32 bytes - value transferred in this call
-    
+
     // Add padding to align storage group to 8-byte boundary
     _pad1: [4]u8 = [_]u8{0} ** 4,
-    
+
     // Storage operation group (aligned to 8 bytes)
     // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together
     contract_address: primitives.Address.Address, // 20 bytes - FIRST: storage key = hash(contract_address, slot)
@@ -108,18 +108,18 @@ pub const Frame = struct {
     state: DatabaseInterface, // 16 bytes - actual storage read/write interface
     access_list: *AccessList, // 8 bytes - LAST: EIP-2929 warm/cold gas cost calculation
     // Total: 48 bytes = exactly 3/4 of a cache line
-    
+
     // COLD DATA
     allocator: std.mem.Allocator, // 16 bytes
     input: []const u8, // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
     output: []const u8, // 16 bytes - only set by RETURN/REVERT at function exit
-    
+
     // Use hardfork enum instead of boolean flags for better cache efficiency
     hardfork: Hardfork, // 1 byte instead of 16 bits of boolean flags
     _pad3: [7]u8 = [_]u8{0} ** 7, // Align to 8-byte boundary
-    
+
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
-    
+
     /// Pointer to the next frame in the call stack (for nested calls)
     /// null if this is the deepest frame or no more frames available
     next_frame: ?*Frame, // 8 bytes - pointer to next frame for CALL/CREATE operations
@@ -268,7 +268,6 @@ pub const Frame = struct {
         // TODO: Implement refund tracking when the refund system is integrated
     }
 
-
     /// Backward compatibility accessors
     pub fn depth(self: *const Frame) u32 {
         return @intCast(self.hot_flags.depth);
@@ -350,7 +349,7 @@ pub const Frame = struct {
         if (@hasField(@TypeOf(self.hot_flags), field_name)) {
             return @field(self.hot_flags, field_name);
         }
-        
+
         // Handle hardfork checks using the enum comparison
         if (std.mem.eql(u8, field_name, "is_prague")) return self.is_at_least(.PRAGUE);
         if (std.mem.eql(u8, field_name, "is_cancun")) return self.is_at_least(.CANCUN);
@@ -363,7 +362,7 @@ pub const Frame = struct {
         if (std.mem.eql(u8, field_name, "is_constantinople")) return self.is_at_least(.CONSTANTINOPLE);
         if (std.mem.eql(u8, field_name, "is_byzantium")) return self.is_at_least(.BYZANTIUM);
         if (std.mem.eql(u8, field_name, "is_homestead")) return self.is_at_least(.HOMESTEAD);
-        
+
         @compileError("Unknown hardfork feature: " ++ field_name);
     }
 
@@ -381,16 +380,9 @@ pub const Frame = struct {
     /// Prepare the next frame for a nested call
     /// This should be called by CALL/DELEGATECALL/STATICCALL/CREATE opcodes
     /// TODO: This will need to be implemented when we add actual CALL/CREATE opcodes
-    pub fn prepare_call_frame(
-        self: *Frame, 
-        gas: u64,
-        static_call: bool,
-        contract_address: primitives.Address.Address,
-        analysis: *const CodeAnalysis,
-        input: []const u8
-    ) ExecutionError.Error!*Frame {
+    pub fn prepare_call_frame(self: *Frame, gas: u64, static_call: bool, contract_address: primitives.Address.Address, analysis: *const CodeAnalysis, input: []const u8) ExecutionError.Error!*Frame {
         const next_frame = self.get_next_frame() orelse return ExecutionError.Error.DepthLimit;
-        
+
         // Set up the next frame for execution
         next_frame.gas_remaining = gas;
         next_frame.hot_flags.is_static = static_call;
@@ -399,7 +391,7 @@ pub const Frame = struct {
         next_frame.analysis = analysis;
         next_frame.input = input;
         next_frame.output = &[_]u8{}; // Reset output
-        
+
         return next_frame;
     }
 };
@@ -453,17 +445,17 @@ comptime {
     // Assert natural alignment for performance-critical fields
     if (@offsetOf(Frame, "gas_remaining") % @alignOf(u64) != 0) @compileError("gas_remaining must be naturally aligned for performance");
     if (@offsetOf(Frame, "contract_address") % @alignOf(primitives.Address.Address) != 0) @compileError("contract_address must be naturally aligned");
-    
+
     // Assert that padding fields exist and are correctly positioned
     if (!@hasField(Frame, "_pad1")) @compileError("Missing _pad1 field for storage cluster alignment");
     if (!@hasField(Frame, "_pad2")) @compileError("Missing _pad2 field for state alignment");
     if (!@hasField(Frame, "_pad3")) @compileError("Missing _pad3 field for hardfork alignment");
-    
+
     // Assert storage cluster is 8-byte aligned (for better cache performance)
     if (@offsetOf(Frame, "contract_address") % 8 != 0) @compileError("contract_address must be 8-byte aligned for cache efficiency");
     if (@offsetOf(Frame, "state") % 8 != 0) @compileError("state must be 8-byte aligned for cache efficiency");
     if (@offsetOf(Frame, "access_list") % 8 != 0) @compileError("access_list must be 8-byte aligned for cache efficiency");
-    
+
     // Assert hardfork field comes after hot data but before allocator
     if (@offsetOf(Frame, "hardfork") <= @offsetOf(Frame, "access_list")) @compileError("hardfork must come after storage cluster");
     if (@offsetOf(Frame, "hardfork") >= @offsetOf(Frame, "allocator")) @compileError("hardfork must come before cold data (allocator)");
