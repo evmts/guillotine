@@ -115,13 +115,19 @@ pub const DatabaseInterface = struct {
         set_account: *const fn (ptr: *anyopaque, address: [20]u8, account: Account) DatabaseError!void,
         delete_account: *const fn (ptr: *anyopaque, address: [20]u8) DatabaseError!void,
         account_exists: *const fn (ptr: *anyopaque, address: [20]u8) bool,
+        get_balance: *const fn (ptr: *anyopaque, address: [20]u8) DatabaseError!u256,
 
         // Storage operations
         get_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256,
         set_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void,
+        
+        // Transient storage operations (EIP-1153)
+        get_transient_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256,
+        set_transient_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void,
 
         // Code operations
         get_code: *const fn (ptr: *anyopaque, code_hash: [32]u8) DatabaseError![]const u8,
+        get_code_by_address: *const fn (ptr: *anyopaque, address: [20]u8) DatabaseError![]const u8,
         set_code: *const fn (ptr: *anyopaque, code: []const u8) DatabaseError![32]u8,
 
         // State root operations
@@ -184,6 +190,11 @@ pub const DatabaseInterface = struct {
                 return self.account_exists(address);
             }
 
+            fn vtable_get_balance(ptr: *anyopaque, address: [20]u8) DatabaseError!u256 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_balance(address);
+            }
+
             fn vtable_get_storage(ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.get_storage(address, key);
@@ -193,10 +204,25 @@ pub const DatabaseInterface = struct {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.set_storage(address, key, value);
             }
+            
+            fn vtable_get_transient_storage(ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_transient_storage(address, key);
+            }
+
+            fn vtable_set_transient_storage(ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.set_transient_storage(address, key, value);
+            }
 
             fn vtable_get_code(ptr: *anyopaque, code_hash: [32]u8) DatabaseError![]const u8 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.get_code(code_hash);
+            }
+
+            fn vtable_get_code_by_address(ptr: *anyopaque, address: [20]u8) DatabaseError![]const u8 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_code_by_address(address);
             }
 
             fn vtable_set_code(ptr: *anyopaque, code: []const u8) DatabaseError![32]u8 {
@@ -254,9 +280,13 @@ pub const DatabaseInterface = struct {
                 .set_account = vtable_set_account,
                 .delete_account = vtable_delete_account,
                 .account_exists = vtable_account_exists,
+                .get_balance = vtable_get_balance,
                 .get_storage = vtable_get_storage,
                 .set_storage = vtable_set_storage,
+                .get_transient_storage = vtable_get_transient_storage,
+                .set_transient_storage = vtable_set_transient_storage,
                 .get_code = vtable_get_code,
+                .get_code_by_address = vtable_get_code_by_address,
                 .set_code = vtable_set_code,
                 .get_state_root = vtable_get_state_root,
                 .commit_changes = vtable_commit_changes,
@@ -298,6 +328,11 @@ pub const DatabaseInterface = struct {
         return self.vtable.account_exists(self.ptr, address);
     }
 
+    /// Get account balance
+    pub fn get_balance(self: DatabaseInterface, address: [20]u8) DatabaseError!u256 {
+        return self.vtable.get_balance(self.ptr, address);
+    }
+
     // Storage operations
 
     /// Get storage value for the given address and key
@@ -310,11 +345,26 @@ pub const DatabaseInterface = struct {
         return self.vtable.set_storage(self.ptr, address, key, value);
     }
 
+    /// Get transient storage value for the given address and key (EIP-1153)
+    pub fn get_transient_storage(self: DatabaseInterface, address: [20]u8, key: u256) DatabaseError!u256 {
+        return self.vtable.get_transient_storage(self.ptr, address, key);
+    }
+
+    /// Set transient storage value for the given address and key (EIP-1153)
+    pub fn set_transient_storage(self: DatabaseInterface, address: [20]u8, key: u256, value: u256) DatabaseError!void {
+        return self.vtable.set_transient_storage(self.ptr, address, key, value);
+    }
+
     // Code operations
 
     /// Get contract code by hash
     pub fn get_code(self: DatabaseInterface, code_hash: [32]u8) DatabaseError![]const u8 {
         return self.vtable.get_code(self.ptr, code_hash);
+    }
+
+    /// Get contract code by address
+    pub fn get_code_by_address(self: DatabaseInterface, address: [20]u8) DatabaseError![]const u8 {
+        return self.vtable.get_code_by_address(self.ptr, address);
     }
 
     /// Store contract code and return its hash
@@ -384,8 +434,11 @@ pub fn validate_database_implementation(comptime T: type) void {
     if (!@hasDecl(T, "set_account")) @compileError("Database implementation missing set_account method");
     if (!@hasDecl(T, "delete_account")) @compileError("Database implementation missing delete_account method");
     if (!@hasDecl(T, "account_exists")) @compileError("Database implementation missing account_exists method");
+    if (!@hasDecl(T, "get_balance")) @compileError("Database implementation missing get_balance method");
     if (!@hasDecl(T, "get_storage")) @compileError("Database implementation missing get_storage method");
     if (!@hasDecl(T, "set_storage")) @compileError("Database implementation missing set_storage method");
+    if (!@hasDecl(T, "get_transient_storage")) @compileError("Database implementation missing get_transient_storage method");
+    if (!@hasDecl(T, "set_transient_storage")) @compileError("Database implementation missing set_transient_storage method");
     if (!@hasDecl(T, "get_code")) @compileError("Database implementation missing get_code method");
     if (!@hasDecl(T, "set_code")) @compileError("Database implementation missing set_code method");
     if (!@hasDecl(T, "get_state_root")) @compileError("Database implementation missing get_state_root method");
