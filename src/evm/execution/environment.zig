@@ -23,7 +23,7 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(access_cost);
 
     // Get balance from state database
-    const balance = frame.state.get_balance(address);
+    const balance = try frame.state.get_balance(address);
     try frame.stack.append(balance);
 }
 
@@ -79,7 +79,7 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(access_cost);
 
     // Get code size from state database
-    const code = frame.state.get_code(address);
+    const code = try frame.state.get_code_by_address(address);
     try frame.stack.append(@as(u256, @intCast(code.len)));
 }
 
@@ -119,7 +119,7 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
     // Get external code from state database
-    const code = frame.state.get_code(address);
+    const code = try frame.state.get_code_by_address(address);
 
     // Use set_data_bounded to copy the code to memory
     // This handles partial copies and zero-padding automatically
@@ -136,7 +136,7 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(access_cost);
 
     // Get code from state database and compute hash
-    const code = frame.state.get_code(address);
+    const code = try frame.state.get_code_by_address(address);
     if (code.len == 0) {
         @branchHint(.unlikely);
         // Empty account - return zero
@@ -156,7 +156,7 @@ pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
     // Get balance of current executing contract
     const self_address = frame.contract_address;
-    const balance = frame.state.get_balance(self_address);
+    const balance = try frame.state.get_balance(self_address);
     try frame.stack.append(balance);
 }
 
