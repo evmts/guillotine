@@ -2,11 +2,13 @@ const std = @import("std");
 const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
-const Address = primitives.Address;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
+const Address = primitives.Address.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+
+// Updated to new API - migration in progress, tests not run yet
 
 // ============================
 // 0x00: STOP opcode
@@ -19,42 +21,44 @@ test "STOP (0x00): Halt execution" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
-    const contract_addr = [_]u8{0x11} ** 20;
+    const contract_addr = [_]u8{0x22} ** 20;
     const code = [_]u8{0x00}; // STOP
-    var contract = Contract.init(
-        caller,
-        contract_addr,
-        0,
-        1000,
-        &code,
-        [_]u8{0} ** 32,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
+    
+    // Store contract code in state
+    try evm.state.set_code(contract_addr, &code);
 
-    var frame_builder = Frame.builder(allocator);
-    var frame = try frame_builder
-        .withVm(&evm)
-        .withContract(&contract)
-        .withGas(1000)
-        .build();
-    defer frame.deinit();
+    // Execute contract with new call API
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = contract_addr,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000,
+    }};
 
-    const interpreter: Evm.Operation.Interpreter = &evm;
-    const state: Evm.Operation.State = &frame;
+    const result = try evm.call(call_params);
 
-    // Execute STOP
-    const result = evm.table.execute(0, interpreter, state, 0x00);
-
-    // Should return STOP error
-    try testing.expectError(ExecutionError.Error.STOP, result);
+    // STOP should complete successfully 
+    try testing.expect(result.success);
+    try testing.expectEqual(@as(usize, 0), result.output.?.len);
+    
+    // Clean up allocated output
+    if (result.output) |output| {
+        allocator.free(output);
+    }
 }
 
 // ============================
