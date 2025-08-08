@@ -103,6 +103,8 @@ pub const Frame = struct {
 
     // Storage operation group (aligned to 8 bytes)
     // All storage operations (SLOAD/SSTORE/TLOAD/TSTORE) need ALL of these together
+    // Ensure 8-byte alignment for contract_address cluster
+    _pad_contract_align: u32 = 0,
     contract_address: primitives.Address.Address, // 20 bytes - FIRST: storage key = hash(contract_address, slot)
     _pad2: [4]u8 = [_]u8{0} ** 4, // Align state to 8-byte boundary
     state: DatabaseInterface, // 16 bytes - actual storage read/write interface
