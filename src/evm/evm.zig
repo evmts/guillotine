@@ -28,7 +28,7 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const builtin = @import("builtin");
-const RuntimeConfig = @import("runtime_config.zig").RuntimeConfig;
+const ComptimeConfig = @import("comptime_config.zig").ComptimeConfig;
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -44,9 +44,9 @@ pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
 /// Maximum stack buffer size for contracts up to 12,800 bytes
 const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 
-// Runtime configuration
-/// Runtime configuration containing all EVM constants and settings
-config: RuntimeConfig,
+// Comptime configuration
+/// Comptime configuration containing all EVM constants and settings
+config: ComptimeConfig,
 // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
@@ -103,14 +103,14 @@ comptime {
     std.debug.assert(@sizeOf(Evm) > 0); // Struct must have size
 }
 
-/// Create a new EVM with a RuntimeConfig.
+/// Create a new EVM with a ComptimeConfig.
 ///
 /// This is the recommended initialization method that uses the centralized
-/// RuntimeConfig for all EVM constants and settings.
+/// ComptimeConfig for all EVM constants and settings.
 ///
 /// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
-/// @param config Runtime configuration (use RuntimeConfig.default() for defaults)
+/// @param config Comptime configuration (use ComptimeConfig.default() for defaults)
 /// @param context Execution context (optional, defaults to Context.init())
 /// @param depth Current call depth (optional, defaults to 0)
 /// @param read_only Static call flag (optional, defaults to false)
@@ -121,25 +121,25 @@ comptime {
 /// Example usage:
 /// ```zig
 /// // Basic initialization with default config
-/// const config = RuntimeConfig.default();
+/// const config = ComptimeConfig.default();
 /// var evm = try Evm.initWithConfig(allocator, database, config, null, 0, false, null);
 /// defer evm.deinit();
 ///
 /// // With custom hardfork configuration
-/// const config = RuntimeConfig.forHardfork(.LONDON);
+/// const config = ComptimeConfig.forHardfork(.LONDON);
 /// var evm = try Evm.initWithConfig(allocator, database, config, null, 0, false, null);
 /// defer evm.deinit();
 /// ```
 pub fn initWithConfig(
     allocator: std.mem.Allocator,
     database: @import("state/database_interface.zig").DatabaseInterface,
-    config: RuntimeConfig,
+    config: ComptimeConfig,
     context: ?Context,
     depth: u16,
     read_only: bool,
     tracer: ?std.io.AnyWriter,
 ) !Evm {
-    Log.debug("Evm.initWithConfig: Initializing EVM with RuntimeConfig", .{});
+    Log.debug("Evm.initWithConfig: Initializing EVM with ComptimeConfig", .{});
 
     // Validate config consistency
     try config.validate();
@@ -183,7 +183,7 @@ pub fn initWithConfig(
 /// Create a new EVM with specified configuration (legacy method).
 ///
 /// This is the legacy initialization method that maintains backward compatibility.
-/// It internally creates a RuntimeConfig from the provided parameters.
+/// It internally creates a ComptimeConfig from the provided parameters.
 ///
 /// @param allocator Memory allocator for VM operations
 /// @param database Database interface for state management
@@ -205,8 +205,8 @@ pub fn init(
     read_only: bool,
     tracer: ?std.io.AnyWriter,
 ) !Evm {
-    // Create a RuntimeConfig from the legacy parameters
-    var config = RuntimeConfig.default();
+    // Create a ComptimeConfig from the legacy parameters
+    var config = ComptimeConfig.default();
     if (table) |t| {
         config.jump_table = t;
     }

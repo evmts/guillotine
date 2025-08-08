@@ -4,10 +4,10 @@ const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const ChainRules = @import("frame.zig").ChainRules;
 const Frame = @import("frame.zig").Frame;
 
-/// Centralized runtime configuration for the EVM.
-/// All configurable constants and runtime parameters are consolidated here.
-/// This struct is designed to be created at comptime for optimal performance.
-pub const RuntimeConfig = struct {
+/// Centralized comptime configuration for the EVM.
+/// All configurable constants and parameters are consolidated here.
+/// This struct is evaluated at comptime for optimal performance.
+pub const ComptimeConfig = struct {
     // Type Configuration
     /// The word type used for EVM stack and arithmetic operations
     /// Standard EVM uses u256, but this can be configured for different use cases
@@ -104,12 +104,12 @@ pub const RuntimeConfig = struct {
     chain_rules: ChainRules = Frame.chainRulesForHardfork(.CANCUN),
 
     /// Create a default configuration for mainnet Cancun
-    pub fn default() RuntimeConfig {
+    pub fn default() ComptimeConfig {
         return .{};
     }
 
     /// Create a configuration for a specific hardfork
-    pub fn forHardfork(hardfork: Hardfork) RuntimeConfig {
+    pub fn forHardfork(hardfork: Hardfork) ComptimeConfig {
         return .{
             .hardfork = hardfork,
             .jump_table = JumpTable.init_from_hardfork(hardfork),
@@ -118,7 +118,7 @@ pub const RuntimeConfig = struct {
     }
 
     /// Create a test configuration with relaxed limits
-    pub fn forTesting() RuntimeConfig {
+    pub fn forTesting() ComptimeConfig {
         return .{
             .max_iterations = 1_000_000,
             .enable_stack_validation = false,
@@ -133,14 +133,14 @@ pub const RuntimeConfig = struct {
     }
 
     /// Create a configuration with custom chain ID
-    pub fn withChainId(self: RuntimeConfig, chain_id: u64) RuntimeConfig {
+    pub fn withChainId(self: ComptimeConfig, chain_id: u64) ComptimeConfig {
         var config = self;
         config.chain_id = chain_id;
         return config;
     }
 
     /// Create a configuration with custom memory limits
-    pub fn withMemoryLimits(self: RuntimeConfig, initial: usize, max: u64) RuntimeConfig {
+    pub fn withMemoryLimits(self: ComptimeConfig, initial: usize, max: u64) ComptimeConfig {
         var config = self;
         config.initial_memory_capacity = initial;
         config.default_memory_limit = max;
@@ -149,7 +149,7 @@ pub const RuntimeConfig = struct {
     }
 
     /// Validate configuration consistency
-    pub fn validate(self: RuntimeConfig) !void {
+    pub fn validate(self: ComptimeConfig) !void {
         if (self.stack_capacity != self.max_stack_size) {
             return error.InconsistentStackConfig;
         }
@@ -163,10 +163,10 @@ pub const RuntimeConfig = struct {
 };
 
 /// Global default configuration (comptime)
-pub const DEFAULT_CONFIG = RuntimeConfig.default();
+pub const DEFAULT_CONFIG = ComptimeConfig.default();
 
 /// Cancun configuration (comptime)
-pub const CANCUN_CONFIG = RuntimeConfig.forHardfork(.CANCUN);
+pub const CANCUN_CONFIG = ComptimeConfig.forHardfork(.CANCUN);
 
 /// Test configuration (comptime)
-pub const TEST_CONFIG = RuntimeConfig.forTesting();
+pub const TEST_CONFIG = ComptimeConfig.forTesting();
