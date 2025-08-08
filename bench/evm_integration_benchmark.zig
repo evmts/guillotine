@@ -21,7 +21,11 @@ const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
 const AddressType = Address.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const timing = @import("timing.zig");
+
+// Updated to new API - migration in progress, tests not run yet
 
 // Test constants for benchmarking
 const WARMUP_ITERATIONS = 10;
@@ -229,22 +233,22 @@ fn benchmark_contract_deployment(allocator: Allocator) !void {
     const caller = Address.ZERO;
     const target = Address.ZERO;
     
-    var contract = Evm.Contract.init_at_address(
-        caller, 
-        target, 
-        0, // value
-        1000000, // gas_limit
-        &COMPLEX_CONTRACT_BYTECODE, 
-        &[_]u8{}, // empty input
-        false // not static
-    );
-    defer contract.deinit(allocator, null);
-    
     // Set contract code in state
     try vm.state.set_code(target, &COMPLEX_CONTRACT_BYTECODE);
     
-    // Execute contract
-    _ = try vm.interpret(&contract, &[_]u8{});
+    // Execute using new call API
+    const call_params = CallParams{ .call = .{
+        .caller = caller,
+        .to = target,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    }};
+    
+    const result = try vm.call(call_params);
+    if (result.output) |output| {
+        allocator.free(output);
+    }
 }
 
 /// Benchmark 3: Cross-Contract Call Integration
