@@ -139,6 +139,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         self.state.database, // database interface
         self.chain_rules, // chain rules
         null, // self_destruct (not supported in this context)
+        null, // created_contracts (not needed in isolated call)
         input, // input data
         self.allocator, // allocator
         null, // next_frame (no nested calls)

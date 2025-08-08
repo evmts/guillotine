@@ -182,6 +182,22 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
         try frame.consume_gas(GasConstants.ColdAccountAccessCost);
     }
 
+    // EIP-6780: Post-Cancun, SELFDESTRUCT only works on contracts created in same transaction
+    if (frame.is_eip6780) {
+        // Check if contract was created in the current transaction
+        if (frame.created_contracts) |created| {
+            if (!created.was_created_in_tx(frame.contract_address)) {
+                // Contract not created in this tx - SELFDESTRUCT becomes no-op
+                // Still consumes gas but does nothing
+                return ExecutionError.Error.STOP;
+            }
+        } else {
+            // No created contracts tracker means no contracts created in this tx
+            // SELFDESTRUCT becomes no-op
+            return ExecutionError.Error.STOP;
+        }
+    }
+
     // Mark contract for destruction at end of transaction
     try frame.mark_for_destruction(recipient);
 

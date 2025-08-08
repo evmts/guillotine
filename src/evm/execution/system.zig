@@ -595,6 +595,14 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                 for (address_bytes, 0..) |byte, i| {
                     address_u256 |= @as(u256, byte) << @intCast((19 - i) * 8);
                 }
+                
+                // EIP-6780: Track created contract for SELFDESTRUCT restriction
+                if (frame.created_contracts) |created| {
+                    var contract_address: primitives.Address.Address = undefined;
+                    @memcpy(&contract_address, address_bytes);
+                    created.mark_created(contract_address) catch {};
+                }
+                
                 try frame.stack.append(address_u256);
             } else {
                 try frame.stack.append(0);
@@ -708,6 +716,14 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                 for (address_bytes, 0..) |byte, i| {
                     address_u256 |= @as(u256, byte) << @intCast((19 - i) * 8);
                 }
+                
+                // EIP-6780: Track created contract for SELFDESTRUCT restriction
+                if (frame.created_contracts) |created| {
+                    var contract_address: primitives.Address.Address = undefined;
+                    @memcpy(&contract_address, address_bytes);
+                    created.mark_created(contract_address) catch {};
+                }
+                
                 try frame.stack.append(address_u256);
             } else {
                 try frame.stack.append(0);
@@ -940,7 +956,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
 
@@ -1029,7 +1045,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
 

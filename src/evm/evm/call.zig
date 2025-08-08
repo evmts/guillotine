@@ -6,6 +6,8 @@ const Frame = @import("../frame.zig").Frame;
 const ChainRules = @import("../frame.zig").ChainRules;
 const AccessList = @import("../access_list.zig").AccessList;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+const Host = @import("../host.zig").Host;
 const CodeAnalysis = @import("../analysis.zig");
 const Evm = @import("../evm.zig");
 const interpret = @import("interpret.zig").interpret;
@@ -76,21 +78,35 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         self.current_frame_depth = 0;
         self.access_list.clear(); // Reset access list for fresh per-call state
         self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
+        self.created_contracts = CreatedContracts.init(self.allocator); // Fresh created contracts tracker for EIP-6780
+        
+        // Create host interface from self
+        var host = Host.init(self);
+        
         for (0..MAX_CALL_DEPTH) |i| {
             const next_frame = if (i + 1 < MAX_CALL_DEPTH) &self.frame_stack[i + 1] else null;
+            // Initialize placeholder frames - actual values set later when frame is used
             self.frame_stack[i] = try Frame.init(
-                0, // gas_remaining - will be set properly for frame 0
-                false, // static_call - will be set properly for frame 0
+                0, // gas_remaining
+                false, // static_call
                 @intCast(i), // call_depth
-                primitives.Address.ZERO_ADDRESS, // contract_address - will be set properly for frame 0
-                &analysis, // analysis - will be set properly for each frame when used
+                primitives.Address.ZERO_ADDRESS, // contract_address
+                primitives.Address.ZERO_ADDRESS, // caller
+                0, // value
+                &analysis, // analysis
                 &self.access_list,
-                self.state,
+                &self.journal,
+                &host,
+                0, // snapshot_id
+                self.state.database,
                 ChainRules{},
                 &self.self_destruct,
-                &[_]u8{}, // input - will be set properly for frame 0
-                self.arena_allocator(), // Arena is preallocated with 256KB capacity in EVM init
+                &self.created_contracts,
+                &[_]u8{}, // input
+                self.internal_arena.allocator(),
                 next_frame,
+                false, // is_create_call
+                false, // is_delegate_call
             );
         }
         // Set up the first frame properly for execution

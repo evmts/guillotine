@@ -21,6 +21,7 @@ const ReturnData = @import("evm/return_data.zig").ReturnData;
 const evm_limits = @import("constants/evm_limits.zig");
 const Frame = @import("frame.zig").Frame;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
+const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 pub const StorageKey = @import("primitives").StorageKey;
 pub const CreateResult = @import("evm/create_result.zig").CreateResult;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
@@ -84,6 +85,9 @@ current_frame_depth: u11 = 0,
 
 /// Self-destruct tracking for the current execution
 self_destruct: SelfDestruct = undefined,
+
+/// Tracks contracts created in current transaction for EIP-6780
+created_contracts: CreatedContracts = undefined,
 
 /// Stack buffer for small contract analysis optimization
 analysis_stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined,
