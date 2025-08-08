@@ -11,4 +11,3 @@ pub const context = @import("context.zig");
 pub const read = @import("read.zig");
 pub const write = @import("write.zig");
 pub const slice = @import("slice.zig");
-pub const EvmMemoryAllocator = @import("evm_allocator.zig").EvmMemoryAllocator;

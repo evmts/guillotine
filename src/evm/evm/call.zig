@@ -89,7 +89,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
                 ChainRules{},
                 &self.self_destruct,
                 &[_]u8{}, // input - will be set properly for frame 0
-                self.arena_allocator(),
+                self.arena_allocator(), // Arena is preallocated with 256KB capacity in EVM init
                 next_frame,
             );
         }

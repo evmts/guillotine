@@ -88,8 +88,6 @@ pub const SoaJumpTable = @import("jump_table/soa_jump_table.zig").SoaJumpTable;
 pub const Memory = @import("memory/memory.zig");
 /// Memory module package for additional memory utilities
 pub const memory = @import("memory/package.zig");
-/// EVM-optimized memory allocator
-pub const EvmMemoryAllocator = @import("memory/evm_allocator.zig").EvmMemoryAllocator;
 
 /// Opcode metadata (gas costs, stack effects)
 pub const Operation = @import("opcodes/operation.zig");
