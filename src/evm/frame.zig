@@ -88,67 +88,67 @@ pub fn FrameImpl(comptime config: anytype) type {
 
         // HOT - Second cache line priority (accessed by major opcode categories)  
         memory: *Memory, // 8 bytes - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
-    analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
-    hot_flags: packed struct {
-        depth: u10, // 10 bits - call stack depth 
-        is_static: bool, // 1 bit - static call restriction
-        is_eip1153: bool, // 1 bit - transient storage validation
-        _padding: u4 = 0, // 4 bits - future expansion
-    }, // 2 bytes
+        analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
+        hot_flags: packed struct {
+            depth: u10, // 10 bits - call stack depth 
+            is_static: bool, // 1 bit - static call restriction
+            is_eip1153: bool, // 1 bit - transient storage validation
+            _padding: u4 = 0, // 4 bits - future expansion
+        }, // 2 bytes
 
-    // WARM - Storage cluster (keep contiguous for SLOAD/SSTORE/TLOAD/TSTORE)
-    contract_address: primitives.Address.Address, // 20 bytes
-    state: DatabaseInterface, // 16 bytes
-    access_list: *AccessList, // 8 bytes
-    
-    // WARM - Call context (grouped together)
-    journal: *CallJournal, // 8 bytes
-    host: *Host, // 8 bytes
-    snapshot_id: u32, // 4 bytes
-    caller: primitives.Address.Address, // 20 bytes  
-    value: u256, // 32 bytes
+        // WARM - Storage cluster (keep contiguous for SLOAD/SSTORE/TLOAD/TSTORE)
+        contract_address: primitives.Address.Address, // 20 bytes
+        state: DatabaseInterface, // 16 bytes
+        access_list: *AccessList, // 8 bytes
+        
+        // WARM - Call context (grouped together)
+        journal: *CallJournal, // 8 bytes
+        host: *Host, // 8 bytes
+        snapshot_id: u32, // 4 bytes
+        caller: primitives.Address.Address, // 20 bytes  
+        value: u256, // 32 bytes
 
-    // COLD - Validation flags and rarely accessed data
-    hardfork: Hardfork, // 1 byte - hardfork validation  
-    is_eip3855: bool,   // 1 byte - PUSH0 validation
-    is_eip4844: bool,   // 1 byte - BLOBHASH validation  
-    is_eip6780: bool,   // 1 byte - SELFDESTRUCT restriction
-    is_create: bool,    // 1 byte - CREATE/CREATE2 context
-    is_delegate: bool,  // 1 byte - DELEGATECALL context
-    
-    // Cold data - accessed infrequently
-    input: []const u8, // 16 bytes - only CALLDATALOAD/SIZE/COPY
-    output: []const u8, // 16 bytes - only RETURN/REVERT
-    
-    // Extremely rare - accessed almost never
-    self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare, only SELFDESTRUCT
-    next_frame: ?*Frame, // 8 bytes - only for nested calls
-    
-    // Bottom - only used for setup/cleanup
-    allocator: std.mem.Allocator, // 16 bytes - extremely rare, only frame init/deinit
+        // COLD - Validation flags and rarely accessed data
+        hardfork: Hardfork, // 1 byte - hardfork validation  
+        is_eip3855: bool,   // 1 byte - PUSH0 validation
+        is_eip4844: bool,   // 1 byte - BLOBHASH validation  
+        is_eip6780: bool,   // 1 byte - SELFDESTRUCT restriction
+        is_create: bool,    // 1 byte - CREATE/CREATE2 context
+        is_delegate: bool,  // 1 byte - DELEGATECALL context
+        
+        // Cold data - accessed infrequently
+        input: []const u8, // 16 bytes - only CALLDATALOAD/SIZE/COPY
+        output: []const u8, // 16 bytes - only RETURN/REVERT
+        
+        // Extremely rare - accessed almost never
+        self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare, only SELFDESTRUCT
+        next_frame: ?*Self, // 8 bytes - only for nested calls
+        
+        // Bottom - only used for setup/cleanup
+        allocator: std.mem.Allocator, // 16 bytes - extremely rare, only frame init/deinit
 
-    /// Initialize a Frame with required parameters
-    pub fn init(
-        gas_remaining: u64,
-        static_call: bool,
-        call_depth: u32,
-        contract_address: primitives.Address.Address,
-        caller: primitives.Address.Address,
-        value: u256,
-        analysis: *const CodeAnalysis,
-        access_list: *AccessList,
-        journal: *CallJournal,
-        host: *Host,
-        snapshot_id: u32,
-        state: DatabaseInterface,
-        chain_rules: ChainRules,
-        self_destruct: ?*SelfDestruct,
-        input: []const u8,
-        allocator: std.mem.Allocator,
-        next_frame: ?*Frame,
-        is_create_call: bool,
-        is_delegate_call: bool,
-    ) !Frame {
+        /// Initialize a Frame with required parameters
+        pub fn init(
+            gas_remaining: u64,
+            static_call: bool,
+            call_depth: u32,
+            contract_address: primitives.Address.Address,
+            caller: primitives.Address.Address,
+            value: u256,
+            analysis: *const CodeAnalysis,
+            access_list: *AccessList,
+            journal: *CallJournal,
+            host: *Host,
+            snapshot_id: u32,
+            state: DatabaseInterface,
+            chain_rules: ChainRules,
+            self_destruct: ?*SelfDestruct,
+            input: []const u8,
+            allocator: std.mem.Allocator,
+            next_frame: ?*Self,
+            is_create_call: bool,
+            is_delegate_call: bool,
+        ) !Self {
         // Determine hardfork from chain rules
         const hardfork = blk: {
             // Note: PRAGUE not yet defined in hardfork.zig, defaulting to CANCUN for now
@@ -166,7 +166,7 @@ pub fn FrameImpl(comptime config: anytype) type {
             break :blk Hardfork.FRONTIER;
         };
 
-        return Frame{
+        return Self{
             // Ultra hot data
             .stack = Stack.init(),
             .gas_remaining = gas_remaining,
@@ -215,32 +215,32 @@ pub fn FrameImpl(comptime config: anytype) type {
         };
     }
 
-    pub fn deinit(self: *Frame) void {
-        self.memory.deinit();
-        self.allocator.destroy(self.memory);
-    }
+        pub fn deinit(self: *Self) void {
+            self.memory.deinit();
+            self.allocator.destroy(self.memory);
+        }
 
-    /// Gas consumption with bounds checking - used by all opcodes that consume gas
-    pub fn consume_gas(self: *Frame, amount: u64) ExecutionError.Error!void {
+        /// Gas consumption with bounds checking - used by all opcodes that consume gas
+        pub fn consume_gas(self: *Self, amount: u64) ExecutionError.Error!void {
         if (self.gas_remaining < amount) return ExecutionError.Error.OutOfGas;
         self.gas_remaining -= amount;
     }
 
-    /// Jump destination validation - uses direct bitmap access
-    /// This is significantly faster than the previous function pointer approach
-    pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
+        /// Jump destination validation - uses direct bitmap access
+        /// This is significantly faster than the previous function pointer approach
+        pub fn valid_jumpdest(self: *Self, dest: u256) bool {
         std.debug.assert(dest <= std.math.maxInt(u32));
         const dest_usize = @as(usize, @intCast(dest));
         return self.analysis.jumpdest_bitmap.isSet(dest_usize);
     }
 
-    /// Address access for EIP-2929 - uses direct access list pointer
-    pub fn access_address(self: *Frame, addr: primitives.Address.Address) !u64 {
+        /// Address access for EIP-2929 - uses direct access list pointer
+        pub fn access_address(self: *Self, addr: primitives.Address.Address) !u64 {
         return self.access_list.access_address(addr);
     }
 
-    /// Mark contract for destruction - uses direct self destruct pointer
-    pub fn mark_for_destruction(self: *Frame, recipient: primitives.Address.Address) !void {
+        /// Mark contract for destruction - uses direct self destruct pointer
+        pub fn mark_for_destruction(self: *Self, recipient: primitives.Address.Address) !void {
         if (self.self_destruct) |sd| {
             @branchHint(.likely);
             return sd.mark_for_destruction(self.contract_address, recipient);
@@ -248,17 +248,17 @@ pub fn FrameImpl(comptime config: anytype) type {
         return ExecutionError.Error.SelfDestructNotAvailable;
     }
 
-    /// Set output data for RETURN/REVERT operations
-    pub fn set_output(self: *Frame, data: []const u8) void {
+        /// Set output data for RETURN/REVERT operations
+        pub fn set_output(self: *Self, data: []const u8) void {
         self.output = data;
     }
 
-    /// Storage access operations for EVM opcodes
-    pub fn get_storage(self: *const Frame, slot: u256) u256 {
+        /// Storage access operations for EVM opcodes
+        pub fn get_storage(self: *const Self, slot: u256) u256 {
         return self.state.get_storage(self.contract_address, slot) catch 0; // Return 0 on error (EVM behavior)
     }
 
-    pub fn set_storage(self: *Frame, slot: u256, value: u256) !void {
+        pub fn set_storage(self: *Self, slot: u256, value: u256) !void {
         // Record the original value in journal before changing
         const original_value = self.state.get_storage(self.contract_address, slot) catch 0;
         if (original_value != value) {
@@ -267,67 +267,67 @@ pub fn FrameImpl(comptime config: anytype) type {
         try self.state.set_storage(self.contract_address, slot, value);
     }
 
-    pub fn get_transient_storage(self: *const Frame, slot: u256) u256 {
+        pub fn get_transient_storage(self: *const Self, slot: u256) u256 {
         return self.state.get_transient_storage(self.contract_address, slot) catch 0; // Return 0 on error (EVM behavior)
     }
 
-    pub fn set_transient_storage(self: *Frame, slot: u256, value: u256) !void {
+        pub fn set_transient_storage(self: *Self, slot: u256, value: u256) !void {
         try self.state.set_transient_storage(self.contract_address, slot, value);
     }
 
-    /// Mark storage slot as warm (EIP-2929) and return true if it was cold
-    pub fn mark_storage_slot_warm(self: *Frame, slot: u256) !bool {
+        /// Mark storage slot as warm (EIP-2929) and return true if it was cold
+        pub fn mark_storage_slot_warm(self: *Self, slot: u256) !bool {
         return self.access_list.access_storage_key(self.contract_address, slot);
     }
 
-    /// Add gas refund for storage operations (e.g., SSTORE refunds)
-    /// TODO: This needs to be integrated with the refund tracking system
-    pub fn add_gas_refund(self: *Frame, amount: u64) void {
+        /// Add gas refund for storage operations (e.g., SSTORE refunds)
+        /// TODO: This needs to be integrated with the refund tracking system
+        pub fn add_gas_refund(self: *Self, amount: u64) void {
         _ = self;
         _ = amount;
         // TODO: Implement refund tracking when the refund system is integrated
     }
 
-    /// Backward compatibility accessors
-    pub fn depth(self: *const Frame) u32 {
+        /// Backward compatibility accessors
+        pub fn depth(self: *const Self) u32 {
         return @intCast(self.hot_flags.depth);
     }
 
-    pub fn is_static(self: *const Frame) bool {
+        pub fn is_static(self: *const Self) bool {
         return self.hot_flags.is_static;
     }
 
-    pub fn set_depth(self: *Frame, d: u32) void {
+        pub fn set_depth(self: *Self, d: u32) void {
         self.hot_flags.depth = @intCast(d);
     }
 
-    pub fn set_is_static(self: *Frame, static: bool) void {
+        pub fn set_is_static(self: *Self, static: bool) void {
         self.hot_flags.is_static = static;
     }
 
-    /// ChainRules helper methods - moved from ChainRules struct for better data locality
-    /// Mapping of chain rule fields to the hardfork in which they were introduced.
-    const HardforkRule = struct {
-        field_name: []const u8,
-        introduced_in: Hardfork,
-    };
+        /// ChainRules helper methods - moved from ChainRules struct for better data locality
+        /// Mapping of chain rule fields to the hardfork in which they were introduced.
+        const HardforkRule = struct {
+            field_name: []const u8,
+            introduced_in: Hardfork,
+        };
 
-    const HARDFORK_RULES = [_]HardforkRule{
-        .{ .field_name = "is_homestead", .introduced_in = .HOMESTEAD },
-        .{ .field_name = "is_byzantium", .introduced_in = .BYZANTIUM },
-        .{ .field_name = "is_constantinople", .introduced_in = .CONSTANTINOPLE },
-        .{ .field_name = "is_petersburg", .introduced_in = .PETERSBURG },
-        .{ .field_name = "is_istanbul", .introduced_in = .ISTANBUL },
-        .{ .field_name = "is_berlin", .introduced_in = .BERLIN },
-        .{ .field_name = "is_london", .introduced_in = .LONDON },
-        .{ .field_name = "is_merge", .introduced_in = .MERGE },
-        .{ .field_name = "is_shanghai", .introduced_in = .SHANGHAI },
-        .{ .field_name = "is_cancun", .introduced_in = .CANCUN },
-        .{ .field_name = "is_eip1153", .introduced_in = .CANCUN },
-    };
+        const HARDFORK_RULES = [_]HardforkRule{
+            .{ .field_name = "is_homestead", .introduced_in = .HOMESTEAD },
+            .{ .field_name = "is_byzantium", .introduced_in = .BYZANTIUM },
+            .{ .field_name = "is_constantinople", .introduced_in = .CONSTANTINOPLE },
+            .{ .field_name = "is_petersburg", .introduced_in = .PETERSBURG },
+            .{ .field_name = "is_istanbul", .introduced_in = .ISTANBUL },
+            .{ .field_name = "is_berlin", .introduced_in = .BERLIN },
+            .{ .field_name = "is_london", .introduced_in = .LONDON },
+            .{ .field_name = "is_merge", .introduced_in = .MERGE },
+            .{ .field_name = "is_shanghai", .introduced_in = .SHANGHAI },
+            .{ .field_name = "is_cancun", .introduced_in = .CANCUN },
+            .{ .field_name = "is_eip1153", .introduced_in = .CANCUN },
+        };
 
-    /// Create ChainRules for a specific hardfork
-    pub fn chainRulesForHardfork(hardfork: Hardfork) ChainRules {
+        /// Create ChainRules for a specific hardfork
+        pub fn chainRulesForHardfork(hardfork: Hardfork) ChainRules {
         var rules = ChainRules{}; // All fields default to true
 
         // Disable features that were introduced after the target hardfork
@@ -343,28 +343,28 @@ pub fn FrameImpl(comptime config: anytype) type {
         return rules;
     }
 
-    /// Get the hardfork for this frame
-    pub fn getHardfork(self: *const Frame) Hardfork {
+        /// Get the hardfork for this frame
+        pub fn getHardfork(self: *const Self) Hardfork {
         return self.hardfork;
     }
 
-    /// Check if this frame's hardfork is greater than or equal to the specified hardfork
-    pub fn is_at_least(self: *const Frame, target_hardfork: Hardfork) bool {
+        /// Check if this frame's hardfork is greater than or equal to the specified hardfork
+        pub fn is_at_least(self: *const Self, target_hardfork: Hardfork) bool {
         return @intFromEnum(self.hardfork) >= @intFromEnum(target_hardfork);
     }
 
-    /// Check if this frame's hardfork is greater than the specified hardfork
-    pub fn is_greater_than(self: *const Frame, target_hardfork: Hardfork) bool {
+        /// Check if this frame's hardfork is greater than the specified hardfork
+        pub fn is_greater_than(self: *const Self, target_hardfork: Hardfork) bool {
         return @intFromEnum(self.hardfork) > @intFromEnum(target_hardfork);
     }
 
-    /// Check if this frame's hardfork exactly matches the specified hardfork
-    pub fn is_exactly(self: *const Frame, target_hardfork: Hardfork) bool {
+        /// Check if this frame's hardfork exactly matches the specified hardfork
+        pub fn is_exactly(self: *const Self, target_hardfork: Hardfork) bool {
         return self.hardfork == target_hardfork;
     }
 
-    /// Check if a specific hardfork feature is enabled
-    pub fn hasHardforkFeature(self: *const Frame, comptime field_name: []const u8) bool {
+        /// Check if a specific hardfork feature is enabled
+        pub fn hasHardforkFeature(self: *const Self, comptime field_name: []const u8) bool {
         // Check hot flags first (most likely to be accessed)
         if (@hasField(@TypeOf(self.hot_flags), field_name)) {
             return @field(self.hot_flags, field_name);
@@ -386,21 +386,21 @@ pub fn FrameImpl(comptime config: anytype) type {
         @compileError("Unknown hardfork feature: " ++ field_name);
     }
 
-    /// Get the next available frame for nested calls (CALL, DELEGATECALL, etc.)
-    /// Returns null if we've reached maximum call depth (stack overflow)
-    pub fn get_next_frame(self: *Frame) ?*Frame {
+        /// Get the next available frame for nested calls (CALL, DELEGATECALL, etc.)
+        /// Returns null if we've reached maximum call depth (stack overflow)
+        pub fn get_next_frame(self: *Self) ?*Self {
         return self.next_frame;
     }
 
-    /// Check if we can make another call (haven't reached max call depth)
-    pub fn can_make_call(self: *const Frame) bool {
+        /// Check if we can make another call (haven't reached max call depth)
+        pub fn can_make_call(self: *const Self) bool {
         return self.next_frame != null;
     }
 
-    /// Prepare the next frame for a nested call
-    /// This should be called by CALL/DELEGATECALL/STATICCALL/CREATE opcodes
-    /// TODO: This will need to be implemented when we add actual CALL/CREATE opcodes
-    pub fn prepare_call_frame(self: *Frame, gas: u64, static_call: bool, contract_address: primitives.Address.Address, analysis: *const CodeAnalysis, input: []const u8) ExecutionError.Error!*Frame {
+        /// Prepare the next frame for a nested call
+        /// This should be called by CALL/DELEGATECALL/STATICCALL/CREATE opcodes
+        /// TODO: This will need to be implemented when we add actual CALL/CREATE opcodes
+        pub fn prepare_call_frame(self: *Self, gas: u64, static_call: bool, contract_address: primitives.Address.Address, analysis: *const CodeAnalysis, input: []const u8) ExecutionError.Error!*Self {
         const next_frame = self.get_next_frame() orelse return ExecutionError.Error.DepthLimit;
 
         // Set up the next frame for execution
@@ -412,7 +412,7 @@ pub fn FrameImpl(comptime config: anytype) type {
         next_frame.input = input;
         next_frame.output = &[_]u8{}; // Reset output
 
-        return next_frame;
+            return next_frame;
         }
     };
 }
@@ -510,6 +510,14 @@ const TestHelpers = struct {
         return AccessList.init(allocator);
     }
 
+    fn createMockCallJournal(allocator: std.mem.Allocator) !CallJournal {
+        return CallJournal.init(allocator);
+    }
+
+    fn createMockHost(allocator: std.mem.Allocator) !Host {
+        return Host.init(allocator);
+    }
+
     fn createMockSelfDestruct(allocator: std.mem.Allocator) !SelfDestruct {
         return SelfDestruct.init(allocator);
     }
@@ -542,19 +550,32 @@ test "Frame - basic initialization" {
     defer db.deinit();
     const chain_rules = TestHelpers.createMockChainRules();
 
+    // Create additional mock components
+    var journal = try TestHelpers.createMockCallJournal(allocator);
+    defer journal.deinit();
+    var host = try TestHelpers.createMockHost(allocator);
+    defer host.deinit();
+
     var ctx = try Frame.init(
-        1000000, // gas
-        false, // not static
-        1, // depth
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db.to_database_interface(),
-        chain_rules,
-        &self_destruct,
+        1000000, // gas_remaining
+        false, // static_call
+        1, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal, // journal
+        &host, // host
+        0, // snapshot_id
+        db.to_database_interface(), // state
+        chain_rules, // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx.deinit();
 
@@ -586,20 +607,31 @@ test "Frame - gas consumption" {
     defer self_destruct.deinit();
     var db = try TestHelpers.createMockDatabase(allocator);
     defer db.deinit();
+    var journal = try TestHelpers.createMockCallJournal(allocator);
+    defer journal.deinit();
+    var host = try TestHelpers.createMockHost(allocator);
+    defer host.deinit();
 
     var ctx = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal, // journal
+        &host, // host
+        0, // snapshot_id
+        db.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx.deinit();
 
@@ -632,20 +664,31 @@ test "Frame - jumpdest validation" {
     defer self_destruct.deinit();
     var db = try TestHelpers.createMockDatabase(allocator);
     defer db.deinit();
+    var journal = try TestHelpers.createMockCallJournal(allocator);
+    defer journal.deinit();
+    var host = try TestHelpers.createMockHost(allocator);
+    defer host.deinit();
 
     var ctx = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal, // journal
+        &host, // host
+        0, // snapshot_id
+        db.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx.deinit();
 
@@ -673,23 +716,33 @@ test "Frame - address access tracking" {
     defer access_list.deinit();
     var self_destruct = try TestHelpers.createMockSelfDestruct(allocator);
     defer self_destruct.deinit();
-
     var db = try TestHelpers.createMockDatabase(allocator);
     defer db.deinit();
+    var journal = try TestHelpers.createMockCallJournal(allocator);
+    defer journal.deinit();
+    var host = try TestHelpers.createMockHost(allocator);
+    defer host.deinit();
 
     var ctx = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal, // journal
+        &host, // host
+        0, // snapshot_id
+        db.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx.deinit();
 
@@ -712,23 +765,33 @@ test "Frame - output data management" {
     defer access_list.deinit();
     var self_destruct = try TestHelpers.createMockSelfDestruct(allocator);
     defer self_destruct.deinit();
-
     var db = try TestHelpers.createMockDatabase(allocator);
     defer db.deinit();
+    var journal = try TestHelpers.createMockCallJournal(allocator);
+    defer journal.deinit();
+    var host = try TestHelpers.createMockHost(allocator);
+    defer host.deinit();
 
     var ctx = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal, // journal
+        &host, // host
+        0, // snapshot_id
+        db.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx.deinit();
 
@@ -758,37 +821,61 @@ test "Frame - static call restrictions" {
     var db2 = try TestHelpers.createMockDatabase(allocator);
     defer db2.deinit();
 
+    // Create additional mock components
+    var journal1 = try TestHelpers.createMockCallJournal(allocator);
+    defer journal1.deinit();
+    var host1 = try TestHelpers.createMockHost(allocator);
+    defer host1.deinit();
+    var journal2 = try TestHelpers.createMockCallJournal(allocator);
+    defer journal2.deinit();
+    var host2 = try TestHelpers.createMockHost(allocator);
+    defer host2.deinit();
+
     // Create static context
     var static_ctx = try Frame.init(
-        1000,
-        true,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db1.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        true, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal1, // journal
+        &host1, // host
+        0, // snapshot_id
+        db1.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer static_ctx.deinit();
 
     // Create non-static context
     var normal_ctx = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db2.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal2, // journal
+        &host2, // host
+        0, // snapshot_id
+        db2.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer normal_ctx.deinit();
 
@@ -815,19 +902,36 @@ test "Frame - selfdestruct availability" {
     var db4 = try TestHelpers.createMockDatabase(allocator);
     defer db4.deinit();
 
+    // Create additional mock components
+    var journal3 = try TestHelpers.createMockCallJournal(allocator);
+    defer journal3.deinit();
+    var host3 = try TestHelpers.createMockHost(allocator);
+    defer host3.deinit();
+    var journal4 = try TestHelpers.createMockCallJournal(allocator);
+    defer journal4.deinit();
+    var host4 = try TestHelpers.createMockHost(allocator);
+    defer host4.deinit();
+    
     var ctx_with_selfdestruct = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db3.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal3, // journal
+        &host3, // host
+        0, // snapshot_id
+        db3.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        &self_destruct, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx_with_selfdestruct.deinit();
 
@@ -837,18 +941,25 @@ test "Frame - selfdestruct availability" {
 
     // Test without SelfDestruct (null)
     var ctx_without_selfdestruct = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db4.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        null,
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis, // analysis
+        &access_list, // access_list
+        &journal4, // journal
+        &host4, // host
+        0, // snapshot_id
+        db4.to_database_interface(), // state
+        TestHelpers.createMockChainRules(), // chain_rules
+        null, // self_destruct
         &[_]u8{}, // input
-        allocator,
+        allocator, // allocator
         null, // next_frame
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx_without_selfdestruct.deinit();
 
