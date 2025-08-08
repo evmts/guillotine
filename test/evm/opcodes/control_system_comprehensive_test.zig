@@ -3,10 +3,13 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 // ============================
 // 0xF3: RETURN opcode
@@ -19,9 +22,8 @@ test "RETURN (0xF3): Return data from execution" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -82,9 +84,8 @@ test "RETURN: Empty return data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -143,9 +144,8 @@ test "REVERT (0xFD): Revert with data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -206,9 +206,8 @@ test "REVERT: Empty revert data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -269,9 +268,8 @@ test "INVALID (0xFE): Consume all gas and fail" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0xFE}; // INVALID
@@ -324,9 +322,8 @@ test "SELFDESTRUCT (0xFF): Schedule contract destruction" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -399,9 +396,8 @@ test "SELFDESTRUCT: Static call protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0xFF}; // SELFDESTRUCT
@@ -449,9 +445,8 @@ test "SELFDESTRUCT: Cold beneficiary address (EIP-2929)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0xFF}; // SELFDESTRUCT
@@ -508,9 +503,8 @@ test "Control opcodes: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     // Test RETURN gas consumption (memory expansion)
@@ -564,9 +558,8 @@ test "RETURN/REVERT: Large memory offset" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const opcodes = [_]u8{ 0xF3, 0xFD }; // RETURN, REVERT
@@ -622,9 +615,8 @@ test "RETURN/REVERT: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const opcodes = [_]u8{ 0xF3, 0xFD }; // RETURN, REVERT
@@ -672,9 +664,8 @@ test "Control flow interaction: Call with REVERT" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0xF1}; // CALL

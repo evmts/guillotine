@@ -3,10 +3,13 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 test "Bitwise: AND basic operations" {
     const allocator = testing.allocator;
@@ -15,9 +18,7 @@ test "Bitwise: AND basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -86,9 +87,7 @@ test "Bitwise: OR basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -148,9 +147,7 @@ test "Bitwise: XOR basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -209,9 +206,7 @@ test "Bitwise: NOT basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -268,9 +263,7 @@ test "Bitwise: BYTE extraction operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -338,9 +331,7 @@ test "Bitwise: SHL (shift left) operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -408,9 +399,7 @@ test "Bitwise: SHR (logical shift right) operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -469,9 +458,7 @@ test "Bitwise: SAR (arithmetic shift right) operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -541,9 +528,7 @@ test "Bitwise: Stack underflow errors" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -591,9 +576,7 @@ test "Bitwise: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;

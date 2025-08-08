@@ -19,8 +19,7 @@ test "LOG0 (0xA0): Emit log with no topics" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -84,8 +83,7 @@ test "LOG1 (0xA1): Emit log with one topic" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -183,8 +181,7 @@ test "LOG2-LOG4: Multiple topics" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -315,8 +312,7 @@ test "LOG0-LOG4: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0xA0, 0xA1, 0xA2, 0xA3, 0xA4 }; // LOG0-LOG4
@@ -400,8 +396,7 @@ test "LOG operations: Static call protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -474,8 +469,7 @@ test "LOG operations: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0xA0, 0xA1, 0xA2, 0xA3, 0xA4 }; // All LOG opcodes
@@ -531,8 +525,7 @@ test "LOG operations: Empty data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -592,8 +585,7 @@ test "LOG operations: Large memory offset" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0xA0}; // LOG0
@@ -647,8 +639,7 @@ test "LOG operations: ERC20 Transfer event pattern" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -802,8 +793,7 @@ test "LOG operations: Multiple logs in sequence" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{

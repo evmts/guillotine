@@ -15,7 +15,7 @@ test "RETURN sets output correctly" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
     var vm = try builder.build();
     defer vm.deinit();
@@ -64,7 +64,7 @@ test "constructor returns runtime code" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
     var vm = try builder.build();
     defer vm.deinit();

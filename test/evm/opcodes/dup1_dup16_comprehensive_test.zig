@@ -3,10 +3,14 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
+// Updated to new API - migration in progress, tests not run yet
 
 // ============================
 // 0x80-0x8F: DUP1 through DUP16
@@ -19,9 +23,7 @@ test "DUP1 (0x80): Duplicate 1st stack item" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -85,9 +87,7 @@ test "DUP2 (0x81): Duplicate 2nd stack item" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -144,9 +144,7 @@ test "DUP3-DUP5: Various duplications" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0x82, 0x83, 0x84 }; // DUP3, DUP4, DUP5
@@ -212,9 +210,7 @@ test "DUP6-DUP10: Mid-range duplications" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0x85, 0x86, 0x87, 0x88, 0x89 }; // DUP6-DUP10
@@ -283,9 +279,7 @@ test "DUP11-DUP16: High-range duplications" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F }; // DUP11-DUP16
@@ -359,9 +353,7 @@ test "DUP16 (0x8F): Duplicate 16th stack item (maximum)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x8F}; // DUP16
@@ -416,9 +408,7 @@ test "DUP1-DUP16: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -484,9 +474,7 @@ test "DUP operations: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0x80, 0x81, 0x85, 0x8F }; // DUP1, DUP2, DUP6, DUP16
@@ -556,9 +544,7 @@ test "DUP operations: Stack overflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x80}; // DUP1
@@ -605,9 +591,7 @@ test "DUP operations: Sequential duplications" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -683,9 +667,7 @@ test "DUP operations: Pattern verification" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0x80, 0x84, 0x88, 0x8C, 0x8F }; // DUP1, DUP5, DUP9, DUP13, DUP16
@@ -756,9 +738,7 @@ test "DUP operations: Boundary test with exact stack size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{ 0x80, 0x8F }; // DUP1, DUP16

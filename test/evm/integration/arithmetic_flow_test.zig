@@ -1,7 +1,10 @@
 const std = @import("std");
 const testing = std.testing;
-const Evm = @import("evm");
-const opcodes = Evm.opcodes;
+const evm = @import("evm");
+const primitives = @import("primitives");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 
 // Integration tests for arithmetic operations combined with control flow
 
@@ -9,13 +12,11 @@ test "Integration: Arithmetic with conditional jumps" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create a simple contract that:
@@ -38,11 +39,11 @@ test "Integration: Arithmetic with conditional jumps" {
     };
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -53,7 +54,7 @@ test "Integration: Arithmetic with conditional jumps" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -62,8 +63,8 @@ test "Integration: Arithmetic with conditional jumps" {
     defer frame.deinit();
 
     // Execute sequence: PUSH 5, PUSH 10, ADD
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x60);
     frame.pc += 2; // Advance past PUSH1 data
@@ -103,21 +104,19 @@ test "Integration: Complex arithmetic expression evaluation" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -128,7 +127,7 @@ test "Integration: Complex arithmetic expression evaluation" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -143,8 +142,8 @@ test "Integration: Complex arithmetic expression evaluation" {
     try frame.stack.push(10);
     try frame.stack.push(5);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x01);
 
@@ -162,21 +161,19 @@ test "Integration: Modular arithmetic chain" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -187,7 +184,7 @@ test "Integration: Modular arithmetic chain" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -203,8 +200,8 @@ test "Integration: Modular arithmetic chain" {
     try frame.stack.push(15);
     try frame.stack.push(7);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x08);
     const addmod_result = try frame.stack.peek(0);
@@ -221,21 +218,19 @@ test "Integration: Division by zero handling in expression" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -246,7 +241,7 @@ test "Integration: Division by zero handling in expression" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -258,8 +253,8 @@ test "Integration: Division by zero handling in expression" {
     try frame.stack.push(10);
     try frame.stack.push(0);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x04);
     const div_result = try frame.stack.peek(0);
@@ -275,21 +270,19 @@ test "Integration: Bitwise operations with arithmetic" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -300,7 +293,7 @@ test "Integration: Bitwise operations with arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -314,8 +307,8 @@ test "Integration: Bitwise operations with arithmetic" {
     try frame.stack.push(0xFF);
     try frame.stack.push(0x0F);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x16);
     const and_result = try frame.stack.peek(0);
@@ -336,21 +329,19 @@ test "Integration: Stack manipulation with arithmetic" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -361,7 +352,7 @@ test "Integration: Stack manipulation with arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -379,8 +370,8 @@ test "Integration: Stack manipulation with arithmetic" {
     try frame.stack.push(10);
     try frame.stack.push(20);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x80);
     try testing.expectEqual(@as(usize, 3), frame.stack.size());
@@ -407,21 +398,19 @@ test "Integration: Comparison chain for range checking" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -432,7 +421,7 @@ test "Integration: Comparison chain for range checking" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -444,8 +433,8 @@ test "Integration: Comparison chain for range checking" {
     // value >= 10 AND value <= 20
     const value: u256 = 15;
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     // Check value >= 10
     try frame.stack.push(value);
@@ -475,21 +464,19 @@ test "Integration: EXP with modular arithmetic" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -500,7 +487,7 @@ test "Integration: EXP with modular arithmetic" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -512,8 +499,8 @@ test "Integration: EXP with modular arithmetic" {
     try frame.stack.push(2);
     try frame.stack.push(8);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x0A);
     const exp_result = try frame.stack.peek(0);
@@ -529,21 +516,19 @@ test "Integration: Signed arithmetic with comparisons" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.MemoryDatabase.init(allocator);
+    var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm = try builder.build();
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Create test addresses
-    const contract_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000001");
-    const owner_address = Evm.Address.from_hex("0x0000000000000000000000000000000000000002");
+    const contract_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000001);
+    const owner_address = primitives.Address.from_u256(0x0000000000000000000000000000000000000002);
 
     // Create contract directly
-    var contract = try Evm.Contract.init(
+    var contract = try evm.Contract.init(
         allocator,
         contract_address,
         owner_address,
@@ -554,7 +539,7 @@ test "Integration: Signed arithmetic with comparisons" {
     defer contract.deinit(allocator, null);
 
     // Create frame directly
-    var frame_builder = Evm.Frame.builder(allocator);
+    var frame_builder = evm.Frame.builder(allocator);
     var frame = try frame_builder
         .withVm(&vm)
         .withContract(&contract)
@@ -569,8 +554,8 @@ test "Integration: Signed arithmetic with comparisons" {
     try frame.stack.push(neg_5);
     try frame.stack.push(10);
 
-    const interpreter: Evm.Operation.Interpreter = &vm;
-    const state: Evm.Operation.State = &frame;
+    const interpreter: evm.Operation.Interpreter = &vm;
+    const state: evm.Operation.State = &frame;
 
     _ = try vm.table.execute(0, interpreter, state, 0x12);
     const slt_result = try frame.stack.peek(0);

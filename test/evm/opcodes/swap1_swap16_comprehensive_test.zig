@@ -19,9 +19,8 @@ test "SWAP1 (0x90): Swap top two stack items" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -86,9 +85,8 @@ test "SWAP2 (0x91): Swap 1st and 3rd stack items" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0x91}; // SWAP2
@@ -141,9 +139,8 @@ test "SWAP3-SWAP5: Various swaps" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x92, 0x93, 0x94 }; // SWAP3, SWAP4, SWAP5
@@ -220,9 +217,8 @@ test "SWAP6-SWAP10: Mid-range swaps" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x95, 0x96, 0x97, 0x98, 0x99 }; // SWAP6-SWAP10
@@ -292,9 +288,8 @@ test "SWAP11-SWAP16: High-range swaps" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F }; // SWAP11-SWAP16
@@ -369,9 +364,8 @@ test "SWAP16 (0x9F): Swap with 16th position (maximum)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0x9F}; // SWAP16
@@ -429,9 +423,8 @@ test "SWAP1-SWAP16: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -497,9 +490,8 @@ test "SWAP operations: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x90, 0x91, 0x95, 0x9F }; // SWAP1, SWAP2, SWAP6, SWAP16
@@ -574,9 +566,8 @@ test "SWAP operations: Sequential swaps" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -652,9 +643,8 @@ test "SWAP operations: Pattern verification" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x90, 0x94, 0x98, 0x9C, 0x9F }; // SWAP1, SWAP5, SWAP9, SWAP13, SWAP16
@@ -731,9 +721,8 @@ test "SWAP operations: Boundary test with exact stack size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x90, 0x9F }; // SWAP1, SWAP16
@@ -801,9 +790,8 @@ test "SWAP operations: No side effects" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0x92}; // SWAP3

@@ -3,19 +3,20 @@ const testing = std.testing;
 
 // Import opcodes to test
 const Evm = @import("evm");
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 
 test "SELFDESTRUCT: Basic functionality" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.Database.Memory.init(allocator);
+    var memory_db = Evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create contract
@@ -71,14 +72,12 @@ test "SELFDESTRUCT: Forbidden in static call" {
     const allocator = testing.allocator;
 
     // Create memory database
-    var memory_db = Evm.Database.Memory.init(allocator);
+    var memory_db = Evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create contract
@@ -131,9 +130,8 @@ test "SELFDESTRUCT: Gas costs by hardfork" {
 
         // Create EVM instance with Frontier hardfork
         const db_interface = memory_db.to_database_interface();
-        var builder = Evm.EvmBuilder.init(allocator, db_interface);
+        var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-        var evm = try builder.build();
         defer evm.deinit();
         evm.hardfork = .FRONTIER;
 
@@ -186,9 +184,8 @@ test "SELFDESTRUCT: Gas costs by hardfork" {
 
         // Create EVM instance with Tangerine Whistle hardfork
         const db_interface = memory_db.to_database_interface();
-        var builder = Evm.EvmBuilder.init(allocator, db_interface);
+        var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-        var evm = try builder.build();
         defer evm.deinit();
         evm.hardfork = .TANGERINE_WHISTLE;
 
@@ -243,9 +240,8 @@ test "SELFDESTRUCT: Account creation cost (EIP-161)" {
 
     // Create EVM instance with Spurious Dragon hardfork
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
     evm.hardfork = .SPURIOUS_DRAGON; // First hardfork with EIP-161
 

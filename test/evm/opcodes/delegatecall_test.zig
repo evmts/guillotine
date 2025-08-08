@@ -7,6 +7,9 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 
 // test {
 //     std.testing.log_level = .debug;
@@ -26,8 +29,7 @@ test "DELEGATECALL basic functionality" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Setup context
@@ -128,8 +130,7 @@ test "DELEGATECALL preserves sender and value" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Setup context
@@ -214,8 +215,7 @@ test "DELEGATECALL with storage access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var vm = try builder.build();
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     // Setup context

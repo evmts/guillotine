@@ -3,10 +3,13 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 test "Arithmetic: ADD basic operations" {
     const allocator = testing.allocator;
@@ -15,7 +18,7 @@ test "Arithmetic: ADD basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -85,7 +88,7 @@ test "Arithmetic: SUB basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -146,7 +149,7 @@ test "Arithmetic: MUL basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -209,7 +212,7 @@ test "Arithmetic: DIV basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -270,7 +273,7 @@ test "Arithmetic: MOD basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -331,7 +334,7 @@ test "Arithmetic: ADDMOD complex operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -396,7 +399,7 @@ test "Arithmetic: MULMOD complex operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -462,7 +465,7 @@ test "Arithmetic: EXP exponential operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -534,7 +537,7 @@ test "Arithmetic: Stack underflow errors" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;

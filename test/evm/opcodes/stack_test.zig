@@ -7,6 +7,7 @@ const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 // Test PUSH0 operation
 test "PUSH0: append zero value" {

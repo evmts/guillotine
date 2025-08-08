@@ -3,10 +3,14 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
+// Updated to new API - migration in progress, tests not run yet
 
 test "Control: STOP halts execution" {
     const allocator = testing.allocator;
@@ -15,9 +19,7 @@ test "Control: STOP halts execution" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -60,9 +62,7 @@ test "Control: JUMP basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create contract with JUMPDEST at position 5
@@ -126,9 +126,7 @@ test "Control: JUMPI conditional jump" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create contract with JUMPDEST at position 5
@@ -199,9 +197,7 @@ test "Control: PC returns program counter" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -256,9 +252,7 @@ test "Control: JUMPDEST is a no-op" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -311,9 +305,7 @@ test "Control: RETURN with data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -383,9 +375,7 @@ test "Control: REVERT with data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -450,9 +440,7 @@ test "Control: INVALID always fails" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -498,9 +486,7 @@ test "Control: SELFDESTRUCT basic operation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -571,9 +557,7 @@ test "Control: Stack underflow errors" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const jumpdest_code = [_]u8{0x5b}; // JUMPDEST at position 0

@@ -3,10 +3,13 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 // ============================
 // 0x30-0x39 Environmental Information Opcodes
@@ -19,9 +22,8 @@ test "ADDRESS (0x30): Push current contract address" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     // Create contract with specific address
@@ -66,9 +68,8 @@ test "BALANCE (0x31): Get account balance" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -130,9 +131,8 @@ test "ORIGIN (0x32): Get transaction origin" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     // Set transaction origin
@@ -181,9 +181,8 @@ test "CALLER (0x33): Get immediate caller" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     // Set transaction origin different from caller
@@ -232,9 +231,8 @@ test "CALLVALUE (0x34): Get msg.value" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const test_cases = [_]u256{
@@ -286,9 +284,8 @@ test "CALLDATALOAD (0x35): Load 32 bytes from calldata" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     // Create test calldata
@@ -368,9 +365,8 @@ test "CALLDATASIZE (0x36): Get calldata size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const test_cases = [_]struct {
@@ -428,9 +424,8 @@ test "CALLDATACOPY (0x37): Copy calldata to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const calldata = [_]u8{
@@ -515,9 +510,8 @@ test "CODESIZE (0x38): Get code size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const test_cases = [_]struct {
@@ -571,9 +565,8 @@ test "CODECOPY (0x39): Copy code to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{
@@ -651,9 +644,8 @@ test "GASPRICE (0x3A): Get gas price" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const test_prices = [_]u256{
@@ -715,9 +707,8 @@ test "Environmental opcodes: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{ 0x60, 0x00 }; // Simple code
@@ -783,9 +774,8 @@ test "Environmental opcodes: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -836,9 +826,8 @@ test "Environmental opcodes: Memory expansion limits" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const code = [_]u8{0x00}; // Minimal code
@@ -884,9 +873,8 @@ test "BALANCE: EIP-2929 cold/warm account access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;

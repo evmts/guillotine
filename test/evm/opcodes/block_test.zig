@@ -3,10 +3,13 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 test "Block: BLOCKHASH operations" {
     const allocator = testing.allocator;
@@ -15,8 +18,7 @@ test "Block: BLOCKHASH operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set up block context
@@ -94,8 +96,7 @@ test "Block: COINBASE operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set coinbase address
@@ -158,8 +159,7 @@ test "Block: TIMESTAMP operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set block timestamp
@@ -221,8 +221,7 @@ test "Block: NUMBER operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set block number
@@ -284,8 +283,7 @@ test "Block: DIFFICULTY/PREVRANDAO operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set difficulty/prevrandao
@@ -347,8 +345,7 @@ test "Block: GASLIMIT operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set gas limit
@@ -410,8 +407,7 @@ test "Block: BASEFEE operations (London)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set base fee
@@ -473,8 +469,7 @@ test "Block: BLOBHASH operations (Cancun)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set up blob hashes
@@ -563,8 +558,7 @@ test "Block: BLOBBASEFEE operations (Cancun)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Set blob base fee
@@ -626,8 +620,7 @@ test "Block: Stack underflow errors" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;
@@ -670,8 +663,7 @@ test "Block: Edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller: Address.Address = [_]u8{0x11} ** 20;

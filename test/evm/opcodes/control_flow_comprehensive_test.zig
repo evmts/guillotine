@@ -3,10 +3,13 @@ const testing = std.testing;
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
+const CallParams = Evm.Host.CallParams;
+const CallResult = Evm.CallResult;
 const Contract = Evm.Contract;
 const Frame = Evm.Frame;
 const MemoryDatabase = Evm.MemoryDatabase;
 const ExecutionError = Evm.ExecutionError;
+// Updated to new API - migration in progress, tests not run yet
 
 // ============================
 // Control Flow Instructions (0x56-0x58, 0x5A-0x5B)
@@ -24,8 +27,7 @@ test "JUMP (0x56): Basic unconditional jump" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create bytecode with JUMPDEST at position 5
@@ -119,8 +121,7 @@ test "JUMP: Jump to various valid destinations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Complex bytecode with multiple JUMPDESTs
@@ -183,8 +184,7 @@ test "JUMP: Invalid jump destinations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -238,8 +238,7 @@ test "JUMP: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x5B}; // Just a JUMPDEST
@@ -286,8 +285,7 @@ test "JUMPI (0x57): Conditional jump with true condition" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     var code = [_]u8{0} ** 10;
@@ -352,8 +350,7 @@ test "JUMPI: Conditional jump with false condition" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     var code = [_]u8{0} ** 12;
@@ -415,8 +412,7 @@ test "JUMPI: Various condition values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -486,8 +482,7 @@ test "JUMPI: Invalid destination with true condition" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x5B}; // JUMPDEST at position 0
@@ -530,8 +525,7 @@ test "JUMPI: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x5B}; // JUMPDEST
@@ -588,8 +582,7 @@ test "PC (0x58): Get program counter at various positions" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -657,8 +650,7 @@ test "PC: Stack overflow protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -716,8 +708,7 @@ test "GAS (0x5A): Get remaining gas" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -764,8 +755,7 @@ test "GAS: After consuming gas with operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -821,8 +811,7 @@ test "GAS: Low gas scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -880,8 +869,7 @@ test "GAS: Stack overflow protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -930,8 +918,7 @@ test "JUMPDEST (0x5B): Basic operation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -985,8 +972,7 @@ test "JUMPDEST: Jump destination validation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create bytecode with JUMPDEST in various positions (like working test)
@@ -1055,8 +1041,7 @@ test "JUMPDEST: Code analysis edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // JUMPDEST opcode appearing as data in PUSH instructions
@@ -1114,8 +1099,7 @@ test "JUMPDEST: Empty code and no JUMPDEST scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Code with no JUMPDESTs
@@ -1174,8 +1158,7 @@ test "Control Flow: Gas consumption verification" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x5B}; // Include JUMPDEST for JUMP/JUMPI tests
@@ -1251,8 +1234,7 @@ test "Control Flow: Complex jump sequences" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     // Create a program with complex control flow
@@ -1382,8 +1364,7 @@ test "Control Flow: Stack operations validation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     var code = [_]u8{0} ** 8;
@@ -1463,8 +1444,7 @@ test "Control Flow: Program counter tracking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     var code = [_]u8{0} ** 8;
@@ -1548,8 +1528,7 @@ test "Control Flow: Out of gas scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const code = [_]u8{0x5B}; // JUMPDEST
@@ -1608,8 +1587,7 @@ test "Control Flow: Stack operations edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
-    var evm = try builder.build();
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
