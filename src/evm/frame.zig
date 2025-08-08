@@ -431,7 +431,8 @@ comptime {
     if (@offsetOf(Frame, "self_destruct") <= @offsetOf(Frame, "access_list")) @compileError("Cold data (self_destruct) must come after warm data (access_list)");
 
     // Assert packed structs are properly sized
-    if (@sizeOf(@TypeOf(Frame.hot_flags)) != 2) @compileError("hot_flags must be exactly 2 bytes (16 bits)");
+    // Ensure packed hot_flags size is as expected
+    if (@sizeOf(@TypeOf(@as(Frame, undefined).hot_flags)) != 2) @compileError("hot_flags must be exactly 2 bytes (16 bits)");
     if (@sizeOf(Hardfork) != 1) @compileError("Hardfork enum must be exactly 1 byte");
 
     // Assert reasonable struct size (should be dominated by stack)
