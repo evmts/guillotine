@@ -278,7 +278,7 @@ pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
 /// @param n Position below top to swap with (1-16)
 pub inline fn swap_unsafe(self: *Stack, n: usize) void {
     @branchHint(.likely);
-    std.mem.swap(u256, self.current - 1, self.current - 1 - n);
+    std.mem.swap(u256, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
 }
 
 /// Peek at the nth element from the top (for test compatibility)

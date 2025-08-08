@@ -158,7 +158,7 @@ pub fn init(
         .access_list = access_list,
         .context = ctx,
         .initial_thread_id = std.Thread.getCurrentId(),
-        .depth = depth,
+        .depth = @intCast(depth),
         .read_only = read_only,
         .tracer = tracer,
         // New execution state fields (initialized fresh in each call)
