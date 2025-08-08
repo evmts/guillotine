@@ -131,6 +131,12 @@ pub const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
 /// Database factory for creating different implementations
 pub const DatabaseFactory = @import("state/database_factory.zig");
 
+/// Host interface for external EVM operations (CALL, BALANCE, etc.)
+pub const Host = @import("host.zig").Host;
+pub const CallParams = @import("host.zig").CallParams;
+pub const BlockInfo = @import("host.zig").BlockInfo;
+pub const MockHost = @import("host.zig").MockHost;
+
 /// Precompiled contracts implementation (IDENTITY, SHA256, etc.)
 pub const Precompiles = @import("precompiles/precompiles_optimized.zig");
 

@@ -11,7 +11,7 @@ const ExecutionError = @import("execution/execution_error.zig");
 const CodeAnalysis = @import("analysis.zig");
 const AccessList = @import("call_frame_stack.zig").AccessList;
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
-const Host = @import("host.zig").Host;
+const Host = @import("root.zig").Host;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
@@ -112,13 +112,13 @@ pub const Frame = struct {
     // Total: 48 bytes = exactly 3/4 of a cache line
 
     // COLD DATA
-    allocator: std.mem.Allocator, // 16 bytes
-    input: []const u8, // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
-    output: []const u8, // 16 bytes - only set by RETURN/REVERT at function exit
-
     // Use hardfork enum instead of boolean flags for better cache efficiency
     hardfork: Hardfork, // 1 byte instead of 16 bits of boolean flags
     _pad3: [7]u8 = [_]u8{0} ** 7, // Align to 8-byte boundary
+    
+    allocator: std.mem.Allocator, // 16 bytes
+    input: []const u8, // 16 bytes - only 3 opcodes: CALLDATALOAD/SIZE/COPY (rare in most contracts)
+    output: []const u8, // 16 bytes - only set by RETURN/REVERT at function exit
 
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare: only SELFDESTRUCT opcode
 

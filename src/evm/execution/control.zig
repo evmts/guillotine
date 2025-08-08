@@ -44,7 +44,7 @@ pub fn op_jumpdest(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    const frame = ctx.frame;
+    const frame = ctx;
 
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -100,7 +100,7 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    const frame = ctx.frame;
+    const frame = ctx;
 
     std.debug.assert(frame.stack.size() >= 2);
 
@@ -144,7 +144,7 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    const frame = ctx.frame;
+    const frame = ctx;
 
     // Debug: op_invalid entered
     // INVALID opcode consumes all remaining gas
@@ -156,7 +156,7 @@ pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    const frame = ctx.frame;
+    const frame = ctx;
     const vm = ctx.vm;
 
     // Check if we're in a static call

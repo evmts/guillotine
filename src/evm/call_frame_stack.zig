@@ -5,7 +5,7 @@ const HashMap = std.HashMap;
 const AutoHashMap = std.AutoHashMap;
 const Address = @import("primitives").Address.Address;
 const primitives = @import("../primitives/primitives.zig");
-const Host = @import("host.zig").Host;
+const Host = @import("root.zig").Host;
 
 const Frame = @import("frame.zig").Frame;
 const Memory = @import("memory/memory.zig").Memory;

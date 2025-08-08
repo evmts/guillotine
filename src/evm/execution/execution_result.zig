@@ -31,7 +31,6 @@
 //! }
 //! ```
 
-const std = @import("std");
 
 /// ExecutionResult holds the result of executing a single EVM opcode
 ///

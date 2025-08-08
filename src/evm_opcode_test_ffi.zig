@@ -2,7 +2,7 @@ const std = @import("std");
 const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
-const CallParams = @import("evm/host.zig").CallParams;
+const CallParams = Evm.CallParams;
 
 // Global allocator for C FFI
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
