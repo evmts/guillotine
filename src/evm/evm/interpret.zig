@@ -109,6 +109,10 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     return ExecutionError.Error.OutOfGas;
                 }
                 frame.gas_remaining -= cost;
+                
+                // TODO: Add dynamic gas calculation here when opcodes have dynamic_gas functions
+                // This would require accessing the jump table to get the dynamic_gas function
+                // and then calling it with the appropriate parameters
             },
         }
     }
