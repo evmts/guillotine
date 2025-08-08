@@ -13,6 +13,7 @@ const ExecutionError = @import("execution/execution_error.zig");
 const execution = @import("execution/package.zig");
 const Frame = @import("frame.zig").Frame;
 const Log = @import("log.zig");
+const stack_height_changes = @import("opcodes/stack_height_changes.zig");
 
 /// Optimized code analysis for EVM bytecode execution.
 /// Contains only the essential data needed during execution.
@@ -105,16 +106,19 @@ const BlockAnalysis = struct {
     }
     
     /// Update stack tracking for an operation
-    fn updateStackTracking(self: *BlockAnalysis, min_stack: u32, max_stack: u32) void {
+    fn updateStackTracking(self: *BlockAnalysis, opcode: u8, min_stack: u32) void {
+        // Get the precise net stack change from the lookup table
+        const net_change = stack_height_changes.get_stack_height_change(opcode);
+        
+        // min_stack tells us how many items the operation pops
         const stack_inputs = @as(i16, @intCast(min_stack));
-        const stack_outputs: i16 = if (max_stack > min_stack) 1 else 0;
         
         // Calculate requirement relative to block start
         const current_stack_req = stack_inputs - self.stack_change;
         self.stack_req = @max(self.stack_req, current_stack_req);
         
-        // Update stack change
-        self.stack_change += stack_outputs - stack_inputs;
+        // Update stack change using the precise net change
+        self.stack_change += net_change;
         self.stack_max_growth = @max(self.stack_max_growth, self.stack_change);
     }
 };
@@ -204,13 +208,11 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
             continue;
         }
 
-        // Get operation for stack tracking
-        const operation_ptr = jump_table.get_operation(op);
-        const stack_inputs = @as(i16, @intCast(operation_ptr.min_stack));
-        const stack_outputs: i16 = if (operation_ptr.max_stack > operation_ptr.min_stack) 1 else 0;
-
+        // Get precise stack height change from lookup table
+        const net_change = stack_height_changes.get_stack_height_change(op);
+        
         // Update stack depth
-        stack_depth = stack_depth - stack_inputs + stack_outputs;
+        stack_depth = stack_depth + net_change;
 
         // Track max stack depth (for potential future use)
         _ = @as(u16, @intCast(@max(0, stack_depth)));
@@ -302,7 +304,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             // Invalid opcode - accumulate in block and create instruction
             const operation = jump_table.get_operation(opcode_byte);
             block.gas_cost += @intCast(operation.constant_gas);
-            block.updateStackTracking(operation.min_stack, operation.max_stack);
+            block.updateStackTracking(opcode_byte, operation.min_stack);
             
             instructions[instruction_count] = Instruction{
                 .opcode_fn = operation.execute,
@@ -330,7 +332,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Add the JUMPDEST instruction to the new block
                 const operation = jump_table.get_operation(opcode_byte);
                 block.gas_cost += @intCast(operation.constant_gas);
-                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = operation.execute,
@@ -344,7 +346,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             .JUMP, .STOP, .RETURN, .REVERT, .SELFDESTRUCT => {
                 const operation = jump_table.get_operation(opcode_byte);
                 block.gas_cost += @intCast(operation.constant_gas);
-                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 if (opcode == .JUMP) {
                     instructions[instruction_count] = Instruction{
@@ -377,7 +379,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             .JUMPI => {
                 const operation = jump_table.get_operation(opcode_byte);
                 block.gas_cost += @intCast(operation.constant_gas);
-                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = UnreachableHandler, // Handled inline by interpreter
@@ -400,7 +402,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             .PUSH0 => {
                 const operation = jump_table.get_operation(opcode_byte);
                 block.gas_cost += @intCast(operation.constant_gas);
-                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = UnreachableHandler,
@@ -413,7 +415,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
                 const operation = jump_table.get_operation(opcode_byte);
                 block.gas_cost += @intCast(operation.constant_gas);
-                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 const push_size = Opcode.get_push_size(opcode_byte);
                 var value: u256 = 0;
@@ -453,7 +455,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             .GAS, .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL, .CREATE, .CREATE2, .SSTORE => {
                 const operation = jump_table.get_operation(opcode_byte);
                 block.gas_cost += @intCast(operation.constant_gas);
-                block.updateStackTracking(operation.min_stack, operation.max_stack);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
                 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = operation.execute,
@@ -471,7 +473,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     // Treat undefined opcodes as INVALID
                     const invalid_operation = jump_table.get_operation(@intFromEnum(Opcode.Enum.INVALID));
                     block.gas_cost += @intCast(invalid_operation.constant_gas);
-                    block.updateStackTracking(invalid_operation.min_stack, invalid_operation.max_stack);
+                    block.updateStackTracking(@intFromEnum(Opcode.Enum.INVALID), invalid_operation.min_stack);
                     
                     instructions[instruction_count] = Instruction{
                         .opcode_fn = invalid_operation.execute,
@@ -479,7 +481,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     };
                 } else {
                     block.gas_cost += @intCast(operation.constant_gas);
-                    block.updateStackTracking(operation.min_stack, operation.max_stack);
+                    block.updateStackTracking(opcode_byte, operation.min_stack);
                     
                     instructions[instruction_count] = Instruction{
                         .opcode_fn = operation.execute,
