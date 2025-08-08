@@ -1,14 +1,15 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
-const Vm = @import("../evm.zig");
+const Evm = @import("../evm.zig");
+const Vm = Evm; // Alias for compatibility
 const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
 const CallFrameStack = @import("../call_frame_stack.zig").CallFrameStack;
 const CallType = @import("../call_frame_stack.zig").CallType;
-const CallParams = @import("../call_frame_stack.zig").CallParams;
+const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
 
@@ -178,7 +179,7 @@ pub const CallResult = struct {
 /// Check call depth limit shared by all call operations
 /// Returns true if depth limit is exceeded, false otherwise
 fn validate_call_depth(frame: *ExecutionContext) bool {
-    return frame.depth >= 1024;
+    return frame.hot_flags.depth >= 1024;
 }
 
 /// Handle memory expansion for call arguments
@@ -528,31 +529,113 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.WriteProtection;
     }
 
-    // Get call frame stack (this would need to be passed somehow)
-    // For now this is a placeholder - we need to refactor to pass CallFrameStack
-    // const call_stack = frame.get_call_stack();
+    // Check depth limit
+    if (validate_call_depth(frame)) {
+        // Depth limit exceeded, push failure
+        try frame.stack.append(0);
+        return;
+    }
 
     // Convert to address
     const to_address = from_u256(to);
-    _ = to_address;
 
-    // Get call arguments from memory
+    // Calculate memory expansion costs BEFORE expanding memory
+    const args_end = if (args_size == 0) 0 else blk: {
+        if (args_offset > std.math.maxInt(u64) or args_size > std.math.maxInt(u64)) {
+            return ExecutionError.Error.InvalidOffset;
+        }
+        const offset = @as(u64, @intCast(args_offset));
+        const size = @as(u64, @intCast(args_size));
+        if (offset > std.math.maxInt(u64) - size) {
+            return ExecutionError.Error.GasUintOverflow;
+        }
+        break :blk offset + size;
+    };
+
+    const ret_end = if (ret_size == 0) 0 else blk: {
+        if (ret_offset > std.math.maxInt(u64) or ret_size > std.math.maxInt(u64)) {
+            return ExecutionError.Error.InvalidOffset;
+        }
+        const offset = @as(u64, @intCast(ret_offset));
+        const size = @as(u64, @intCast(ret_size));
+        if (offset > std.math.maxInt(u64) - size) {
+            return ExecutionError.Error.GasUintOverflow;
+        }
+        break :blk offset + size;
+    };
+
+    // Find the maximum memory size needed
+    const max_memory_size = @max(args_end, ret_end);
+    
+    // Calculate memory expansion cost
+    const memory_expansion_cost = if (max_memory_size > 0) blk: {
+        const expansion_cost = frame.memory.get_expansion_cost(max_memory_size);
+        break :blk expansion_cost;
+    } else 0;
+
+    // Base gas cost for CALL opcode
+    const base_gas = GasConstants.CALL_BASE_COST;
+    
+    // Additional gas costs
+    var total_gas_cost = base_gas + memory_expansion_cost;
+    
+    // Add value transfer cost if applicable
+    if (value > 0) {
+        total_gas_cost += GasConstants.CALL_VALUE_TRANSFER_COST;
+        // Check if account is new (would need state access)
+        // For now, we assume account exists
+        // if (is_new_account) total_gas_cost += GasConstants.CallNewAccountCost;
+    }
+
+    // Consume the gas for the CALL operation itself
+    try frame.consume_gas(total_gas_cost);
+
+    // Get call arguments from memory (this expands memory if needed)
     const args = try get_call_args(frame, args_offset, args_size);
-    _ = args;
 
-    // Ensure return memory is available
+    // Ensure return memory is available (this expands memory if needed)
     try ensure_return_memory(frame, ret_offset, ret_size);
 
-    // Calculate gas limit
+    // Calculate gas limit for the called contract
     const gas_limit = calculate_call_gas_amount(frame, gas, value);
-    _ = gas_limit;
 
-    // For now, push 0 (failure) since we don't have the full implementation
-    // In the full implementation, we would:
-    // 1. Create new frame using init_call_frame
-    // 2. Execute the frame
-    // 3. Handle result and gas updates
-    try frame.stack.append(0);
+    // Access the VM through the host interface
+    const host = frame.host;
+    
+    // Create call parameters
+    const call_params = CallParams{ .call = .{
+        .caller = frame.contract_address,
+        .to = to_address,
+        .value = value,
+        .input = args,
+        .gas = gas_limit,
+    }};
+    
+    // Perform the call using the host's call method
+    const call_result = host.call(call_params) catch {
+        // On error, push 0 (failure) and return
+        try frame.stack.append(0);
+        return;
+    };
+
+    // Update gas remaining
+    frame.gas_remaining = @min(frame.gas_remaining, call_result.gas_left);
+
+    // Write return data if successful and there's output
+    if (call_result.success and call_result.output != null and ret_size > 0) {
+        const output = call_result.output.?;
+        const ret_offset_usize = @as(usize, @intCast(ret_offset));
+        const ret_size_usize = @as(usize, @intCast(ret_size));
+        const copy_size = @min(output.len, ret_size_usize);
+        
+        // Copy output to return memory area
+        if (copy_size > 0) {
+            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+        }
+    }
+
+    // Push result (1 for success, 0 for failure)
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
