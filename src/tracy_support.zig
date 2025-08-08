@@ -78,13 +78,13 @@ pub fn TrackedAllocator(comptime T: type) type {
         const Self = @This();
         
         pub fn init(child: T, name: [*:0]const u8) Self {
-            _ = name; // Always mark as used to avoid compiler error
             if (comptime enabled) {
                 return .{
                     .child = child,
                     .tracy_allocator = ztracy.TrackedAllocator.init(child, name),
                 };
             } else {
+                _ = name; // Only mark as unused when not using tracy
                 return .{ .child = child, .tracy_allocator = {} };
             }
         }
