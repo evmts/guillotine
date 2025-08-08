@@ -384,21 +384,28 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                         break;
                     }
 
-                    // Use optimized multiplication
+                    // Use optimized multiplication  
                     const mul_result = mul64x64(self.limbs[i], rhs.limbs[j]);
 
-                    // Add to result with carry
+                    // Add low part + carry to current position
                     const add1 = addWithCarry(result.limbs[i + j], mul_result.low, 0);
-                    const add2 = addWithCarry(mul_result.high, carry, add1.carry);
+                    const add2 = addWithCarry(add1.sum, carry, 0);
+                    result.limbs[i + j] = add2.sum;
 
-                    result.limbs[i + j] = add1.sum;
-                    carry = add2.sum + add2.carry;
+                    // New carry is high part + carries from additions
+                    carry = mul_result.high + add1.carry + add2.carry;
                 }
 
+                // Propagate remaining carry to higher positions
                 if (carry != 0) {
-                    if (i + limbs < limbs) {
-                        result.limbs[i + limbs] = carry;
-                    } else {
+                    var k = i + limbs;
+                    while (carry != 0 and k < limbs) {
+                        const add_result = addWithCarry(result.limbs[k], carry, 0);
+                        result.limbs[k] = add_result.sum;
+                        carry = add_result.carry;
+                        k += 1;
+                    }
+                    if (carry != 0) {
                         overflow = true;
                     }
                 }
@@ -3849,6 +3856,7 @@ test "performance stress tests from intx" {
 test "wrapping_mul" {
     const U256 = Uint(256, 4);
 
+    // Test case from the original failing test
     const a = U256.from_limbs(.{ 0x1234567890ABCDEF, 0xFEDCBA9876543210, 0x0, 0x4000000000000000 });
     const b = U256.from_limbs(.{ 0x1234567890ABCDEF, 0xFEDCBA9876543210, 0x0, 0x4000000000000000 });
 
@@ -3857,6 +3865,23 @@ test "wrapping_mul" {
     const ab_native = a_native *% b_native;
 
     const ab: U256 = a.wrapping_mul(b);
-
     try testing.expectEqual(ab_native, ab.to_u256().?);
+
+    // Additional test cases for edge cases
+    
+    // Test with max values that overflow
+    const max = U256.MAX;
+    const max_native = max.to_u256().?;
+    const max_squared_native = max_native *% max_native;
+    const max_squared = max.wrapping_mul(max);
+    try testing.expectEqual(max_squared_native, max_squared.to_u256().?);
+
+    // Test with simple values
+    const small_a = U256.from_limbs(.{ 0x123456789, 0, 0, 0 });
+    const small_b = U256.from_limbs(.{ 0x987654321, 0, 0, 0 });
+    const small_a_native = small_a.to_u256().?;
+    const small_b_native = small_b.to_u256().?;
+    const small_result_native = small_a_native *% small_b_native;
+    const small_result = small_a.wrapping_mul(small_b);
+    try testing.expectEqual(small_result_native, small_result.to_u256().?);
 }
