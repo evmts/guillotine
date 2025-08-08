@@ -13,31 +13,6 @@ pub fn op_pop(context: *anyopaque) ExecutionError.Error!void {
     _ = try frame.stack.pop();
 }
 
-pub fn op_push0(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    // EIP-3855 validation should be handled during bytecode analysis phase,
-    // not at runtime. Invalid PUSH0 opcodes should be rejected during code analysis.
-    
-    // Compile-time validation: PUSH0 pops 0 items, pushes 1
-    // This ensures at build time that PUSH0 has valid stack effects for EVM
-    try StackValidation.validateStackRequirements(0, 1, frame.stack.size());
-
-    frame.stack.append_unsafe(0);
-}
-
-pub fn op_push1(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    
-    if (frame.stack.size() >= Stack.CAPACITY) {
-        @branchHint(.cold);
-        unreachable;
-    }
-
-    const code = frame.contract.code;
-    const value: u256 = if (frame.pc + 1 < code.len) code[frame.pc + 1] else 0;
-
-    frame.stack.append_unsafe(value);
-}
 
 
 
