@@ -37,6 +37,11 @@ pub const CallParams = struct {
 
 /// Access list for EIP-2929 warm/cold address and storage tracking
 pub const AccessList = struct {
+    /// Gas costs for EIP-2929
+    pub const WARM_ACCOUNT_ACCESS_COST = 100;
+    pub const COLD_ACCOUNT_ACCESS_COST = 2600;
+    pub const WARM_STORAGE_ACCESS_COST = 100;
+    pub const COLD_STORAGE_ACCESS_COST = 2100;
     /// Warm addresses accessed this transaction
     warm_addresses: AutoHashMap(Address, void),
     /// Warm storage slots accessed this transaction
@@ -63,19 +68,19 @@ pub const AccessList = struct {
     }
     
     /// Mark address as accessed, return gas cost
-    pub fn access_address(self: *AccessList, addr: Address) u64 {
+    pub fn access_address(self: *AccessList, addr: Address) !u64 {
         if (self.warm_addresses.contains(addr)) {
-            return 100; // Warm access cost (EIP-2929)
+            return WARM_ACCOUNT_ACCESS_COST;
         } else {
-            self.warm_addresses.put(addr, {}) catch {};
-            return 2600; // Cold access cost (EIP-2929)
+            try self.warm_addresses.put(addr, {});
+            return COLD_ACCOUNT_ACCESS_COST;
         }
     }
     
     /// Mark storage slot as accessed, return gas cost
     pub fn access_storage(self: *AccessList, addr: Address, key: u256) u64 {
         const storage = self.warm_storage.getOrPut(addr) catch {
-            return 2100; // Cold storage access cost
+            return COLD_STORAGE_ACCESS_COST;
         };
         
         if (!storage.found_existing) {
@@ -83,11 +88,27 @@ pub const AccessList = struct {
         }
         
         if (storage.value_ptr.contains(key)) {
-            return 100; // Warm storage access cost
+            return WARM_STORAGE_ACCESS_COST;
         } else {
             storage.value_ptr.put(key, {}) catch {};
-            return 2100; // Cold storage access cost
+            return COLD_STORAGE_ACCESS_COST;
         }
+    }
+    
+    /// Mark storage slot as accessed, return whether it was cold (true) or warm (false)
+    pub fn access_storage_key(self: *AccessList, addr: Address, key: u256) !bool {
+        const storage = try self.warm_storage.getOrPut(addr);
+        
+        if (!storage.found_existing) {
+            storage.value_ptr.* = AutoHashMap(u256, void).init(self.allocator);
+        }
+        
+        const was_cold = !storage.value_ptr.contains(key);
+        if (was_cold) {
+            try storage.value_ptr.put(key, {});
+        }
+        
+        return was_cold;
     }
 };
 
