@@ -2,16 +2,19 @@ const std = @import("std");
 const testing = std.testing;
 
 // Import opcodes through evm module
-const Evm = @import("evm");
+const evm = @import("evm");
+const CallParams = evm.Host.CallParams;
+const CallResult = evm.CallResult;
+// Updated to new API - migration in progress, tests not run yet
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
-const MemoryDatabase = Evm.MemoryDatabase;
-const Contract = Evm.Contract;
-const Frame = Evm.Frame;
-const Operation = Evm.Operation;
-const arithmetic = Evm.opcodes.arithmetic;
-const stack = Evm.opcodes.stack;
-const comparison = Evm.opcodes.comparison;
+const MemoryDatabase = evm.MemoryDatabase;
+const Contract = evm.Contract;
+const Frame = evm.Frame;
+const Operation = evm.Operation;
+const arithmetic = evm.opcodes.arithmetic;
+const stack = evm.opcodes.stack;
+const comparison = evm.opcodes.comparison;
 
 test "Integration: Complex arithmetic calculation" {
     // Test: Calculate (10 + 20) * 3 - 15
@@ -23,10 +26,9 @@ test "Integration: Complex arithmetic calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -52,7 +54,7 @@ test "Integration: Complex arithmetic calculation" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
@@ -92,10 +94,9 @@ test "Integration: Modular arithmetic with overflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -121,7 +122,7 @@ test "Integration: Modular arithmetic with overflow" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
@@ -157,10 +158,9 @@ test "Integration: Fibonacci sequence calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -186,7 +186,7 @@ test "Integration: Fibonacci sequence calculation" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
@@ -234,10 +234,9 @@ test "Integration: Conditional arithmetic based on comparison" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -263,7 +262,7 @@ test "Integration: Conditional arithmetic based on comparison" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
@@ -328,10 +327,9 @@ test "Integration: Calculate average of multiple values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -357,7 +355,7 @@ test "Integration: Calculate average of multiple values" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
@@ -399,10 +397,9 @@ test "Integration: Complex ADDMOD and MULMOD calculations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -428,7 +425,7 @@ test "Integration: Complex ADDMOD and MULMOD calculations" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(10000)
         .withInput(contract.input)
@@ -487,10 +484,9 @@ test "Integration: Exponentiation chain" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = Evm.EvmBuilder.init(allocator, db_interface);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
 
-    var evm = try builder.build();
-    defer evm.deinit();
+    defer vm.deinit();
 
     const contract_address = primitives.Address.from_u256(0x3333);
     const alice_address = primitives.Address.from_u256(0x1111);
@@ -516,7 +512,7 @@ test "Integration: Exponentiation chain" {
 
     var frame_builder = Frame.builder(allocator);
     frame_ptr.* = try frame_builder
-        .withVm(&evm)
+        .withVm(&vm)
         .withContract(&contract)
         .withGas(50000)
         .withInput(contract.input)
