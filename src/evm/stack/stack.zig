@@ -214,7 +214,7 @@ pub inline fn pop_unsafe(self: *Stack) u256 {
 /// @return Pointer to the top value
 pub inline fn peek_unsafe(self: *const Stack) *const u256 {
     @branchHint(.likely);
-    return self.current - 1;
+    return &(self.current - 1)[0];
 }
 
 /// Duplicate the nth element onto the top of stack (unsafe version).
