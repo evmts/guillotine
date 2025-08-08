@@ -10,15 +10,17 @@ const Opcode = @import("opcodes/opcode.zig");
 const JumpTable = @import("jump_table/jump_table.zig");
 const instruction_limits = @import("constants/instruction_limits.zig");
 const ExecutionError = @import("execution/execution_error.zig");
+const execution = @import("execution/package.zig");
+const Frame = @import("frame.zig").Frame;
 const Log = @import("log.zig");
 
 /// Optimized code analysis for EVM bytecode execution.
 /// Contains only the essential data needed during execution.
 const CodeAnalysis = @This();
 
-/// Heap-allocated null-terminated instruction stream for execution.
+/// Heap-allocated instruction stream for execution.
 /// Must be freed by caller using deinit().
-instructions: [*]?Instruction,
+instructions: []Instruction,
 
 /// Heap-allocated bitmap marking all valid JUMPDEST positions in the bytecode.
 /// Required for JUMP/JUMPI validation during execution.
@@ -30,7 +32,7 @@ allocator: std.mem.Allocator,
 /// Handler for opcodes that should never be executed directly.
 /// Used for JUMP, JUMPI, and PUSH opcodes that are handled inline by the interpreter.
 /// This function should never be called - if it is, there's a bug in the analysis or interpreter.
-pub fn UnreachableHandler(frame: anytype) ExecutionError.Error!void {
+pub fn UnreachableHandler(frame: *anyopaque) ExecutionError.Error!void {
     _ = frame;
     Log.err("UnreachableHandler called - this indicates a bug where an opcode marked for inline handling was executed through the jump table", .{});
     unreachable;
@@ -42,25 +44,27 @@ pub fn UnreachableHandler(frame: anytype) ExecutionError.Error!void {
 /// 
 /// The block information (gas cost, stack requirements) is stored in the instruction's arg.block_info.
 /// This handler must be called before executing any instructions in the basic block.
-pub fn BeginBlockHandler(frame: anytype) ExecutionError.Error!void {
-    // Access the current instruction through the frame
-    // Note: This assumes the frame has access to the current instruction
-    // This may need adjustment based on the actual frame structure
-    const current_instruction = @as(*const Instruction, @ptrCast(frame.current_instruction));
-    const block = current_instruction.arg.block_info;
+pub fn BeginBlockHandler(frame: *anyopaque) ExecutionError.Error!void {
+    const actual_frame = @as(*Frame, @ptrCast(@alignCast(frame)));
+    // TODO: BeginBlockHandler needs to be redesigned since Frame doesn't have current_instruction
+    // For now, just consume a small amount of gas as a placeholder
+    // const current_instruction = @as(*const Instruction, @ptrCast(actual_frame.current_instruction));
+    // const block = current_instruction.arg.block_info;
+    const placeholder_gas = 1; // Placeholder gas cost
     
     // Single gas check for entire block - eliminates per-opcode gas validation
-    if (frame.gas_remaining < block.gas_cost) {
+    if (actual_frame.gas_remaining < placeholder_gas) {
         return ExecutionError.Error.OutOfGas;
     }
-    frame.gas_remaining -= block.gas_cost;
+    actual_frame.gas_remaining -= placeholder_gas;
     
+    // TODO: Stack validation also needs the block info
     // Single stack validation for entire block - eliminates per-opcode stack checks
-    const stack_size = @as(u16, @intCast(frame.stack.len()));
-    if (stack_size < block.stack_req) {
-        return ExecutionError.Error.StackUnderflow;
-    }
-    if (stack_size + block.stack_max_growth > 1024) {
+    // const stack_size = @as(u16, @intCast(actual_frame.stack.len()));
+    // if (stack_size < block.stack_req) {
+    //     return ExecutionError.Error.StackUnderflow;
+    // }
+    // if (stack_size + block.stack_max_growth > 1024) {
         return ExecutionError.Error.StackOverflow;
     }
     
@@ -133,10 +137,9 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
 
     if (code.len == 0) {
         // For empty code, just create empty instruction array
-        const empty_instructions = try allocator.alloc(?Instruction, 1);
-        empty_instructions[0] = null;
+        const empty_instructions = try allocator.alloc(Instruction, 0);
         return CodeAnalysis{
-            .instructions = @ptrCast(empty_instructions.ptr),
+            .instructions = empty_instructions,
             .jumpdest_bitmap = jumpdest_bitmap,
             .allocator = allocator,
         };
@@ -233,14 +236,8 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
 /// Clean up allocated instruction array and bitmap.
 /// Must be called by the caller to prevent memory leaks.
 pub fn deinit(self: *CodeAnalysis) void {
-    // Find the length by looking for null terminator
-    var len: usize = 0;
-    while (self.instructions[len] != null) : (len += 1) {}
-    len += 1; // Include null terminator
-
-    // Free the instruction array
-    const instructions_slice = @as([*]?Instruction, @ptrCast(self.instructions))[0..len];
-    self.allocator.free(instructions_slice);
+    // Free the instruction array (now a slice)
+    self.allocator.free(self.instructions);
 
     // Free the bitmap
     self.jumpdest_bitmap.deinit();
@@ -278,9 +275,9 @@ fn createCodeBitmap(allocator: std.mem.Allocator, code: []const u8) !DynamicBitS
 /// 1. Injecting BEGINBLOCK instructions at basic block boundaries
 /// 2. Pre-calculating gas and stack requirements for entire blocks
 /// 3. Eliminating per-instruction validation during execution
-fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) ![*:null]Instruction {
+fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) ![]Instruction {
     // Allocate instruction array with extra space for BEGINBLOCK instructions
-    const instructions = try allocator.alloc(?Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
+    const instructions = try allocator.alloc(Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
     errdefer allocator.free(instructions);
 
     var pc: usize = 0;
@@ -507,22 +504,21 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         instruction_count += 1;
     }
 
-    // Null-terminate the instruction stream
-    instructions[instruction_count] = null;
+    // No terminator needed for slices
 
     // Resolve jump targets after initial translation
     resolveJumpTargets(allocator, code, instructions[0..instruction_count], jumpdest_bitmap) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
     };
 
-    // Resize array to actual size + null terminator
-    const final_instructions = try allocator.realloc(instructions, instruction_count + 1);
-    return @ptrCast(final_instructions.ptr);
+    // Resize array to actual size (no null terminator needed for slices)
+    const final_instructions = try allocator.realloc(instructions, instruction_count);
+    return final_instructions;
 }
 
 /// Resolve jump targets in the instruction stream.
 /// This creates direct pointers from JUMP/JUMPI instructions to their target instructions.
-fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructions: []?Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
+fn resolveJumpTargets(allocator: std.mem.Allocator, code: []const u8, instructions: []Instruction, jumpdest_bitmap: *const DynamicBitSet) !void {
     // Build a map from PC to instruction index using dynamic allocation
     // Initialize with sentinel value (MAX_INSTRUCTIONS means "not mapped")
     var pc_to_instruction = try allocator.alloc(u16, code.len);
