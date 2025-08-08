@@ -9,6 +9,7 @@ const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
 const CallFrameStack = @import("../call_frame_stack.zig").CallFrameStack;
 const CallType = @import("../call_frame_stack.zig").CallType;
+const Host = @import("../host.zig").Host;
 const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
@@ -490,26 +491,223 @@ pub fn revert_to_snapshot(vm: *Vm, snapshot_id: usize) !void {
 }
 
 pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = ctx;
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
-    // TODO: Implementation requires:
-    // - vm instance for contract creation
-    // - frame.contract.address access
-    // - frame.return_data operations
-    // - handle_create_result integration
+    // Pop parameters from stack
+    const value = try frame.stack.pop();
+    const init_offset = try frame.stack.pop();
+    const init_size = try frame.stack.pop();
+
+    // Check if in static context (CREATE not allowed)
+    if (frame.hot_flags.is_static) {
+        @branchHint(.unlikely);
+        return ExecutionError.Error.StaticStateChange;
+    }
+
+    // Check call depth limit
+    if (frame.hot_flags.depth >= 1024) {
+        @branchHint(.unlikely);
+        try frame.stack.append(0);
+        return;
+    }
+
+    // CRITICAL FIX: Calculate memory expansion costs BEFORE expanding memory
+    const init_end = if (init_size > 0) blk: {
+        try check_offset_bounds(init_offset);
+        try check_offset_bounds(init_size);
+        const init_offset_usize = @as(usize, @intCast(init_offset));
+        const init_size_usize = @as(usize, @intCast(init_size));
+        const end = init_offset_usize + init_size_usize;
+        if (end < init_offset_usize) return ExecutionError.Error.GasUintOverflow;
+        break :blk end;
+    } else 0;
+
+    const memory_expansion_cost = frame.memory.get_expansion_cost(init_end);
+
+    // Base gas cost for CREATE (32000 gas)
+    const base_gas = GasConstants.CreateGas;
+    
+    // EIP-3860: Charge for init code size (2 gas per 32-byte word)
+    const init_code_words = (init_size + 31) / 32;
+    const init_code_cost = init_code_words * 2;
+    
+    const total_gas_cost = base_gas + memory_expansion_cost + @as(u64, @intCast(init_code_cost));
+
+    // Consume gas before proceeding
+    try frame.consume_gas(total_gas_cost);
+
+    // EIP-3860: Check init code size limit (49,152 bytes max)
+    if (init_size > 49152) {
+        @branchHint(.unlikely);
+        try frame.stack.append(0);
+        return;
+    }
+
+    // Now expand memory and get init code after charging for it
+    const init_code = if (init_size > 0) blk: {
+        const init_offset_usize = @as(usize, @intCast(init_offset));
+        const init_size_usize = @as(usize, @intCast(init_size));
+        _ = try frame.memory.ensure_context_capacity(init_offset_usize + init_size_usize);
+        break :blk try frame.memory.get_slice(init_offset_usize, init_size_usize);
+    } else &[_]u8{};
+
+    // EIP-150: Apply 63/64 gas forwarding rule
+    const remaining_gas = frame.gas_remaining;
+    const gas_reserved = remaining_gas / 64;
+    const gas_for_create = remaining_gas - gas_reserved;
+
+    // CREATE uses sender address + nonce for address calculation
+    const call_params = CallParams{
+        .create = .{
+            .caller = frame.contract_address,
+            .value = value,
+            .init_code = init_code,
+            .gas = gas_for_create,
+        },
+    };
+
+    // Execute the CREATE through the host
+    const call_result = frame.host.call(call_params) catch {
+        try frame.stack.append(0);
+        return;
+    };
+
+    // Handle gas accounting after CREATE
+    frame.gas_remaining = gas_reserved + call_result.gas_left;
+
+    // Push created address or 0 on failure
+    if (call_result.success) {
+        // The host should return the created address in the output
+        if (call_result.output) |address_bytes| {
+            if (address_bytes.len == 20) {
+                // Convert address bytes to u256 and push
+                var address_u256: u256 = 0;
+                for (address_bytes, 0..) |byte, i| {
+                    address_u256 |= @as(u256, byte) << @intCast((19 - i) * 8);
+                }
+                try frame.stack.append(address_u256);
+            } else {
+                try frame.stack.append(0);
+            }
+        } else {
+            try frame.stack.append(0);
+        }
+    } else {
+        try frame.stack.append(0);
+    }
 }
 
 /// CREATE2 opcode - Create contract with deterministic address
 pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
-    _ = ctx;
+    const frame = @as(*ExecutionContext, @ptrCast(@alignCast(context)));
 
-    // TODO: Implementation requires:
-    // - vm instance for contract creation
-    // - frame.contract.address access
-    // - frame.return_data operations
-    // - handle_create_result integration
+    // Pop parameters from stack
+    const value = try frame.stack.pop();
+    const init_offset = try frame.stack.pop();
+    const init_size = try frame.stack.pop();
+    const salt = try frame.stack.pop();
+
+    // Check if in static context (CREATE2 not allowed)
+    if (frame.hot_flags.is_static) {
+        @branchHint(.unlikely);
+        return ExecutionError.Error.StaticStateChange;
+    }
+
+    // Check call depth limit
+    if (frame.hot_flags.depth >= 1024) {
+        @branchHint(.unlikely);
+        try frame.stack.append(0);
+        return;
+    }
+
+    // CRITICAL FIX: Calculate memory expansion costs BEFORE expanding memory
+    const init_end = if (init_size > 0) blk: {
+        try check_offset_bounds(init_offset);
+        try check_offset_bounds(init_size);
+        const init_offset_usize = @as(usize, @intCast(init_offset));
+        const init_size_usize = @as(usize, @intCast(init_size));
+        const end = init_offset_usize + init_size_usize;
+        if (end < init_offset_usize) return ExecutionError.Error.GasUintOverflow;
+        break :blk end;
+    } else 0;
+
+    const memory_expansion_cost = frame.memory.get_expansion_cost(init_end);
+
+    // Base gas cost for CREATE2 (32000 gas)
+    const base_gas = GasConstants.CreateGas;
+    
+    // EIP-3860: Charge for init code size (2 gas per 32-byte word)
+    const init_code_words = (init_size + 31) / 32;
+    const init_code_cost = init_code_words * 2;
+    
+    // CREATE2 has additional cost for hashing (6 gas per 32-byte word)
+    const hash_cost = init_code_words * 6;
+    
+    const total_gas_cost = base_gas + memory_expansion_cost + @as(u64, @intCast(init_code_cost)) + @as(u64, @intCast(hash_cost));
+
+    // Consume gas before proceeding
+    try frame.consume_gas(total_gas_cost);
+
+    // EIP-3860: Check init code size limit (49,152 bytes max)
+    if (init_size > 49152) {
+        @branchHint(.unlikely);
+        try frame.stack.append(0);
+        return;
+    }
+
+    // Now expand memory and get init code after charging for it
+    const init_code = if (init_size > 0) blk: {
+        const init_offset_usize = @as(usize, @intCast(init_offset));
+        const init_size_usize = @as(usize, @intCast(init_size));
+        _ = try frame.memory.ensure_context_capacity(init_offset_usize + init_size_usize);
+        break :blk try frame.memory.get_slice(init_offset_usize, init_size_usize);
+    } else &[_]u8{};
+
+    // EIP-150: Apply 63/64 gas forwarding rule
+    const remaining_gas = frame.gas_remaining;
+    const gas_reserved = remaining_gas / 64;
+    const gas_for_create = remaining_gas - gas_reserved;
+
+    // CREATE2 uses salt for deterministic address calculation
+    const call_params = CallParams{
+        .create2 = .{
+            .caller = frame.contract_address,
+            .value = value,
+            .init_code = init_code,
+            .salt = salt,
+            .gas = gas_for_create,
+        },
+    };
+
+    // Execute the CREATE2 through the host
+    const call_result = frame.host.call(call_params) catch {
+        try frame.stack.append(0);
+        return;
+    };
+
+    // Handle gas accounting after CREATE2
+    frame.gas_remaining = gas_reserved + call_result.gas_left;
+
+    // Push created address or 0 on failure
+    if (call_result.success) {
+        // The host should return the created address in the output
+        if (call_result.output) |address_bytes| {
+            if (address_bytes.len == 20) {
+                // Convert address bytes to u256 and push
+                var address_u256: u256 = 0;
+                for (address_bytes, 0..) |byte, i| {
+                    address_u256 |= @as(u256, byte) << @intCast((19 - i) * 8);
+                }
+                try frame.stack.append(address_u256);
+            } else {
+                try frame.stack.append(0);
+            }
+        } else {
+            try frame.stack.append(0);
+        }
+    } else {
+        try frame.stack.append(0);
+    }
 }
 
 pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
@@ -661,27 +859,83 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const ret_offset = try frame.stack.pop();
     const ret_size = try frame.stack.pop();
 
-    // Convert to address
-    const to_address = from_u256(to);
-    _ = to_address;
+    // CRITICAL FIX: Calculate memory expansion costs BEFORE expanding memory
+    const args_end = if (args_size > 0) blk: {
+        try check_offset_bounds(args_offset);
+        try check_offset_bounds(args_size);
+        const args_offset_usize = @as(usize, @intCast(args_offset));
+        const args_size_usize = @as(usize, @intCast(args_size));
+        const end = args_offset_usize + args_size_usize;
+        if (end < args_offset_usize) return ExecutionError.Error.GasUintOverflow;
+        break :blk end;
+    } else 0;
 
-    // Get call arguments from memory
+    const ret_end = if (ret_size > 0) blk: {
+        try check_offset_bounds(ret_offset);
+        try check_offset_bounds(ret_size);
+        const ret_offset_usize = @as(usize, @intCast(ret_offset));
+        const ret_size_usize = @as(usize, @intCast(ret_size));
+        const end = ret_offset_usize + ret_size_usize;
+        if (end < ret_offset_usize) return ExecutionError.Error.GasUintOverflow;
+        break :blk end;
+    } else 0;
+
+    const max_memory_size = @max(args_end, ret_end);
+    const memory_expansion_cost = frame.memory.get_expansion_cost(max_memory_size);
+
+    // Base gas cost for DELEGATECALL (700 gas)
+    const base_gas = GasConstants.CALL_BASE_COST; // Same as CALL
+    const total_gas_cost = base_gas + memory_expansion_cost;
+
+    // Consume gas before proceeding
+    try frame.consume_gas(total_gas_cost);
+
+    // Check call depth limit
+    if (frame.hot_flags.depth >= 1024) {
+        @branchHint(.unlikely);
+        try frame.stack.append(0);
+        return;
+    }
+
+    // Now expand memory after charging for it
     const args = try get_call_args(frame, args_offset, args_size);
-    _ = args;
-
-    // Ensure return memory is available
     try ensure_return_memory(frame, ret_offset, ret_size);
 
-    // Calculate gas limit (DELEGATECALL uses no value)
-    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
-    _ = gas_limit;
+    // Convert to address
+    const to_address = from_u256(to);
 
-    // For now, push 0 (failure) since we don't have the full implementation
-    // In the full implementation, we would:
-    // 1. Create DELEGATECALL frame that preserves caller and value
-    // 2. Execute with shared memory
-    // 3. Handle result
-    try frame.stack.append(0);
+    // Calculate gas to forward (63/64 rule)
+    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
+
+    // DELEGATECALL preserves the original caller and value from parent context
+    // This is critical for proxy patterns and library calls
+    const call_params = CallParams{
+        .delegatecall = .{
+            .caller = frame.caller, // Preserve original caller, not current contract
+            .to = to_address,
+            .input = args,
+            .gas = gas_limit,
+        },
+    };
+
+    // Execute the delegatecall through the host
+    const call_result = frame.host.call(call_params) catch {
+        try frame.stack.append(0);
+        return;
+    };
+
+    // Store return data if any
+    if (call_result.output) |output| {
+        if (ret_size > 0) {
+            const ret_offset_usize = @as(usize, @intCast(ret_offset));
+            const ret_size_usize = @as(usize, @intCast(ret_size));
+            const copy_size = @min(ret_size_usize, output.len);
+            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+        }
+    }
+
+    // Push success flag (1 for success, 0 for failure)
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
@@ -695,27 +949,82 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const ret_offset = try frame.stack.pop();
     const ret_size = try frame.stack.pop();
 
-    // Convert to address
-    const to_address = from_u256(to);
-    _ = to_address;
+    // CRITICAL FIX: Calculate memory expansion costs BEFORE expanding memory
+    const args_end = if (args_size > 0) blk: {
+        try check_offset_bounds(args_offset);
+        try check_offset_bounds(args_size);
+        const args_offset_usize = @as(usize, @intCast(args_offset));
+        const args_size_usize = @as(usize, @intCast(args_size));
+        const end = args_offset_usize + args_size_usize;
+        if (end < args_offset_usize) return ExecutionError.Error.GasUintOverflow;
+        break :blk end;
+    } else 0;
 
-    // Get call arguments from memory
+    const ret_end = if (ret_size > 0) blk: {
+        try check_offset_bounds(ret_offset);
+        try check_offset_bounds(ret_size);
+        const ret_offset_usize = @as(usize, @intCast(ret_offset));
+        const ret_size_usize = @as(usize, @intCast(ret_size));
+        const end = ret_offset_usize + ret_size_usize;
+        if (end < ret_offset_usize) return ExecutionError.Error.GasUintOverflow;
+        break :blk end;
+    } else 0;
+
+    const max_memory_size = @max(args_end, ret_end);
+    const memory_expansion_cost = frame.memory.get_expansion_cost(max_memory_size);
+
+    // Base gas cost for STATICCALL (700 gas)
+    const base_gas = GasConstants.CALL_BASE_COST; // Same as CALL/DELEGATECALL
+    const total_gas_cost = base_gas + memory_expansion_cost;
+
+    // Consume gas before proceeding
+    try frame.consume_gas(total_gas_cost);
+
+    // Check call depth limit
+    if (frame.hot_flags.depth >= 1024) {
+        @branchHint(.unlikely);
+        try frame.stack.append(0);
+        return;
+    }
+
+    // Now expand memory after charging for it
     const args = try get_call_args(frame, args_offset, args_size);
-    _ = args;
-
-    // Ensure return memory is available
     try ensure_return_memory(frame, ret_offset, ret_size);
 
-    // Calculate gas limit (STATICCALL uses no value)
-    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
-    _ = gas_limit;
+    // Convert to address
+    const to_address = from_u256(to);
 
-    // For now, push 0 (failure) since we don't have the full implementation
-    // In the full implementation, we would:
-    // 1. Create STATICCALL frame with is_static = true
-    // 2. Execute with separate memory
-    // 3. Handle result
-    try frame.stack.append(0);
+    // Calculate gas to forward (63/64 rule)
+    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
+
+    // STATICCALL enforces read-only context - no state changes allowed
+    const call_params = CallParams{
+        .staticcall = .{
+            .caller = frame.contract_address,
+            .to = to_address,
+            .input = args,
+            .gas = gas_limit,
+        },
+    };
+
+    // Execute the staticcall through the host
+    const call_result = frame.host.call(call_params) catch {
+        try frame.stack.append(0);
+        return;
+    };
+
+    // Store return data if any
+    if (call_result.output) |output| {
+        if (ret_size > 0) {
+            const ret_offset_usize = @as(usize, @intCast(ret_offset));
+            const ret_size_usize = @as(usize, @intCast(ret_size));
+            const copy_size = @min(ret_size_usize, output.len);
+            try frame.memory.set_data_bounded(ret_offset_usize, output[0..copy_size]);
+        }
+    }
+
+    // Push success flag (1 for success, 0 for failure)
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 /// SELFDESTRUCT opcode (0xFF): Destroy the current contract and send balance to recipient
