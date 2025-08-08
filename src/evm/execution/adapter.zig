@@ -1,4 +1,4 @@
-const ExecutionError = @import("execution/execution_error.zig");
+const ExecutionError = @import("execution_error.zig");
 const ExecutionContext = @import("../frame.zig").ExecutionContext;
 
 /// Adapter that allows calling either a legacy handler (fn(*ExecutionContext) !void)
