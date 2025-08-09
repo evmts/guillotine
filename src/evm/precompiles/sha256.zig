@@ -90,23 +90,26 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// Uses hardware acceleration when available for improved performance.
 ///
 /// @param input Input data to hash
-/// @param output Output buffer for hash result
+/// @param output Output buffer for hash result (must be at least 32 bytes)
 fn sha256Hash(input: []const u8, output: []u8) void {
-    // Use hardware-accelerated implementation when available
-    var hash_output: [SHA256_OUTPUT_SIZE]u8 = undefined;
-    crypto.SHA256_Accel.SHA256_Accel.hash(input, &hash_output);
-    @memcpy(output[0..SHA256_OUTPUT_SIZE], &hash_output);
+    // Hash directly into the output buffer to avoid intermediate allocation
+    // The output buffer must be at least SHA256_OUTPUT_SIZE bytes
+    crypto.SHA256_Accel.SHA256_Accel.hash(input, output[0..SHA256_OUTPUT_SIZE]);
 }
 
 /// Output formatter for SHA256
 ///
 /// SHA256 outputs exactly 32 bytes which matches the expected output size,
-/// so no padding is required. This directly copies the hash.
+/// so no padding is required. Since we hash directly into the output buffer,
+/// this is a no-op for SHA256.
 ///
-/// @param hash_bytes The hash to copy
-/// @param output The output buffer to fill
+/// @param hash_bytes The hash (already in output buffer)
+/// @param output The output buffer (same as hash_bytes for in-place operation)
 fn sha256Format(hash_bytes: []const u8, output: []u8) void {
-    @memcpy(output[0..SHA256_OUTPUT_SIZE], hash_bytes[0..SHA256_OUTPUT_SIZE]);
+    // No-op: SHA256 already wrote directly to the output buffer
+    // and doesn't need any formatting or padding
+    _ = hash_bytes;
+    _ = output;
 }
 
 /// Execute SHA256 precompile

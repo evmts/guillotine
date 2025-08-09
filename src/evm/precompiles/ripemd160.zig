@@ -93,25 +93,30 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// This allows RIPEMD160 to use the generic hash precompile implementation.
 ///
 /// @param input Input data to hash
-/// @param output Output buffer for hash result (will receive 20 bytes)
+/// @param output Output buffer for hash result (must be at least 32 bytes)
 fn ripemd160Hash(input: []const u8, output: []u8) void {
+    // Hash directly into the right position in the output buffer (after padding)
+    // RIPEMD160 produces 20 bytes, but Ethereum requires 32 bytes with left padding
     const hash = crypto.HashAlgorithms.RIPEMD160.hash_fixed(input);
-    @memcpy(output[0..RIPEMD160_HASH_SIZE], &hash);
+    
+    // Zero out the padding area (first 12 bytes)
+    @memset(output[0..12], 0);
+    
+    // Copy the hash after the padding
+    @memcpy(output[12..32], &hash);
 }
 
 /// Output formatter for RIPEMD160
 ///
-/// RIPEMD160 outputs a 20-byte hash but must be formatted as 32 bytes with
-/// 12 zero bytes of left padding according to Ethereum specification.
+/// Since we already hash and pad directly into the output buffer,
+/// this is a no-op for RIPEMD160.
 ///
-/// @param hash_bytes The 20-byte hash to format
-/// @param output The 32-byte output buffer to fill
+/// @param hash_bytes The hash (already in output buffer with padding)
+/// @param output The output buffer (same as hash_bytes for in-place operation)
 fn ripemd160Format(hash_bytes: []const u8, output: []u8) void {
-    // Zero out the entire output buffer
-    @memset(output[0..RIPEMD160_OUTPUT_SIZE], 0);
-    
-    // Copy hash to the right position (after 12 bytes of padding)
-    @memcpy(output[12..32], hash_bytes[0..RIPEMD160_HASH_SIZE]);
+    // No-op: RIPEMD160 already wrote and padded directly to the output buffer
+    _ = hash_bytes;
+    _ = output;
 }
 
 /// Executes the RIPEMD160 precompile

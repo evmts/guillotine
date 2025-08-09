@@ -149,14 +149,12 @@ pub inline fn executeHashPrecompile(
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
 
-    // Create temporary buffer for hash result
-    var hash_buffer: [64]u8 = undefined; // Generous size for any hash
+    // Compute hash directly into output buffer (avoids intermediate allocation)
+    // Most hash functions can write directly to the output buffer
+    hash_fn(input, output);
     
-    // Compute hash
-    hash_fn(input, hash_buffer[0..]);
-    
-    // Format output using the provided formatting function
-    format_output(hash_buffer[0..], output);
+    // Format output in-place if needed (e.g., for padding)
+    format_output(output, output);
 
     return PrecompileOutput.success_result(gas_cost, output_size);
 }
