@@ -189,8 +189,6 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     const allocator = std.testing.allocator;
     const JumpTable = @import("../jump_table/jump_table.zig");
     const Analysis = @import("../analysis.zig");
-    const Frame = @import("../frame.zig").Frame;
-    const Evm = @import("../evm.zig").Evm;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const AccessList = @import("../access_list/access_list.zig").AccessList;
     const CallJournal = @import("../call_frame_stack.zig").CallJournal;
@@ -198,7 +196,6 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
     const Address = @import("primitives").Address.Address;
-    const ExecutionError = @import("../execution/execution_error.zig");
 
     // Simple block with 5 x PUSH1 (5*3 gas) then STOP
     const code = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x60, 0x03, 0x60, 0x04, 0x60, 0x05, 0x00 };
@@ -258,8 +255,6 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
     const allocator = std.testing.allocator;
     const JumpTable = @import("../jump_table/jump_table.zig");
     const Analysis = @import("../analysis.zig");
-    const Frame = @import("../frame.zig").Frame;
-    const Evm = @import("../evm.zig").Evm;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const AccessList = @import("../access_list/access_list.zig").AccessList;
     const CallJournal = @import("../call_frame_stack.zig").CallJournal;
@@ -267,7 +262,6 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
     const Address = @import("primitives").Address.Address;
-    const ExecutionError = @import("../execution/execution_error.zig");
 
     // Block with ADD (requires 2 stack items) then STOP
     const code = &[_]u8{ 0x01, 0x00 };
@@ -325,8 +319,6 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
     const allocator = std.testing.allocator;
     const JumpTable = @import("../jump_table/jump_table.zig");
     const Analysis = @import("../analysis.zig");
-    const Frame = @import("../frame.zig").Frame;
-    const Evm = @import("../evm.zig").Evm;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const AccessList = @import("../access_list/access_list.zig").AccessList;
     const CallJournal = @import("../call_frame_stack.zig").CallJournal;
@@ -334,7 +326,6 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
     const Address = @import("primitives").Address.Address;
-    const ExecutionError = @import("../execution/execution_error.zig");
     const Stack = @import("../stack/stack.zig");
 
     // Block with PUSH1 then STOP (max_growth = +1)
