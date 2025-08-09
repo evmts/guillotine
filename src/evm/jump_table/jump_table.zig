@@ -135,8 +135,10 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) OperationView {
     };
 }
 
-// Note: The old execute method has been removed as it's unused in the new ExecutionContext pattern.
-// Opcode execution now happens through the ExecutionFunc signature with ExecutionContext only.
+    // Note: JUMP/JUMPI and PUSH opcodes are executed inline by the interpreter
+    // using information produced by analysis. The execute functions for those
+    // entries are intentionally unreachable (invalid) and serve only as metadata
+    // carriers for gas/stack validation.
 
 /// Validate and fix the jump table.
 ///

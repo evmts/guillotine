@@ -81,7 +81,7 @@ pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();            // top
+    const top = frame.stack.pop_unsafe(); // top
     const top_minus_1 = frame.stack.peek_unsafe().*; // second from top
     const result = top_minus_1 +% top;
     frame.stack.set_top_unsafe(result);
@@ -117,7 +117,7 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
 
     const top = frame.stack.pop_unsafe();
     const top_minus_1 = frame.stack.peek_unsafe().*;
-    
+
     // Use optimized U256 multiplication
     const a_u256 = U256.from_u256_unsafe(top_minus_1);
     const b_u256 = U256.from_u256_unsafe(top);
@@ -157,7 +157,7 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
 
     const top = frame.stack.pop_unsafe();
     const top_minus_1 = frame.stack.peek_unsafe().*;
-    
+
     const result = top_minus_1 -% top;
 
     frame.stack.set_top_unsafe(result);
@@ -198,9 +198,9 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();            // divisor
+    const top = frame.stack.pop_unsafe(); // divisor
     const top_minus_1 = frame.stack.peek_unsafe().*; // dividend
-    
+
     const result = if (top == 0) blk: {
         break :blk 0;
     } else blk: {
@@ -250,7 +250,7 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();            // divisor (signed)
+    const top = frame.stack.pop_unsafe(); // divisor (signed)
     const top_minus_1 = frame.stack.peek_unsafe().*; // dividend (signed)
 
     var result: u256 = undefined;
@@ -309,9 +309,9 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();            // divisor
+    const top = frame.stack.pop_unsafe(); // divisor
     const top_minus_1 = frame.stack.peek_unsafe().*; // dividend
-    
+
     const result = if (top == 0) blk: {
         @branchHint(.unlikely);
         break :blk 0;
@@ -364,7 +364,7 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();            // divisor (signed)
+    const top = frame.stack.pop_unsafe(); // divisor (signed)
     const top_minus_1 = frame.stack.peek_unsafe().*; // dividend (signed)
 
     var result: u256 = undefined;
@@ -419,8 +419,8 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
-    const top = frame.stack.pop_unsafe();            // modulus
-    const top_minus_1 = frame.stack.pop_unsafe();    // b
+    const top = frame.stack.pop_unsafe(); // modulus
+    const top_minus_1 = frame.stack.pop_unsafe(); // b
     const top_minus_2 = frame.stack.peek_unsafe().*; // a
 
     var result: u256 = undefined;
@@ -481,8 +481,8 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
-    const top = frame.stack.pop_unsafe();            // modulus
-    const top_minus_1 = frame.stack.pop_unsafe();    // b
+    const top = frame.stack.pop_unsafe(); // modulus
+    const top_minus_1 = frame.stack.pop_unsafe(); // b
     const top_minus_2 = frame.stack.peek_unsafe().*; // a
 
     var result: u256 = undefined;
@@ -546,7 +546,7 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();            // exponent
+    const top = frame.stack.pop_unsafe(); // exponent
     const top_minus_1 = frame.stack.peek_unsafe().*; // base
 
     // Calculate gas cost based on exponent byte size
