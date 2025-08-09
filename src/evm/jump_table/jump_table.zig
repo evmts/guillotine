@@ -244,13 +244,17 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         jt.max_stack[0x60] = Stack.CAPACITY - 1;
         jt.undefined_flags[0x60] = false;
 
-        // PUSH2-PUSH32 - temporarily disabled during refactor
+        // PUSH2-PUSH32
+        // Note: PUSH operations are executed inline by the interpreter using
+        // pre-decoded push_value from analysis. We still set metadata here
+        // so stack validation and block gas accounting have correct values.
         for (1..32) |i| {
-            jt.execute_funcs[0x60 + i] = execution.null_opcode.op_invalid;
-            jt.constant_gas[0x60 + i] = execution.GasConstants.GasFastestStep;
-            jt.min_stack[0x60 + i] = 0;
-            jt.max_stack[0x60 + i] = Stack.CAPACITY - 1;
-            jt.undefined_flags[0x60 + i] = true;
+            const idx = 0x60 + i;
+            jt.execute_funcs[idx] = execution.null_opcode.op_invalid; // unreachable at runtime
+            jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
+            jt.min_stack[idx] = 0;
+            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.undefined_flags[idx] = false;
         }
     } else {
         // PUSH0 - EIP-3855 (available from Shanghai)
@@ -272,15 +276,14 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
         jt.max_stack[0x60] = Stack.CAPACITY - 1;
         jt.undefined_flags[0x60] = false;
 
-        // PUSH2-PUSH32 - temporarily disabled during refactor
-        // TODO: Implement new-style PUSH operations for PUSH2-32
+        // PUSH2-PUSH32 inline execution; provide metadata only
         inline for (1..32) |i| {
             const opcode_idx = 0x60 + i;
-            jt.execute_funcs[opcode_idx] = execution.null_opcode.op_invalid;
+            jt.execute_funcs[opcode_idx] = execution.null_opcode.op_invalid; // unreachable
             jt.constant_gas[opcode_idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[opcode_idx] = 0;
             jt.max_stack[opcode_idx] = Stack.CAPACITY - 1;
-            jt.undefined_flags[opcode_idx] = true; // Mark as undefined until implemented
+            jt.undefined_flags[opcode_idx] = false;
         }
     }
 
