@@ -160,7 +160,7 @@ test "Stack validation: jump table stack requirements verification" {
     try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), push1_op.max_stack);
 
     // Test at capacity
-    stack.size = Stack.CAPACITY;
+    stack.set_size_unsafe(Stack.CAPACITY);
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, push1_op));
 }
 

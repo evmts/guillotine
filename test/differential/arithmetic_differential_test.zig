@@ -73,7 +73,7 @@ test "ADD opcode 0 + 0 = 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -168,7 +168,7 @@ test "ADD opcode 1 + 1 = 2" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -263,7 +263,7 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -358,7 +358,7 @@ test "SUB opcode 10 - 5 = 5" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -453,7 +453,7 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -548,7 +548,7 @@ test "MUL opcode 7 * 6 = 42" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -643,7 +643,7 @@ test "DIV opcode 6 / 42 = 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -738,7 +738,7 @@ test "DIV opcode division by zero = 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -833,7 +833,7 @@ test "DIV opcode division by zero 42 / 0 = 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -927,7 +927,7 @@ test "MOD opcode 50 % 7 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -1022,7 +1022,7 @@ test "EXP opcode 2 ** 3 = 8" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -1056,7 +1056,7 @@ test "EXP opcode 2 ** 3 = 8" {
     }
 }
 
-tens-normalize.js/est "SDIV opcode signed division -8 / 2 = -4" {
+test "SDIV opcode signed division -8 / 2 = -4" {
     const allocator = testing.allocator;
 
     // PUSH32 2, PUSH32 -8 (as u256), SDIV, MSTORE, RETURN (computes 2 / -8 = 0)
@@ -1117,7 +1117,7 @@ tens-normalize.js/est "SDIV opcode signed division -8 / 2 = -4" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -1211,7 +1211,7 @@ test "SMOD opcode signed modulo -8 % 3 = -2" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -1310,7 +1310,7 @@ test "ADDMOD opcode (5 + 10) % 7 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -1409,7 +1409,7 @@ test "MULMOD opcode (5 * 6) % 7 = 2" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -1504,7 +1504,7 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);

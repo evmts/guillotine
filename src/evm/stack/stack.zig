@@ -131,7 +131,7 @@ pub fn clear(self: *Stack) void {
 
     // In debug/safe modes, zero out all values for security
     if (comptime CLEAR_ON_POP) {
-        @memset(std.mem.asBytes(&self.data), 0);
+        @memset(std.mem.asBytes(self.data), 0);
     }
 }
 
@@ -302,6 +302,12 @@ pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
         return Error.StackUnderflow;
     }
     return (self.current - 1 - n)[0];
+}
+
+/// Unsafe setter to adjust stack size for tests
+pub inline fn set_size_unsafe(self: *Stack, n: usize) void {
+    // Caller must ensure 0 <= n <= CAPACITY
+    self.current = self.base + n;
 }
 
 // Note: test-compatibility clear consolidated with main clear() above

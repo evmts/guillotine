@@ -179,15 +179,12 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     self.frame_stack[0].deinit();
 
     // Map error to success status
-    const success: bool = switch (exec_err) {
-        null => true,
-        else => switch (exec_err.?) {
-            ExecutionError.Error.STOP => true,
-            ExecutionError.Error.REVERT => false,
-            ExecutionError.Error.OutOfGas => false,
-            else => false,
-        },
-    };
+    const success: bool = if (exec_err) |e| switch (e) {
+        ExecutionError.Error.STOP => true,
+        ExecutionError.Error.REVERT => false,
+        ExecutionError.Error.OutOfGas => false,
+        else => false,
+    } else true;
 
     Log.debug("[call] Returning with success={}, gas_left={}, output_len={}", .{ success, self.frame_stack[0].gas_remaining, output.len });
     return CallResult{
