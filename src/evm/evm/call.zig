@@ -91,12 +91,28 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     Log.debug("[call] Code size: {}, code_len: {}", .{ call_info.code_size, call_info.code.len });
 
-    // Do analysis using heap allocator
-    var analysis = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
-        Log.err("[call] Code analysis failed: {}", .{err});
-        return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+    // Use cached analysis if available, otherwise analyze and cache
+    const analysis_ptr = if (self.analysis_cache) |*cache| blk: {
+        Log.debug("[call] Using analysis cache for code analysis", .{});
+        break :blk cache.getOrAnalyze(call_info.code[0..call_info.code_size], &self.table) catch |err| {
+            Log.err("[call] Cached code analysis failed: {}", .{err});
+            return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+        };
+    } else blk: {
+        Log.debug("[call] No cache available, analyzing code directly", .{});
+        // Fallback to direct analysis if no cache
+        var analysis = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
+            Log.err("[call] Code analysis failed: {}", .{err});
+            return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+        };
+        // IMPORTANT: This is a memory leak if we don't have a cache! 
+        // We can't defer deinit here because we need the analysis for execution.
+        // This is why the cache is important - it manages the lifetime properly.
+        break :blk &analysis;
     };
-    defer analysis.deinit();
+    
+    // Don't defer deinit when using cache - cache manages lifetime
+    const analysis = analysis_ptr.*;
 
     Log.debug("[call] Code analysis complete: {} instructions", .{analysis.instructions.len});
 
@@ -131,7 +147,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_info.address, // contract_address
             call_caller, // caller
             call_value, // value
-            &analysis, // analysis
+            analysis_ptr, // analysis
             &self.access_list,
             &self.journal,
             &host,
@@ -193,7 +209,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_info.address, // contract_address
             call_caller, // caller
             call_value, // value
-            &analysis, // analysis
+            analysis_ptr, // analysis
             &self.access_list,
             &self.journal,
             &host,

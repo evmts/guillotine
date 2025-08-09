@@ -30,6 +30,7 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const builtin = @import("builtin");
+const AnalysisCache = @import("analysis_cache.zig");
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -97,6 +98,9 @@ created_contracts: CreatedContracts = undefined,
 
 /// Stack buffer for small contract analysis optimization
 analysis_stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined,
+
+/// LRU cache for code analysis to avoid redundant analysis during nested calls
+analysis_cache: ?AnalysisCache = null,
 
 /// Call journal for transaction revertibility
 journal: CallJournal = undefined,
@@ -203,6 +207,7 @@ pub fn init(
         .journal = CallJournal.init(allocator),
         .gas_refunds = 0,
         .created_contracts = CreatedContracts.init(allocator),
+        .analysis_cache = AnalysisCache.init(allocator, AnalysisCache.DEFAULT_CACHE_SIZE),
     };
 }
 
@@ -213,6 +218,11 @@ pub fn deinit(self: *Evm) void {
     self.access_list.deinit();
     self.internal_arena.deinit();
     self.journal.deinit();
+    
+    // Clean up analysis cache if it exists
+    if (self.analysis_cache) |*cache| {
+        cache.deinit();
+    }
 
     // Clean up lazily allocated frame stack if it exists
     if (self.frame_stack) |frames| {
