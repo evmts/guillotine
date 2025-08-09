@@ -15,6 +15,7 @@ const Args = struct {
     contract_code_path: []const u8,
     calldata: []const u8,
     num_runs: u8,
+    disable_trace: bool,
 };
 
 const CALLER_ADDRESS_U256: u256 = 0x1000000000000000000000000000000000000001;
@@ -53,6 +54,11 @@ pub fn main() !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
+    
+    // Set up tracer based on disable_trace flag
+    const stdout = std.io.getStdOut().writer();
+    const tracer: ?std.io.AnyWriter = if (args.disable_trace) null else stdout.any();
+    
     var vm = try Evm.Evm.init(
         allocator,
         db_interface,
@@ -61,7 +67,7 @@ pub fn main() !void {
         null, // context
         0, // depth
         false, // read_only
-        null, // tracer
+        tracer, // tracer
     );
     defer vm.deinit();
 
@@ -124,6 +130,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     var contract_code_path: ?[]const u8 = null;
     var calldata: ?[]const u8 = null;
     var num_runs: u8 = 1;
+    var disable_trace: bool = false;
 
     var i: usize = 1;
     while (i < args.len) {
@@ -138,6 +145,8 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
         } else if (std.mem.eql(u8, arg, "--num-runs") or std.mem.eql(u8, arg, "-n")) {
             i += 1;
             num_runs = try std.fmt.parseInt(u8, args[i], 10);
+        } else if (std.mem.eql(u8, arg, "--disable-trace")) {
+            disable_trace = true;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try print("Zig EVM runner interface\n\n", .{});
             try print("Usage: runner [OPTIONS]\n\n", .{});
@@ -145,6 +154,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
             try print("  --contract-code-path <PATH>  Path to the hex contract code to deploy and run\n", .{});
             try print("  --calldata <HEX>            Hex of calldata to use when calling the contract\n", .{});
             try print("  -n, --num-runs <N>          Number of times to run the benchmark [default: 1]\n", .{});
+            try print("  --disable-trace             Disable execution tracing output\n", .{});
             try print("  -h, --help                  Print help information\n", .{});
             std.process.exit(0);
         }
@@ -155,6 +165,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
         .contract_code_path = contract_code_path.?,
         .calldata = calldata.?,
         .num_runs = num_runs,
+        .disable_trace = disable_trace,
     };
 }
 
