@@ -311,10 +311,8 @@ pub fn get_balance(self: *Evm, address: primitives.Address.Address) u256 {
 
 /// Check if account exists (Host interface)
 pub fn account_exists(self: *Evm, address: primitives.Address.Address) bool {
-    _ = self;
-    _ = address;
-    Log.err("Host.account_exists not implemented", .{});
-    unreachable;
+    // Delegate to the underlying database via state
+    return self.state.database.account_exists(address);
 }
 
 /// Get account code (Host interface)
