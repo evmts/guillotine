@@ -13,6 +13,15 @@ pub const CallParams = union(enum) {
         input: []const u8,
         gas: u64,
     },
+    /// CALLCODE operation: execute external code with current storage/context
+    /// Executes code at `to`, but uses caller's storage and address context
+    callcode: struct {
+        caller: Address,
+        to: Address,
+        value: u256,
+        input: []const u8,
+        gas: u64,
+    },
     /// DELEGATECALL operation (preserves caller context)
     delegatecall: struct {
         caller: Address,  // Original caller, not current contract
