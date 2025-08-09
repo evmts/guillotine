@@ -92,7 +92,8 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     Log.debug("[call] Code size: {}, code_len: {}", .{ call_info.code_size, call_info.code.len });
 
     // Use cached analysis if available, otherwise analyze and cache
-    const analysis_ptr = if (self.analysis_cache) |*cache| blk: {
+    var analysis_owned = false;
+    var analysis_ptr: *CodeAnalysis = if (self.analysis_cache) |*cache| blk: {
         Log.debug("[call] Using analysis cache for code analysis", .{});
         break :blk cache.getOrAnalyze(call_info.code[0..call_info.code_size], &self.table) catch |err| {
             Log.err("[call] Cached code analysis failed: {}", .{err});
@@ -101,14 +102,19 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     } else blk: {
         Log.debug("[call] No cache available, analyzing code directly", .{});
         // Fallback to direct analysis if no cache
-        var analysis = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
+        var analysis_val = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
             Log.err("[call] Code analysis failed: {}", .{err});
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
-        // IMPORTANT: This is a memory leak if we don't have a cache!
-        // We can't defer deinit here because we need the analysis for execution.
-        // This is why the cache is important - it manages the lifetime properly.
-        break :blk &analysis;
+        // Heap-allocate CodeAnalysis when not using cache to ensure valid lifetime
+        const analysis_heap = self.allocator.create(CodeAnalysis) catch {
+            analysis_val.deinit();
+            return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+        };
+        analysis_heap.* = analysis_val;
+        // Note: We must remember to deinit and destroy this after execution completes
+        analysis_owned = true;
+        break :blk analysis_heap;
     };
 
     // Don't defer deinit when using cache - cache manages lifetime
@@ -279,6 +285,12 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     // Restore parent frame depth (or stay at 0 if top-level)
     if (self.current_frame_depth > 0) {
         self.current_frame_depth -= 1;
+    }
+
+    // Clean up analysis if we allocated it locally (no cache)
+    if (analysis_owned) {
+        analysis_ptr.deinit();
+        self.allocator.destroy(analysis_ptr);
     }
 
     // Map error to success status
