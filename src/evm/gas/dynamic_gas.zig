@@ -14,6 +14,7 @@ pub fn call_dynamic_gas(frame: *Frame) ExecutionError.Error!u64 {
     // Stack grows upward, so current - 1 is top of stack
     const stack_base = frame.stack.base;
     
+    const to = stack_base[stack_size - 2];
     const args_offset = stack_base[stack_size - 4];
     const args_size = stack_base[stack_size - 5];
     const ret_offset = stack_base[stack_size - 6];
@@ -43,11 +44,12 @@ pub fn call_dynamic_gas(frame: *Frame) ExecutionError.Error!u64 {
         }
     }
     
-    // TODO: Add EIP-2929 cold/warm access costs when access_list is properly integrated
-    // const to_address = stack_ptr[stack_len - 2];
-    // if (!frame.access_list.is_warm(to_address)) {
-    //     total_gas += GasConstants.ColdAccountAccessCost;
-    // }
+    // EIP-2929: Add cold/warm access costs
+    if (frame.is_at_least(.BERLIN)) {
+        const to_address = primitives.Address.from_u256(to);
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas += access_cost;
+    }
     
     return total_gas;
 }
@@ -66,6 +68,7 @@ pub fn delegatecall_dynamic_gas(frame: *Frame) ExecutionError.Error!u64 {
     
     const stack_base = frame.stack.base;
     
+    const to = stack_base[stack_size - 2];
     const args_offset = stack_base[stack_size - 3];
     const args_size = stack_base[stack_size - 4];
     const ret_offset = stack_base[stack_size - 5];
@@ -92,6 +95,13 @@ pub fn delegatecall_dynamic_gas(frame: *Frame) ExecutionError.Error!u64 {
         if (ret_gas > total_gas) {
             total_gas = ret_gas;
         }
+    }
+    
+    // EIP-2929: Add cold/warm access costs
+    if (frame.is_at_least(.BERLIN)) {
+        const to_address = primitives.Address.from_u256(to);
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas += access_cost;
     }
     
     return total_gas;

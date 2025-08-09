@@ -647,6 +647,11 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                     created.mark_created(contract_address) catch {};
                 }
 
+                // EIP-2929: Mark newly created address as warm
+                var contract_address: primitives.Address.Address = undefined;
+                @memcpy(&contract_address, address_bytes);
+                _ = try frame.access_list.access_address(contract_address);
+
                 try frame.stack.append(address_u256);
             } else {
                 try frame.stack.append(0);
@@ -783,6 +788,11 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                     created.mark_created(contract_address) catch {};
                 }
 
+                // EIP-2929: Mark newly created address as warm
+                var contract_address: primitives.Address.Address = undefined;
+                @memcpy(&contract_address, address_bytes);
+                _ = try frame.access_list.access_address(contract_address);
+
                 try frame.stack.append(address_u256);
             } else {
                 try frame.stack.append(0);
@@ -869,10 +879,8 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(to_address);
-        if (access_cost > 100) { // Was cold
-            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas_cost += access_cost;
     }
 
     // Add value transfer cost if applicable
@@ -1019,10 +1027,8 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(to_address);
-        if (access_cost > 100) { // Was cold
-            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas_cost += access_cost;
     }
 
     // Consume gas before proceeding
@@ -1136,10 +1142,8 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(to_address);
-        if (access_cost > 100) { // Was cold
-            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas_cost += access_cost;
     }
 
     // Consume gas before proceeding
@@ -1242,11 +1246,8 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if recipient is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(recipient_address);
-        if (access_cost > 100) { // Was cold
-            // Cold access adds extra cost
-            gas_cost += GasConstants.ColdAccountAccessCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(recipient_address);
+        gas_cost += access_cost;
     }
 
     // Consume gas
