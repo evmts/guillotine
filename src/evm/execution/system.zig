@@ -1217,6 +1217,11 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// - Tangerine Whistle (EIP-150): 5000 gas base cost
 /// - Spurious Dragon (EIP-161): Additional 25000 gas if creating a new account
 /// - London (EIP-3529): Removed gas refunds for selfdestruct
+/// - Cancun (EIP-6780): SELFDESTRUCT only works on contracts created in same transaction
+///
+/// EIP-6780 Changes (Cancun):
+/// - If contract was created in the same transaction: Full destruction (balance transfer + code/storage deletion)
+/// - If contract existed before this transaction: Only balance transfer, contract remains
 ///
 /// In static call contexts, SELFDESTRUCT is forbidden and will revert.
 /// The contract is only marked for destruction and actual deletion happens at transaction end.
@@ -1224,7 +1229,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// Stack: [recipient_address] -> []
 /// Gas: Variable based on hardfork and account creation
 /// Memory: No memory access
-/// Storage: Contract marked for destruction
+/// Storage: Contract marked for destruction (if created in same tx)
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
@@ -1255,9 +1260,26 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     // Record the self-destruct operation in the journal
     try frame.journal.record_selfdestruct(frame.snapshot_id, frame.contract_address, recipient_address);
 
-    // Mark for destruction using the existing self_destruct system if available
+    // EIP-6780: Check if contract was created in this transaction
+    const should_destroy = if (frame.is_at_least(.CANCUN)) blk: {
+        // Only destroy if contract was created in this transaction
+        if (frame.created_contracts) |created| {
+            break :blk created.was_created_in_tx(frame.contract_address);
+        }
+        // If no created_contracts tracking, assume pre-existing (don't destroy)
+        break :blk false;
+    } else true; // Pre-Cancun: always destroy
+
+    // Mark for destruction or just transfer balance based on EIP-6780
     if (frame.self_destruct) |sd| {
-        try sd.mark_for_destruction(frame.contract_address, recipient_address);
+        if (should_destroy) {
+            // Full destruction: mark for end-of-transaction cleanup
+            try sd.mark_for_destruction(frame.contract_address, recipient_address);
+        } else {
+            // EIP-6780: Only transfer balance, don't destroy
+            // This will be handled in apply_destructions by checking created_contracts
+            try sd.mark_for_destruction(frame.contract_address, recipient_address);
+        }
     }
 
     // SELFDESTRUCT terminates execution immediately - we would signal this

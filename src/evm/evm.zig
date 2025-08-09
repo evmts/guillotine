@@ -202,7 +202,7 @@ pub fn init(
         .frame_stack = null,
         .current_frame_depth = 0,
         .max_allocated_depth = 0,
-        .self_destruct = undefined,
+        .self_destruct = SelfDestruct.init(allocator),
         .analysis_stack_buffer = undefined,
         .journal = CallJournal.init(allocator),
         .gas_refunds = 0,
@@ -223,6 +223,12 @@ pub fn deinit(self: *Evm) void {
     if (self.analysis_cache) |*cache| {
         cache.deinit();
     }
+
+    // Clean up self-destruct tracking
+    self.self_destruct.deinit();
+
+    // Clean up created contracts tracking
+    self.created_contracts.deinit();
 
     // Clean up lazily allocated frame stack if it exists
     if (self.frame_stack) |frames| {

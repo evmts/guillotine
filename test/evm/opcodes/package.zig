@@ -33,6 +33,7 @@ pub const push4_push12_comprehensive_test = @import("push4_push12_comprehensive_
 pub const return_output_test = @import("return_output_test.zig");
 pub const returndata_block_comprehensive_test = @import("returndata_block_comprehensive_test.zig");
 pub const selfdestruct_test = @import("selfdestruct_test.zig");
+pub const selfdestruct_eip6780_test = @import("selfdestruct_eip6780_test.zig");
 pub const shift_crypto_comprehensive_test = @import("shift_crypto_comprehensive_test.zig");
 pub const stack_memory_control_comprehensive_test = @import("stack_memory_control_comprehensive_test.zig");
 pub const stack_test = @import("stack_test.zig");
@@ -77,6 +78,7 @@ test {
     _ = return_output_test;
     _ = returndata_block_comprehensive_test;
     _ = selfdestruct_test;
+    _ = selfdestruct_eip6780_test;
     _ = shift_crypto_comprehensive_test;
     _ = stack_memory_control_comprehensive_test;
     _ = stack_test;
