@@ -225,12 +225,17 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
 
     // 0x60s & 0x70s: Push operations
     if (comptime builtin.mode == .ReleaseSmall) {
-        // PUSH0 - EIP-3855
-        jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
-        jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
-        jt.min_stack[0x5f] = 0;
-        jt.max_stack[0x5f] = Stack.CAPACITY - 1;
-        jt.undefined_flags[0x5f] = false;
+        // PUSH0 - EIP-3855 (available from Shanghai)
+        if (@intFromEnum(hardfork) >= @intFromEnum(Hardfork.SHANGHAI)) {
+            jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+            jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
+            jt.min_stack[0x5f] = 0;
+            jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+            jt.undefined_flags[0x5f] = false;
+        } else {
+            // Before Shanghai, PUSH0 is undefined
+            jt.undefined_flags[0x5f] = true;
+        }
 
         // PUSH1 - most common
         jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
@@ -248,12 +253,17 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
             jt.undefined_flags[0x60 + i] = true;
         }
     } else {
-        // PUSH0 - EIP-3855
-        jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
-        jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
-        jt.min_stack[0x5f] = 0;
-        jt.max_stack[0x5f] = Stack.CAPACITY - 1;
-        jt.undefined_flags[0x5f] = false;
+        // PUSH0 - EIP-3855 (available from Shanghai)
+        if (@intFromEnum(hardfork) >= @intFromEnum(Hardfork.SHANGHAI)) {
+            jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+            jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
+            jt.min_stack[0x5f] = 0;
+            jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+            jt.undefined_flags[0x5f] = false;
+        } else {
+            // Before Shanghai, PUSH0 is undefined
+            jt.undefined_flags[0x5f] = true;
+        }
 
         // PUSH1 - most common, optimized with direct byte access
         jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
