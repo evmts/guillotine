@@ -833,6 +833,14 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Additional gas costs
     var total_gas_cost = base_gas + memory_expansion_cost;
 
+    // EIP-2929: Check if address is cold and add extra gas cost
+    if (frame.is_at_least(.BERLIN)) {
+        const access_cost = try frame.access_address(to_address);
+        if (access_cost > 100) { // Was cold
+            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
+        }
+    }
+
     // Add value transfer cost if applicable
     if (value > 0) {
         total_gas_cost += GasConstants.CALL_VALUE_TRANSFER_COST;
@@ -955,7 +963,18 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     // Base gas cost for DELEGATECALL (700 gas)
     const base_gas = GasConstants.CALL_BASE_COST; // Same as CALL
-    const total_gas_cost = base_gas + memory_expansion_cost;
+    var total_gas_cost = base_gas + memory_expansion_cost;
+
+    // Convert to address for warm/cold check
+    const to_address = from_u256(to);
+
+    // EIP-2929: Check if address is cold and add extra gas cost
+    if (frame.is_at_least(.BERLIN)) {
+        const access_cost = try frame.access_address(to_address);
+        if (access_cost > 100) { // Was cold
+            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
+        }
+    }
 
     // Consume gas before proceeding
     try frame.consume_gas(total_gas_cost);
@@ -970,9 +989,6 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     // Now expand memory after charging for it
     const args = try get_call_args(frame, args_offset, args_size);
     try ensure_return_memory(frame, ret_offset, ret_size);
-
-    // Convert to address
-    const to_address = from_u256(to);
 
     // Calculate gas to forward (63/64 rule)
     const gas_limit = calculate_call_gas_amount(frame, gas, 0);
@@ -1060,7 +1076,18 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // Base gas cost for STATICCALL (700 gas)
     const base_gas = GasConstants.CALL_BASE_COST; // Same as CALL/DELEGATECALL
-    const total_gas_cost = base_gas + memory_expansion_cost;
+    var total_gas_cost = base_gas + memory_expansion_cost;
+
+    // Convert to address for warm/cold check
+    const to_address = from_u256(to);
+
+    // EIP-2929: Check if address is cold and add extra gas cost
+    if (frame.is_at_least(.BERLIN)) {
+        const access_cost = try frame.access_address(to_address);
+        if (access_cost > 100) { // Was cold
+            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
+        }
+    }
 
     // Consume gas before proceeding
     try frame.consume_gas(total_gas_cost);
@@ -1075,9 +1102,6 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Now expand memory after charging for it
     const args = try get_call_args(frame, args_offset, args_size);
     try ensure_return_memory(frame, ret_offset, ret_size);
-
-    // Convert to address
-    const to_address = from_u256(to);
 
     // Calculate gas to forward (63/64 rule)
     const gas_limit = calculate_call_gas_amount(frame, gas, 0);
@@ -1156,6 +1180,21 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const recipient = try frame.stack.pop();
     const recipient_address = from_u256(recipient);
 
+    // Calculate gas cost
+    var gas_cost = GasConstants.SelfDestructCost;
+
+    // EIP-2929: Check if recipient is cold and add extra gas cost
+    if (frame.is_at_least(.BERLIN)) {
+        const access_cost = try frame.access_address(recipient_address);
+        if (access_cost > 100) { // Was cold
+            // Cold access adds extra cost
+            gas_cost += GasConstants.ColdAccountAccessCost;
+        }
+    }
+
+    // Consume gas
+    try frame.consume_gas(gas_cost);
+
     // Record the self-destruct operation in the journal
     try frame.journal.record_selfdestruct(frame.snapshot_id, frame.contract_address, recipient_address);
 
@@ -1163,10 +1202,6 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     if (frame.self_destruct) |sd| {
         try sd.mark_for_destruction(frame.contract_address, recipient_address);
     }
-
-    // Gas consumption would be handled here based on hardfork rules
-    // For now, we consume a basic amount
-    try frame.consume_gas(GasConstants.SelfDestructCost);
 
     // SELFDESTRUCT terminates execution immediately - we would signal this
     // to the execution loop, but for now we'll just return

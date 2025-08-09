@@ -1737,6 +1737,20 @@ pub fn build(b: *std.Build) void {
 
     const run_jumpi_bug_test = b.addRunArtifact(jumpi_bug_test);
     test_step.dependOn(&run_jumpi_bug_test.step);
+
+    // Add EIP-2929 warm/cold access test
+    const eip2929_test = b.addTest(.{
+        .name = "eip2929-test",
+        .root_source_file = b.path("test/evm/eip2929_warm_cold_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    eip2929_test.root_module.addImport("evm", evm_mod);
+    eip2929_test.root_module.addImport("primitives", primitives_mod);
+    eip2929_test.root_module.addImport("Address", primitives_mod);
+
+    const run_eip2929_test = b.addRunArtifact(eip2929_test);
+    test_step.dependOn(&run_eip2929_test.step);
     const jumpi_bug_test_step = b.step("test-jumpi", "Run JUMPI bug test");
     jumpi_bug_test_step.dependOn(&run_jumpi_bug_test.step);
 

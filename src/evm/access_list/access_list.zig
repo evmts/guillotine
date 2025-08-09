@@ -126,15 +126,29 @@ pub fn pre_warm_storage_slots(self: *AccessList, address: primitives.Address.Add
 
 /// Initialize transaction access list with pre-warmed addresses
 /// According to EIP-2929, tx.origin and block.coinbase are always pre-warmed
+/// EIP-3651 adds COINBASE to warm addresses (already included as block_coinbase)
 pub fn init_transaction(self: *AccessList, to: ?primitives.Address.Address) std.mem.Allocator.Error!void {
     // Clear previous transaction data
     self.clear();
 
+    // Pre-warm tx.origin
     try self.addresses.put(self.context.tx_origin, {});
+    
+    // Pre-warm block.coinbase (EIP-2929 + EIP-3651)
     try self.addresses.put(self.context.block_coinbase, {});
 
+    // Pre-warm destination address if present
     if (to) |to_address| {
         try self.addresses.put(to_address, {});
+    }
+
+    // Pre-warm all precompile addresses (0x01 through 0x0A)
+    // This is required by EIP-2929 for correct gas accounting
+    var i: u8 = 1;
+    while (i <= 10) : (i += 1) {
+        var precompile_addr: primitives.Address.Address = [_]u8{0} ** 20;
+        precompile_addr[19] = i;
+        try self.addresses.put(precompile_addr, {});
     }
 }
 
