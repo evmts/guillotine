@@ -49,33 +49,13 @@ pub fn UnreachableHandler(frame: *anyopaque) ExecutionError.Error!void {
 /// The block information (gas cost, stack requirements) is stored in the instruction's arg.block_info.
 /// This handler must be called before executing any instructions in the basic block.
 pub fn BeginBlockHandler(frame: *anyopaque) ExecutionError.Error!void {
-    const actual_frame = @as(*Frame, @ptrCast(@alignCast(frame)));
-    // TODO: BeginBlockHandler needs to be redesigned since Frame doesn't have current_instruction
-    // For now, just consume a small amount of gas as a placeholder
-    // const current_instruction = @as(*const Instruction, @ptrCast(actual_frame.current_instruction));
-    // const block = current_instruction.arg.block_info;
-    const placeholder_gas = 1; // Placeholder gas cost
-
-    // Single gas check for entire block - eliminates per-opcode gas validation
-    if (actual_frame.gas_remaining < placeholder_gas) {
-        return ExecutionError.Error.OutOfGas;
-    }
-    actual_frame.gas_remaining -= placeholder_gas;
-
-    // TODO: Stack validation also needs the block info
-    // Single stack validation for entire block - eliminates per-opcode stack checks
-    // const stack_size = @as(u16, @intCast(actual_frame.stack.len()));
-    // if (stack_size < block.stack_req) {
-    //     return ExecutionError.Error.StackUnderflow;
-    // }
-    // if (stack_size + block.stack_max_growth > 1024) {
-    //     return ExecutionError.Error.StackOverflow;
-    // }
-
-    // Log.debug("BeginBlock: gas_cost={}, stack_req={}, stack_max_growth={}, current_stack={}", .{
-    //     block.gas_cost, block.stack_req, block.stack_max_growth, stack_size
-    // });
-    Log.debug("BeginBlock: placeholder implementation consuming {} gas", .{placeholder_gas});
+    // BEGINBLOCK validation is intentionally handled in the interpreter
+    // (see evm/interpret.zig under the `.block_info` case). The opcode_fn
+    // for BEGINBLOCK is a no-op to avoid double-charging gas or duplicating
+    // stack validation. Keeping this as a no-op also prevents accidental
+    // misuse if called directly.
+    _ = frame;
+    return;
 }
 
 /// Block analysis structure used during instruction stream generation.

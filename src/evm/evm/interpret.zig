@@ -184,3 +184,212 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
     Log.debug("[interpret] Reached end of instructions without STOP/RETURN, current_index={}, len={}", .{ current_index, instructions.len });
 }
+
+test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
+    const allocator = std.testing.allocator;
+    const JumpTable = @import("../jump_table/jump_table.zig");
+    const Analysis = @import("../analysis.zig");
+    const Frame = @import("../frame.zig").Frame;
+    const Evm = @import("../evm.zig").Evm;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    const AccessList = @import("../access_list/access_list.zig").AccessList;
+    const CallJournal = @import("../call_frame_stack.zig").CallJournal;
+    const Host = @import("../host.zig").Host;
+    const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+    const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+    const Address = @import("primitives").Address.Address;
+    const ExecutionError = @import("../execution/execution_error.zig");
+
+    // Simple block with 5 x PUSH1 (5*3 gas) then STOP
+    const code = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x60, 0x03, 0x60, 0x04, 0x60, 0x05, 0x00 };
+    var analysis = try Analysis.from_code(allocator, code, &JumpTable.DEFAULT);
+    defer analysis.deinit();
+
+    // Setup VM and environment
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer vm.deinit();
+
+    var access_list = AccessList.init(allocator, @import("../access_list/context.zig").Context.init());
+    defer access_list.deinit();
+    var journal = CallJournal.init(allocator);
+    defer journal.deinit();
+    var self_destruct = SelfDestruct.init(allocator);
+    defer self_destruct.deinit();
+    var created_contracts = CreatedContracts.init(allocator);
+    defer created_contracts.deinit();
+
+    var host_impl = vm; // Evm implements Host interface
+    var host = Host.init(&host_impl);
+
+    // Gas is less than block base cost (5*3 = 15)
+    var frame = try Frame.init(
+        10, // gas_remaining
+        false, // static
+        0, // depth
+        Address.ZERO, // contract
+        Address.ZERO, // caller
+        0, // value
+        &analysis,
+        &access_list,
+        &journal,
+        &host,
+        0, // snapshot_id
+        db_interface,
+        Frame.ChainRules.DEFAULT,
+        &self_destruct,
+        &created_contracts,
+        &[_]u8{}, // input
+        allocator,
+        null,
+        false,
+        false,
+    );
+    defer frame.deinit();
+
+    const result = interpret(&vm, &frame);
+    try std.testing.expectError(ExecutionError.Error.OutOfGas, result);
+}
+
+test "BEGINBLOCK: stack underflow detected at block entry" {
+    const allocator = std.testing.allocator;
+    const JumpTable = @import("../jump_table/jump_table.zig");
+    const Analysis = @import("../analysis.zig");
+    const Frame = @import("../frame.zig").Frame;
+    const Evm = @import("../evm.zig").Evm;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    const AccessList = @import("../access_list/access_list.zig").AccessList;
+    const CallJournal = @import("../call_frame_stack.zig").CallJournal;
+    const Host = @import("../host.zig").Host;
+    const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+    const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+    const Address = @import("primitives").Address.Address;
+    const ExecutionError = @import("../execution/execution_error.zig");
+
+    // Block with ADD (requires 2 stack items) then STOP
+    const code = &[_]u8{ 0x01, 0x00 };
+    var analysis = try Analysis.from_code(allocator, code, &JumpTable.DEFAULT);
+    defer analysis.deinit();
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer vm.deinit();
+
+    var access_list = AccessList.init(allocator, @import("../access_list/context.zig").Context.init());
+    defer access_list.deinit();
+    var journal = CallJournal.init(allocator);
+    defer journal.deinit();
+    var self_destruct = SelfDestruct.init(allocator);
+    defer self_destruct.deinit();
+    var created_contracts = CreatedContracts.init(allocator);
+    defer created_contracts.deinit();
+
+    var host_impl = vm;
+    var host = Host.init(&host_impl);
+
+    var frame = try Frame.init(
+        1000,
+        false,
+        0,
+        Address.ZERO,
+        Address.ZERO,
+        0,
+        &analysis,
+        &access_list,
+        &journal,
+        &host,
+        0,
+        db_interface,
+        Frame.ChainRules.DEFAULT,
+        &self_destruct,
+        &created_contracts,
+        &[_]u8{},
+        allocator,
+        null,
+        false,
+        false,
+    );
+    defer frame.deinit();
+
+    // Stack is empty -> should fail at BEGINBLOCK
+    const result = interpret(&vm, &frame);
+    try std.testing.expectError(ExecutionError.Error.StackUnderflow, result);
+}
+
+test "BEGINBLOCK: stack overflow detected from max growth" {
+    const allocator = std.testing.allocator;
+    const JumpTable = @import("../jump_table/jump_table.zig");
+    const Analysis = @import("../analysis.zig");
+    const Frame = @import("../frame.zig").Frame;
+    const Evm = @import("../evm.zig").Evm;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    const AccessList = @import("../access_list/access_list.zig").AccessList;
+    const CallJournal = @import("../call_frame_stack.zig").CallJournal;
+    const Host = @import("../host.zig").Host;
+    const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+    const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+    const Address = @import("primitives").Address.Address;
+    const ExecutionError = @import("../execution/execution_error.zig");
+    const Stack = @import("../stack/stack.zig");
+
+    // Block with PUSH1 then STOP (max_growth = +1)
+    const code = &[_]u8{ 0x60, 0x01, 0x00 };
+    var analysis = try Analysis.from_code(allocator, code, &JumpTable.DEFAULT);
+    defer analysis.deinit();
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer vm.deinit();
+
+    var access_list = AccessList.init(allocator, @import("../access_list/context.zig").Context.init());
+    defer access_list.deinit();
+    var journal = CallJournal.init(allocator);
+    defer journal.deinit();
+    var self_destruct = SelfDestruct.init(allocator);
+    defer self_destruct.deinit();
+    var created_contracts = CreatedContracts.init(allocator);
+    defer created_contracts.deinit();
+
+    var host_impl = vm;
+    var host = Host.init(&host_impl);
+
+    var frame = try Frame.init(
+        1000,
+        false,
+        0,
+        Address.ZERO,
+        Address.ZERO,
+        0,
+        &analysis,
+        &access_list,
+        &journal,
+        &host,
+        0,
+        db_interface,
+        Frame.ChainRules.DEFAULT,
+        &self_destruct,
+        &created_contracts,
+        &[_]u8{},
+        allocator,
+        null,
+        false,
+        false,
+    );
+    defer frame.deinit();
+
+    // Fill stack to capacity
+    var i: usize = 0;
+    while (i < Stack.CAPACITY) : (i += 1) {
+        frame.stack.append_unsafe(0);
+    }
+
+    const result = interpret(&vm, &frame);
+    try std.testing.expectError(ExecutionError.Error.StackOverflow, result);
+}
