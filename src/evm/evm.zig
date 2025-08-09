@@ -466,6 +466,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     if (exec_err) |e| {
         switch (e) {
             ExecutionError.Error.REVERT => {
+                std.debug.print("[create_contract] REVERT with output_len={}\n", .{frame.output.len});
                 // Revert state changes since snapshot
                 self.journal.revert_to_snapshot(snapshot_id);
                 // Duplicate revert data for return
@@ -485,6 +486,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
                 };
             },
             ExecutionError.Error.OutOfGas => {
+                std.debug.print("[create_contract] OutOfGas during constructor\n", .{});
                 self.journal.revert_to_snapshot(snapshot_id);
                 frame.deinit();
                 return InterprResult{
@@ -497,7 +499,9 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
                 };
             },
             else => {
+                std.debug.print("[create_contract] Failure during constructor: {}\n", .{e});
                 // Treat other errors as failure
+                self.journal.revert_to_snapshot(snapshot_id);
                 frame.deinit();
                 return InterprResult{
                     .status = .Failure,
@@ -513,8 +517,11 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
 
     // Success (STOP or fell off end): deploy runtime code if any
     if (frame.output.len > 0) {
+        std.debug.print("[create_contract] Success STOP, deploying runtime code len={}\n", .{frame.output.len});
         // Store code at the new address (MemoryDatabase copies the slice)
         self.state.set_code(new_address, frame.output) catch {};
+    } else {
+        std.debug.print("[create_contract] Success STOP, empty runtime code\n", .{});
     }
     const gas_left = frame.gas_remaining;
     frame.deinit();
