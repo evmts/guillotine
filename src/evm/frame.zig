@@ -259,6 +259,11 @@ pub const Frame = struct {
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
         std.debug.assert(dest <= std.math.maxInt(u32));
         const dest_usize = @as(usize, @intCast(dest));
+        // Check bounds before accessing the bitmap to prevent out-of-bounds access
+        // The bitmap size matches the code length, so any destination >= code length is invalid
+        if (dest_usize >= self.analysis.jumpdest_bitmap.bit_length) {
+            return false;
+        }
         return self.analysis.jumpdest_bitmap.isSet(dest_usize);
     }
 
@@ -682,8 +687,11 @@ test "Frame - jumpdest validation" {
     try std.testing.expect(!ctx.valid_jumpdest(3));
     try std.testing.expect(!ctx.valid_jumpdest(5));
 
-    // Test out of bounds
+    // Test out of bounds - these should return false without panicking
     try std.testing.expect(!ctx.valid_jumpdest(1000));
+    try std.testing.expect(!ctx.valid_jumpdest(code.len)); // Exactly at boundary
+    try std.testing.expect(!ctx.valid_jumpdest(code.len + 1)); // Just past boundary
+    try std.testing.expect(!ctx.valid_jumpdest(std.math.maxInt(u32))); // Maximum u32 value
 }
 
 test "Frame - address access tracking" {
