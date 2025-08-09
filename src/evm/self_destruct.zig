@@ -3,6 +3,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
+const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 
 /// Error type for SelfDestruct operations
 pub const StateError = error{OutOfMemory};

@@ -119,15 +119,24 @@ pub const CallJournal = struct {
     /// Current snapshot ID counter
     next_snapshot_id: u32,
 
+    /// Original storage values recorded per (address, key) on first write in the transaction
+    original_storage: AutoHashMap(Address, AutoHashMap(u256, u256)),
+
     pub fn init(allocator: Allocator) CallJournal {
         return CallJournal{
             .entries = ArrayList(JournalEntry).init(allocator),
             .next_snapshot_id = 0,
+            .original_storage = AutoHashMap(Address, AutoHashMap(u256, u256)).init(allocator),
         };
     }
 
     pub fn deinit(self: *CallJournal) void {
         self.entries.deinit();
+        var it = self.original_storage.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        self.original_storage.deinit();
     }
 
     /// Create a snapshot point for revertible operations
@@ -171,6 +180,14 @@ pub const CallJournal = struct {
 
     /// Record a storage change
     pub fn record_storage_change(self: *CallJournal, snapshot_id: u32, address: Address, key: u256, original_value: u256) !void {
+        // Persist the original value on first write within this transaction
+        var outer = try self.original_storage.getOrPut(address);
+        if (!outer.found_existing) {
+            outer.value_ptr.* = AutoHashMap(u256, u256).init(self.entries.allocator);
+        }
+        if (!outer.value_ptr.contains(key)) {
+            try outer.value_ptr.put(key, original_value);
+        }
         try self.entries.append(.{
             .storage_change = .{
                 .snapshot_id = snapshot_id,
@@ -210,5 +227,13 @@ pub const CallJournal = struct {
                 .snapshot_id = snapshot_id,
             },
         });
+    }
+
+    /// Get the original storage value recorded for (address, key), if any
+    pub fn get_original_storage(self: *const CallJournal, address: Address, key: u256) ?u256 {
+        if (self.original_storage.get(address)) |inner| {
+            if (inner.get(key)) |val| return val;
+        }
+        return null;
     }
 };

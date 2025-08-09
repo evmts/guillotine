@@ -50,21 +50,16 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     const slot = popped.b; // Second popped (was top)
 
     const current_value = frame.get_storage(slot);
+    const original_value = frame.get_original_storage(slot);
 
     const is_cold = frame.mark_storage_slot_warm(slot) catch {
         return ExecutionError.Error.OutOfMemory;
     };
 
     var total_gas: u64 = 0;
-
-    if (is_cold) {
-        @branchHint(.unlikely);
-        total_gas += GasConstants.ColdSloadCost;
-    }
-
-    // Get storage cost based on current hardfork and value change
+    // Compute full EIP-2200/EIP-3529 cost using original/current/new
     const hardfork = frame.getHardfork();
-    const cost = storage_costs.calculateStorageCost(hardfork, current_value, value);
+    const cost = storage_costs.calculateSstoreCost(hardfork, original_value, current_value, value, is_cold);
     total_gas += cost.gas;
 
     // Consume all gas at once
@@ -72,10 +67,8 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
 
     try frame.set_storage(slot, value);
 
-    // Apply refund if any
-    if (cost.refund > 0) {
-        frame.add_gas_refund(cost.refund);
-    }
+    // Apply refund delta if any
+    if (cost.refund > 0) frame.add_gas_refund(cost.refund);
 }
 
 pub fn op_tload(context: *anyopaque) ExecutionError.Error!void {

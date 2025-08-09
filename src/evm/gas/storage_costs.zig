@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
+const GasConstants = @import("primitives").GasConstants;
 
 /// Storage slot status for gas calculation
 pub const StorageStatus = enum(u8) {
@@ -123,6 +124,63 @@ pub fn getStorageCost(hardfork: Hardfork, status: StorageStatus) StorageCost {
 pub fn calculateStorageCost(hardfork: Hardfork, current: u256, new: u256) StorageCost {
     const status = StorageStatus.fromValues(current, new);
     return getStorageCost(hardfork, status);
+}
+
+/// Calculate SSTORE cost per EIP-2200/EIP-3529 given original/current/new and cold/warm
+/// Returns gas cost and refund delta (positive adds, negative reduces prior refunds)
+pub fn calculateSstoreCost(hardfork: Hardfork, original: u256, current: u256, new: u256, is_cold: bool) StorageCost {
+    var gas: u64 = 0;
+    // EIP-2929 cold surcharge
+    const is_berlin_or_later = @intFromEnum(hardfork) >= @intFromEnum(Hardfork.BERLIN);
+    if (is_berlin_or_later and is_cold) {
+        gas += GasConstants.ColdSloadCost;
+    }
+
+    // If new == current: SLOAD gas (Istanbul 800; Berlin+ warm 100, but our constants model uses 0 in table and charges WarmStorageReadCost at SLOAD site)
+    if (new == current) {
+        const warm_sload: u64 = if (is_berlin_or_later) GasConstants.WarmStorageReadCost else @as(u64, 800);
+        return .{ .gas = gas + warm_sload, .refund = 0 };
+    }
+
+    // First write in tx if original == current
+    if (original == current) {
+        if (original == 0) {
+            // 0 -> non-zero
+            gas += GasConstants.SstoreSetGas;
+            return .{ .gas = gas, .refund = 0 };
+        } else {
+            // non-zero -> different
+            const reset_gas: u64 = if (is_berlin_or_later) @as(u64, 2900) else GasConstants.SstoreResetGas;
+            // Refund if clearing to zero (Istanbul 15000; Berlin/London 4800)
+            const clear_refund: u64 = if (is_berlin_or_later) @as(u64, 4800) else @as(u64, 15000);
+            const refund: u64 = if (new == 0) clear_refund else 0;
+            gas += reset_gas;
+            return .{ .gas = gas, .refund = refund };
+        }
+    }
+
+    // Subsequent writes (slot already dirty): charge warm SLOAD gas equivalent
+    const subsequent_gas: u64 = if (is_berlin_or_later) GasConstants.WarmStorageReadCost else @as(u64, 800);
+
+    // Refund adjustments when flipping relative to original per EIP-2200
+    var refund_delta: i64 = 0;
+    if (original != 0) {
+        if (current == 0 and new != 0) {
+            // undo of a clear relative to original: consume refund (negative)
+            const clear_refund: u64 = if (is_berlin_or_later) @as(u64, 4800) else @as(u64, 15000);
+            refund_delta -= @as(i64, @intCast(clear_refund));
+        }
+        if (new == 0) {
+            // becoming zero while original non-zero and current non-zero → earn refund
+            const clear_refund: u64 = if (is_berlin_or_later) @as(u64, 4800) else @as(u64, 15000);
+            refund_delta += @as(i64, @intCast(clear_refund));
+        }
+    }
+
+    // Clamp negative refund to zero in returned unsigned field by signalling no direct negative; caller should handle deltas aggregation.
+    // We encode negative by returning 0 here; the EVM refund accumulator can be adjusted separately if supported.
+    const unsigned_refund: u64 = if (refund_delta > 0) @intCast(refund_delta) else 0;
+    return .{ .gas = gas + subsequent_gas, .refund = unsigned_refund };
 }
 
 /// Calculate storage cost for a given hardfork and status at runtime

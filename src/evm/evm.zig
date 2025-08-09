@@ -226,7 +226,6 @@ pub fn deinit(self: *Evm) void {
 
     // Clean up self-destruct tracking
     self.self_destruct.deinit();
-
     // Clean up created contracts tracking
     self.created_contracts.deinit();
 
@@ -237,16 +236,7 @@ pub fn deinit(self: *Evm) void {
         self.frame_stack = null;
     }
 
-    // Clean up created_contracts - always initialized in init()
-    self.created_contracts.deinit();
-
-    // Clean up self_destruct if it was initialized
-    // Since self_destruct is initially undefined and only initialized in call(),
-    // we need to check if it has a valid allocator (non-null pointer)
-    // The allocator field in the HashMap will be valid if init() was called
-    if (@intFromPtr(self.self_destruct.allocator.ptr) != 0) {
-        self.self_destruct.deinit();
-    }
+    // created_contracts is initialized in init(); single deinit above is sufficient
 }
 
 /// Reset the EVM for reuse without deallocating memory.

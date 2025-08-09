@@ -298,6 +298,12 @@ pub const Frame = struct {
         try self.state.set_storage(self.contract_address, slot, value);
     }
 
+    /// Get the original storage value for this slot at transaction start if recorded
+    pub fn get_original_storage(self: *const Frame, slot: u256) u256 {
+        if (self.journal.get_original_storage(self.contract_address, slot)) |val| return val;
+        return self.state.get_storage(self.contract_address, slot) catch 0;
+    }
+
     pub fn get_transient_storage(self: *const Frame, slot: u256) u256 {
         return self.state.get_transient_storage(self.contract_address, slot) catch 0; // Return 0 on error (EVM behavior)
     }
