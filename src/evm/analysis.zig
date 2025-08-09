@@ -30,6 +30,11 @@ instructions: []Instruction,
 /// Required for JUMP/JUMPI validation during execution.
 jumpdest_bitmap: DynamicBitSet,
 
+/// PC to instruction index mapping for runtime jump resolution.
+/// Maps bytecode PC positions to their corresponding instruction indices.
+/// Required for dynamic JUMP/JUMPI that don't have pre-resolved targets.
+pc_to_instruction: []const u16,
+
 /// Allocator used for the instruction array (needed for cleanup)
 allocator: std.mem.Allocator,
 
@@ -126,9 +131,11 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     if (code.len == 0) {
         // For empty code, just create empty instruction array
         const empty_instructions = try allocator.alloc(Instruction, 0);
+        const empty_pc_mapping = try allocator.alloc(u16, 0);
         return CodeAnalysis{
             .instructions = empty_instructions,
             .jumpdest_bitmap = jumpdest_bitmap,
+            .pc_to_instruction = empty_pc_mapping,
             .allocator = allocator,
         };
     }
@@ -210,11 +217,12 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     }
 
     // Convert to instruction stream using temporary data
-    const instructions = try codeToInstructions(allocator, code, jump_table, &jumpdest_bitmap);
+    const result = try codeToInstructions(allocator, code, jump_table, &jumpdest_bitmap);
 
     return CodeAnalysis{
-        .instructions = instructions,
+        .instructions = result.instructions,
         .jumpdest_bitmap = jumpdest_bitmap,
+        .pc_to_instruction = result.pc_to_instruction,
         .allocator = allocator,
     };
 }
@@ -224,6 +232,9 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
 pub fn deinit(self: *CodeAnalysis) void {
     // Free the instruction array (now a slice)
     self.allocator.free(self.instructions);
+
+    // Free the PC to instruction mapping
+    self.allocator.free(self.pc_to_instruction);
 
     // Free the bitmap
     self.jumpdest_bitmap.deinit();
@@ -271,12 +282,18 @@ fn createCodeBitmap(allocator: std.mem.Allocator, code: []const u8) !DynamicBitS
     return bitmap;
 }
 
+/// Result structure for code analysis containing both instructions and PC mapping
+const AnalysisResult = struct {
+    instructions: []Instruction,
+    pc_to_instruction: []u16,
+};
+
 /// Convert bytecode to null-terminated instruction stream with block-based optimization.
 /// This implementation follows evmone's advanced analysis approach by:
 /// 1. Injecting BEGINBLOCK instructions at basic block boundaries
 /// 2. Pre-calculating gas and stack requirements for entire blocks
 /// 3. Eliminating per-instruction validation during execution
-fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) ![]Instruction {
+fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) !AnalysisResult {
     Log.debug("[analysis] Converting {} bytes of code to instructions", .{code.len});
 
     // Allocate instruction array with extra space for BEGINBLOCK instructions
@@ -284,8 +301,9 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     errdefer allocator.free(instructions);
 
     // Allocate PC to instruction index mapping - tracks which instruction index corresponds to each PC
+    // This will be returned to the caller and freed in deinit
     const pc_to_instruction = try allocator.alloc(u16, code.len);
-    defer allocator.free(pc_to_instruction);
+    errdefer allocator.free(pc_to_instruction);
     @memset(pc_to_instruction, std.math.maxInt(u16)); // Initialize with invalid values
 
     var pc: usize = 0;
@@ -365,9 +383,14 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc_to_instruction[pc] = @intCast(instruction_count);
                 
                 if (opcode == .JUMP) {
+                    // For JUMP, mark it for runtime resolution
+                    // The interpreter will handle this specially
                     instructions[instruction_count] = Instruction{
                         .opcode_fn = UnreachableHandler, // Handled inline by interpreter
-                        .arg = .none, // Will be filled with .jump_target during resolveJumpTargets
+                        .arg = .{ .jump_target = JumpTarget{
+                            .instruction = undefined, // Will be resolved at runtime
+                            .jump_type = .jump,
+                        }},
                     };
                 } else {
                     instructions[instruction_count] = Instruction{
@@ -404,9 +427,14 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Record PC to instruction mapping for JUMPI
                 pc_to_instruction[pc] = @intCast(instruction_count);
                 
+                // For JUMPI, mark it for runtime resolution
+                // The interpreter will handle this specially
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = UnreachableHandler, // Handled inline by interpreter
-                    .arg = .none, // Will be filled with .jump_target during resolveJumpTargets
+                    .arg = .{ .jump_target = JumpTarget{
+                        .instruction = undefined, // Will be resolved at runtime
+                        .jump_type = .jumpi,
+                    }},
                 };
                 instruction_count += 1;
                 pc += 1;
@@ -583,7 +611,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
     // Resize array to actual size (no null terminator needed for slices)
     const final_instructions = try allocator.realloc(instructions, instruction_count);
-    return final_instructions;
+    return AnalysisResult{
+        .instructions = final_instructions,
+        .pc_to_instruction = pc_to_instruction,
+    };
 }
 
 /// Resolve jump targets in the instruction stream.
@@ -617,39 +648,27 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
         }
     }
 
-    // Now resolve JUMP and JUMPI targets
+    // Now resolve JUMP and JUMPI targets for static jumps (where PUSH immediately precedes)
     for (instructions, 0..) |*inst, idx| {
-        // Check if this is a JUMP or JUMPI by looking for UnreachableHandler with no arg yet
-        if (inst.opcode_fn == UnreachableHandler and inst.arg == .none) {
-            // Look at the previous instruction for a PUSH value
-            if (idx > 0 and instructions[idx - 1].arg == .push_value) {
-                const target_pc = instructions[idx - 1].arg.push_value;
-                
-                // Validate the jump target is a valid JUMPDEST
-                if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {
-                    // Find the BEGINBLOCK for this target PC
-                    const block_idx = pc_to_block_start[@intCast(target_pc)];
-                    if (block_idx != std.math.maxInt(u16) and block_idx < instructions.len) {
-                        // Determine if this is JUMP or JUMPI by checking the original bytecode
-                        // We need to find the PC for this instruction
-                        var original_pc: ?usize = null;
-                        for (pc_to_instruction, 0..) |mapped_idx, pc| {
-                            if (mapped_idx == idx) {
-                                original_pc = pc;
-                                break;
-                            }
-                        }
-                        
-                        if (original_pc) |pc| {
-                            const opcode_byte = code[pc];
-                            const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
-                            inst.arg = .{ .jump_target = JumpTarget{
-                                .instruction = &instructions[block_idx],
-                                .jump_type = jump_type,
-                            } };
+        // Check if this is a JUMP or JUMPI that needs static resolution
+        if (inst.opcode_fn == UnreachableHandler and inst.arg == .jump_target) {
+            // Check if the target is undefined (needs resolution)
+            if (@intFromPtr(inst.arg.jump_target.instruction) == 0) {
+                // Look at the previous instruction for a PUSH value
+                if (idx > 0 and instructions[idx - 1].arg == .push_value) {
+                    const target_pc = instructions[idx - 1].arg.push_value;
+                    
+                    // Validate the jump target is a valid JUMPDEST
+                    if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {
+                        // Find the BEGINBLOCK for this target PC
+                        const block_idx = pc_to_block_start[@intCast(target_pc)];
+                        if (block_idx != std.math.maxInt(u16) and block_idx < instructions.len) {
+                            // Update the target to point to the correct block
+                            inst.arg.jump_target.instruction = &instructions[block_idx];
                         }
                     }
                 }
+                // If we couldn't resolve statically, leave it as undefined for runtime resolution
             }
         }
     }

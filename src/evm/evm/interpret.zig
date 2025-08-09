@@ -79,7 +79,35 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                         if (!frame.valid_jumpdest(dest)) {
                             return ExecutionError.Error.InvalidJump;
                         }
-                        current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                        
+                        // Check if this is a pre-resolved jump or needs runtime resolution
+                        if (@intFromPtr(jump_target.instruction) == 0) {
+                            // Runtime resolution needed - use pc_to_instruction mapping
+                            if (dest > std.math.maxInt(usize) or dest >= frame.analysis.pc_to_instruction.len) {
+                                return ExecutionError.Error.InvalidJump;
+                            }
+                            
+                            const dest_usize = @as(usize, @intCast(dest));
+                            const inst_idx = frame.analysis.pc_to_instruction[dest_usize];
+                            
+                            // Check if we have a valid mapping
+                            if (inst_idx == std.math.maxInt(u16)) {
+                                return ExecutionError.Error.InvalidJump;
+                            }
+                            
+                            // Find the BEGINBLOCK that contains this instruction
+                            var block_idx = inst_idx;
+                            while (block_idx > 0) : (block_idx -= 1) {
+                                if (instructions[block_idx].arg == .block_info) {
+                                    break;
+                                }
+                            }
+                            
+                            current_index = block_idx;
+                        } else {
+                            // Pre-resolved jump - use the cached target
+                            current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                        }
                     },
                     .jumpi => {
                         const pops = frame.stack.pop2_unsafe();
@@ -89,7 +117,35 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                             if (!frame.valid_jumpdest(dest)) {
                                 return ExecutionError.Error.InvalidJump;
                             }
-                            current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                            
+                            // Check if this is a pre-resolved jump or needs runtime resolution
+                            if (@intFromPtr(jump_target.instruction) == 0) {
+                                // Runtime resolution needed - use pc_to_instruction mapping
+                                if (dest > std.math.maxInt(usize) or dest >= frame.analysis.pc_to_instruction.len) {
+                                    return ExecutionError.Error.InvalidJump;
+                                }
+                                
+                                const dest_usize = @as(usize, @intCast(dest));
+                                const inst_idx = frame.analysis.pc_to_instruction[dest_usize];
+                                
+                                // Check if we have a valid mapping
+                                if (inst_idx == std.math.maxInt(u16)) {
+                                    return ExecutionError.Error.InvalidJump;
+                                }
+                                
+                                // Find the BEGINBLOCK that contains this instruction
+                                var block_idx = inst_idx;
+                                while (block_idx > 0) : (block_idx -= 1) {
+                                    if (instructions[block_idx].arg == .block_info) {
+                                        break;
+                                    }
+                                }
+                                
+                                current_index = block_idx;
+                            } else {
+                                // Pre-resolved jump - use the cached target
+                                current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                            }
                         } else {
                             current_index += 1;
                         }

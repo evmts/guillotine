@@ -885,7 +885,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         // We need to query the host to check if account exists
         const account_exists = frame.host.account_exists(to_address);
         if (!account_exists) {
-            total_gas_cost += GasConstants.CallNewAccountCost;
+            total_gas_cost += GasConstants.CALL_NEW_ACCOUNT_COST;
         }
     }
 

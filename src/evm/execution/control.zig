@@ -13,19 +13,25 @@ pub fn op_stop(context: *anyopaque) ExecutionError.Error!void {
     return ExecutionError.Error.STOP;
 }
 
-// DEPRECATED: JUMP is now handled directly in interpret.zig via .jump_target instruction type
-// This function is no longer called and should be deleted
+/// Runtime JUMP handler for dynamic jumps where destination is computed at runtime.
+/// Called when a JUMP instruction doesn't have a pre-resolved target from analysis.
+/// This is now handled inline by the interpreter, so this function shouldn't be called.
 pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // TODO_DELETE: This function is deprecated - JUMP is handled in interpret loop
+    // This function should not be called - JUMP is handled inline by the interpreter
+    // If we get here, it means the analysis didn't mark this as a JUMP properly
+    Log.err("op_jump called - this indicates a bug in analysis", .{});
     unreachable;
 }
 
-// DEPRECATED: JUMPI is now handled directly in interpret.zig via .jump_target instruction type
-// This function is no longer called and should be deleted
+/// Runtime JUMPI handler for dynamic conditional jumps where destination is computed at runtime.
+/// Called when a JUMPI instruction doesn't have a pre-resolved target from analysis.
+/// This is now handled inline by the interpreter, so this function shouldn't be called.
 pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // TODO_DELETE: This function is deprecated - JUMPI is handled in interpret loop
+    // This function should not be called - JUMPI is handled inline by the interpreter
+    // If we get here, it means the analysis didn't mark this as a JUMPI properly
+    Log.err("op_jumpi called - this indicates a bug in analysis", .{});
     unreachable;
 }
 

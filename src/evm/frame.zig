@@ -261,7 +261,7 @@ pub const Frame = struct {
         const dest_usize = @as(usize, @intCast(dest));
         // Check bounds before accessing the bitmap to prevent out-of-bounds access
         // The bitmap size matches the code length, so any destination >= code length is invalid
-        if (dest_usize >= self.analysis.jumpdest_bitmap.bit_length) {
+        if (dest_usize >= self.analysis.jumpdest_bitmap.capacity()) {
             return false;
         }
         return self.analysis.jumpdest_bitmap.isSet(dest_usize);
