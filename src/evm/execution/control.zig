@@ -17,7 +17,8 @@ pub fn op_stop(context: *anyopaque) ExecutionError.Error!void {
 // This function is no longer called and should be deleted
 pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // TODO_DELETE: This function is deprecated - JUMP is handled in interpret loop
+    // JUMP is handled inline by the interpreter based on pre-resolved targets
+    // in the instruction stream; this function must never be called.
     unreachable;
 }
 
@@ -25,14 +26,15 @@ pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
 // This function is no longer called and should be deleted
 pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // TODO_DELETE: This function is deprecated - JUMPI is handled in interpret loop
+    // JUMPI is handled inline by the interpreter based on pre-resolved targets
+    // in the instruction stream; this function must never be called.
     unreachable;
 }
 
 // TODO_PC_DELETE: PC operations are deprecated in the new architecture
 pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // TODO_DELETE: This function is deprecated - PC is not needed in new architecture
+    // PC is handled within the interpreter loop; this stub must never be called.
     unreachable;
 }
 
