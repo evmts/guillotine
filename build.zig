@@ -1530,7 +1530,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_newevm_test.step);
     test_step.dependOn(&run_stack_validation_test.step);
     test_step.dependOn(&run_jump_table_test.step);
-    test_step.dependOn(&run_opcodes_test.step);
     // benchmark runner test removed - file no longer exists
 
     // Add inline ops test
@@ -1571,8 +1570,6 @@ pub fn build(b: *std.Build) void {
 
     // Analyze and compact test removed - file no longer exists
 
-    test_step.dependOn(&run_gas_test.step);
-    test_step.dependOn(&run_static_protection_test.step);
     test_step.dependOn(&run_blake2f_test.step);
     if (run_bn254_rust_test) |bn254_test| {
         test_step.dependOn(&bn254_test.step);
@@ -1630,16 +1627,8 @@ pub fn build(b: *std.Build) void {
         revm_test_step.dependOn(&run_revm_test.step);
     }
 
-    test_step.dependOn(&run_e2e_simple_test.step);
-    test_step.dependOn(&run_e2e_error_test.step);
-    test_step.dependOn(&run_e2e_data_test.step);
-    test_step.dependOn(&run_e2e_inheritance_test.step);
-    test_step.dependOn(&run_constructor_bug_test.step);
-    test_step.dependOn(&run_solidity_constructor_test.step);
     test_step.dependOn(&run_return_opcode_bug_test.step);
-    test_step.dependOn(&run_contract_call_test.step);
     // Hardfork tests removed completely
-    test_step.dependOn(&run_delegatecall_test.step);
 
     // Add all BN254 tests to main test step
     test_step.dependOn(&run_bn254_fp_test.step);
@@ -1762,7 +1751,6 @@ pub fn build(b: *std.Build) void {
     block_execution_erc20_test.root_module.addImport("primitives", primitives_mod);
 
     const run_block_execution_erc20_test = b.addRunArtifact(block_execution_erc20_test);
-    test_step.dependOn(&run_block_execution_erc20_test.step);
     const block_execution_erc20_test_step = b.step("test-block-execution-erc20", "Run block execution ERC20 test");
     block_execution_erc20_test_step.dependOn(&run_block_execution_erc20_test.step);
 

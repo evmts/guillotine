@@ -106,6 +106,12 @@ pub const JournalEntry = union(enum) {
         address: primitives.Address.Address,
     },
 
+    /// Account was marked for selfdestruct
+    selfdestruct_marked: struct {
+        address: primitives.Address.Address,
+        beneficiary: primitives.Address.Address,
+    },
+
     /// Log was emitted (least frequent, smallest payload)
     log_created: struct {
         /// Index of the log in the logs array
@@ -466,6 +472,17 @@ pub const Journal = struct {
                 _ = state.remove_balance(created.address);
                 _ = state.remove_nonce(created.address);
                 _ = state.remove_code(created.address);
+            },
+
+            .selfdestruct_marked => |sd| {
+                Log.debug("Journal.revert_entry: Reverting selfdestruct_marked addr={x}, beneficiary={x}", .{ 
+                    primitives.Address.to_u256(sd.address), 
+                    primitives.Address.to_u256(sd.beneficiary) 
+                });
+                // Remove the selfdestruct marking if the state supports it
+                if (@hasDecl(@TypeOf(state), "unmark_selfdestruct")) {
+                    _ = state.unmark_selfdestruct(sd.address);
+                }
             },
 
             .log_created => |log_entry| {

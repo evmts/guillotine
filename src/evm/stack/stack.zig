@@ -131,7 +131,7 @@ pub fn clear(self: *Stack) void {
 
     // In debug/safe modes, zero out all values for security
     if (comptime CLEAR_ON_POP) {
-        @memset(std.mem.asBytes(self.data), 0);
+        @memset(std.mem.sliceAsBytes(self.data), 0);
     }
 }
 
