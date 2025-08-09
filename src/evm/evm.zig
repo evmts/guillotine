@@ -349,7 +349,9 @@ pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics
 
 pub usingnamespace @import("evm/set_context.zig");
 
-pub usingnamespace @import("evm/call.zig");  // This provides the actual call() implementation
+// pub usingnamespace @import("evm/call.zig");  // Old implementation with workaround
+pub usingnamespace @import("evm/call_refactored.zig");  // New refactored implementation using unified execute
+pub usingnamespace @import("evm/execute.zig");  // Export the new execute function
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
