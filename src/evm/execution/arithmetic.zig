@@ -81,9 +81,9 @@ pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-    const result = a +% b;
+    const top = frame.stack.pop_unsafe();            // top
+    const top_minus_1 = frame.stack.peek_unsafe().*; // second from top
+    const result = top_minus_1 +% top;
     frame.stack.set_top_unsafe(result);
 }
 
@@ -115,12 +115,12 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
+    const top = frame.stack.pop_unsafe();
+    const top_minus_1 = frame.stack.peek_unsafe().*;
+    
     // Use optimized U256 multiplication
-    const a_u256 = U256.from_u256_unsafe(a);
-    const b_u256 = U256.from_u256_unsafe(b);
+    const a_u256 = U256.from_u256_unsafe(top_minus_1);
+    const b_u256 = U256.from_u256_unsafe(top);
     const product_u256 = a_u256.wrapping_mul(b_u256);
     const product = product_u256.to_u256_unsafe();
 
@@ -155,10 +155,10 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const result = b -% a;
+    const top = frame.stack.pop_unsafe();
+    const top_minus_1 = frame.stack.peek_unsafe().*;
+    
+    const result = top_minus_1 -% top;
 
     frame.stack.set_top_unsafe(result);
 }
@@ -198,13 +198,13 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const result = if (a == 0) blk: {
+    const top = frame.stack.pop_unsafe();            // divisor
+    const top_minus_1 = frame.stack.peek_unsafe().*; // dividend
+    
+    const result = if (top == 0) blk: {
         break :blk 0;
     } else blk: {
-        const result_u256 = U256.from_u256_unsafe(b).wrapping_div(U256.from_u256_unsafe(a));
+        const result_u256 = U256.from_u256_unsafe(top_minus_1).wrapping_div(U256.from_u256_unsafe(top));
         break :blk result_u256.to_u256_unsafe();
     };
 
@@ -250,24 +250,24 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const top = frame.stack.pop_unsafe();            // divisor (signed)
+    const top_minus_1 = frame.stack.peek_unsafe().*; // dividend (signed)
 
     var result: u256 = undefined;
-    if (a == 0) {
+    if (top == 0) {
         @branchHint(.unlikely);
         result = 0;
     } else {
-        const a_i256 = @as(i256, @bitCast(a));
-        const b_i256 = @as(i256, @bitCast(b));
+        const divisor_i256 = @as(i256, @bitCast(top));
+        const dividend_i256 = @as(i256, @bitCast(top_minus_1));
         const min_i256 = std.math.minInt(i256);
-        if (b_i256 == min_i256 and a_i256 == -1) {
+        if (dividend_i256 == min_i256 and divisor_i256 == -1) {
             @branchHint(.unlikely);
             // MIN_I256 / -1 = MIN_I256 (overflow wraps)
             // This matches EVM behavior where overflow wraps around
-            result = b;
+            result = top_minus_1;
         } else {
-            const result_i256 = @divTrunc(b_i256, a_i256);
+            const result_i256 = @divTrunc(dividend_i256, divisor_i256);
             result = @as(u256, @bitCast(result_i256));
         }
     }
@@ -309,17 +309,17 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    const result = if (a == 0) blk: {
+    const top = frame.stack.pop_unsafe();            // divisor
+    const top_minus_1 = frame.stack.peek_unsafe().*; // dividend
+    
+    const result = if (top == 0) blk: {
         @branchHint(.unlikely);
         break :blk 0;
     } else blk: {
         // Use optimized U256 modulo
-        const a_u256 = U256.from_u256_unsafe(a);
-        const b_u256 = U256.from_u256_unsafe(b);
-        const div_rem_result = b_u256.div_rem(a_u256);
+        const dividend_u256 = U256.from_u256_unsafe(top_minus_1);
+        const divisor_u256 = U256.from_u256_unsafe(top);
+        const div_rem_result = dividend_u256.div_rem(divisor_u256);
         break :blk div_rem_result.remainder.to_u256_unsafe();
     };
 
@@ -364,17 +364,17 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
+    const top = frame.stack.pop_unsafe();            // divisor (signed)
+    const top_minus_1 = frame.stack.peek_unsafe().*; // dividend (signed)
 
     var result: u256 = undefined;
-    if (a == 0) {
+    if (top == 0) {
         @branchHint(.unlikely);
         result = 0;
     } else {
-        const a_i256 = @as(i256, @bitCast(a));
-        const b_i256 = @as(i256, @bitCast(b));
-        const result_i256 = @rem(b_i256, a_i256);
+        const divisor_i256 = @as(i256, @bitCast(top));
+        const dividend_i256 = @as(i256, @bitCast(top_minus_1));
+        const result_i256 = @rem(dividend_i256, divisor_i256);
         result = @as(u256, @bitCast(result_i256));
     }
 
@@ -419,18 +419,18 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.pop_unsafe();
-    const n = frame.stack.peek_unsafe().*;
+    const top = frame.stack.pop_unsafe();            // modulus
+    const top_minus_1 = frame.stack.pop_unsafe();    // b
+    const top_minus_2 = frame.stack.peek_unsafe().*; // a
 
     var result: u256 = undefined;
-    if (n == 0) {
+    if (top == 0) {
         result = 0;
     } else {
         // Use U256 add_mod to properly handle overflow
-        const a_u256 = U256.from_u256_unsafe(a);
-        const b_u256 = U256.from_u256_unsafe(b);
-        const n_u256 = U256.from_u256_unsafe(n);
+        const a_u256 = U256.from_u256_unsafe(top_minus_2);
+        const b_u256 = U256.from_u256_unsafe(top_minus_1);
+        const n_u256 = U256.from_u256_unsafe(top);
         const result_u256 = a_u256.add_mod(b_u256, n_u256);
         result = result_u256.to_u256_unsafe();
     }
@@ -481,18 +481,18 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.pop_unsafe();
-    const n = frame.stack.peek_unsafe().*;
+    const top = frame.stack.pop_unsafe();            // modulus
+    const top_minus_1 = frame.stack.pop_unsafe();    // b
+    const top_minus_2 = frame.stack.peek_unsafe().*; // a
 
     var result: u256 = undefined;
-    if (n == 0) {
+    if (top == 0) {
         result = 0;
     } else {
         // Use optimized U256 mulmod
-        const a_u256 = U256.from_u256_unsafe(a);
-        const b_u256 = U256.from_u256_unsafe(b);
-        const n_u256 = U256.from_u256_unsafe(n);
+        const a_u256 = U256.from_u256_unsafe(top_minus_2);
+        const b_u256 = U256.from_u256_unsafe(top_minus_1);
+        const n_u256 = U256.from_u256_unsafe(top);
         const result_u256 = a_u256.mul_mod(b_u256, n_u256);
         result = result_u256.to_u256_unsafe();
     }
@@ -546,11 +546,11 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const base = frame.stack.pop_unsafe();
-    const exp = frame.stack.peek_unsafe().*;
+    const top = frame.stack.pop_unsafe();            // exponent
+    const top_minus_1 = frame.stack.peek_unsafe().*; // base
 
     // Calculate gas cost based on exponent byte size
-    var exp_copy = exp;
+    var exp_copy = top;
     var byte_size: u64 = 0;
     while (exp_copy > 0) : (exp_copy >>= 8) {
         byte_size += 1;
@@ -562,27 +562,27 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Early exit optimizations
-    if (exp == 0) {
+    if (top == 0) {
         frame.stack.set_top_unsafe(1);
         return;
     }
-    if (base == 0) {
+    if (top_minus_1 == 0) {
         frame.stack.set_top_unsafe(0);
         return;
     }
-    if (base == 1) {
+    if (top_minus_1 == 1) {
         frame.stack.set_top_unsafe(1);
         return;
     }
-    if (exp == 1) {
-        frame.stack.set_top_unsafe(base);
+    if (top == 1) {
+        frame.stack.set_top_unsafe(top_minus_1);
         return;
     }
 
     // Square-and-multiply algorithm
     var result: u256 = 1;
-    var b = base;
-    var e = exp;
+    var b = top_minus_1;
+    var e = top;
 
     while (e > 0) {
         if ((e & 1) == 1) {
