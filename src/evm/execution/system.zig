@@ -7,12 +7,13 @@ const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
-const CallFrameStack = @import("../call_frame_stack.zig").CallFrameStack;
-const CallType = @import("../call_frame_stack.zig").CallType;
 const Host = @import("../host.zig").Host;
 const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
+
+// Define local CallType to decouple from preallocated call frame stack
+const CallType = enum { Call, CallCode, DelegateCall, StaticCall };
 
 // ============================================================================
 // Call Operation Types and Gas Calculation
@@ -626,7 +627,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     if (call_result.success) {
         // Commit the snapshot on success (no-op in current implementation)
         // The journal entries persist for transaction-level revert capability
-        
+
         // Handle gas accounting after CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
@@ -656,10 +657,10 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     } else {
         // Revert the snapshot on failure
         frame.journal.revert_to_snapshot(snapshot);
-        
+
         // Handle gas accounting after failed CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
-        
+
         try frame.stack.append(0);
     }
 }
@@ -762,7 +763,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     if (call_result.success) {
         // Commit the snapshot on success (no-op in current implementation)
         // The journal entries persist for transaction-level revert capability
-        
+
         // Handle gas accounting after CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
@@ -792,10 +793,10 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     } else {
         // Revert the snapshot on failure
         frame.journal.revert_to_snapshot(snapshot);
-        
+
         // Handle gas accounting after failed CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
-        
+
         try frame.stack.append(0);
     }
 }
@@ -912,7 +913,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Create a journal snapshot before entering child frame
     // This allows us to revert all state changes if the call fails
     const snapshot = frame.journal.create_snapshot();
-    
+
     // Access the VM through the host interface
     const host = frame.host;
 
