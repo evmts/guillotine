@@ -46,10 +46,29 @@ We are committed to providing a welcoming and inclusive environment. All contrib
 
 - Zig 0.14.1 or later
 - Git
-- (Optional) Rust toolchain for BN254 optimizations
-- (Optional) Cargo for building Rust dependencies
+- Rust toolchain (required for BN254 and REVM dependencies)
+- Cargo for building Rust dependencies
 
 ### Building the Project
+
+#### First-time Setup (Fresh Machine)
+
+When building on a fresh machine or after a fresh clone, you need to initialize submodules:
+
+```bash
+# Initialize and update git submodules
+git submodule update --init --recursive
+
+# Build the project (Zig automatically runs cargo build for Rust dependencies)
+zig build
+
+# Run tests
+zig build test
+```
+
+**Note**: The Zig build system automatically runs `cargo build` as a dependency step when building Rust libraries. On the first build, this may take longer as Cargo downloads and compiles dependencies.
+
+#### Regular Development
 
 ```bash
 # Build the project
@@ -58,8 +77,8 @@ zig build
 # Run tests
 zig build test
 
-# Run benchmarks
-zig build bench
+# Run EVM comparison benchmarks
+zig build bench-compare
 
 # Run official EVM benchmarks (hyperfine required)
 zig build build-evm-runner  # Build the benchmark runner

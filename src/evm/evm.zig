@@ -202,7 +202,7 @@ pub fn init(
         .frame_stack = null,
         .current_frame_depth = 0,
         .max_allocated_depth = 0,
-        .self_destruct = undefined,
+        .self_destruct = SelfDestruct.init(allocator),
         .analysis_stack_buffer = undefined,
         .journal = CallJournal.init(allocator),
         .gas_refunds = 0,
@@ -224,6 +224,12 @@ pub fn deinit(self: *Evm) void {
         cache.deinit();
     }
 
+    // Clean up self-destruct tracking
+    self.self_destruct.deinit();
+
+    // Clean up created contracts tracking
+    self.created_contracts.deinit();
+
     // Clean up lazily allocated frame stack if it exists
     if (self.frame_stack) |frames| {
         // Frames are deinitialized at the end of each call; just free array storage
@@ -231,9 +237,16 @@ pub fn deinit(self: *Evm) void {
         self.frame_stack = null;
     }
 
-    // Other execution state doesn't need cleanup in deinit:
-    // - self_destruct: undefined or ownership transferred to caller
-    // - analysis_stack_buffer: undefined or stack-allocated
+    // Clean up created_contracts - always initialized in init()
+    self.created_contracts.deinit();
+
+    // Clean up self_destruct if it was initialized
+    // Since self_destruct is initially undefined and only initialized in call(),
+    // we need to check if it has a valid allocator (non-null pointer)
+    // The allocator field in the HashMap will be valid if init() was called
+    if (@intFromPtr(self.self_destruct.allocator.ptr) != 0) {
+        self.self_destruct.deinit();
+    }
 }
 
 /// Reset the EVM for reuse without deallocating memory.

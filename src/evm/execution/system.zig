@@ -647,6 +647,11 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                     created.mark_created(contract_address) catch {};
                 }
 
+                // EIP-2929: Mark newly created address as warm
+                var contract_address: primitives.Address.Address = undefined;
+                @memcpy(&contract_address, address_bytes);
+                _ = try frame.access_list.access_address(contract_address);
+
                 try frame.stack.append(address_u256);
             } else {
                 try frame.stack.append(0);
@@ -783,6 +788,11 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                     created.mark_created(contract_address) catch {};
                 }
 
+                // EIP-2929: Mark newly created address as warm
+                var contract_address: primitives.Address.Address = undefined;
+                @memcpy(&contract_address, address_bytes);
+                _ = try frame.access_list.access_address(contract_address);
+
                 try frame.stack.append(address_u256);
             } else {
                 try frame.stack.append(0);
@@ -869,10 +879,8 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(to_address);
-        if (access_cost > 100) { // Was cold
-            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas_cost += access_cost;
     }
 
     // Add value transfer cost if applicable
@@ -964,15 +972,123 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 }
 
 pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
-    const ctx = @as(*Frame, @ptrCast(@alignCast(context)));
-    _ = ctx;
+    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
-    // TODO: Implementation requires:
-    // - vm instance for callcode operations
-    // - frame.contract.address access
-    // - frame.is_static checks
-    // - frame.return_data operations
-    // - handle_call_result integration
+    // Pop parameters from stack (same layout as CALL)
+    const gas = try frame.stack.pop();
+    const to = try frame.stack.pop();
+    const value = try frame.stack.pop();
+    const args_offset = try frame.stack.pop();
+    const args_size = try frame.stack.pop();
+    const ret_offset = try frame.stack.pop();
+    const ret_size = try frame.stack.pop();
+
+    // CALLCODE obeys static context for value transfers
+    if (frame.is_static() and value != 0) {
+        return ExecutionError.Error.WriteProtection;
+    }
+
+    // Depth limit
+    if (validate_call_depth(frame)) {
+        try frame.stack.append(0);
+        return;
+    }
+
+    const to_address = from_u256(to);
+
+    // Compute memory expansion costs safely first
+    const args_end = if (args_size == 0) 0 else blk: {
+        if (args_offset > std.math.maxInt(u64) or args_size > std.math.maxInt(u64))
+            return ExecutionError.Error.InvalidOffset;
+        const offset = @as(u64, @intCast(args_offset));
+        const size = @as(u64, @intCast(args_size));
+        if (offset > std.math.maxInt(u64) - size)
+            return ExecutionError.Error.GasUintOverflow;
+        break :blk offset + size;
+    };
+
+    const ret_end = if (ret_size == 0) 0 else blk: {
+        if (ret_offset > std.math.maxInt(u64) or ret_size > std.math.maxInt(u64))
+            return ExecutionError.Error.InvalidOffset;
+        const offset = @as(u64, @intCast(ret_offset));
+        const size = @as(u64, @intCast(ret_size));
+        if (offset > std.math.maxInt(u64) - size)
+            return ExecutionError.Error.GasUintOverflow;
+        break :blk offset + size;
+    };
+
+    const max_memory_size = @max(args_end, ret_end);
+    const memory_expansion_cost = if (max_memory_size > 0) frame.memory.get_expansion_cost(max_memory_size) else 0;
+
+    // Base gas cost for CALLCODE is same as CALL (700 at Tangerine)
+    var total_gas_cost: u64 = GasConstants.CALL_BASE_COST + memory_expansion_cost;
+
+    // EIP-2929 cold/warm account access cost
+    if (frame.is_at_least(.BERLIN)) {
+        const access_cost = try frame.access_address(to_address);
+        if (access_cost > GasConstants.WarmStorageReadCost) {
+            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
+        }
+    }
+
+    // Value transfer cost applies (CALLVALUE), but CALLCODE cannot create new accounts
+    if (value != 0) {
+        total_gas_cost += GasConstants.CallValueTransferGas;
+    }
+
+    // Charge operation costs before memory actions
+    try frame.consume_gas(total_gas_cost);
+
+    // Expand memory and get slices
+    const args = try get_call_args(frame, args_offset, args_size);
+    try ensure_return_memory(frame, ret_offset, ret_size);
+
+    // Calculate gas to forward with 63/64 rule and stipend for value
+    const gas_limit = calculate_call_gas_amount(frame, gas, value, total_gas_cost);
+    // Deduct forwarded gas from caller; stipend is not deducted
+    const gas_to_deduct = if (value != 0) gas_limit - GasConstants.CallStipend else gas_limit;
+    try frame.consume_gas(gas_to_deduct);
+
+    // Snapshot state for potential revert
+    const snapshot = frame.journal.create_snapshot();
+
+    // Execute via host using callcode variant; host must run code at `to` in current storage
+    const call_params = CallParams{ .callcode = .{
+        .caller = frame.contract_address,
+        .to = to_address,
+        .value = value,
+        .input = args,
+        .gas = gas_limit,
+    } };
+
+    const call_result = frame.host.call(call_params) catch {
+        frame.journal.revert_to_snapshot(snapshot);
+        try frame.stack.append(0);
+        return;
+    };
+
+    // Commit or revert snapshot based on success
+    if (!call_result.success) {
+        frame.journal.revert_to_snapshot(snapshot);
+    }
+
+    // Return unused gas to caller
+    frame.gas_remaining += call_result.gas_left;
+
+    // Write return data
+    if (call_result.output) |output| {
+        if (ret_size > 0) {
+            const ret_offset_usize = @as(usize, @intCast(ret_offset));
+            const ret_size_usize = @as(usize, @intCast(ret_size));
+            const copy_size = @min(output.len, ret_size_usize);
+            if (copy_size > 0) {
+                try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+            }
+        }
+    }
+
+    // Push success flag
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
@@ -1019,10 +1135,8 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(to_address);
-        if (access_cost > 100) { // Was cold
-            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas_cost += access_cost;
     }
 
     // Consume gas before proceeding
@@ -1136,10 +1250,8 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(to_address);
-        if (access_cost > 100) { // Was cold
-            total_gas_cost += GasConstants.ColdAccountAccessCost - GasConstants.WarmStorageReadCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(to_address);
+        total_gas_cost += access_cost;
     }
 
     // Consume gas before proceeding
@@ -1217,6 +1329,11 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// - Tangerine Whistle (EIP-150): 5000 gas base cost
 /// - Spurious Dragon (EIP-161): Additional 25000 gas if creating a new account
 /// - London (EIP-3529): Removed gas refunds for selfdestruct
+/// - Cancun (EIP-6780): SELFDESTRUCT only works on contracts created in same transaction
+///
+/// EIP-6780 Changes (Cancun):
+/// - If contract was created in the same transaction: Full destruction (balance transfer + code/storage deletion)
+/// - If contract existed before this transaction: Only balance transfer, contract remains
 ///
 /// In static call contexts, SELFDESTRUCT is forbidden and will revert.
 /// The contract is only marked for destruction and actual deletion happens at transaction end.
@@ -1224,7 +1341,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// Stack: [recipient_address] -> []
 /// Gas: Variable based on hardfork and account creation
 /// Memory: No memory access
-/// Storage: Contract marked for destruction
+/// Storage: Contract marked for destruction (if created in same tx)
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
@@ -1242,11 +1359,8 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if recipient is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_address(recipient_address);
-        if (access_cost > 100) { // Was cold
-            // Cold access adds extra cost
-            gas_cost += GasConstants.ColdAccountAccessCost;
-        }
+        const access_cost = try frame.access_list.get_call_cost(recipient_address);
+        gas_cost += access_cost;
     }
 
     // Consume gas
@@ -1255,9 +1369,26 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     // Record the self-destruct operation in the journal
     try frame.journal.record_selfdestruct(frame.snapshot_id, frame.contract_address, recipient_address);
 
-    // Mark for destruction using the existing self_destruct system if available
+    // EIP-6780: Check if contract was created in this transaction
+    const should_destroy = if (frame.is_at_least(.CANCUN)) blk: {
+        // Only destroy if contract was created in this transaction
+        if (frame.created_contracts) |created| {
+            break :blk created.was_created_in_tx(frame.contract_address);
+        }
+        // If no created_contracts tracking, assume pre-existing (don't destroy)
+        break :blk false;
+    } else true; // Pre-Cancun: always destroy
+
+    // Mark for destruction or just transfer balance based on EIP-6780
     if (frame.self_destruct) |sd| {
-        try sd.mark_for_destruction(frame.contract_address, recipient_address);
+        if (should_destroy) {
+            // Full destruction: mark for end-of-transaction cleanup
+            try sd.mark_for_destruction(frame.contract_address, recipient_address);
+        } else {
+            // EIP-6780: Only transfer balance, don't destroy
+            // This will be handled in apply_destructions by checking created_contracts
+            try sd.mark_for_destruction(frame.contract_address, recipient_address);
+        }
     }
 
     // SELFDESTRUCT terminates execution immediately - we would signal this
