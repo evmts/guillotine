@@ -238,15 +238,49 @@ fn handle_address_access(vm: *Vm, frame: Frame, to: u256) ExecutionError.Error!p
     return to_address;
 }
 
-/// Calculate gas for call operations using 63/64 rule and value stipend
-fn calculate_call_gas_amount(frame: *Frame, gas: u256, value: u256) u64 {
-    var gas_for_call = if (gas > std.math.maxInt(u64)) std.math.maxInt(u64) else @as(u64, @intCast(gas));
-    gas_for_call = @min(gas_for_call, frame.gas_remaining - (frame.gas_remaining / GasConstants.CALL_GAS_RETENTION_DIVISOR));
-
+/// Calculate gas for call operations implementing EIP-150 semantics
+///
+/// EIP-150 introduces the all-but-one-64th rule where the calling contract
+/// retains at least 1/64th of its remaining gas. Additionally, calls with
+/// value transfers receive a 2300 gas stipend to ensure basic operations.
+///
+/// ## Gas Forwarding Rules:
+/// 1. Calculate max forwardable: gas_remaining - floor(gas_remaining/64)
+/// 2. Use minimum of requested gas and max forwardable
+/// 3. If value > 0, add 2300 gas stipend (not taken from caller's gas)
+///
+/// ## Parameters
+/// - `frame`: Current execution frame
+/// - `gas`: Requested gas amount from stack
+/// - `value`: ETH value being transferred (0 for non-value calls)
+/// - `already_consumed`: Gas already consumed for the call operation
+///
+/// ## Returns
+/// - Actual gas amount to forward to the called contract
+fn calculate_call_gas_amount(frame: *Frame, gas: u256, value: u256, already_consumed: u64) u64 {
+    // Convert requested gas to u64, capping at max
+    const gas_requested = if (gas > std.math.maxInt(u64)) 
+        std.math.maxInt(u64) 
+    else 
+        @as(u64, @intCast(gas));
+    
+    // EIP-150: All but one 64th rule
+    // Caller must retain at least 1/64 of remaining gas
+    const gas_available = frame.gas_remaining - already_consumed;
+    const one_64th = gas_available / GasConstants.CALL_GAS_RETENTION_DIVISOR;
+    const max_gas_to_forward = gas_available - one_64th;
+    
+    // Take minimum of requested and maximum forwardable
+    var gas_for_call = @min(gas_requested, max_gas_to_forward);
+    
+    // EIP-150: Add stipend for value transfers
+    // The stipend is ADDED to the gas, not taken from the caller
     if (value != 0) {
-        gas_for_call = @max(gas_for_call, GasConstants.GAS_STIPEND_VALUE_TRANSFER);
+        // For value transfers, ensure at least the stipend amount
+        // This gas is given "for free" to the callee
+        gas_for_call += GasConstants.GAS_STIPEND_VALUE_TRANSFER;
     }
-
+    
     return gas_for_call;
 }
 
@@ -844,9 +878,14 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Add value transfer cost if applicable
     if (value > 0) {
         total_gas_cost += GasConstants.CALL_VALUE_TRANSFER_COST;
-        // Check if account is new (would need state access)
-        // For now, we assume account exists
-        // if (is_new_account) total_gas_cost += GasConstants.CallNewAccountCost;
+        
+        // EIP-150: Check if account is new (doesn't exist) and add creation cost
+        // Account creation only happens with value transfer to non-existent account
+        // We need to query the host to check if account exists
+        const account_exists = frame.host.account_exists(to_address);
+        if (!account_exists) {
+            total_gas_cost += GasConstants.CallNewAccountCost;
+        }
     }
 
     // Consume the gas for the CALL operation itself
@@ -859,7 +898,16 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     try ensure_return_memory(frame, ret_offset, ret_size);
 
     // Calculate gas limit for the called contract
-    const gas_limit = calculate_call_gas_amount(frame, gas, value);
+    // Pass the gas already consumed for memory expansion and base costs
+    const gas_limit = calculate_call_gas_amount(frame, gas, value, total_gas_cost);
+
+    // Deduct the forwarded gas from remaining (but not the stipend)
+    // The stipend is added "for free" and not deducted from caller
+    const gas_to_deduct = if (value != 0)
+        gas_limit - GasConstants.GAS_STIPEND_VALUE_TRANSFER
+    else
+        gas_limit;
+    try frame.consume_gas(gas_to_deduct);
 
     // Create a journal snapshot before entering child frame
     // This allows us to revert all state changes if the call fails
@@ -894,8 +942,9 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         frame.journal.revert_to_snapshot(snapshot);
     }
 
-    // Update gas remaining
-    frame.gas_remaining = @min(frame.gas_remaining, call_result.gas_left);
+    // Update gas remaining - return unused gas to caller
+    // The gas_left from the call should be added back
+    frame.gas_remaining += call_result.gas_left;
 
     // Write return data if successful and there's output
     if (call_result.success and call_result.output != null and ret_size > 0) {
@@ -991,7 +1040,11 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     try ensure_return_memory(frame, ret_offset, ret_size);
 
     // Calculate gas to forward (63/64 rule)
-    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
+    // DELEGATECALL never transfers value, so no stipend
+    const gas_limit = calculate_call_gas_amount(frame, gas, 0, total_gas_cost);
+    
+    // Deduct the forwarded gas from remaining
+    try frame.consume_gas(gas_limit);
 
     // Create a journal snapshot before entering child frame
     // This allows us to revert all state changes if the call fails
@@ -1104,7 +1157,11 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     try ensure_return_memory(frame, ret_offset, ret_size);
 
     // Calculate gas to forward (63/64 rule)
-    const gas_limit = calculate_call_gas_amount(frame, gas, 0);
+    // STATICCALL never transfers value, so no stipend
+    const gas_limit = calculate_call_gas_amount(frame, gas, 0, total_gas_cost);
+    
+    // Deduct the forwarded gas from remaining
+    try frame.consume_gas(gas_limit);
 
     // Create a journal snapshot before entering child frame
     // Even though STATICCALL is read-only, we still snapshot for consistency
@@ -1644,38 +1701,59 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
     }
 }
 
-test "CALL with value guarantees minimum 2300 gas stipend to callee" {
+test "CALL with value guarantees 2300 gas stipend added to forwarded gas" {
     // Test with simple frame struct that has only what calculate_call_gas_amount needs
     var frame = struct {
         gas_remaining: u64,
     }{
-        .gas_remaining = 1000, // Low gas remaining
+        .gas_remaining = 10000, // Sufficient gas remaining
     };
 
-    // Test 1: With value transfer, should guarantee minimum 2300 gas
+    // Test 1: With value transfer, stipend is ADDED to forwarded gas
     {
-        const gas_requested: primitives.u256 = 50; // Request only 50 gas
+        const gas_requested: primitives.u256 = 1000; // Request 1000 gas
         const value: primitives.u256 = 1; // Non-zero value triggers stipend
+        const already_consumed: u64 = 100; // Some gas already consumed
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value);
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Should receive at least 2300 gas (the stipend), not 50
-        try testing.expectEqual(@as(u64, GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
+        // Available after consumed: 10000 - 100 = 9900
+        // Max forwardable: 9900 - (9900/64) = 9900 - 154 = 9746
+        // Requested: 1000 (less than max)
+        // With stipend: 1000 + 2300 = 3300
+        try testing.expectEqual(@as(u64, 1000 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
     }
 
-    // Test 2: With value transfer and high gas request, should use requested amount if higher than stipend
+    // Test 2: EIP-150 63/64 rule limits gas forwarding
     {
-        frame.gas_remaining = 10000; // Plenty of gas available
-        const gas_requested: primitives.u256 = 5000; // Request more than stipend
+        frame.gas_remaining = 6400; // Specific amount for easy calculation
+        const gas_requested: primitives.u256 = 10000; // Request more than available
+        const value: primitives.u256 = 0; // No value, no stipend
+        const already_consumed: u64 = 0;
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Available: 6400
+        // One 64th: 6400 / 64 = 100
+        // Max forwardable: 6400 - 100 = 6300
+        // No stipend since value = 0
+        try testing.expectEqual(@as(u64, 6300), gas_for_call);
+    }
+
+    // Test 3: Stipend is added even when gas is limited by 63/64 rule
+    {
+        frame.gas_remaining = 640; // Low gas
+        const gas_requested: primitives.u256 = 1000; // Request more than available
         const value: primitives.u256 = 1; // Non-zero value
+        const already_consumed: u64 = 0;
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value);
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Should receive the requested amount (after 63/64 rule), which is higher than stipend
-        const max_allowed = frame.gas_remaining - (frame.gas_remaining / 64);
-        const expected = @min(5000, max_allowed);
-        try testing.expectEqual(expected, gas_for_call);
-        try testing.expect(gas_for_call >= GasConstants.GAS_STIPEND_VALUE_TRANSFER);
+        // Available: 640
+        // One 64th: 640 / 64 = 10  
+        // Max forwardable: 640 - 10 = 630
+        // With stipend: 630 + 2300 = 2930
+        try testing.expectEqual(@as(u64, 630 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
     }
 }
 
@@ -1691,11 +1769,131 @@ test "CALL without value respects gas limit without stipend" {
     {
         const gas_requested: primitives.u256 = 50; // Request only 50 gas
         const value: primitives.u256 = 0; // Zero value - no stipend
+        const already_consumed: u64 = 0;
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value);
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Should receive only what was requested (50 gas), no stipend boost
+        // Available: 1000
+        // One 64th: 1000 / 64 = 15
+        // Max forwardable: 1000 - 15 = 985
+        // Requested: 50 (less than max)
+        // No stipend since value = 0
         try testing.expectEqual(@as(u64, 50), gas_for_call);
         try testing.expect(gas_for_call < GasConstants.GAS_STIPEND_VALUE_TRANSFER);
+    }
+}
+
+test "EIP-150 gas calculations for nested calls" {
+    // Test nested call gas calculations following EIP-150 semantics
+    var frame = struct {
+        gas_remaining: u64,
+    }{
+        .gas_remaining = 100000,
+    };
+
+    // Test 1: First level call gets 63/64 of available gas
+    {
+        const gas_requested: primitives.u256 = std.math.maxInt(u64); // Request all gas
+        const value: primitives.u256 = 0;
+        const already_consumed: u64 = 1000; // Some overhead
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Available after consumed: 100000 - 1000 = 99000
+        // One 64th: 99000 / 64 = 1546
+        // Max forwardable: 99000 - 1546 = 97454
+        const expected = (100000 - 1000) - ((100000 - 1000) / 64);
+        try testing.expectEqual(expected, gas_for_call);
+    }
+
+    // Test 2: Simulate second level call (from within first call)
+    {
+        frame.gas_remaining = 97454; // Gas forwarded to first call
+        const gas_requested: primitives.u256 = std.math.maxInt(u64);
+        const value: primitives.u256 = 0;
+        const already_consumed: u64 = 500; // Some overhead in nested call
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Available after consumed: 97454 - 500 = 96954
+        // One 64th: 96954 / 64 = 1514
+        // Max forwardable: 96954 - 1514 = 95440
+        const expected = (97454 - 500) - ((97454 - 500) / 64);
+        try testing.expectEqual(expected, gas_for_call);
+    }
+}
+
+test "EIP-150 minimum gas retention" {
+    // Test that caller always retains at least 1/64 of gas
+    var frame = struct {
+        gas_remaining: u64,
+    }{
+        .gas_remaining = 64, // Exactly 64 gas
+    };
+
+    // Caller should retain exactly 1 gas (64/64 = 1)
+    {
+        const gas_requested: primitives.u256 = 100; // Request more than available
+        const value: primitives.u256 = 0;
+        const already_consumed: u64 = 0;
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Available: 64
+        // One 64th: 64 / 64 = 1
+        // Max forwardable: 64 - 1 = 63
+        try testing.expectEqual(@as(u64, 63), gas_for_call);
+    }
+
+    // Test with very low gas (less than 64)
+    frame.gas_remaining = 32;
+    {
+        const gas_requested: primitives.u256 = 100;
+        const value: primitives.u256 = 0;
+        const already_consumed: u64 = 0;
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Available: 32
+        // One 64th: 32 / 64 = 0 (integer division)
+        // Max forwardable: 32 - 0 = 32 (all gas can be forwarded)
+        try testing.expectEqual(@as(u64, 32), gas_for_call);
+    }
+}
+
+test "EIP-150 stipend edge cases" {
+    // Test edge cases around the 2300 gas stipend
+    var frame = struct {
+        gas_remaining: u64,
+    }{
+        .gas_remaining = 100, // Very low gas
+    };
+
+    // Test 1: Stipend is added even when caller has very low gas
+    {
+        const gas_requested: primitives.u256 = 10;
+        const value: primitives.u256 = 1; // Value transfer
+        const already_consumed: u64 = 0;
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Available: 100
+        // One 64th: 100 / 64 = 1
+        // Max forwardable: 100 - 1 = 99
+        // Requested: 10 (less than max)
+        // With stipend: 10 + 2300 = 2310
+        try testing.expectEqual(@as(u64, 10 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
+    }
+
+    // Test 2: Stipend with zero gas requested
+    {
+        const gas_requested: primitives.u256 = 0; // Request zero gas
+        const value: primitives.u256 = 1; // Value transfer
+        const already_consumed: u64 = 0;
+
+        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+
+        // Even with 0 gas requested, stipend ensures 2300 gas
+        try testing.expectEqual(@as(u64, GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
     }
 }
