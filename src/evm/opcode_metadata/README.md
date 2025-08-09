@@ -1,10 +1,10 @@
-# Jump Table - Opcode Dispatch System
+# Opcode Metadata - Opcode Dispatch System
 
 High-performance opcode dispatch mechanism that maps EVM opcodes to their implementations while enforcing hardfork rules and stack validation.
 
 ## Purpose
 
-The jump table system provides:
+The opcode metadata system provides:
 - Fast O(1) opcode-to-function dispatch
 - Hardfork-aware operation availability
 - Centralized stack validation
@@ -15,19 +15,19 @@ The jump table system provides:
 
 The system consists of two main components:
 
-1. **Jump Table**: Maps opcodes to function pointers based on hardfork
+1. **Opcode Metadata**: Maps opcodes to function pointers based on hardfork
 2. **Operation Config**: Metadata about each operation (stack requirements, gas)
 
-The jump table validates all stack preconditions, allowing individual operations to use unsafe (but fast) stack operations without compromising safety.
+The opcode metadata validates all stack preconditions, allowing individual operations to use unsafe (but fast) stack operations without compromising safety.
 
 ## Files
 
-### `jump_table.zig`
+### `opcode_metadata.zig`
 Core dispatch table mapping opcodes to implementations.
 
 **Structure**:
 ```zig
-JumpTable = struct {
+OpcodeMetadata = struct {
     table: [256]OperationFunc,  // Function pointers indexed by opcode
     config: [256]Operation,      // Operation metadata
 }
@@ -134,7 +134,7 @@ Operation = struct {
 
 ### Basic Execution
 ```zig
-const table = try JumpTable.init(allocator, .LONDON);
+const table = try OpcodeMetadata.init(allocator, .LONDON);
 defer table.deinit();
 
 const opcode = 0x01; // ADD
@@ -154,7 +154,7 @@ if (operations[0x5f].exec != invalidOpcode) {
 
 ## Stack Validation
 
-The jump table performs critical safety checks:
+The opcode metadata performs critical safety checks:
 
 1. **Underflow Prevention**: Ensures enough items for operation
 2. **Overflow Prevention**: Ensures room for results
@@ -172,7 +172,7 @@ const b = state.stack.items[state.stack.items.len - 2];
 - **Dispatch**: ~2-3 CPU cycles (array lookup)
 - **Validation**: ~5-10 cycles (comparison + branch)
 - **Total Overhead**: <15 cycles per operation
-- **Memory**: 4KB per jump table (256 entries × 16 bytes)
+- **Memory**: 4KB per opcode metadata (256 entries × 16 bytes)
 
 ## Hardfork Support
 

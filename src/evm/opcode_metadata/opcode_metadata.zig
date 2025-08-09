@@ -21,12 +21,12 @@ const stack_ops = execution.stack;
 const log = execution.log;
 const operation_config = @import("operation_config.zig");
 
-/// EVM jump table for efficient opcode dispatch.
+/// EVM opcode metadata for efficient opcode dispatch.
 ///
-/// The jump table is a critical performance optimization that maps opcodes
+/// The opcode metadata is a critical performance optimization that maps opcodes
 /// to their execution handlers. Instead of using a switch statement with
-/// 256 cases, the jump table provides O(1) dispatch by indexing directly
-/// into arrays of function pointers and metadata.
+/// 256 cases, the opcode metadata provides O(1) dispatch by indexing directly
+/// into arrays of function pointers and jt.
 ///
 /// ## Design Rationale
 /// - Parallel arrays provide better cache locality than array-of-structs
@@ -46,12 +46,12 @@ const operation_config = @import("operation_config.zig");
 ///
 /// Example:
 /// ```zig
-/// const table = JumpTable.init_from_hardfork(.CANCUN);
+/// const table = OpcodeMetadata.init_from_hardfork(.CANCUN);
 /// const opcode = bytecode[pc];
 /// const operation = table.get_operation(opcode);
 /// // Old execute method removed - see ExecutionContext pattern
 /// ```
-pub const JumpTable = @This();
+pub const OpcodeMetadata = @This();
 
 /// CPU cache line size for optimal memory alignment.
 /// Most modern x86/ARM processors use 64-byte cache lines.
@@ -70,25 +70,25 @@ dynamic_gas: [256]?GasFunc align(CACHE_LINE_SIZE),
 memory_size: [256]?MemorySizeFunc align(CACHE_LINE_SIZE),
 undefined_flags: [256]bool align(CACHE_LINE_SIZE),
 
-/// CANCUN jump table, pre-generated at compile time.
+/// CANCUN opcode metadata, pre-generated at compile time.
 /// This is the latest hardfork configuration.
 pub const CANCUN = init_from_hardfork(.CANCUN);
 
-/// Default jump table for the latest hardfork.
+/// Default opcode metadata for the latest hardfork.
 /// References CANCUN to avoid generating the same table twice.
-/// This is what gets used when no jump table is specified.
+/// This is what gets used when no opcode metadata is specified.
 pub const DEFAULT = CANCUN;
 
-/// Create an empty jump table with all entries set to defaults.
+/// Create an empty opcode metadata with all entries set to defaults.
 ///
-/// This creates a blank jump table that must be populated with
+/// This creates a blank opcode metadata that must be populated with
 /// operations before use. Typically, you'll want to use
 /// init_from_hardfork() instead to get a pre-configured table.
 ///
-/// @return An empty jump table
-pub fn init() JumpTable {
+/// @return An empty opcode metadata table
+pub fn init() OpcodeMetadata {
     const undefined_execute = operation_module.NULL_OPERATION.execute;
-    return JumpTable{
+    return OpcodeMetadata{
         .execute_funcs = [_]ExecutionFunc{undefined_execute} ** 256,
         .constant_gas = [_]u64{0} ** 256,
         .min_stack = [_]u32{0} ** 256,
@@ -115,7 +115,7 @@ pub const OperationView = struct {
 /// Returns a view of the operation data for the opcode.
 /// This maintains API compatibility while using parallel arrays internally.
 ///
-/// @param self The jump table
+/// @param self The opcode metadata
 /// @param opcode The opcode byte value (0x00-0xFF)
 /// @return Operation view struct
 ///
@@ -123,7 +123,7 @@ pub const OperationView = struct {
 /// ```zig
 /// const op = table.get_operation(0x01); // Get ADD operation
 /// ```
-pub inline fn get_operation(self: *const JumpTable, opcode: u8) OperationView {
+pub inline fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationView {
     return OperationView{
         .execute = self.execute_funcs[opcode],
         .constant_gas = self.constant_gas[opcode],
@@ -140,17 +140,17 @@ pub inline fn get_operation(self: *const JumpTable, opcode: u8) OperationView {
     // entries are intentionally unreachable (invalid) and serve only as metadata
     // carriers for gas/stack validation.
 
-/// Validate and fix the jump table.
+/// Validate and fix the opcode jt.
 ///
 /// Ensures all entries are valid:
 /// - Operations with memory_size must have dynamic_gas
 /// - Invalid operations are logged and marked as undefined
 ///
-/// This should be called after manually constructing a jump table
+/// This should be called after manually constructing a opcode metadata
 /// to ensure it's safe for execution.
 ///
-/// @param self The jump table to validate
-pub fn validate(self: *JumpTable) void {
+/// @param self The opcode metadata to validate
+pub fn validate(self: *OpcodeMetadata) void {
     for (0..256) |i| {
         // Check for invalid operation configuration (error path)
         if (self.memory_size[i] != null and self.dynamic_gas[i] == null) {
@@ -164,9 +164,9 @@ pub fn validate(self: *JumpTable) void {
     }
 }
 
-pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
+pub fn copy(self: *const OpcodeMetadata, allocator: std.mem.Allocator) !OpcodeMetadata {
     _ = allocator;
-    return JumpTable{
+    return OpcodeMetadata{
         .execute_funcs = self.execute_funcs,
         .constant_gas = self.constant_gas,
         .min_stack = self.min_stack,
@@ -177,14 +177,14 @@ pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
     };
 }
 
-/// Create a jump table configured for a specific hardfork.
+/// Create a opcode metadata configured for a specific hardfork.
 ///
-/// This is the primary way to create a jump table. It starts with
+/// This is the primary way to create a opcode jt. It starts with
 /// the Frontier base configuration and applies all changes up to
 /// the specified hardfork.
 ///
 /// @param hardfork The target hardfork configuration
-/// @return A fully configured jump table
+/// @return A fully configured opcode metadata
 ///
 /// Hardfork progression:
 /// - FRONTIER: Base EVM opcodes
@@ -200,12 +200,12 @@ pub fn copy(self: *const JumpTable, allocator: std.mem.Allocator) !JumpTable {
 ///
 /// Example:
 /// ```zig
-/// const table = JumpTable.init_from_hardfork(.CANCUN);
+/// const table = OpcodeMetadata.init_from_hardfork(.CANCUN);
 /// // Table includes all opcodes through Cancun
 /// ```
-pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
+pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     @setEvalBranchQuota(10000);
-    var jt = JumpTable.init();
+    var jt = OpcodeMetadata.init();
 
     // With ALL_OPERATIONS sorted by hardfork, we can iterate once.
     // Each opcode will be set to the latest active version for the target hardfork.
@@ -398,6 +398,9 @@ pub fn init_from_hardfork(hardfork: Hardfork) JumpTable {
     return jt;
 }
 
+/// Alias for backward compatibility with camelCase naming
+pub const initFromHardfork = init_from_hardfork;
+
 test "jump_table_benchmarks" {
     const Timer = std.time.Timer;
     var timer = try Timer.start();
@@ -413,9 +416,9 @@ test "jump_table_benchmarks" {
     const iterations = 100000;
 
     // Benchmark 1: Opcode dispatch performance comparison
-    const cancun_table = JumpTable.init_from_hardfork(.CANCUN);
-    const shanghai_table = JumpTable.init_from_hardfork(.SHANGHAI);
-    const berlin_table = JumpTable.init_from_hardfork(.BERLIN);
+    const cancun_table = OpcodeMetadata.init_from_hardfork(.CANCUN);
+    const shanghai_table = OpcodeMetadata.init_from_hardfork(.SHANGHAI);
+    const berlin_table = OpcodeMetadata.init_from_hardfork(.BERLIN);
 
     timer.reset();
     var i: usize = 0;
@@ -481,7 +484,7 @@ test "jump_table_benchmarks" {
     };
 
     for (hardfork_specific_opcodes) |test_case| {
-        const table = JumpTable.init_from_hardfork(test_case.hardfork);
+        const table = OpcodeMetadata.init_from_hardfork(test_case.hardfork);
         i = 0;
         while (i < 10000) : (i += 1) {
             const operation = table.get_operation(test_case.opcode);
@@ -516,7 +519,7 @@ test "jump_table_benchmarks" {
     timer.reset();
     i = 0;
     while (i < 1000) : (i += 1) { // Fewer iterations due to full scan cost
-        // Scan entire jump table (tests cache locality)
+        // Scan entire opcode metadata (tests cache locality)
         for (0..256) |opcode_idx| {
             _ = cancun_table.get_operation(@intCast(opcode_idx));
         }
@@ -524,7 +527,7 @@ test "jump_table_benchmarks" {
     const table_scan_ns = timer.read();
 
     // Print benchmark results
-    std.log.debug("Jump Table Benchmarks:", .{});
+    std.log.debug("OpcodeMetadata Benchmarks:", .{});
     std.log.debug("  Cancun dispatch ({} ops): {} ns", .{ iterations, cancun_dispatch_ns });
     std.log.debug("  Shanghai dispatch ({} ops): {} ns", .{ iterations, shanghai_dispatch_ns });
     std.log.debug("  Berlin dispatch ({} ops): {} ns", .{ iterations, berlin_dispatch_ns });
@@ -561,6 +564,6 @@ test "jump_table_benchmarks" {
 
     // Expect very fast dispatch (should be just array indexing)
     if (avg_dispatch_ns < 10) {
-        std.log.debug("✓ Jump table showing expected O(1) performance");
+        std.log.debug("✓ OpcodeMetadata showing expected O(1) performance");
     }
 }

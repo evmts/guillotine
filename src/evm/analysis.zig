@@ -9,7 +9,7 @@ const JumpTarget = @import("instruction.zig").JumpTarget;
 const DynamicGas = @import("instruction.zig").DynamicGas;
 const DynamicGasFunc = @import("instruction.zig").DynamicGasFunc;
 const Opcode = @import("opcodes/opcode.zig");
-const JumpTable = @import("jump_table/jump_table.zig");
+const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 const instruction_limits = @import("constants/instruction_limits.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const execution = @import("execution/package.zig");
@@ -126,7 +126,7 @@ const BlockAnalysis = struct {
 /// - EIP-3855 (PUSH0): Reject PUSH0 in pre-Shanghai contracts
 /// - EIP-5656 (MCOPY): Reject MCOPY in pre-Cancun contracts
 /// - EIP-3198 (BASEFEE): Reject BASEFEE in pre-London contracts
-pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable) !CodeAnalysis {
+pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *const OpcodeMetadata) !CodeAnalysis {
     if (code.len > limits.MAX_CONTRACT_SIZE) {
         return error.CodeTooLarge;
     }
@@ -310,7 +310,7 @@ const CodeGenResult = struct {
     inst_jump_type: []JumpType,
 };
 
-fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const JumpTable, jumpdest_bitmap: *const DynamicBitSet) !CodeGenResult {
+fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const OpcodeMetadata, jumpdest_bitmap: *const DynamicBitSet) !CodeGenResult {
     Log.debug("[analysis] Converting {} bytes of code to instructions", .{code.len});
 
     // Allocate instruction array with extra space for BEGINBLOCK instructions
@@ -728,7 +728,7 @@ test "from_code basic functionality" {
     // Simple bytecode: PUSH1 0x01, STOP
     const code = &[_]u8{ 0x60, 0x01, 0x00 };
 
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
@@ -745,7 +745,7 @@ test "from_code with jumpdest" {
     // Bytecode: JUMPDEST, PUSH1 0x01, STOP
     const code = &[_]u8{ 0x5B, 0x60, 0x01, 0x00 };
 
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
@@ -772,7 +772,7 @@ test "jump target resolution with BEGINBLOCK injections" {
         0x60, 0x01, // PUSH1 0x01
         0x00, // STOP
     };
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
@@ -827,7 +827,7 @@ test "conditional jump (JUMPI) target resolution" {
         0x60, 0x42, // PUSH1 0x42
         0x00, // STOP
     };
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
@@ -870,7 +870,7 @@ test "invalid jump target handling" {
         0x60, 0x01, // PUSH1 0x01 (at PC 5, NOT a JUMPDEST)
         0x00, // STOP
     };
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 

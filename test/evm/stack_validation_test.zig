@@ -2,15 +2,15 @@ const std = @import("std");
 const testing = std.testing;
 const Evm = @import("evm");
 const Stack = Evm.Stack;
-const JumpTable = Evm.JumpTable;
+const OpcodeMetadata = Evm.OpcodeMetadata;
 const ExecutionError = Evm.ExecutionError;
 const stack_validation = Evm.stack_validation;
 
 // Test stack validation in the context of actual opcodes
 
 test "Stack validation: binary operations" {
-    // Create jump table
-    var table = JumpTable.init_from_hardfork(.FRONTIER);
+    // Create opcode metadata
+    var table = OpcodeMetadata.init_from_hardfork(.FRONTIER);
 
     // Get ADD operation
     const add_op = table.get_operation(0x01);
@@ -35,7 +35,7 @@ test "Stack validation: binary operations" {
 }
 
 test "Stack validation: PUSH operations" {
-    var table = JumpTable.init_from_hardfork(.FRONTIER);
+    var table = OpcodeMetadata.init_from_hardfork(.FRONTIER);
     const push1_op = table.get_operation(0x60);
 
     // PUSH operations have min_stack = 0
@@ -56,7 +56,7 @@ test "Stack validation: PUSH operations" {
 }
 
 test "Stack validation: DUP operations" {
-    var table = JumpTable.init_from_hardfork(.FRONTIER);
+    var table = OpcodeMetadata.init_from_hardfork(.FRONTIER);
     const dup1_op = table.get_operation(0x80);
 
     // DUP1 needs at least 1 item
@@ -81,7 +81,7 @@ test "Stack validation: DUP operations" {
 }
 
 test "Stack validation: SWAP operations" {
-    var table = JumpTable.init_from_hardfork(.FRONTIER);
+    var table = OpcodeMetadata.init_from_hardfork(.FRONTIER);
     const swap1_op = table.get_operation(0x90);
 
     // SWAP1 needs at least 2 items
@@ -128,11 +128,11 @@ test "Stack validation: max_stack calculations" {
     try testing.expectEqual(@as(u32, Stack.CAPACITY), stack_validation.calculate_max_stack(7, 1));
 }
 
-test "Stack validation: jump table stack requirements verification" {
-    // This test verifies that the jump table properly sets stack requirements
+test "Stack validation: opcode metadata stack requirements verification" {
+    // This test verifies that the opcode metadata properly sets stack requirements
     // for operations, and that our validation functions work correctly with them
 
-    var table = JumpTable.init_from_hardfork(.FRONTIER);
+    var table = OpcodeMetadata.init_from_hardfork(.FRONTIER);
 
     // Test ADD operation requirements
     const add_op = table.get_operation(0x01);
@@ -168,7 +168,7 @@ test "Stack validation: all operation categories" {
     // This test verifies that all operation categories have appropriate
     // min_stack and max_stack values set
 
-    var table = JumpTable.init_from_hardfork(.CANCUN);
+    var table = OpcodeMetadata.init_from_hardfork(.CANCUN);
 
     const test_cases = [_]struct {
         opcode: u8,

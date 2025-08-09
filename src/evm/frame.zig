@@ -530,12 +530,12 @@ comptime {
 
 // Helper functions for tests
 const TestHelpers = struct {
-    const JumpTable = @import("jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
     const MemoryDatabase = @import("state/memory_database.zig");
 
     fn createEmptyAnalysis(allocator: std.mem.Allocator) !CodeAnalysis {
         const code = &[_]u8{0x00}; // STOP
-        const table = JumpTable.DEFAULT;
+        const table = OpcodeMetadata.DEFAULT;
         return CodeAnalysis.from_code(allocator, code, &table);
     }
 
@@ -558,11 +558,11 @@ const TestHelpers = struct {
 
 test "Frame - basic initialization" {
     const allocator = std.testing.allocator;
-    const JumpTable = @import("jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
     // Create a simple code analysis for testing
     const code = &[_]u8{ 0x5B, 0x60, 0x01, 0x00 }; // JUMPDEST, PUSH1 0x01, STOP
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
@@ -604,11 +604,11 @@ test "Frame - basic initialization" {
 
 test "Frame - gas consumption" {
     const allocator = std.testing.allocator;
-    const JumpTable = @import("jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
     // Create empty code analysis for testing
     const code = &[_]u8{0x00}; // STOP
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
@@ -650,11 +650,11 @@ test "Frame - gas consumption" {
 
 test "Frame - jumpdest validation" {
     const allocator = std.testing.allocator;
-    const JumpTable = @import("jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
     // Create code with specific JUMPDESTs at positions 2 and 4
     const code = &[_]u8{ 0x00, 0x00, 0x5B, 0x00, 0x5B, 0x00 }; // STOP, STOP, JUMPDEST, STOP, JUMPDEST, STOP
-    const table = JumpTable.DEFAULT;
+    const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 

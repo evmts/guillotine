@@ -2,7 +2,7 @@ const std = @import("std");
 const Operation = @import("../opcodes/operation.zig").Operation;
 const ExecutionFunc = @import("../opcodes/operation.zig").ExecutionFunc;
 
-/// Struct-of-Arrays implementation of the jump table for improved cache locality.
+/// Struct-of-Arrays implementation of opcode metadata for improved cache locality.
 /// 
 /// Instead of storing an array of Operation structs (AoS), we store separate arrays
 /// for each field (SoA). This improves cache utilization because:
@@ -17,7 +17,7 @@ const ExecutionFunc = @import("../opcodes/operation.zig").ExecutionFunc;
 /// - max_stack: 256 * 4 bytes = 1KB
 /// - undefined_flags: 256 * 1 byte = 256 bytes
 /// Total: ~6.25KB vs 10KB+ for AoS
-pub const SoaJumpTable = struct {
+pub const SoaOpcodeMetadata = struct {
     /// Execution function pointers - hot path, accessed every opcode
     execute_funcs: [256]ExecutionFunc align(64),
     
@@ -31,9 +31,9 @@ pub const SoaJumpTable = struct {
     /// Undefined flags - cold path, rarely accessed
     undefined_flags: [256]bool align(64),
     
-    /// Initialize from existing AoS jump table
-    pub fn init_from_aos(aos_table: *const @import("jump_table.zig")) SoaJumpTable {
-        var soa = SoaJumpTable{
+    /// Initialize from existing AoS opcode metadata
+    pub fn init_from_aos(aos_metadata: *const @import("opcode_metadata.zig")) SoaOpcodeMetadata {
+        var soa = SoaOpcodeMetadata{
             .execute_funcs = undefined,
             .constant_gas = undefined,
             .min_stack = undefined,
@@ -43,7 +43,7 @@ pub const SoaJumpTable = struct {
         
         // Convert AoS to SoA
         for (0..256) |i| {
-            const op = aos_table.get_operation(@intCast(i));
+            const op = aos_metadata.get_operation(@intCast(i));
             soa.execute_funcs[i] = op.execute;
             soa.constant_gas[i] = op.constant_gas;
             soa.min_stack[i] = op.min_stack;
@@ -55,7 +55,7 @@ pub const SoaJumpTable = struct {
     }
     
     /// Get operation data using SoA access pattern
-    pub inline fn get_operation_soa(self: *const SoaJumpTable, opcode: u8) struct {
+    pub inline fn get_operation_soa(self: *const SoaOpcodeMetadata, opcode: u8) struct {
         execute: ExecutionFunc,
         gas: u64,
         min_stack: u32,
@@ -72,7 +72,7 @@ pub const SoaJumpTable = struct {
     }
     
     /// Optimized hot path - just get execute and gas
-    pub inline fn get_hot_fields(self: *const SoaJumpTable, opcode: u8) struct {
+    pub inline fn get_hot_fields(self: *const SoaOpcodeMetadata, opcode: u8) struct {
         execute: ExecutionFunc,
         gas: u64,
     } {
@@ -83,7 +83,7 @@ pub const SoaJumpTable = struct {
     }
     
     /// Optimized stack validation - just get min/max stack
-    pub inline fn get_stack_requirements(self: *const SoaJumpTable, opcode: u8) struct {
+    pub inline fn get_stack_requirements(self: *const SoaOpcodeMetadata, opcode: u8) struct {
         min_stack: u32,
         max_stack: u32,
     } {

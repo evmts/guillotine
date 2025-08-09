@@ -862,6 +862,22 @@ pub fn build(b: *std.Build) void {
     const jump_table_test_step = b.step("test-jump-table", "Run Jump table tests");
     jump_table_test_step.dependOn(&run_jump_table_test.step);
 
+    // Add Config tests
+    const config_test = b.addTest(.{
+        .name = "config-test",
+        .root_source_file = b.path("test/evm/config_simple_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    config_test.root_module.stack_check = false;
+    config_test.root_module.addImport("primitives", primitives_mod);
+    config_test.root_module.addImport("evm", evm_mod);
+
+    const run_config_test = b.addRunArtifact(config_test);
+    const config_test_step = b.step("test-config", "Run Config tests");
+    config_test_step.dependOn(&run_config_test.step);
+
     // Add Opcodes tests
     const opcodes_test = b.addTest(.{
         .name = "opcodes-test",
@@ -1530,6 +1546,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_newevm_test.step);
     test_step.dependOn(&run_stack_validation_test.step);
     test_step.dependOn(&run_jump_table_test.step);
+    test_step.dependOn(&run_config_test.step);
     // benchmark runner test removed - file no longer exists
 
     // Add inline ops test

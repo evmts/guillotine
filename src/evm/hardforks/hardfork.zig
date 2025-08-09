@@ -20,7 +20,7 @@
 ///
 /// Example:
 /// ```zig
-/// const table = JumpTable.init_from_hardfork(.CANCUN);
+/// const table = OpcodeMetadata.init_from_hardfork(.CANCUN);
 /// const is_berlin_plus = @intFromEnum(hardfork) >= @intFromEnum(Hardfork.BERLIN);
 /// ```
 pub const Hardfork = enum {

@@ -3,7 +3,7 @@ const testing = std.testing;
 const Evm = @import("evm.zig");
 const Frame = @import("frame.zig").Frame;
 const ChainRules = @import("frame.zig").ChainRules;
-const JumpTable = @import("jump_table/jump_table.zig");
+const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
 const primitives = @import("primitives");
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
@@ -57,7 +57,7 @@ test "Evm.init with custom hardfork configuration" {
     const hardforks = [_]Hardfork{ .FRONTIER, .BERLIN, .LONDON, .SHANGHAI, .CANCUN };
 
     for (hardforks) |hardfork| {
-        const jump_table = JumpTable.init(hardfork);
+        const jump_table = OpcodeMetadata.init(hardfork);
         const chain_rules = Frame.chainRulesForHardfork(hardfork);
 
         var evm = try Evm.Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);

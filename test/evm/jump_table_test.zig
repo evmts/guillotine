@@ -1,6 +1,6 @@
 const std = @import("std");
 const Evm = @import("evm");
-const JumpTable = Evm.JumpTable;
+const OpcodeMetadata = Evm.OpcodeMetadata;
 const Operation = Evm.Operation;
 const OperationModule = Evm.OperationModule;
 const Stack = Evm.Stack;
@@ -10,7 +10,7 @@ const MemoryDatabase = Evm.MemoryDatabase;
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 const execution = Evm.execution;
-const gas_constants = Evm.gas_constants;
+const gas_constants = Evm.GasConstants;
 const testing = std.testing;
 const Vm = Evm.Evm;
 const Context = Evm.Context;
@@ -19,8 +19,8 @@ test {
     // std.testing.log_level = .debug;
 }
 
-test "JumpTable basic operations" {
-    const jt = JumpTable.init_from_hardfork(.FRONTIER);
+test "OpcodeMetadata basic operations" {
+    const jt = OpcodeMetadata.initFromHardfork(.FRONTIER);
 
     // Test a couple of operations
     const stop_op = jt.get_operation(0x00);
@@ -34,8 +34,8 @@ test "JumpTable basic operations" {
     try std.testing.expect(undef_op.undefined);
 }
 
-test "JumpTable initialization and validation" {
-    const jt = JumpTable.init();
+test "OpcodeMetadata initialization and validation" {
+    const jt = OpcodeMetadata.init();
     try std.testing.expectEqual(@as(usize, 256), jt.execute_funcs.len);
 
     // Check that all entries are initially set to undefined
@@ -56,7 +56,7 @@ test "JumpTable initialization and validation" {
     }
 }
 
-test "JumpTable gas constants" {
+test "OpcodeMetadata gas constants" {
     try std.testing.expectEqual(@as(u64, 2), gas_constants.GasQuickStep);
     try std.testing.expectEqual(@as(u64, 3), gas_constants.GasFastestStep);
     try std.testing.expectEqual(@as(u64, 5), gas_constants.GasFastStep);
@@ -69,11 +69,11 @@ test "JumpTable gas constants" {
     try std.testing.expectEqual(@as(u64, 32000), gas_constants.CreateGas);
 }
 
-test "JumpTable basic initialization" {
-    // Test minimal jump table functionality without VM
-    const jt = JumpTable.init_from_hardfork(.FRONTIER);
+test "OpcodeMetadata basic initialization" {
+    // Test minimal opcode metadata functionality without VM
+    const jt = OpcodeMetadata.initFromHardfork(.FRONTIER);
 
-    // Verify the jump table was created
+    // Verify the opcode metadata was created
     try std.testing.expectEqual(@as(usize, 256), jt.execute_funcs.len);
 
     // Test a basic operation lookup
@@ -117,21 +117,21 @@ test "Manual VM.init reproduction" {
 
     // Step 6: Test static defaults
     std.log.debug("Step 6: Testing static defaults", .{});
-    const jump_table = JumpTable.DEFAULT;
+    const opcode_metadata = OpcodeMetadata.DEFAULT;
     const ChainRules = @import("evm").ChainRules;
     const chain_rules = ChainRules.DEFAULT;
-    _ = jump_table;
+    _ = opcode_metadata;
     _ = chain_rules;
     std.log.debug("Step 6: Static defaults work", .{});
 
     std.log.debug("Manual VM.init reproduction completed successfully!", .{});
 }
 
-test "JumpTable Constantinople opcodes" {
+test "OpcodeMetadata Constantinople opcodes" {
     // Test that Constantinople opcodes are properly configured
-    const jt_frontier = JumpTable.init_from_hardfork(.FRONTIER);
-    const jt_byzantium = JumpTable.init_from_hardfork(.BYZANTIUM);
-    const jt_constantinople = JumpTable.init_from_hardfork(.CONSTANTINOPLE);
+    const jt_frontier = OpcodeMetadata.initFromHardfork(.FRONTIER);
+    const jt_byzantium = OpcodeMetadata.initFromHardfork(.BYZANTIUM);
+    const jt_constantinople = OpcodeMetadata.initFromHardfork(.CONSTANTINOPLE);
 
     // Constantinople opcodes should not be in Frontier
     try std.testing.expect(jt_frontier.get_operation(0xf5).undefined); // CREATE2
@@ -169,11 +169,11 @@ test "JumpTable Constantinople opcodes" {
     try std.testing.expectEqual(@as(u32, 2), shl_op.min_stack);
 }
 
-test "JumpTable Istanbul opcodes" {
+test "OpcodeMetadata Istanbul opcodes" {
     // Test that Istanbul opcodes are properly configured
-    const jt_constantinople = JumpTable.init_from_hardfork(.CONSTANTINOPLE);
-    const jt_istanbul = JumpTable.init_from_hardfork(.ISTANBUL);
-    const jt_london = JumpTable.init_from_hardfork(.LONDON);
+    const jt_constantinople = OpcodeMetadata.initFromHardfork(.CONSTANTINOPLE);
+    const jt_istanbul = OpcodeMetadata.initFromHardfork(.ISTANBUL);
+    const jt_london = OpcodeMetadata.initFromHardfork(.LONDON);
 
     // Istanbul opcodes should not be in Constantinople
     try std.testing.expect(jt_constantinople.get_operation(0x46).undefined); // CHAINID
@@ -203,11 +203,11 @@ test "JumpTable Istanbul opcodes" {
     try std.testing.expectEqual(@as(u32, 0), basefee_op.min_stack);
 }
 
-test "JumpTable Shanghai opcodes" {
+test "OpcodeMetadata Shanghai opcodes" {
     // Test that Shanghai opcodes are properly configured
-    const jt_london = JumpTable.init_from_hardfork(.LONDON);
-    const jt_merge = JumpTable.init_from_hardfork(.MERGE);
-    const jt_shanghai = JumpTable.init_from_hardfork(.SHANGHAI);
+    const jt_london = OpcodeMetadata.initFromHardfork(.LONDON);
+    const jt_merge = OpcodeMetadata.initFromHardfork(.MERGE);
+    const jt_shanghai = OpcodeMetadata.initFromHardfork(.SHANGHAI);
 
     // PUSH0 should not be in London/Merge
     try std.testing.expect(jt_london.get_operation(0x5f).undefined); // PUSH0
@@ -223,10 +223,10 @@ test "JumpTable Shanghai opcodes" {
     try std.testing.expectEqual(@as(u32, Stack.CAPACITY - 1), push0_op.max_stack);
 }
 
-test "JumpTable Cancun opcodes" {
+test "OpcodeMetadata Cancun opcodes" {
     // Test that Cancun opcodes are properly configured
-    const jt_shanghai = JumpTable.init_from_hardfork(.SHANGHAI);
-    const jt_cancun = JumpTable.init_from_hardfork(.CANCUN);
+    const jt_shanghai = OpcodeMetadata.initFromHardfork(.SHANGHAI);
+    const jt_cancun = OpcodeMetadata.initFromHardfork(.CANCUN);
 
     // Cancun opcodes should not be in Shanghai
     try std.testing.expect(jt_shanghai.get_operation(0x49).undefined); // BLOBHASH
@@ -264,10 +264,10 @@ test "JumpTable Cancun opcodes" {
     try std.testing.expectEqual(@as(u32, 2), tstore_op.min_stack);
 }
 
-test "JumpTable @constCast memory safety issue reproduction" {
+test "OpcodeMetadata @constCast memory safety issue reproduction" {
     // This test verifies that our safe hardfork-specific operation variants work correctly
     // Previously this would segfault in CI due to @constCast modifying read-only memory
-    const jt = JumpTable.init_from_hardfork(.TANGERINE_WHISTLE);
+    const jt = OpcodeMetadata.initFromHardfork(.TANGERINE_WHISTLE);
 
     // This should work without @constCast modifications
     const balance_op = jt.get_operation(0x31); // BALANCE
@@ -277,9 +277,9 @@ test "JumpTable @constCast memory safety issue reproduction" {
     try std.testing.expectEqual(@as(u64, 400), balance_op.constant_gas);
 }
 
-test "benchmark current AoS jump table memory access pattern" {
-    // Create a jump table
-    const table = JumpTable.DEFAULT;
+test "benchmark current AoS opcode metadata memory access pattern" {
+    // Create opcode metadata
+    const table = OpcodeMetadata.DEFAULT;
 
     // Simulate typical opcode execution pattern from real EVM workloads
     // These are the most common opcodes in order of frequency
@@ -340,11 +340,11 @@ test "benchmark current AoS jump table memory access pattern" {
 }
 
 test "benchmark SoA jump table memory access pattern" {
-    const SoaJumpTable = @import("evm").SoaJumpTable;
+    const SoaOpcodeMetadata = @import("evm").SoaOpcodeMetadata;
 
     // Create both jump tables
-    const aos_table = JumpTable.DEFAULT;
-    const soa_table = SoaJumpTable.init_from_aos(&aos_table);
+    const aos_table = OpcodeMetadata.DEFAULT;
+    const soa_table = SoaOpcodeMetadata.init_from_aos(&aos_table);
 
     // Same opcode pattern as AoS test
     const common_opcodes = [_]u8{
@@ -404,11 +404,11 @@ test "benchmark SoA jump table memory access pattern" {
 }
 
 test "struct-of-arrays maintains operation correctness" {
-    const SoaJumpTable = @import("evm").SoaJumpTable;
+    const SoaOpcodeMetadata = @import("evm").SoaOpcodeMetadata;
 
     // Create both implementations
-    const aos_table = JumpTable.DEFAULT;
-    const soa_table = SoaJumpTable.init_from_aos(&aos_table);
+    const aos_table = OpcodeMetadata.DEFAULT;
+    const soa_table = SoaOpcodeMetadata.init_from_aos(&aos_table);
 
     // Test that SoA returns same values as AoS
     const opcodes_to_test = [_]u8{ 0x01, 0x60, 0x52, 0x00, 0xfe };

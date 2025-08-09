@@ -2,7 +2,7 @@ const std = @import("std");
 const CodeAnalysis = @import("analysis.zig");
 const keccak = std.crypto.hash.sha3.Keccak256;
 const Log = @import("log.zig");
-const JumpTable = @import("jump_table/jump_table.zig");
+const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
 /// LRU cache for code analysis results to avoid redundant analysis during nested calls.
 ///
@@ -171,7 +171,7 @@ fn evictLRU(self: *AnalysisCache) void {
 pub fn getOrAnalyze(
     self: *AnalysisCache,
     code: []const u8,
-    jump_table: *const JumpTable,
+    jump_table: *const OpcodeMetadata,
 ) !*CodeAnalysis {
     self.mutex.lock();
     defer self.mutex.unlock();
@@ -278,7 +278,7 @@ test "AnalysisCache - basic operations" {
     defer cache.deinit();
 
     // Create a mock jump table
-    var jump_table = JumpTable{};
+    var jump_table = OpcodeMetadata{};
 
     // Test code samples
     const code1 = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }; // PUSH1 1, PUSH1 2, ADD
@@ -310,7 +310,7 @@ test "AnalysisCache - LRU eviction" {
     var cache = init(allocator, 2); // Very small cache
     defer cache.deinit();
 
-    var jump_table = JumpTable{};
+    var jump_table = OpcodeMetadata{};
 
     const code1 = &[_]u8{ 0x60, 0x01 }; // PUSH1 1
     const code2 = &[_]u8{ 0x60, 0x02 }; // PUSH1 2
@@ -338,7 +338,7 @@ test "AnalysisCache - hit rate calculation" {
     var cache = init(allocator, 10);
     defer cache.deinit();
 
-    var jump_table = JumpTable{};
+    var jump_table = OpcodeMetadata{};
     const code = &[_]u8{ 0x60, 0x01 };
 
     // First access is a miss
@@ -361,7 +361,7 @@ test "AnalysisCache - clear operation" {
     var cache = init(allocator, 5);
     defer cache.deinit();
 
-    var jump_table = JumpTable{};
+    var jump_table = OpcodeMetadata{};
 
     // Add some entries
     const code1 = &[_]u8{ 0x60, 0x01 };

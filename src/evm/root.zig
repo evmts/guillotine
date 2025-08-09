@@ -18,7 +18,7 @@
 //! ### Opcodes
 //! - **Opcode**: Enumeration of all EVM instructions
 //! - **Operation**: Metadata about each opcode (gas, stack effects)
-//! - **JumpTable**: Maps opcodes to their implementations
+//! - **OpcodeMetadata**: Maps opcodes to their implementations
 //! - **execution/**: Individual opcode implementations
 //!
 //! ### Error Handling
@@ -77,11 +77,17 @@ pub const Context = @import("access_list/context.zig");
 /// Ethereum hardfork configuration
 pub const Hardfork = @import("hardforks/hardfork.zig");
 
-/// Opcode to implementation mapping
-pub const JumpTable = @import("jump_table/jump_table.zig");
+/// Centralized EVM configuration system
+pub const config = @import("config.zig");
+pub const EvmConfig = config.EvmConfig;
+pub const EipFlags = config.EipFlags;
+pub const EipOverrides = config.EipOverrides;
 
-/// Struct-of-arrays jump table for improved cache locality
-pub const SoaJumpTable = @import("jump_table/soa_jump_table.zig").SoaJumpTable;
+/// Opcode to implementation mapping
+pub const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
+
+/// Struct-of-arrays opcode metadata for improved cache locality
+pub const SoaOpcodeMetadata = @import("opcode_metadata/soa_opcode_metadata.zig").SoaOpcodeMetadata;
 
 /// Byte-addressable memory implementation
 pub const Memory = @import("memory/memory.zig");
@@ -402,8 +408,8 @@ test "Memory module" {
 test "ExecutionError module" {
     std.testing.refAllDecls(ExecutionError);
 }
-test "JumpTable module" {
-    std.testing.refAllDecls(JumpTable);
+test "OpcodeMetadata module" {
+    std.testing.refAllDecls(OpcodeMetadata);
 }
 test "Execution module" {
     std.testing.refAllDecls(execution);

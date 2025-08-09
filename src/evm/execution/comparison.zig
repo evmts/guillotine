@@ -125,7 +125,7 @@ pub fn op_iszero(context: *anyopaque) ExecutionError.Error!void {
 
 // Fuzz testing functions for comparison operations
 pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []const FuzzComparisonOperation) !void {
-    const JumpTable = @import("../jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const CodeAnalysis = @import("../analysis.zig");
     const AccessList = @import("../access_list.zig").AccessList;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
@@ -137,7 +137,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
 
         // Create a simple code analysis for testing
         const code = &[_]u8{0x00}; // STOP
-        const table = JumpTable.DEFAULT;
+        const table = OpcodeMetadata.DEFAULT;
         var analysis = try CodeAnalysis.from_code(allocator, code, &table);
         defer analysis.deinit();
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Stack = @import("stack.zig");
 const Operation = @import("../opcodes/operation.zig").Operation;
-const OperationView = @import("../jump_table/jump_table.zig").OperationView;
+const OperationView = @import("../opcode_metadata/opcode_metadata.zig").OperationView;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Log = @import("../log.zig");
 

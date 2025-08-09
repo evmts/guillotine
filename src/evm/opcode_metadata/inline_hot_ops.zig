@@ -272,7 +272,7 @@ pub inline fn execute_with_inline_hot_ops(
 test "inline hot ops maintains correctness" {
     // Test that inlined operations produce same results as regular dispatch
     const testing = std.testing;
-    const JumpTable = @import("jump_table.zig");
+    const OpcodeMetadata = @import("opcode_metadata.zig");
     
     // Test PUSH1
     {
@@ -298,7 +298,7 @@ test "inline hot ops maintains correctness" {
             .contract = .{ .code_size = 2 },
         };
         
-        const result = try execute_with_inline_hot_ops(JumpTable.DEFAULT, 0, undefined, &mock_frame, 0x60);
+        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &mock_frame, 0x60);
         try testing.expectEqual(@as(usize, 2), result.bytes_consumed);
         try testing.expectEqual(@as(u256, 0x42), try stack.pop());
     }
@@ -321,7 +321,7 @@ test "inline hot ops maintains correctness" {
             .gas_remaining = 1000,
         };
         
-        const result = try execute_with_inline_hot_ops(JumpTable.DEFAULT, 0, undefined, &mock_frame, 0x01);
+        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &mock_frame, 0x01);
         try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
         try testing.expectEqual(@as(u256, 30), try stack.pop());
     }

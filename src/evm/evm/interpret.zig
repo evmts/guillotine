@@ -225,7 +225,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
 test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     const allocator = std.testing.allocator;
-    const JumpTable = @import("../jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const Analysis = @import("../analysis.zig");
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const AccessList = @import("../access_list/access_list.zig").AccessList;
@@ -237,7 +237,7 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
 
     // Simple block with 5 x PUSH1 (5*3 gas) then STOP
     const code = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x60, 0x03, 0x60, 0x04, 0x60, 0x05, 0x00 };
-    var analysis = try Analysis.from_code(allocator, code, &JumpTable.DEFAULT);
+    var analysis = try Analysis.from_code(allocator, code, &OpcodeMetadata.DEFAULT);
     defer analysis.deinit();
 
     // Setup VM and environment
@@ -291,7 +291,7 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
 
 test "BEGINBLOCK: stack underflow detected at block entry" {
     const allocator = std.testing.allocator;
-    const JumpTable = @import("../jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const Analysis = @import("../analysis.zig");
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const AccessList = @import("../access_list/access_list.zig").AccessList;
@@ -303,7 +303,7 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
 
     // Block with ADD (requires 2 stack items) then STOP
     const code = &[_]u8{ 0x01, 0x00 };
-    var analysis = try Analysis.from_code(allocator, code, &JumpTable.DEFAULT);
+    var analysis = try Analysis.from_code(allocator, code, &OpcodeMetadata.DEFAULT);
     defer analysis.deinit();
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -355,7 +355,7 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
 
 test "BEGINBLOCK: stack overflow detected from max growth" {
     const allocator = std.testing.allocator;
-    const JumpTable = @import("../jump_table/jump_table.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const Analysis = @import("../analysis.zig");
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const AccessList = @import("../access_list/access_list.zig").AccessList;
@@ -368,7 +368,7 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
 
     // Block with PUSH1 then STOP (max_growth = +1)
     const code = &[_]u8{ 0x60, 0x01, 0x00 };
-    var analysis = try Analysis.from_code(allocator, code, &JumpTable.DEFAULT);
+    var analysis = try Analysis.from_code(allocator, code, &OpcodeMetadata.DEFAULT);
     defer analysis.deinit();
 
     var memory_db = MemoryDatabase.init(allocator);

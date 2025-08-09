@@ -1,6 +1,6 @@
 const std = @import("std");
 const Opcode = @import("opcode.zig");
-const operation_config = @import("../jump_table/operation_config.zig");
+const operation_config = @import("../opcode_metadata/operation_config.zig");
 const Stack = @import("../stack/stack.zig");
 
 /// Pre-computed net stack height change for each opcode.
