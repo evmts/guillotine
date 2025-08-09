@@ -11,10 +11,27 @@ pub inline fn context_size(self: *const Memory) usize {
     return total_len -| self.my_checkpoint;
 }
 
-/// Ensures the current context's memory region is at least `min_context_size` bytes.
-/// Returns the number of *new 32-byte words added to the shared_buffer* if it expanded.
-/// This is crucial for EVM gas calculation.
-pub noinline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
+/// Inline wrapper for ensure_context_capacity that handles the common case where no expansion is needed.
+/// This avoids function call overhead for the majority of memory operations.
+pub inline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
+    // Fast path: Check if memory is already large enough (common case)
+    const required_total_len = self.my_checkpoint + min_context_size;
+    const current_len = self.shared_buffer_ref.items.len;
+    
+    if (required_total_len <= current_len) {
+        @branchHint(.likely); // Most memory operations don't require expansion
+        // Memory is already large enough - no expansion needed
+        // This is the hot path that benefits from inlining
+        return 0;
+    }
+    
+    // Slow path: Delegate to the non-inline implementation for actual expansion
+    return self.ensure_context_capacity_slow(min_context_size);
+}
+
+/// Non-inline implementation of memory expansion for when actual expansion is needed.
+/// This keeps the complex expansion logic out of the inline hot path.
+pub noinline fn ensure_context_capacity_slow(self: *Memory, min_context_size: usize) MemoryError!u64 {
     const zone = tracy.zone(@src(), "memory_ensure_capacity\x00");
     defer zone.end();
     
@@ -29,12 +46,9 @@ pub noinline fn ensure_context_capacity(self: *Memory, min_context_size: usize) 
     const shared_buffer = self.shared_buffer_ref;
     const old_total_buffer_len = shared_buffer.items.len;
     const old_total_words = constants.calculate_num_words(old_total_buffer_len);
-
-    if (required_total_len <= old_total_buffer_len) {
-        // Buffer is already large enough
-        Log.debug("Memory.ensure_context_capacity: Buffer already large enough, no expansion needed", .{});
-        return 0;
-    }
+    
+    // Note: We already checked in the inline wrapper that expansion is needed,
+    // so we can skip the redundant check here
 
     // Resize the buffer
     const resize_zone = tracy.zone(@src(), "memory_resize\x00");
