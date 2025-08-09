@@ -182,12 +182,8 @@ pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need contract_code field in ExecutionContext
     // Push size of current contract's code
-    // try frame.stack.append(@as(u256, @intCast(frame.contract_code.len)));
-
-    // Placeholder implementation - push zero for now
-    try frame.stack.append(0);
+    try frame.stack.append(@as(u256, @intCast(frame.code.len)));
 }
 
 pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
@@ -263,23 +259,22 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.OutOfOffset;
     }
 
-    // TODO: Implement codecopy with ExecutionContext
-    // const mem_offset_usize = @as(usize, @intCast(mem_offset));
-    // const code_offset_usize = @as(usize, @intCast(code_offset));
-    // const size_usize = @as(usize, @intCast(size));
-    //
-    // // Calculate memory expansion gas cost
-    // const new_size = mem_offset_usize + size_usize;
-    // const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    // try frame.consume_gas(memory_gas);
-    //
-    // // Dynamic gas for copy operation
-    // const word_size = (size_usize + 31) / 32;
-    // try frame.consume_gas(GasConstants.CopyGas * word_size);
-    //
-    // // Copy current contract code to memory
-    // const code = frame.contract_code;
-    // try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
+    const mem_offset_usize = @as(usize, @intCast(mem_offset));
+    const code_offset_usize = @as(usize, @intCast(code_offset));
+    const size_usize = @as(usize, @intCast(size));
+
+    // Calculate memory expansion gas cost
+    const new_size = mem_offset_usize + size_usize;
+    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    try frame.consume_gas(memory_gas);
+
+    // Dynamic gas for copy operation
+    const word_size = (size_usize + 31) / 32;
+    try frame.consume_gas(GasConstants.CopyGas * word_size);
+
+    // Copy current contract code to memory
+    const code = frame.code;
+    try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
 /// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data
 /// This is an EOF opcode that allows reading from the return data buffer

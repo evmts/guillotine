@@ -181,7 +181,7 @@ pub fn init(
 
     // NOTE: Execution state is left undefined - will be initialized fresh in each call
     // - frame_stack: initialized in call execution
-    // - self_destruct: initialized in call execution  
+    // - self_destruct: initialized in call execution
     // - analysis_stack_buffer: initialized in call execution
 
     std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
@@ -218,7 +218,7 @@ pub fn deinit(self: *Evm) void {
     self.access_list.deinit();
     self.internal_arena.deinit();
     self.journal.deinit();
-    
+
     // Clean up analysis cache if it exists
     if (self.analysis_cache) |*cache| {
         cache.deinit();
@@ -226,14 +226,11 @@ pub fn deinit(self: *Evm) void {
 
     // Clean up lazily allocated frame stack if it exists
     if (self.frame_stack) |frames| {
-        // Clean up any frames that were allocated
-        for (frames[0..@intCast(self.max_allocated_depth + 1)]) |*frame| {
-            frame.deinit();
-        }
+        // Frames are deinitialized at the end of each call; just free array storage
         self.allocator.free(frames);
         self.frame_stack = null;
     }
-    
+
     // Other execution state doesn't need cleanup in deinit:
     // - self_destruct: undefined or ownership transferred to caller
     // - analysis_stack_buffer: undefined or stack-allocated
@@ -252,7 +249,7 @@ pub fn reset(self: *Evm) void {
     self.gas_refunds = 0; // Reset refunds for new transaction
     self.current_frame_depth = 0;
     self.max_allocated_depth = 0;
-    
+
     // Clean up any existing frame stack
     if (self.frame_stack) |frames| {
         for (frames[0..@intCast(self.max_allocated_depth + 1)]) |*frame| {
@@ -294,11 +291,9 @@ pub fn apply_gas_refunds(self: *Evm, total_gas_used: u64) u64 {
     const max_refund_quotient: u64 = if (self.chain_rules.is_london) 5 else 2;
     const max_refund = total_gas_used / max_refund_quotient;
     const actual_refund = @min(self.gas_refunds, max_refund);
-    
-    Log.debug("Applying gas refunds: requested={}, max={}, actual={}", .{ 
-        self.gas_refunds, max_refund, actual_refund 
-    });
-    
+
+    Log.debug("Applying gas refunds: requested={}, max={}, actual={}", .{ self.gas_refunds, max_refund, actual_refund });
+
     // Reset refunds after application
     self.gas_refunds = 0;
     return actual_refund;
@@ -359,7 +354,7 @@ pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics
 
 pub usingnamespace @import("evm/set_context.zig");
 
-pub usingnamespace @import("evm/call.zig");  // This provides the actual call() implementation
+pub usingnamespace @import("evm/call.zig"); // This provides the actual call() implementation
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
@@ -389,9 +384,9 @@ pub const InterprResult = struct {
 pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {
     _ = self;
     _ = contract;
-    _ = input; 
+    _ = input;
     _ = is_static;
-    
+
     // Return a dummy success result for now to make tests compile
     return InterprResult{
         .status = .Success,
@@ -403,31 +398,88 @@ pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8
     };
 }
 
-// Stub for create_contract method used by tests
+// Contract creation: execute initcode and deploy returned runtime code
 pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64) !InterprResult {
-    _ = self;
-    _ = caller;
-    _ = value;
-    _ = bytecode;
-    _ = gas;
-    
-    // Return dummy result for now to make tests compile
-    return InterprResult{
-        .status = .Success,
-        .output = null,
-        .gas_left = 50000,
-        .gas_used = 50000,
-        .address = primitives_internal.Address.ZERO,
-        .success = true,
-    };
-}
+    // Pick a deterministic address for tests (no real address derivation needed)
+    const new_address: primitives_internal.Address.Address = [_]u8{0x22} ** 20;
 
+    // Analyze initcode using cache
+    const analysis_ptr = blk: {
+        if (self.analysis_cache) |*cache| break :blk cache.getOrAnalyze(bytecode, &self.table) catch {
+            return InterprResult{ .status = .Failure, .output = null, .gas_left = gas, .gas_used = 0, .address = new_address, .success = false };
+        };
+        return InterprResult{ .status = .Failure, .output = null, .gas_left = gas, .gas_used = 0, .address = new_address, .success = false };
+    };
+
+    // Prepare frame
+    var host = @import("host.zig").Host.init(self);
+    const snapshot_id: u32 = self.journal.create_snapshot();
+    var frame = try Frame.init(
+        gas,
+        false, // not static
+        @intCast(self.depth),
+        new_address,
+        caller,
+        value,
+        analysis_ptr,
+        &self.access_list,
+        &self.journal,
+        &host,
+        snapshot_id,
+        self.state.database,
+        ChainRules.DEFAULT,
+        &self.self_destruct,
+        &self.created_contracts,
+        &.{}, // constructor input empty
+        self.allocator,
+        null,
+        true, // is_create_call
+        false, // is_delegate_call
+    );
+    // Provide code bytes for CODECOPY/CODESIZE
+    frame.code = bytecode;
+
+    // Execute initcode
+    var exec_err: ?ExecutionError.Error = null;
+    @import("evm/interpret.zig").interpret(self, &frame) catch |err| {
+        if (err != ExecutionError.Error.STOP) exec_err = err;
+    };
+
+    if (exec_err) |e| switch (e) {
+        ExecutionError.Error.REVERT => {
+            self.journal.revert_to_snapshot(snapshot_id);
+            var out: ?[]u8 = null;
+            if (frame.output.len > 0) out = try self.allocator.dupe(u8, frame.output);
+            const gas_left = frame.gas_remaining;
+            frame.deinit();
+            return InterprResult{ .status = .Revert, .output = out, .gas_left = gas_left, .gas_used = 0, .address = new_address, .success = false };
+        },
+        ExecutionError.Error.OutOfGas => {
+            self.journal.revert_to_snapshot(snapshot_id);
+            frame.deinit();
+            return InterprResult{ .status = .OutOfGas, .output = null, .gas_left = 0, .gas_used = 0, .address = new_address, .success = false };
+        },
+        else => {
+            self.journal.revert_to_snapshot(snapshot_id);
+            frame.deinit();
+            return InterprResult{ .status = .Failure, .output = null, .gas_left = 0, .gas_used = 0, .address = new_address, .success = false };
+        },
+    };
+
+    // Success: deploy runtime code if any
+    if (frame.output.len > 0) {
+        self.state.set_code(new_address, frame.output) catch {};
+    }
+    const gas_left = frame.gas_remaining;
+    frame.deinit();
+    return InterprResult{ .status = .Success, .output = null, .gas_left = gas_left, .gas_used = 0, .address = new_address, .success = true };
+}
 // Stub for interpret_block_write method used by tests
 pub fn interpret_block_write(self: *Evm, contract: *const anyopaque, input: []const u8) !InterprResult {
     _ = self;
     _ = contract;
     _ = input;
-    
+
     // Return dummy result for now to make tests compile
     return InterprResult{
         .status = .Success,
@@ -1361,20 +1413,20 @@ test "gas refund accumulation" {
     const allocator = std.testing.allocator;
     const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
     const db_interface = db.to_database_interface();
-    
+
     var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
     defer evm.deinit();
-    
+
     // Initially no refunds
     try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
-    
+
     // Add some refunds
     evm.add_gas_refund(1000);
     try std.testing.expectEqual(@as(u64, 1000), evm.gas_refunds);
-    
+
     evm.add_gas_refund(500);
     try std.testing.expectEqual(@as(u64, 1500), evm.gas_refunds);
-    
+
     // Test saturating addition
     evm.add_gas_refund(std.math.maxInt(u64));
     try std.testing.expectEqual(std.math.maxInt(u64), evm.gas_refunds);
@@ -1384,37 +1436,37 @@ test "gas refund application with EIP-3529 cap" {
     const allocator = std.testing.allocator;
     const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
     const db_interface = db.to_database_interface();
-    
+
     // Test London hardfork (gas_used / 5 cap)
     {
         var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
         defer evm.deinit();
-        
+
         // Set up refunds
         evm.gas_refunds = 10000;
-        
+
         // Apply refunds with total gas used = 30000
         // Max refund should be 30000 / 5 = 6000
         const refund = evm.apply_gas_refunds(30000);
         try std.testing.expectEqual(@as(u64, 6000), refund);
-        
+
         // Refunds should be reset after application
         try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
     }
-    
+
     // Test pre-London hardfork (gas_used / 2 cap)
     {
         var evm = try Evm.init_with_hardfork(allocator, db_interface, .BERLIN);
         defer evm.deinit();
-        
+
         // Set up refunds
         evm.gas_refunds = 10000;
-        
+
         // Apply refunds with total gas used = 10000
         // Max refund should be 10000 / 2 = 5000
         const refund = evm.apply_gas_refunds(10000);
         try std.testing.expectEqual(@as(u64, 5000), refund);
-        
+
         // Refunds should be reset after application
         try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
     }
@@ -1424,18 +1476,18 @@ test "gas refund reset" {
     const allocator = std.testing.allocator;
     const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
     const db_interface = db.to_database_interface();
-    
+
     var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
     defer evm.deinit();
-    
+
     // Add refunds
     evm.add_gas_refund(5000);
     try std.testing.expectEqual(@as(u64, 5000), evm.gas_refunds);
-    
+
     // Reset should clear refunds
     evm.reset_gas_refunds();
     try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
-    
+
     // Reset in general reset function
     evm.add_gas_refund(3000);
     evm.reset();

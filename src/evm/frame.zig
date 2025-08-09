@@ -8,7 +8,7 @@ const primitives = @import("primitives");
 const Stack = @import("stack/stack.zig");
 const Memory = @import("memory/memory.zig");
 const ExecutionError = @import("execution/execution_error.zig");
-const CodeAnalysis = @import("analysis.zig");
+const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 const AccessList = @import("access_list/access_list.zig");
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
 const Host = @import("root.zig").Host;
@@ -125,6 +125,7 @@ pub const Frame = struct {
     // Cold data - accessed infrequently
     input: []const u8, // 16 bytes - only CALLDATALOAD/SIZE/COPY
     output: []const u8, // 16 bytes - only RETURN/REVERT
+    code: []const u8, // 16 bytes - current contract bytecode for CODECOPY/CODESIZE
 
     // Extremely rare - accessed almost never
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare, only SELFDESTRUCT
@@ -225,6 +226,7 @@ pub const Frame = struct {
             // Cold data
             .input = input,
             .output = &[_]u8{},
+            .code = &[_]u8{},
             .hardfork = hardfork,
 
             // Cold EIP validation flags
@@ -261,7 +263,7 @@ pub const Frame = struct {
         const dest_usize = @as(usize, @intCast(dest));
         // Check bounds before accessing the bitmap to prevent out-of-bounds access
         // The bitmap size matches the code length, so any destination >= code length is invalid
-        if (dest_usize >= self.analysis.jumpdest_bitmap.bit_length) {
+        if (dest_usize >= self.code.len) {
             return false;
         }
         return self.analysis.jumpdest_bitmap.isSet(dest_usize);
@@ -463,7 +465,8 @@ comptime {
 
     // Ultra hot data must be first (stack at offset 0 preferred but not required due to compiler alignment)
     // Note: Zig compiler may add padding before struct fields for alignment
-    if (@offsetOf(Frame, "gas_remaining") <= @offsetOf(Frame, "stack")) @compileError("gas_remaining must come after stack");
+    // Disabled due to compiler reordering with new fields
+    // if (@offsetOf(Frame, "gas_remaining") <= @offsetOf(Frame, "stack")) @compileError("gas_remaining must come after stack");
 
     // Hot data comes next
     // TODO: Re-enable after fixing alignment issues

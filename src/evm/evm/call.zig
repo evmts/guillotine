@@ -105,12 +105,12 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             Log.err("[call] Code analysis failed: {}", .{err});
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
-        // IMPORTANT: This is a memory leak if we don't have a cache! 
+        // IMPORTANT: This is a memory leak if we don't have a cache!
         // We can't defer deinit here because we need the analysis for execution.
         // This is why the cache is important - it manages the lifetime properly.
         break :blk &analysis;
     };
-    
+
     // Don't defer deinit when using cache - cache manages lifetime
     const analysis = analysis_ptr.*;
 
@@ -134,7 +134,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             const initial_capacity = 16; // Start with space for 16 frames
             self.frame_stack = try self.allocator.alloc(Frame, initial_capacity);
         }
-        
+
         // Create host interface from self
         var host = Host.init(self);
 
@@ -162,8 +162,9 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             false, // is_create_call
             false, // is_delegate_call
         );
+        self.frame_stack.?[0].code = call_info.code;
         // Frame resources will be released after execution completes
-        
+
         // Mark that we've allocated the first frame
         self.max_allocated_depth = 0;
 
@@ -178,12 +179,12 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     } else {
         // Nested call: Allocate a new frame on-demand
         const new_depth = self.current_frame_depth + 1;
-        
+
         // Check call depth limit
         if (new_depth >= MAX_CALL_DEPTH) {
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
-        
+
         // Ensure we have space in the frame stack, grow if needed
         if (self.frame_stack) |frames| {
             if (new_depth >= frames.len) {
@@ -196,10 +197,10 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             // Should not happen, but handle gracefully
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
-        
+
         // Create host interface from self
         var host = Host.init(self);
-        
+
         // Initialize the new frame
         const parent_frame = &self.frame_stack.?[self.current_frame_depth];
         self.frame_stack.?[new_depth] = try Frame.init(
@@ -224,13 +225,13 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             false, // is_create_call
             false, // is_delegate_call
         );
-        
-        // Update tracking
-        self.current_frame_depth = new_depth;
+        self.frame_stack.?[new_depth].code = call_info.code;
+
+        // Update tracking        self.current_frame_depth = new_depth;
         if (new_depth > self.max_allocated_depth) {
             self.max_allocated_depth = new_depth;
         }
-        
+
         // Copy block context from parent frame
         self.frame_stack.?[new_depth].block_number = parent_frame.block_number;
         self.frame_stack.?[new_depth].block_timestamp = parent_frame.block_timestamp;
@@ -268,13 +269,13 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         output = self.allocator.dupe(u8, executed_frame.output) catch &.{};
         Log.debug("[call] Output length: {}", .{output.len});
     }
-    
+
     // Save gas remaining for return
     const gas_remaining = executed_frame.gas_remaining;
 
     // Release frame resources
     executed_frame.deinit();
-    
+
     // Restore parent frame depth (or stay at 0 if top-level)
     if (self.current_frame_depth > 0) {
         self.current_frame_depth -= 1;

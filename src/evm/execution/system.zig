@@ -259,20 +259,20 @@ fn handle_address_access(vm: *Vm, frame: Frame, to: u256) ExecutionError.Error!p
 /// - Actual gas amount to forward to the called contract
 fn calculate_call_gas_amount(frame: *Frame, gas: u256, value: u256, already_consumed: u64) u64 {
     // Convert requested gas to u64, capping at max
-    const gas_requested = if (gas > std.math.maxInt(u64)) 
-        std.math.maxInt(u64) 
-    else 
+    const gas_requested = if (gas > std.math.maxInt(u64))
+        std.math.maxInt(u64)
+    else
         @as(u64, @intCast(gas));
-    
+
     // EIP-150: All but one 64th rule
     // Caller must retain at least 1/64 of remaining gas
     const gas_available = frame.gas_remaining - already_consumed;
     const one_64th = gas_available / GasConstants.CALL_GAS_RETENTION_DIVISOR;
     const max_gas_to_forward = gas_available - one_64th;
-    
+
     // Take minimum of requested and maximum forwardable
     var gas_for_call = @min(gas_requested, max_gas_to_forward);
-    
+
     // EIP-150: Add stipend for value transfers
     // The stipend is ADDED to the gas, not taken from the caller
     if (value != 0) {
@@ -280,7 +280,7 @@ fn calculate_call_gas_amount(frame: *Frame, gas: u256, value: u256, already_cons
         // This gas is given "for free" to the callee
         gas_for_call += GasConstants.GAS_STIPEND_VALUE_TRANSFER;
     }
-    
+
     return gas_for_call;
 }
 
@@ -626,7 +626,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     if (call_result.success) {
         // Commit the snapshot on success (no-op in current implementation)
         // The journal entries persist for transaction-level revert capability
-        
+
         // Handle gas accounting after CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
@@ -656,10 +656,10 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     } else {
         // Revert the snapshot on failure
         frame.journal.revert_to_snapshot(snapshot);
-        
+
         // Handle gas accounting after failed CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
-        
+
         try frame.stack.append(0);
     }
 }
@@ -762,7 +762,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     if (call_result.success) {
         // Commit the snapshot on success (no-op in current implementation)
         // The journal entries persist for transaction-level revert capability
-        
+
         // Handle gas accounting after CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
@@ -792,10 +792,10 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     } else {
         // Revert the snapshot on failure
         frame.journal.revert_to_snapshot(snapshot);
-        
+
         // Handle gas accounting after failed CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
-        
+
         try frame.stack.append(0);
     }
 }
@@ -862,8 +862,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     } else 0;
 
     // Base gas cost for CALL opcode
-    const base_gas = GasConstants.CALL_BASE_COST;
-
+    const base_gas = GasConstants.CallGas;
     // Additional gas costs
     var total_gas_cost = base_gas + memory_expansion_cost;
 
@@ -877,14 +876,14 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
     // Add value transfer cost if applicable
     if (value > 0) {
-        total_gas_cost += GasConstants.CALL_VALUE_TRANSFER_COST;
-        
+        total_gas_cost += GasConstants.CallValueTransferGas;
+
         // EIP-150: Check if account is new (doesn't exist) and add creation cost
         // Account creation only happens with value transfer to non-existent account
         // We need to query the host to check if account exists
         const account_exists = frame.host.account_exists(to_address);
         if (!account_exists) {
-            total_gas_cost += GasConstants.CallNewAccountCost;
+            total_gas_cost += GasConstants.NewAccountCost;
         }
     }
 
@@ -904,7 +903,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Deduct the forwarded gas from remaining (but not the stipend)
     // The stipend is added "for free" and not deducted from caller
     const gas_to_deduct = if (value != 0)
-        gas_limit - GasConstants.GAS_STIPEND_VALUE_TRANSFER
+        gas_limit - GasConstants.CallStipend
     else
         gas_limit;
     try frame.consume_gas(gas_to_deduct);
@@ -912,7 +911,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Create a journal snapshot before entering child frame
     // This allows us to revert all state changes if the call fails
     const snapshot = frame.journal.create_snapshot();
-    
+
     // Access the VM through the host interface
     const host = frame.host;
 
@@ -1042,7 +1041,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     // Calculate gas to forward (63/64 rule)
     // DELEGATECALL never transfers value, so no stipend
     const gas_limit = calculate_call_gas_amount(frame, gas, 0, total_gas_cost);
-    
+
     // Deduct the forwarded gas from remaining
     try frame.consume_gas(gas_limit);
 
@@ -1159,7 +1158,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Calculate gas to forward (63/64 rule)
     // STATICCALL never transfers value, so no stipend
     const gas_limit = calculate_call_gas_amount(frame, gas, 0, total_gas_cost);
-    
+
     // Deduct the forwarded gas from remaining
     try frame.consume_gas(gas_limit);
 
@@ -1750,7 +1749,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas" {
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
         // Available: 640
-        // One 64th: 640 / 64 = 10  
+        // One 64th: 640 / 64 = 10
         // Max forwardable: 640 - 10 = 630
         // With stipend: 630 + 2300 = 2930
         try testing.expectEqual(@as(u64, 630 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
