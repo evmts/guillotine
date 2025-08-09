@@ -41,8 +41,8 @@
             .hash = "webui-2.5.0-beta.4-pxqD5esSNwCHzwq6ndnW-ShzC_nPNAzGu13l4Unk0rFl",
         },
         .c_kzg_4844 = .{
-            .url = "git+https://github.com/evmts/c-kzg-4844#d231873d5c815af6f1ab2e315f038fa5cb8c5294",
-            .hash = "c_kzg_4844-0.0.0-UbJ7acpiHQBNlbFymCuO9OTLut3UtdHz4OiDZBc5pCAd",
+            .url = "git+https://github.com/ethereum/c-kzg-4844#v2.1.1",
+            .hash = "N-V-__8AAMRWcwV8OFU4iFPMGO-2HcYogCjtmO69VpT-DhxI",
         },
         .zbench = .{
             .url = "https://github.com/hendriknielaender/zBench/archive/refs/heads/zig-0.14.0.tar.gz",

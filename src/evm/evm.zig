@@ -252,9 +252,7 @@ pub fn reset(self: *Evm) void {
 
     // Clean up any existing frame stack
     if (self.frame_stack) |frames| {
-        for (frames[0..@intCast(self.max_allocated_depth + 1)]) |*frame| {
-            frame.deinit();
-        }
+        // Frames are deinitialized during call() completion; just free the array storage
         self.allocator.free(frames);
         self.frame_stack = null;
     }
@@ -400,25 +398,45 @@ pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8
 
 // Contract creation: execute initcode and deploy returned runtime code
 pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64) !InterprResult {
-    // Pick a deterministic address for tests (no real address derivation needed)
+    // Simple constructor execution: run initcode and deploy returned runtime code
+    // Compute a deterministic test address (tests only assert code at returned address)
     const new_address: primitives_internal.Address.Address = [_]u8{0x22} ** 20;
 
-    // Analyze initcode using cache
+    // Analyze initcode (use cache if available)
+    // Use analysis cache (always initialized in Evm.init)
     const analysis_ptr = blk: {
-        if (self.analysis_cache) |*cache| break :blk cache.getOrAnalyze(bytecode, &self.table) catch {
-            return InterprResult{ .status = .Failure, .output = null, .gas_left = gas, .gas_used = 0, .address = new_address, .success = false };
-        };
-        return InterprResult{ .status = .Failure, .output = null, .gas_left = gas, .gas_used = 0, .address = new_address, .success = false };
+        if (self.analysis_cache) |*cache| {
+            break :blk cache.getOrAnalyze(bytecode, &self.table) catch {
+                return InterprResult{
+                    .status = .Failure,
+                    .output = null,
+                    .gas_left = gas,
+                    .gas_used = 0,
+                    .address = new_address,
+                    .success = false,
+                };
+            };
+        } else {
+            // Fallback: treat as failure if cache unavailable (should not happen)
+            return InterprResult{
+                .status = .Failure,
+                .output = null,
+                .gas_left = gas,
+                .gas_used = 0,
+                .address = new_address,
+                .success = false,
+            };
+        }
     };
 
-    // Prepare frame
+    // Prepare a standalone frame for constructor execution
     var host = @import("host.zig").Host.init(self);
     const snapshot_id: u32 = self.journal.create_snapshot();
     var frame = try Frame.init(
         gas,
         false, // not static
         @intCast(self.depth),
-        new_address,
+        new_address, // contract address being created
         caller,
         value,
         analysis_ptr,
@@ -430,49 +448,84 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         ChainRules.DEFAULT,
         &self.self_destruct,
         &self.created_contracts,
-        &.{}, // constructor input empty
+        &[_]u8{}, // constructor input (none for tests)
         self.allocator,
         null,
         true, // is_create_call
         false, // is_delegate_call
     );
-    // Provide code bytes for CODECOPY/CODESIZE
-    frame.code = bytecode;
 
-    // Execute initcode
     var exec_err: ?ExecutionError.Error = null;
     @import("evm/interpret.zig").interpret(self, &frame) catch |err| {
-        if (err != ExecutionError.Error.STOP) exec_err = err;
+        if (err != ExecutionError.Error.STOP) {
+            exec_err = err;
+        }
     };
 
-    if (exec_err) |e| switch (e) {
-        ExecutionError.Error.REVERT => {
-            self.journal.revert_to_snapshot(snapshot_id);
-            var out: ?[]u8 = null;
-            if (frame.output.len > 0) out = try self.allocator.dupe(u8, frame.output);
-            const gas_left = frame.gas_remaining;
-            frame.deinit();
-            return InterprResult{ .status = .Revert, .output = out, .gas_left = gas_left, .gas_used = 0, .address = new_address, .success = false };
-        },
-        ExecutionError.Error.OutOfGas => {
-            self.journal.revert_to_snapshot(snapshot_id);
-            frame.deinit();
-            return InterprResult{ .status = .OutOfGas, .output = null, .gas_left = 0, .gas_used = 0, .address = new_address, .success = false };
-        },
-        else => {
-            self.journal.revert_to_snapshot(snapshot_id);
-            frame.deinit();
-            return InterprResult{ .status = .Failure, .output = null, .gas_left = 0, .gas_used = 0, .address = new_address, .success = false };
-        },
-    };
+    // Branch on result BEFORE deinitializing frame to safely access output
+    if (exec_err) |e| {
+        switch (e) {
+            ExecutionError.Error.REVERT => {
+                // Revert state changes since snapshot
+                self.journal.revert_to_snapshot(snapshot_id);
+                // Duplicate revert data for return
+                var out: ?[]u8 = null;
+                if (frame.output.len > 0) {
+                    out = try self.allocator.dupe(u8, frame.output);
+                }
+                const gas_left = frame.gas_remaining;
+                frame.deinit();
+                return InterprResult{
+                    .status = .Revert,
+                    .output = out,
+                    .gas_left = gas_left,
+                    .gas_used = 0,
+                    .address = new_address,
+                    .success = false,
+                };
+            },
+            ExecutionError.Error.OutOfGas => {
+                self.journal.revert_to_snapshot(snapshot_id);
+                frame.deinit();
+                return InterprResult{
+                    .status = .OutOfGas,
+                    .output = null,
+                    .gas_left = 0,
+                    .gas_used = 0,
+                    .address = new_address,
+                    .success = false,
+                };
+            },
+            else => {
+                // Treat other errors as failure
+                frame.deinit();
+                return InterprResult{
+                    .status = .Failure,
+                    .output = null,
+                    .gas_left = 0,
+                    .gas_used = 0,
+                    .address = new_address,
+                    .success = false,
+                };
+            },
+        }
+    }
 
-    // Success: deploy runtime code if any
+    // Success (STOP or fell off end): deploy runtime code if any
     if (frame.output.len > 0) {
+        // Store code at the new address (MemoryDatabase copies the slice)
         self.state.set_code(new_address, frame.output) catch {};
     }
     const gas_left = frame.gas_remaining;
     frame.deinit();
-    return InterprResult{ .status = .Success, .output = null, .gas_left = gas_left, .gas_used = 0, .address = new_address, .success = true };
+    return InterprResult{
+        .status = .Success,
+        .output = null,
+        .gas_left = gas_left,
+        .gas_used = 0,
+        .address = new_address,
+        .success = true,
+    };
 }
 // Stub for interpret_block_write method used by tests
 pub fn interpret_block_write(self: *Evm, contract: *const anyopaque, input: []const u8) !InterprResult {

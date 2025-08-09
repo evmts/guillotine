@@ -183,7 +183,7 @@ pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
 pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Push size of current contract's code
-    try frame.stack.append(@as(u256, @intCast(frame.code.len)));
+    try frame.stack.append(@as(u256, @intCast(frame.analysis.code_len)));
 }
 
 pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
@@ -243,7 +243,6 @@ pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need contract_code field in ExecutionContext
     // Pop memory offset, code offset, and size
     const mem_offset = try frame.stack.pop();
     const code_offset = try frame.stack.pop();
@@ -268,12 +267,12 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
     try frame.consume_gas(memory_gas);
 
-    // Dynamic gas for copy operation
+    // Dynamic gas for copy operation (VERYLOW * word_count)
     const word_size = (size_usize + 31) / 32;
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
-    // Copy current contract code to memory
-    const code = frame.code;
+    // Copy from current contract bytecode (from analysis)
+    const code = frame.analysis.code;
     try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
 /// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data

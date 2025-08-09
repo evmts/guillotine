@@ -106,20 +106,58 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             },
             .none => {
                 @branchHint(.likely);
-                // Most opcodes now have .none - no individual gas/stack validation needed
-                // Gas and stack validation is handled by BEGINBLOCK instructions
-                current_index += 1;
-                nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
-                    // Frame already manages its own output, no need to copy
-                    Log.debug("[interpret] Opcode at index {} returned error: {}", .{ current_index - 1, err });
+                // Handle dynamic JUMP/JUMPI at runtime if needed
+                const jt = frame.analysis.inst_jump_type[current_index];
+                switch (jt) {
+                    .jump => {
+                        const dest = frame.stack.pop_unsafe();
+                        if (!frame.valid_jumpdest(dest)) {
+                            return ExecutionError.Error.InvalidJump;
+                        }
+                        const dest_usize: usize = @intCast(dest);
+                        const idx = frame.analysis.pc_to_block_start[dest_usize];
+                        if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
+                            return ExecutionError.Error.InvalidJump;
+                        }
+                        current_index = idx;
+                        break; // proceed to next loop iteration
+                    },
+                    .jumpi => {
+                        const pops = frame.stack.pop2_unsafe();
+                        const dest = pops.a;
+                        const condition = pops.b;
+                        if (condition != 0) {
+                            if (!frame.valid_jumpdest(dest)) {
+                                return ExecutionError.Error.InvalidJump;
+                            }
+                            const dest_usize: usize = @intCast(dest);
+                            const idx = frame.analysis.pc_to_block_start[dest_usize];
+                            if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
+                                return ExecutionError.Error.InvalidJump;
+                            }
+                            current_index = idx;
+                        } else {
+                            current_index += 1;
+                        }
+                        break; // handled
+                    },
+                    .other => {
+                        // Most opcodes now have .none - no individual gas/stack validation needed
+                        // Gas and stack validation is handled by BEGINBLOCK instructions
+                        current_index += 1;
+                        nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
+                            // Frame already manages its own output, no need to copy
+                            Log.debug("[interpret] Opcode at index {} returned error: {}", .{ current_index - 1, err });
 
-                    // Handle gas exhaustion for InvalidOpcode specifically
-                    if (err == ExecutionError.Error.InvalidOpcode) {
-                        frame.gas_remaining = 0;
-                    }
+                            // Handle gas exhaustion for InvalidOpcode specifically
+                            if (err == ExecutionError.Error.InvalidOpcode) {
+                                frame.gas_remaining = 0;
+                            }
 
-                    return err;
-                };
+                            return err;
+                        };
+                    },
+                }
             },
             .gas_cost => |cost| {
                 // Legacy path - kept for compatibility

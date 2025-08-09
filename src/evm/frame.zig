@@ -261,11 +261,7 @@ pub const Frame = struct {
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
         std.debug.assert(dest <= std.math.maxInt(u32));
         const dest_usize = @as(usize, @intCast(dest));
-        // Check bounds before accessing the bitmap to prevent out-of-bounds access
-        // The bitmap size matches the code length, so any destination >= code length is invalid
-        if (dest_usize >= self.code.len) {
-            return false;
-        }
+        if (dest_usize >= self.analysis.code_len) return false;
         return self.analysis.jumpdest_bitmap.isSet(dest_usize);
     }
 
