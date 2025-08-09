@@ -231,9 +231,16 @@ pub fn deinit(self: *Evm) void {
         self.frame_stack = null;
     }
 
-    // Other execution state doesn't need cleanup in deinit:
-    // - self_destruct: undefined or ownership transferred to caller
-    // - analysis_stack_buffer: undefined or stack-allocated
+    // Clean up created_contracts - always initialized in init()
+    self.created_contracts.deinit();
+
+    // Clean up self_destruct if it was initialized
+    // Since self_destruct is initially undefined and only initialized in call(),
+    // we need to check if it has a valid allocator (non-null pointer)
+    // The allocator field in the HashMap will be valid if init() was called
+    if (@intFromPtr(self.self_destruct.allocator.ptr) != 0) {
+        self.self_destruct.deinit();
+    }
 }
 
 /// Reset the EVM for reuse without deallocating memory.
