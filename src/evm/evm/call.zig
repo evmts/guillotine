@@ -18,6 +18,7 @@ const precompiles = @import("../precompiles/precompiles.zig");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
+const CallJournal = @import("../call_frame_stack.zig").CallJournal;
 
 // Threshold for stack vs heap allocation optimization
 const STACK_ALLOCATION_THRESHOLD = 12800; // bytes of bytecode
@@ -99,10 +100,9 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     Log.debug("[call] Code analysis complete: {} instructions", .{analysis.instructions.len});
 
-    // Reinitialize if first frame
-    // Only initialize EVM state if we're at depth 0 (top-level call)
-    // Check current frame depth from EVM to determine if this is a nested call
+    // Handle frame allocation based on call depth
     if (self.current_frame_depth == 0) {
+        // Top-level call: Initialize fresh execution state
         // Initialize fresh execution state in EVM instance (per-call isolation)
         // CRITICAL: Clear all state at beginning of top-level call
         self.current_frame_depth = 0;
@@ -110,12 +110,21 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
         self.created_contracts = CreatedContracts.init(self.allocator); // Fresh created contracts tracker for EIP-6780
 
+        // Allocate frame stack lazily - start with just space for the first frame
+        // We'll grow this on-demand when nested calls happen
+        if (self.frame_stack == null) {
+            // Allocate initial frame stack with reasonable initial capacity
+            // Most contracts don't go very deep, so start small
+            const initial_capacity = 16; // Start with space for 16 frames
+            self.frame_stack = try self.allocator.alloc(Frame, initial_capacity);
+        }
+        
         // Create host interface from self
         var host = Host.init(self);
 
         // Initialize only the first frame now. Nested frames will be initialized on demand
         const first_next_frame: ?*Frame = null; // no nested calls pre-allocated
-        self.frame_stack[0] = try Frame.init(
+        self.frame_stack.?[0] = try Frame.init(
             call_info.gas, // gas_remaining
             call_info.is_static, // static_call
             @intCast(self.depth), // call_depth
@@ -138,15 +147,82 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             false, // is_delegate_call
         );
         // Frame resources will be released after execution completes
+        
+        // Mark that we've allocated the first frame
+        self.max_allocated_depth = 0;
 
         // Set block context from VM's context
-        self.frame_stack[0].block_number = self.context.block_number;
-        self.frame_stack[0].block_timestamp = self.context.block_timestamp;
-        self.frame_stack[0].block_difficulty = self.context.block_difficulty;
-        self.frame_stack[0].block_gas_limit = self.context.block_gas_limit;
-        self.frame_stack[0].block_coinbase = self.context.block_coinbase;
-        self.frame_stack[0].block_base_fee = self.context.block_base_fee;
-        self.frame_stack[0].block_blob_base_fee = if (self.context.blob_base_fee > 0) self.context.blob_base_fee else null;
+        self.frame_stack.?[0].block_number = self.context.block_number;
+        self.frame_stack.?[0].block_timestamp = self.context.block_timestamp;
+        self.frame_stack.?[0].block_difficulty = self.context.block_difficulty;
+        self.frame_stack.?[0].block_gas_limit = self.context.block_gas_limit;
+        self.frame_stack.?[0].block_coinbase = self.context.block_coinbase;
+        self.frame_stack.?[0].block_base_fee = self.context.block_base_fee;
+        self.frame_stack.?[0].block_blob_base_fee = if (self.context.blob_base_fee > 0) self.context.blob_base_fee else null;
+    } else {
+        // Nested call: Allocate a new frame on-demand
+        const new_depth = self.current_frame_depth + 1;
+        
+        // Check call depth limit
+        if (new_depth >= MAX_CALL_DEPTH) {
+            return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+        }
+        
+        // Ensure we have space in the frame stack, grow if needed
+        if (self.frame_stack) |frames| {
+            if (new_depth >= frames.len) {
+                // Need to grow the frame stack
+                const new_capacity = @min(frames.len * 2, MAX_CALL_DEPTH);
+                const new_frames = try self.allocator.realloc(frames, new_capacity);
+                self.frame_stack = new_frames;
+            }
+        } else {
+            // Should not happen, but handle gracefully
+            return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+        }
+        
+        // Create host interface from self
+        var host = Host.init(self);
+        
+        // Initialize the new frame
+        const parent_frame = &self.frame_stack.?[self.current_frame_depth];
+        self.frame_stack.?[new_depth] = try Frame.init(
+            call_info.gas, // gas_remaining
+            call_info.is_static or parent_frame.is_static(), // inherit static context
+            @intCast(new_depth), // call_depth
+            call_info.address, // contract_address
+            call_caller, // caller
+            call_value, // value
+            &analysis, // analysis
+            &self.access_list,
+            &self.journal,
+            &host,
+            self.journal.create_snapshot(), // new snapshot for revertibility
+            self.state.database,
+            ChainRules{},
+            &self.self_destruct,
+            &self.created_contracts,
+            call_info.input, // input
+            self.allocator, // use general allocator for frame-owned allocations
+            null, // next_frame
+            false, // is_create_call
+            false, // is_delegate_call
+        );
+        
+        // Update tracking
+        self.current_frame_depth = new_depth;
+        if (new_depth > self.max_allocated_depth) {
+            self.max_allocated_depth = new_depth;
+        }
+        
+        // Copy block context from parent frame
+        self.frame_stack.?[new_depth].block_number = parent_frame.block_number;
+        self.frame_stack.?[new_depth].block_timestamp = parent_frame.block_timestamp;
+        self.frame_stack.?[new_depth].block_difficulty = parent_frame.block_difficulty;
+        self.frame_stack.?[new_depth].block_gas_limit = parent_frame.block_gas_limit;
+        self.frame_stack.?[new_depth].block_coinbase = parent_frame.block_coinbase;
+        self.frame_stack.?[new_depth].block_base_fee = parent_frame.block_base_fee;
+        self.frame_stack.?[new_depth].block_blob_base_fee = parent_frame.block_blob_base_fee;
     }
 
     if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
@@ -159,24 +235,34 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         return precompile_result;
     }
 
-    Log.debug("[call] Starting interpret, gas={}", .{self.frame_stack[0].gas_remaining});
+    const current_frame = &self.frame_stack.?[self.current_frame_depth];
+    Log.debug("[call] Starting interpret at depth {}, gas={}", .{ self.current_frame_depth, current_frame.gas_remaining });
 
     // Execute and normalize result handling so we can always clean up the frame
     var exec_err: ?ExecutionError.Error = null;
-    interpret(self, &self.frame_stack[0]) catch |err| {
+    interpret(self, current_frame) catch |err| {
         Log.debug("[call] Interpret ended with error: {}", .{err});
         exec_err = err;
     };
 
     // Copy output before frame cleanup
     var output: []const u8 = &.{};
-    if (self.frame_stack[0].output.len > 0) {
-        output = self.allocator.dupe(u8, self.frame_stack[0].output) catch &.{};
+    const executed_frame = &self.frame_stack.?[self.current_frame_depth];
+    if (executed_frame.output.len > 0) {
+        output = self.allocator.dupe(u8, executed_frame.output) catch &.{};
         Log.debug("[call] Output length: {}", .{output.len});
     }
+    
+    // Save gas remaining for return
+    const gas_remaining = executed_frame.gas_remaining;
 
     // Release frame resources
-    self.frame_stack[0].deinit();
+    executed_frame.deinit();
+    
+    // Restore parent frame depth (or stay at 0 if top-level)
+    if (self.current_frame_depth > 0) {
+        self.current_frame_depth -= 1;
+    }
 
     // Map error to success status
     const success: bool = if (exec_err) |e| switch (e) {
@@ -186,10 +272,10 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         else => false,
     } else true;
 
-    Log.debug("[call] Returning with success={}, gas_left={}, output_len={}", .{ success, self.frame_stack[0].gas_remaining, output.len });
+    Log.debug("[call] Returning with success={}, gas_left={}, output_len={}", .{ success, gas_remaining, output.len });
     return CallResult{
         .success = success,
-        .gas_left = self.frame_stack[0].gas_remaining,
+        .gas_left = gas_remaining,
         .output = output,
     };
 }

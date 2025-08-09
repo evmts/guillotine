@@ -78,11 +78,16 @@ state: EvmState,
 access_list: AccessList,
 
 // Execution state for nested calls and frame management
-/// Pre-allocated frame stack for nested calls (moved from call.zig local variable)
-frame_stack: [MAX_CALL_DEPTH]Frame = undefined,
+/// Lazily allocated frame stack for nested calls - only allocates what's needed
+/// Frame at index 0 is allocated when top-level call begins,
+/// additional frames are allocated on-demand during CALL/CREATE operations
+frame_stack: ?[]Frame = null,
 
 /// Current active frame depth in the frame stack
 current_frame_depth: u11 = 0,
+
+/// Maximum frame depth allocated so far (for efficient cleanup)
+max_allocated_depth: u11 = 0,
 
 /// Self-destruct tracking for the current execution
 self_destruct: SelfDestruct = undefined,
@@ -190,8 +195,9 @@ pub fn init(
         .read_only = read_only,
         .tracer = tracer,
         // New execution state fields (initialized fresh in each call)
-        .frame_stack = undefined,
+        .frame_stack = null,
         .current_frame_depth = 0,
+        .max_allocated_depth = 0,
         .self_destruct = undefined,
         .analysis_stack_buffer = undefined,
         .journal = CallJournal.init(allocator),
@@ -208,9 +214,18 @@ pub fn deinit(self: *Evm) void {
     self.internal_arena.deinit();
     self.journal.deinit();
 
-    // Execution state doesn't need cleanup in deinit:
+    // Clean up lazily allocated frame stack if it exists
+    if (self.frame_stack) |frames| {
+        // Clean up any frames that were allocated
+        for (frames[0..@intCast(self.max_allocated_depth + 1)]) |*frame| {
+            frame.deinit();
+        }
+        self.allocator.free(frames);
+        self.frame_stack = null;
+    }
+    
+    // Other execution state doesn't need cleanup in deinit:
     // - self_destruct: undefined or ownership transferred to caller
-    // - frame_stack: undefined or cleaned up in call execution
     // - analysis_stack_buffer: undefined or stack-allocated
 }
 
@@ -225,6 +240,17 @@ pub fn reset(self: *Evm) void {
     self.depth = 0;
     self.read_only = false;
     self.gas_refunds = 0; // Reset refunds for new transaction
+    self.current_frame_depth = 0;
+    self.max_allocated_depth = 0;
+    
+    // Clean up any existing frame stack
+    if (self.frame_stack) |frames| {
+        for (frames[0..@intCast(self.max_allocated_depth + 1)]) |*frame| {
+            frame.deinit();
+        }
+        self.allocator.free(frames);
+        self.frame_stack = null;
+    }
 }
 
 /// Get the internal arena allocator for temporary EVM data
