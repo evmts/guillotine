@@ -107,7 +107,7 @@ pub const Stack = @import("stack/stack.zig");
 pub const stack_validation = @import("stack/stack_validation.zig");
 
 /// Main virtual machine implementation
-pub const Evm = @import("evm.zig");
+pub const Evm = @import("evm.zig").Evm;
 
 /// Execution context and frame management
 pub const Frame = @import("frame.zig").Frame;

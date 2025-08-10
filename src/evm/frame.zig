@@ -348,8 +348,9 @@ pub const Frame = struct {
     /// Forwards the refund delta (can be negative) to the EVM accumulator.
     /// The refunds will be applied at transaction end with EIP-3529 cap.
     pub fn adjust_gas_refund(self: *Frame, delta: i64) void {
-        const Evm = @import("evm.zig");
-        const evm = @as(*Evm, @ptrCast(@alignCast(self.host.ptr)));
+        const configureEvm = @import("evm.zig").configureEvm;
+        const EvmType = configureEvm(@import("config.zig").EvmConfig.DEFAULT);
+        const evm = @as(*EvmType, @ptrCast(@alignCast(self.host.ptr)));
         evm.adjust_gas_refund(delta);
     }
 

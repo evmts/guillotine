@@ -93,6 +93,8 @@ pub const Host = struct {
         emit_log: *const fn (ptr: *anyopaque, contract_address: Address, topics: []const u256, data: []const u8) void,
         /// Execute EVM call (CALL, DELEGATECALL, STATICCALL, CREATE, CREATE2)
         call: *const fn (ptr: *anyopaque, params: CallParams) anyerror!CallResult,
+        /// Add gas refund for transaction
+        add_gas_refund: *const fn (ptr: *anyopaque, amount: u64) void,
     };
 
     /// Initialize a Host interface from any implementation
@@ -135,6 +137,11 @@ pub const Host = struct {
                 return self.call(params);
             }
 
+            fn vtable_add_gas_refund(ptr: *anyopaque, amount: u64) void {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.add_gas_refund(amount);
+            }
+
             const vtable = VTable{
                 .get_balance = vtable_get_balance,
                 .account_exists = vtable_account_exists,
@@ -142,6 +149,7 @@ pub const Host = struct {
                 .get_block_info = vtable_get_block_info,
                 .emit_log = vtable_emit_log,
                 .call = vtable_call,
+                .add_gas_refund = vtable_add_gas_refund,
             };
         };
 
@@ -179,6 +187,11 @@ pub const Host = struct {
     /// Execute EVM call
     pub fn call(self: Host, params: CallParams) !CallResult {
         return self.vtable.call(self.ptr, params);
+    }
+
+    /// Add gas refund
+    pub fn add_gas_refund(self: Host, amount: u64) void {
+        return self.vtable.add_gas_refund(self.ptr, amount);
     }
 };
 
