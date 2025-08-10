@@ -100,6 +100,7 @@ created_contracts: CreatedContracts = undefined,
 /// Stack buffer for small contract analysis optimization
 analysis_stack_buffer: [config.max_stack_buffer_size]u8 = undefined,
 
+
 /// LRU cache for code analysis to avoid redundant analysis during nested calls
 analysis_cache: ?AnalysisCache = null,
 
@@ -122,14 +123,70 @@ initial_thread_id: std.Thread.Id,
         }
 
         // Import method implementations
-        pub usingnamespace @import("evm/set_context.zig");
+        pub fn set_context(self: *Self, context: Context) void {
+            self.context = context;
+            self.access_list.context = context;
+        }
         // call.zig is imported with explicit wrapper below due to generic type issues
-        // pub usingnamespace @import("evm/call.zig");
-        pub usingnamespace @import("evm/call_contract.zig");
-        pub usingnamespace @import("evm/execute_precompile_call.zig");
-        pub usingnamespace @import("evm/staticcall_contract.zig");
-        pub usingnamespace @import("evm/validate_static_context.zig");
-        pub usingnamespace @import("evm/set_storage_protected.zig");
+        // Import generic functions
+        const call_mod = @import("evm/call.zig").call(config);
+        pub const call = call_mod.callImpl;
+        
+        const call_contract_mod = @import("evm/call_contract.zig").call_contract(config);
+        pub const call_contract = call_contract_mod.callContractImpl;
+        const execute_precompile_mod = @import("evm/execute_precompile_call.zig").execute_precompile_call(config);
+        pub const execute_precompile_call = execute_precompile_mod.executePrecompileCallImpl;
+        pub const execute_precompile_call_by_id = execute_precompile_mod.executePrecompileCallByIdImpl;
+        const staticcall_mod = @import("evm/staticcall_contract.zig").staticcall_contract(config);
+        pub const staticcall_contract = staticcall_mod.staticcallContractImpl;
+        const validate_static_mod = @import("evm/validate_static_context.zig").validate_static_context(config);
+        pub const validate_static_context = validate_static_mod.validateStaticContextImpl;
+        const set_storage_mod = @import("evm/set_storage_protected.zig").set_storage_protected(config);
+        pub const set_storage_protected = set_storage_mod.setStorageProtectedImpl;
+        
+        // Additional protected methods
+        pub fn set_transient_storage_protected(self: *Self, address: primitives.Address.Address, slot: u256, value: u256) !void {
+            try self.validate_static_context();
+            try self.state.set_transient_storage(address, slot, value);
+        }
+        
+        pub fn set_balance_protected(self: *Self, address: primitives.Address.Address, balance: u256) !void {
+            try self.validate_static_context();
+            try self.state.set_balance(address, balance);
+        }
+        
+        pub fn set_code_protected(self: *Self, address: primitives.Address.Address, code: []const u8) !void {
+            try self.validate_static_context();
+            try self.state.set_code(address, code);
+        }
+        
+        pub fn emit_log_protected(self: *Self, address: primitives.Address.Address, topics: []u256, data: []const u8) !void {
+            try self.validate_static_context();
+            const log_entry = EvmLog.init(address, topics, data);
+            try self.state.add_log(log_entry);
+        }
+        
+        pub fn validate_value_transfer(self: *const Self, value: u256) ExecutionError.Error!void {
+            if (self.read_only and value > 0) {
+                return ExecutionError.Error.WriteProtection;
+            }
+        }
+        
+        pub fn selfdestruct_protected(self: *Self, contract: primitives.Address.Address, beneficiary: primitives.Address.Address) !void {
+            try self.validate_static_context();
+            try self.self_destruct.insert(contract, beneficiary);
+        }
+        
+        pub fn require_one_thread(self: *Self) void {
+            if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+                if (self.initial_thread_id != std.Thread.getCurrentId()) {
+                    Log.err("Detected the EVM running on more than one thread. The current architecture of the EVM simplifies itself by assuming there is no concurrency. Everywhere in the EVM depending on this assumption is clearly commented. This restriction will be removed before Beta release", .{});
+                }
+            }
+        }
+        
+        const interpret_mod = @import("evm/interpret.zig").interpret(config);
+        pub const interpret = interpret_mod.interpretImpl;
 
         /// Create a new EVM instance.
         ///
@@ -261,52 +318,7 @@ pub fn deinit(self: *Self) void {
 
 // Explicit wrapper for the call method to work around generic type issues
 // This dispatches to the appropriate call type methods
-pub fn call(self: *Self, params: CallParams) ExecutionError.Error!CallResult {
-    switch (params) {
-        .call => |call_data| {
-            const call_contract_impl = @import("evm/call_contract.zig");
-            return call_contract_impl.call_contract(self, call_data.caller, call_data.to, call_data.value, call_data.input, call_data.gas, false);
-        },
-        .staticcall => |call_data| {
-            const staticcall_impl = @import("evm/staticcall_contract.zig");
-            return staticcall_impl.staticcall_contract(self, call_data.caller, call_data.to, call_data.input, call_data.gas);
-        },
-        .delegatecall => |call_data| {
-            // TODO: Implement delegatecall
-            _ = call_data;
-            return CallResult{ .success = false, .gas_left = 0, .output = null };
-        },
-        .create => |create_data| {
-            const result = try self.create_contract(create_data.caller, create_data.value, create_data.init_code, create_data.gas);
-            return CallResult{
-                .success = result.success,
-                .gas_left = result.gas_left,
-                .output = result.output,
-            };
-        },
-        .create2 => |create2_data| {
-            // TODO: Implement create2
-            _ = create2_data;
-            return CallResult{ .success = false, .gas_left = 0, .output = null };
-        },
-        .callcode => |callcode_data| {
-            // TODO: Implement callcode
-            _ = callcode_data;
-            return CallResult{ .success = false, .gas_left = 0, .output = null };
-        },
-    }
-}
 
-// Explicit wrappers for methods that have issues with usingnamespace and generic types
-pub fn call_contract(self: *Self, caller: primitives_internal.Address.Address, to: primitives_internal.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) !CallResult {
-    const call_contract_impl = @import("evm/call_contract.zig");
-    return call_contract_impl.call_contract(self, caller, to, value, input, gas, is_static);
-}
-
-pub fn staticcall_contract(self: *Self, caller: primitives_internal.Address.Address, to: primitives_internal.Address.Address, input: []const u8, gas: u64) !CallResult {
-    const staticcall_impl = @import("evm/staticcall_contract.zig");
-    return staticcall_impl.staticcall_contract(self, caller, to, input, gas);
-}
 
 /// Reset the EVM for reuse without deallocating memory.
 /// This is efficient for executing multiple contracts in sequence.
@@ -430,15 +442,7 @@ pub fn emit_log(self: *Self, contract_address: primitives.Address.Address, topic
 }
 
 
-// Method implementations moved inside struct
-pub usingnamespace @import("evm/set_transient_storage_protected.zig");
-pub usingnamespace @import("evm/set_balance_protected.zig");
-pub usingnamespace @import("evm/set_code_protected.zig");
-pub usingnamespace @import("evm/emit_log_protected.zig");
-pub usingnamespace @import("evm/validate_value_transfer.zig");
-pub usingnamespace @import("evm/selfdestruct_protected.zig");
-pub usingnamespace @import("evm/require_one_thread.zig");
-pub usingnamespace @import("evm/interpret.zig");
+// Method implementations have been moved inside the struct as generic functions
 
 // Compatibility wrapper for old interpret API used by tests
 pub const InterprResult = struct {
