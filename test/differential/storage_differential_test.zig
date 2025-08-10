@@ -53,42 +53,34 @@ test "SSTORE then SLOAD storage operations" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute the contract using call API
+    const call_params = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -105,10 +97,8 @@ test "SSTORE then SLOAD storage operations" {
         std.debug.print("SSTORE/SLOAD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SSTORE/SLOAD, we expect this to succeed
         try testing.expect(false);
     }
@@ -149,42 +139,34 @@ test "SLOAD from empty storage slot returns 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute the contract using call API
+    const call_params2 = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+    const guillotine_result = try vm_instance.call(call_params2);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -201,10 +183,8 @@ test "SLOAD from empty storage slot returns 0" {
         std.debug.print("SLOAD empty test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SLOAD empty slot, we expect this to succeed
         try testing.expect(false);
     }
@@ -256,42 +236,34 @@ test "TSTORE then TLOAD transient storage operations" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    // Create contract and execute
-    var contract = Contract.init_at_address(
-        contract_address, // caller
-        contract_address, // address where code executes
-        0, // value
-        1000000, // gas
-        &bytecode,
-        &[_]u8{}, // empty input
-        false, // not static
-    );
-    defer contract.deinit(allocator, null);
-
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    // Execute the contract
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    // Execute the contract using call API
+    const call_params3 = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+    const guillotine_result = try vm_instance.call(call_params3);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -308,10 +280,8 @@ test "TSTORE then TLOAD transient storage operations" {
         std.debug.print("TSTORE/TLOAD test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For TSTORE/TLOAD, we expect this to succeed
         try testing.expect(false);
     }

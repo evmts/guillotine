@@ -31,38 +31,32 @@ test "RETURN opcode returns data from memory" {
 
     // Execute on Guillotine
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    var contract = Contract.init_at_address(
-        contract_address,
-        contract_address,
-        0,
-        1000000,
-        &bytecode,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
-
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    const call_params = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -103,38 +97,32 @@ test "REVERT opcode reverts execution" {
 
     // Execute on Guillotine
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    var contract = Contract.init_at_address(
-        contract_address,
-        contract_address,
-        0,
-        1000000,
-        &bytecode,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
-
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    const call_params2 = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result = try vm_instance.call(call_params2);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should fail (revert)
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
     try testing.expect(!revm_succeeded); // REVERT should fail
@@ -166,38 +154,32 @@ test "INVALID opcode causes invalid instruction error" {
 
     // Execute on Guillotine
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    var contract = Contract.init_at_address(
-        contract_address,
-        contract_address,
-        0,
-        1000000,
-        &bytecode,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
-
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    const call_params3 = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result = try vm_instance.call(call_params3);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should fail (invalid instruction)
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
     try testing.expect(!revm_succeeded); // INVALID should fail
@@ -224,38 +206,32 @@ test "SELFDESTRUCT opcode destroys contract" {
 
     // Execute on Guillotine
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = evm.EvmBuilder.init(allocator, db_interface);
-
-    var vm_instance = try builder.build();
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    var contract = Contract.init_at_address(
-        contract_address,
-        contract_address,
-        0,
-        1000000,
-        &bytecode,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
-
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    const call_params4 = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result = try vm_instance.call(call_params4);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results - both should succeed (SELFDESTRUCT is a valid operation)
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
     try testing.expect(revm_succeeded); // SELFDESTRUCT should succeed
@@ -286,7 +262,6 @@ test "CODESIZE opcode returns contract code size" {
 
     // Execute on Guillotine
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -299,25 +274,22 @@ test "CODESIZE opcode returns contract code size" {
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    var contract = Contract.init_at_address(
-        contract_address,
-        contract_address,
-        0,
-        1000000,
-        &bytecode,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
-
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    const call_params = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
@@ -364,7 +336,6 @@ test "CODECOPY opcode copies contract code to memory" {
 
     // Execute on Guillotine
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -377,25 +348,22 @@ test "CODECOPY opcode copies contract code to memory" {
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    var contract = Contract.init_at_address(
-        contract_address,
-        contract_address,
-        0,
-        1000000,
-        &bytecode,
-        &[_]u8{},
-        false,
-    );
-    defer contract.deinit(allocator, null);
-
     try vm_instance.state.set_code(contract_address, &bytecode);
 
-    const guillotine_result = try vm_instance.interpret(&contract, &[_]u8{}, false);
+    const call_params2 = evm.CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result = try vm_instance.call(call_params2);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
     // Compare results
     const revm_succeeded = revm_result.success;
-    const guillotine_succeeded = guillotine_result.status == .Success;
+    const guillotine_succeeded = guillotine_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
 

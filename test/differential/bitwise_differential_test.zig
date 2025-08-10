@@ -3,7 +3,7 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
-const CallParams = evm.Host.CallParams;
+const CallParams = evm.CallParams;
 const CallResult = evm.CallResult;
 
 // Import REVM wrapper from module
@@ -50,7 +50,6 @@ test "AND opcode 0xFF & 0x0F = 0x0F" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -72,7 +71,7 @@ test "AND opcode 0xFF & 0x0F = 0x0F" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -97,10 +96,7 @@ test "AND opcode 0xFF & 0x0F = 0x0F" {
         std.debug.print("AND test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For AND, we expect this to succeed
         try testing.expect(false);
     }
@@ -145,7 +141,6 @@ test "OR opcode 0x0F | 0xF0 = 0xFF" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -167,7 +162,7 @@ test "OR opcode 0x0F | 0xF0 = 0xFF" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -192,10 +187,7 @@ test "OR opcode 0x0F | 0xF0 = 0xFF" {
         std.debug.print("OR test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For OR, we expect this to succeed
         try testing.expect(false);
     }
@@ -240,7 +232,6 @@ test "SHL opcode 1 << 4 = 16" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -262,7 +253,7 @@ test "SHL opcode 1 << 4 = 16" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -287,10 +278,8 @@ test "SHL opcode 1 << 4 = 16" {
         std.debug.print("SHL test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SHL, we expect this to succeed
         try testing.expect(false);
     }
@@ -335,7 +324,6 @@ test "XOR opcode 0xF0 ^ 0x0F = 0xFF" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -357,7 +345,7 @@ test "XOR opcode 0xF0 ^ 0x0F = 0xFF" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -381,10 +369,8 @@ test "XOR opcode 0xF0 ^ 0x0F = 0xFF" {
         std.debug.print("XOR test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For XOR, we expect this to succeed
         try testing.expect(false);
     }
@@ -424,7 +410,6 @@ test "NOT opcode ~0x0F = 0xFF...F0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -446,7 +431,7 @@ test "NOT opcode ~0x0F = 0xFF...F0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -470,10 +455,8 @@ test "NOT opcode ~0x0F = 0xFF...F0" {
         std.debug.print("NOT test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For NOT, we expect this to succeed
         try testing.expect(false);
     }
@@ -518,7 +501,6 @@ test "SHR opcode 16 >> 2 = 4" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -540,7 +522,7 @@ test "SHR opcode 16 >> 2 = 4" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -564,10 +546,8 @@ test "SHR opcode 16 >> 2 = 4" {
         std.debug.print("SHR test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SHR, we expect this to succeed
         try testing.expect(false);
     }
@@ -613,7 +593,6 @@ test "SAR opcode arithmetic right shift with sign" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -635,7 +614,7 @@ test "SAR opcode arithmetic right shift with sign" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -659,10 +638,8 @@ test "SAR opcode arithmetic right shift with sign" {
         std.debug.print("SAR test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SAR, we expect this to succeed
         try testing.expect(false);
     }
@@ -708,7 +685,6 @@ test "BYTE opcode extract byte from word" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -730,7 +706,7 @@ test "BYTE opcode extract byte from word" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -754,10 +730,8 @@ test "BYTE opcode extract byte from word" {
         std.debug.print("BYTE test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For BYTE, we expect this to succeed
         try testing.expect(false);
     }

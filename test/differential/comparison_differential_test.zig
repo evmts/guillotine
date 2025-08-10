@@ -3,7 +3,7 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
-const CallParams = evm.Host.CallParams;
+const CallParams = evm.CallParams;
 const CallResult = evm.CallResult;
 
 // Import REVM wrapper from module
@@ -50,7 +50,6 @@ test "LT opcode 5 < 10 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -72,7 +71,7 @@ test "LT opcode 5 < 10 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -96,10 +95,7 @@ test "LT opcode 5 < 10 = 1" {
         std.debug.print("LT test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For LT, we expect this to succeed
         try testing.expect(false);
     }
@@ -144,7 +140,6 @@ test "GT opcode 10 > 5 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -166,7 +161,7 @@ test "GT opcode 10 > 5 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -190,10 +185,7 @@ test "GT opcode 10 > 5 = 1" {
         std.debug.print("GT test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For GT, we expect this to succeed
         try testing.expect(false);
     }
@@ -238,7 +230,6 @@ test "EQ opcode 42 == 42 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -260,7 +251,7 @@ test "EQ opcode 42 == 42 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -284,10 +275,8 @@ test "EQ opcode 42 == 42 = 1" {
         std.debug.print("EQ test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For EQ, we expect this to succeed
         try testing.expect(false);
     }
@@ -332,7 +321,6 @@ test "SLT opcode signed -1 < 1 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -354,7 +342,7 @@ test "SLT opcode signed -1 < 1 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -378,10 +366,8 @@ test "SLT opcode signed -1 < 1 = 1" {
         std.debug.print("SLT test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SLT, we expect this to succeed
         try testing.expect(false);
     }
@@ -426,7 +412,6 @@ test "SGT opcode signed 1 > -1 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -448,7 +433,7 @@ test "SGT opcode signed 1 > -1 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -472,10 +457,8 @@ test "SGT opcode signed 1 > -1 = 1" {
         std.debug.print("SGT test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SGT, we expect this to succeed
         try testing.expect(false);
     }
@@ -515,7 +498,6 @@ test "ISZERO opcode 0 == 0 ? 1 : 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -537,7 +519,7 @@ test "ISZERO opcode 0 == 0 ? 1 : 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -561,10 +543,8 @@ test "ISZERO opcode 0 == 0 ? 1 : 0" {
         std.debug.print("ISZERO test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For ISZERO(0), we expect this to succeed
         try testing.expect(false);
     }
@@ -604,7 +584,6 @@ test "ISZERO opcode 42 == 0 ? 1 : 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -626,7 +605,7 @@ test "ISZERO opcode 42 == 0 ? 1 : 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -650,10 +629,8 @@ test "ISZERO opcode 42 == 0 ? 1 : 0" {
         std.debug.print("ISZERO test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For ISZERO(42), we expect this to succeed
         try testing.expect(false);
     }

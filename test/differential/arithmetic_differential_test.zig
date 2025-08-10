@@ -3,7 +3,7 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
-const CallParams = evm.Host.CallParams;
+const CallParams = evm.CallParams;
 const CallResult = evm.CallResult;
 
 // Import REVM wrapper from module
@@ -51,7 +51,6 @@ test "ADD opcode 0 + 0 = 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -97,10 +96,7 @@ test "ADD opcode 0 + 0 = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For ADD 0 + 0 = 0, we expect this to succeed
         try testing.expect(false);
     }
@@ -146,7 +142,6 @@ test "ADD opcode 1 + 1 = 2" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -192,10 +187,7 @@ test "ADD opcode 1 + 1 = 2" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For ADD 1 + 1 = 2, we expect this to succeed
         try testing.expect(false);
     }
@@ -241,7 +233,6 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -287,10 +278,7 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        // Debug disabled in compatibility path
         // For ADD overflow, we expect this to succeed
         try testing.expect(false);
     }
@@ -336,7 +324,6 @@ test "SUB opcode 10 - 5 = 5" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -382,10 +369,8 @@ test "SUB opcode 10 - 5 = 5" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SUB 10 - 5 = 5, we expect this to succeed
         try testing.expect(false);
     }
@@ -431,7 +416,6 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -477,10 +461,8 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SUB underflow, we expect this to succeed
         try testing.expect(false);
     }
@@ -526,7 +508,6 @@ test "MUL opcode 7 * 6 = 42" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -572,10 +553,8 @@ test "MUL opcode 7 * 6 = 42" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For MUL 7 * 6 = 42, we expect this to succeed
         try testing.expect(false);
     }
@@ -621,7 +600,6 @@ test "DIV opcode 6 / 42 = 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -667,10 +645,8 @@ test "DIV opcode 6 / 42 = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For DIV 6 / 42 = 0, we expect this to succeed
         try testing.expect(false);
     }
@@ -716,7 +692,6 @@ test "DIV opcode division by zero = 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -762,10 +737,8 @@ test "DIV opcode division by zero = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For DIV 0 / 42 = 0, we expect this to succeed
         try testing.expect(false);
     }
@@ -811,7 +784,6 @@ test "DIV opcode division by zero 42 / 0 = 0" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -857,10 +829,8 @@ test "DIV opcode division by zero 42 / 0 = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For DIV by zero, we expect this to succeed (EVM spec says div by 0 = 0)
         try testing.expect(false);
     }
@@ -905,7 +875,6 @@ test "MOD opcode 50 % 7 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -952,10 +921,8 @@ test "MOD opcode 50 % 7 = 1" {
         std.debug.print("MOD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For MOD 50 % 7 = 1, we expect this to succeed
         try testing.expect(false);
     }
@@ -1000,7 +967,6 @@ test "EXP opcode 2 ** 3 = 8" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -1047,10 +1013,8 @@ test "EXP opcode 2 ** 3 = 8" {
         std.debug.print("EXP test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For EXP 2 ** 3 = 8, we expect this to succeed
         try testing.expect(false);
     }
@@ -1095,7 +1059,6 @@ test "SDIV opcode signed division -8 / 2 = -4" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -1141,10 +1104,8 @@ test "SDIV opcode signed division -8 / 2 = -4" {
         std.debug.print("SDIV test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SDIV -8 / 2 = -4, we expect this to succeed
         try testing.expect(false);
     }
@@ -1189,7 +1150,6 @@ test "SMOD opcode signed modulo -8 % 3 = -2" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -1235,10 +1195,8 @@ test "SMOD opcode signed modulo -8 % 3 = -2" {
         std.debug.print("SMOD test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SMOD -8 % 3 = -2, we expect this to succeed
         try testing.expect(false);
     }
@@ -1288,7 +1246,6 @@ test "ADDMOD opcode (5 + 10) % 7 = 1" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -1334,10 +1291,8 @@ test "ADDMOD opcode (5 + 10) % 7 = 1" {
         std.debug.print("ADDMOD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For ADDMOD (5 + 10) % 7 = 1, we expect this to succeed
         try testing.expect(false);
     }
@@ -1387,7 +1342,6 @@ test "MULMOD opcode (5 * 6) % 7 = 2" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -1433,10 +1387,8 @@ test "MULMOD opcode (5 * 6) % 7 = 2" {
         std.debug.print("MULMOD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For MULMOD (5 * 6) % 7 = 2, we expect this to succeed
         try testing.expect(false);
     }
@@ -1482,7 +1434,6 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
 
     // Execute on Guillotine - inline all setup
     const MemoryDatabase = evm.MemoryDatabase;
-    const Contract = evm.Contract;
 
     // Create EVM instance
     var memory_db = MemoryDatabase.init(allocator);
@@ -1528,10 +1479,8 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
         std.debug.print("SIGNEXTEND test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine status: {s}\n", .{ revm_succeeded, @tagName(guillotine_result.status) });
-        if (guillotine_result.err) |err| {
-            std.debug.print("Guillotine error: {}\n", .{err});
-        }
+        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
+        // Error details not available in new API
         // For SIGNEXTEND, we expect this to succeed
         try testing.expect(false);
     }
