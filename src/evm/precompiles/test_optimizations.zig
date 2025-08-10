@@ -4,7 +4,7 @@ const testing = std.testing;
 const primitives = @import("primitives");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
-const ChainRules = @import("../frame.zig").ChainRules;
+const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 
 // Import both versions for comparison
 const precompiles_original = @import("precompiles.zig");

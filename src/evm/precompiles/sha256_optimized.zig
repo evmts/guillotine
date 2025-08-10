@@ -4,7 +4,7 @@ const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const crypto = @import("crypto");
-const ChainRules = @import("../frame.zig").ChainRules;
+const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 
 /// SHA256 precompile implementation (Optimized Version)
 ///

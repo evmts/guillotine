@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
-const ChainRules = @import("../frame.zig").ChainRules;
+const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 
 // Import precompile modules that need wrapping
 const ecrecover = @import("ecrecover.zig");

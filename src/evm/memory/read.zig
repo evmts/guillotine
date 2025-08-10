@@ -1,12 +1,8 @@
 const std = @import("std");
 const Log = @import("../log.zig");
-const memory = @import("./memory.zig");
+const Memory = @import("./memory.zig").Memory;
 const errors = @import("errors.zig");
 const context = @import("context.zig");
-const EvmConfig = @import("../config.zig").EvmConfig;
-
-// Use default config for compatibility
-const Memory = memory.createMemory(EvmConfig.DEFAULT);
 
 /// Read 32 bytes as u256 at context-relative offset.
 pub inline fn get_u256(self: *const Memory, relative_offset: usize) errors.MemoryError!u256 {
@@ -37,7 +33,7 @@ pub inline fn get_slice(self: *const Memory, relative_offset: usize, len: usize)
 }
 
 /// Read a single byte at context-relative offset (for test compatibility)
-pub inline fn get_byte(self: *const memory.Memory, relative_offset: usize) errors.MemoryError!u8 {
+pub inline fn get_byte(self: *const Memory, relative_offset: usize) errors.MemoryError!u8 {
     if (relative_offset >= self.context_size()) return errors.MemoryError.InvalidOffset;
     const abs_offset = self.my_checkpoint + relative_offset;
     return self.shared_buffer_ref.items[abs_offset];

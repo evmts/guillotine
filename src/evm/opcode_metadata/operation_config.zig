@@ -8,7 +8,8 @@ const Frame = @import("../frame.zig").Frame;
 fn wrap_ctx(comptime OpFn: *const fn (*Frame) ExecutionError.Error!void) operation_module.ExecutionFunc {
     return struct {
         pub fn f(ctx: *anyopaque) ExecutionError.Error!void {
-            return adapter.call_ctx(OpFn, ctx);
+            const frame = @as(*Frame, @ptrCast(@alignCast(ctx)));
+            return OpFn(frame);
         }
     }.f;
 }

@@ -1,12 +1,8 @@
 const std = @import("std");
 const Log = @import("../log.zig");
-const memory = @import("./memory.zig");
+const Memory = @import("./memory.zig").Memory;
 const errors = @import("errors.zig");
 const context = @import("context.zig");
-const EvmConfig = @import("../config.zig").EvmConfig;
-
-// Use default config for compatibility
-const Memory = memory.createMemory(EvmConfig.DEFAULT);
 
 // NOTE: This file has been reviewed for issue #8 optimization opportunities.
 // All manual loops have been replaced with std.mem functions:
@@ -73,7 +69,7 @@ pub fn set_data_bounded(
 }
 
 /// Write u256 value at context-relative offset (for test compatibility)
-pub inline fn set_u256(self: *memory.Memory, relative_offset: usize, value: u256) errors.MemoryError!void {
+pub inline fn set_u256(self: *Memory, relative_offset: usize, value: u256) errors.MemoryError!void {
     _ = try self.ensure_context_capacity(relative_offset + 32);
     const abs_offset = self.my_checkpoint + relative_offset;
     const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + 32].ptr);

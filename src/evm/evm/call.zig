@@ -18,6 +18,28 @@ const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const primitives = @import("primitives");
 const precompiles = @import("../precompiles/precompiles.zig");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
+const HardforkChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
+
+/// Convert hardforks.ChainRules to frame.ChainRules
+fn convertChainRules(hardfork_rules: HardforkChainRules) ChainRules {
+    return ChainRules{
+        .is_homestead = hardfork_rules.is_homestead,
+        .is_byzantium = hardfork_rules.is_byzantium,
+        .is_constantinople = hardfork_rules.is_constantinople,
+        .is_petersburg = hardfork_rules.is_petersburg,
+        .is_istanbul = hardfork_rules.is_istanbul,
+        .is_berlin = hardfork_rules.is_berlin,
+        .is_london = hardfork_rules.is_london,
+        .is_merge = hardfork_rules.is_merge,
+        .is_shanghai = hardfork_rules.is_shanghai,
+        .is_cancun = hardfork_rules.is_cancun,
+        .is_prague = hardfork_rules.is_prague,
+        .is_eip1153 = hardfork_rules.is_eip1153,
+        .is_eip3855 = hardfork_rules.is_eip3855,
+        .is_eip4844 = hardfork_rules.is_eip4844,
+        .is_eip6780 = hardfork_rules.is_cancun, // EIP-6780 is part of Cancun
+    };
+}
 const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
 const CallJournal = @import("../call_frame_stack.zig").CallJournal;
@@ -176,7 +198,7 @@ pub fn call(comptime config: EvmConfig) type {
             &host,
             0, // snapshot_id
             self.state.database,
-            ChainRules{},
+            convertChainRules(self.chain_rules),
             &self.self_destruct,
             &self.created_contracts,
             call_info.input, // input
@@ -239,7 +261,7 @@ pub fn call(comptime config: EvmConfig) type {
             &host,
             self.journal.create_snapshot(), // new snapshot for revertibility
             self.state.database,
-            ChainRules{},
+            convertChainRules(self.chain_rules),
             &self.self_destruct,
             &self.created_contracts,
             call_info.input, // input

@@ -1,12 +1,8 @@
 const std = @import("std");
 const Log = @import("../log.zig");
-const memory_module = @import("./memory.zig");
+const Memory = @import("./memory.zig").Memory;
 const MemoryError = @import("errors.zig").MemoryError;
 const constants = @import("constants.zig");
-const EvmConfig = @import("../config.zig").EvmConfig;
-
-// Use default config for compatibility
-const Memory = memory_module.createMemory(EvmConfig.DEFAULT);
 
 /// Returns the size of the memory region visible to the current context.
 pub inline fn context_size(self: *const Memory) usize {

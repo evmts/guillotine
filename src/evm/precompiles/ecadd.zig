@@ -31,7 +31,7 @@ const bn254 = @import("bn254.zig");
 const GasConstants = @import("primitives").GasConstants;
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const PrecompileError = @import("precompile_result.zig").PrecompileError;
-const ChainRules = @import("../frame.zig").ChainRules;
+const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 const ec_validation = @import("ec_validation.zig");
 
 /// Calculate gas cost for ECADD based on chain rules

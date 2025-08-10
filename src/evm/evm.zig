@@ -28,6 +28,7 @@ pub const CreateResult = @import("evm/create_result.zig").CreateResult;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
 pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
+const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
 const precompiles = @import("precompiles/precompiles.zig");
 const builtin = @import("builtin");
 const analysis_cache_module = @import("analysis_cache.zig");
@@ -41,7 +42,7 @@ const EvmConfig = @import("config.zig").EvmConfig;
 ///
 /// This is a generic function that takes a compile-time EvmConfig and returns
 /// an EVM struct type with compile-time known array sizes and configuration.
-pub fn Evm(comptime config: EvmConfig) type {
+pub fn configureEvm(comptime config: EvmConfig) type {
     // Validate configuration at compile time
     comptime config.validate();
     
@@ -50,13 +51,13 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Initial arena capacity for temporary allocations (256KB)
         /// This covers most common contract executions without reallocation
-        const ARENA_INITIAL_CAPACITY = config.arena_initial_capacity;
+        const ARENA_INITIAL_CAPACITY = 256 * 1024;
         
-        /// AnalysisCache type configured for this EVM instance
-        const AnalysisCache = analysis_cache_module.createAnalysisCache(config);
+        /// AnalysisCache type - using the existing AnalysisCache struct
+        const AnalysisCache = analysis_cache_module.AnalysisCache;
         
-        /// Frame type configured for this EVM instance
-        const Frame = frame_module.createFrame(config);
+        /// Frame type - using the existing Frame struct
+        const Frame = frame_module.Frame;
 
         // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
@@ -70,7 +71,7 @@ read_only: bool = false,
 
 // Configuration fields (set at initialization)
 /// Protocol rules for the current hardfork
-chain_rules: Frame.ChainRules,
+chain_rules: ChainRules,
 /// Execution context providing transaction and block information
 context: Context,
 
@@ -269,7 +270,7 @@ initial_thread_id: std.Thread.Id,
             return Self{
                 .allocator = allocator,
                 .internal_arena = internal_arena,
-                .chain_rules = Frame.chainRulesForHardfork(config.hardfork),
+                .chain_rules = ChainRules.for_hardfork(config.hardfork),
         .state = state,
         .access_list = access_list,
         .context = ctx,
@@ -320,6 +321,28 @@ pub fn deinit(self: *Self) void {
     }
 
     // created_contracts is initialized in init(); single deinit above is sufficient
+}
+
+/// Convert hardforks.ChainRules to frame.ChainRules
+/// This function converts between the two ChainRules types used in different parts of the codebase
+pub fn convertToFrameChainRules(hardfork_rules: ChainRules) frame_module.ChainRules {
+    return frame_module.ChainRules{
+        .is_homestead = hardfork_rules.is_homestead,
+        .is_byzantium = hardfork_rules.is_byzantium,
+        .is_constantinople = hardfork_rules.is_constantinople,
+        .is_petersburg = hardfork_rules.is_petersburg,
+        .is_istanbul = hardfork_rules.is_istanbul,
+        .is_berlin = hardfork_rules.is_berlin,
+        .is_london = hardfork_rules.is_london,
+        .is_merge = hardfork_rules.is_merge,
+        .is_shanghai = hardfork_rules.is_shanghai,
+        .is_cancun = hardfork_rules.is_cancun,
+        .is_prague = hardfork_rules.is_prague,
+        .is_eip1153 = hardfork_rules.is_eip1153,
+        .is_eip3855 = hardfork_rules.is_eip3855,
+        .is_eip4844 = hardfork_rules.is_eip4844,
+        .is_eip6780 = hardfork_rules.is_cancun, // EIP-6780 is part of Cancun
+    };
 }
 
 // Explicit wrapper for the call method to work around generic type issues
@@ -526,7 +549,7 @@ pub fn create_contract(self: *Self, caller: primitives_internal.Address.Address,
         &host,
         snapshot_id,
         self.state.database,
-        Frame.ChainRules.DEFAULT,
+        convertToFrameChainRules(self.chain_rules),
         &self.self_destruct,
         &self.created_contracts,
         &[_]u8{}, // constructor input (none for tests)
@@ -965,7 +988,6 @@ test "Evm chain rules access" {
 
     const test_addr = [_]u8{0x42} ** 20;
     // In generic Evm, chain_rules is compile-time determined
-    const chain_rules = ChainRules.for_hardfork(test_config.hardfork);
     const is_precompile = precompiles.is_precompile_hardfork(test_addr, test_config.hardfork);
     try testing.expectEqual(false, is_precompile);
 }
@@ -986,7 +1008,7 @@ test "Evm reinitialization behavior" {
     evm.deinit();
 
     const config_reset = EvmConfig.init(.CANCUN);
-    const EvmTypeReset = Evm(config_reset);
+    const EvmTypeReset = configureEvm(config_reset);
     evm = try EvmTypeReset.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1579,7 +1601,6 @@ test "fuzz_evm_hardfork_configurations" {
 
             // Verify EVM was configured for the specified hardfork
             // In generic Evm, hardfork is compile-time determined
-            const chain_rules = ChainRules.for_hardfork(hardfork_config.hardfork);
             try testing.expect(hardfork_config.hardfork == hardfork);
 
             // Test state modifications with hardfork context
@@ -1596,7 +1617,7 @@ test "fuzz_evm_hardfork_configurations" {
 
                 // Verify hardfork rules remain consistent
                 // In generic Evm, hardfork is compile-time determined
-                try testing.expect(test_config.hardfork == hardfork);
+                try testing.expect(hardfork_config.hardfork == hardfork);
             }
 
             // Test multiple EVM instances with different hardforks
@@ -1605,7 +1626,7 @@ test "fuzz_evm_hardfork_configurations" {
                 const second_hardfork = hardforks[second_hardfork_idx];
 
                 const test_config2 = EvmConfig.init(second_hardfork);
-                const EvmType2 = Evm(test_config2);
+                const EvmType2 = configureEvm(test_config2);
                 var evm2 = try EvmType2.init(allocator, db_interface, null, 0, false, null);
                 defer evm2.deinit();
 
