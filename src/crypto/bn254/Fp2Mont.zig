@@ -56,6 +56,7 @@ pub fn subAssign(self: *Fp2Mont, other: *const Fp2Mont) void {
     self.* = self.sub(other);
 }
 
+// using the schoolbook algorithm
 pub fn mul(self: *const Fp2Mont, other: *const Fp2Mont) Fp2Mont {
     const ac = self.u0.mul(&other.u0);
     const bd = self.u1.mul(&other.u1);
@@ -63,7 +64,6 @@ pub fn mul(self: *const Fp2Mont, other: *const Fp2Mont) Fp2Mont {
     const bc = self.u1.mul(&other.u0);
     const result_u0 = ac.sub(&bd);
     const result_u1 = ad.add(&bc);
-
     return Fp2Mont{
         .u0 = result_u0,
         .u1 = result_u1,
@@ -93,7 +93,15 @@ pub fn mulBySmallIntAssign(self: *Fp2Mont, other: u8) void {
 }
 
 pub fn square(self: *const Fp2Mont) Fp2Mont {
-    return self.mul(self);
+    const apb = self.u0.add(&self.u1);
+    const amb = self.u0.sub(&self.u1);
+
+    const result_u0 = apb.mul(&amb);
+    const result_u1 = self.u0.mul(&self.u1).mulBySmallInt(2);
+    return Fp2Mont{
+        .u0 = result_u0,
+        .u1 = result_u1,
+    };
 }
 
 pub fn squareAssign(self: *Fp2Mont) void {

@@ -57,14 +57,18 @@ pub fn subAssign(self: *Fp12Mont, other: *const Fp12Mont) void {
     self.* = self.sub(other);
 }
 
+// using the Karatsuba algorithm
 pub fn mul(self: *const Fp12Mont, other: *const Fp12Mont) Fp12Mont {
-    const v = curve_parameters.V;
+    //const v = curve_parameters.V;
 
     const w0_mul_w0 = self.w0.mul(&other.w0);
     const w1_mul_w1 = self.w1.mul(&other.w1);
-    const result_w0 = w0_mul_w0.add(&v.mul(&w1_mul_w1));
 
-    const result_w1 = self.w1.mul(&other.w0).add(&self.w0.mul(&other.w1));
+    const self_w0_add_w1 = self.w0.add(&self.w1);
+    const other_w0_add_w1 = other.w0.add(&other.w1);
+
+    const result_w0 = w0_mul_w0.add(&w1_mul_w1.mul_by_v());
+    const result_w1 = self_w0_add_w1.mul(&other_w0_add_w1).sub(&w0_mul_w0).sub(&w1_mul_w1);
 
     return Fp12Mont{
         .w0 = result_w0,
@@ -94,9 +98,20 @@ pub fn mulBySmallIntAssign(self: *Fp12Mont, other: u8) void {
     self.* = self.mulBySmallInt(other);
 }
 
-// TODO: optimize this
+// complex square
 pub fn square(self: *const Fp12Mont) Fp12Mont {
-    return self.mul(self);
+    // const v = curve_parameters.V;
+    const w0_mul_w1 = self.w0.mul(&self.w1);
+    const w0_plus_w1 = self.w0.add(&self.w1);
+    const w0_plus_v_w1 = self.w0.add(&self.w1.mul_by_v());
+
+    const result_w0 = w0_plus_w1.mul(&w0_plus_v_w1).sub(&w0_mul_w1).sub(&w0_mul_w1.mul_by_v());
+    const result_w1 = w0_mul_w1.mulBySmallInt(2);
+
+    return Fp12Mont{
+        .w0 = result_w0,
+        .w1 = result_w1,
+    };
 }
 
 pub fn squareAssign(self: *Fp12Mont) void {

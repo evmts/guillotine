@@ -76,7 +76,7 @@ fn randomG2() G2 {
 // =============================================================================
 
 test "benchmark FpMont.add" {
-    const n = 50000;
+    const n = 500000;
 
     var inputs_a = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -86,6 +86,13 @@ test "benchmark FpMont.add" {
     for (0..n) |i| {
         inputs_a[i] = randomFpMont();
         inputs_b[i] = randomFpMont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -103,7 +110,7 @@ test "benchmark FpMont.add" {
 }
 
 test "benchmark FpMont.sub" {
-    const n = 50000;
+    const n = 500000;
 
     var inputs_a = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -113,6 +120,13 @@ test "benchmark FpMont.sub" {
     for (0..n) |i| {
         inputs_a[i] = randomFpMont();
         inputs_b[i] = randomFpMont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].sub(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -130,7 +144,7 @@ test "benchmark FpMont.sub" {
 }
 
 test "benchmark FpMont.mul" {
-    const n = 50000;
+    const n = 500000;
 
     var inputs_a = try std.testing.allocator.alloc(FpMont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -140,6 +154,13 @@ test "benchmark FpMont.mul" {
     for (0..n) |i| {
         inputs_a[i] = randomFpMont();
         inputs_b[i] = randomFpMont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].mul(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -156,6 +177,37 @@ test "benchmark FpMont.mul" {
     std.debug.print("FpMont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
+test "benchmark FpMont.square" {
+    const n = 500000;
+
+    var inputs = try std.testing.allocator.alloc(FpMont, n);
+    defer std.testing.allocator.free(inputs);
+
+    for (0..n) |i| {
+        inputs[i] = randomFpMont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+    const end = std.time.nanoTimestamp();
+
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+
+    const time = formatTime(avg_ns);
+    std.debug.print("FpMont.square n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+}
+
 test "benchmark FpMont.pow" {
     const n = 5000;
 
@@ -167,6 +219,13 @@ test "benchmark FpMont.pow" {
     for (0..n) |i| {
         inputs[i] = randomFpMont();
         exponents[i] = nextRandom();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].pow(exponents[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -194,6 +253,13 @@ test "benchmark FpMont.inv" {
         if (inputs[i].value == 0) inputs[i] = FpMont.ONE;
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].inv();
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].inv();
@@ -213,7 +279,7 @@ test "benchmark FpMont.inv" {
 // =============================================================================
 
 test "benchmark Fp2Mont.add" {
-    const n = 10000;
+    const n = 100000;
 
     var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -223,6 +289,13 @@ test "benchmark Fp2Mont.add" {
     for (0..n) |i| {
         inputs_a[i] = randomFp2Mont();
         inputs_b[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -240,7 +313,7 @@ test "benchmark Fp2Mont.add" {
 }
 
 test "benchmark Fp2Mont.sub" {
-    const n = 10000;
+    const n = 100000;
     // Random number generation
     // Using deterministic PRNG
 
@@ -252,6 +325,13 @@ test "benchmark Fp2Mont.sub" {
     for (0..n) |i| {
         inputs_a[i] = randomFp2Mont();
         inputs_b[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].sub(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -270,7 +350,7 @@ test "benchmark Fp2Mont.sub" {
 }
 
 test "benchmark Fp2Mont.mul" {
-    const n = 5000;
+    const n = 100000;
 
     var inputs_a = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -280,6 +360,13 @@ test "benchmark Fp2Mont.mul" {
     for (0..n) |i| {
         inputs_a[i] = randomFp2Mont();
         inputs_b[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].mul(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -296,8 +383,39 @@ test "benchmark Fp2Mont.mul" {
     std.debug.print("Fp2Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
+test "benchmark Fp2Mont.square" {
+    const n = 100000;
+
+    var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
+    defer std.testing.allocator.free(inputs);
+
+    for (0..n) |i| {
+        inputs[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+    const end = std.time.nanoTimestamp();
+
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+
+    const time = formatTime(avg_ns);
+    std.debug.print("Fp2Mont.square n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+}
+
 test "benchmark Fp2Mont.pow" {
-    const n = 1000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -310,6 +428,13 @@ test "benchmark Fp2Mont.pow" {
     for (0..n) |i| {
         inputs[i] = randomFp2Mont();
         exponents[i] = nextRandom();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].pow(exponents[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -328,7 +453,7 @@ test "benchmark Fp2Mont.pow" {
 }
 
 test "benchmark Fp2Mont.inv" {
-    const n = 500;
+    const n = 100000;
 
     var inputs = try std.testing.allocator.alloc(Fp2Mont, n);
     defer std.testing.allocator.free(inputs);
@@ -338,6 +463,13 @@ test "benchmark Fp2Mont.inv" {
         if (inputs[i].u0.value == 0 and inputs[i].u1.value == 0) {
             inputs[i] = Fp2Mont.ONE;
         }
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].inv();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -355,7 +487,7 @@ test "benchmark Fp2Mont.inv" {
 }
 
 test "benchmark Fp2Mont.neg" {
-    const n = 10000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -365,6 +497,13 @@ test "benchmark Fp2Mont.neg" {
 
     for (0..n) |i| {
         inputs[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].neg();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -383,7 +522,7 @@ test "benchmark Fp2Mont.neg" {
 }
 
 test "benchmark Fp2Mont.norm" {
-    const n = 10000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -393,6 +532,13 @@ test "benchmark Fp2Mont.norm" {
 
     for (0..n) |i| {
         inputs[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].norm();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -411,7 +557,7 @@ test "benchmark Fp2Mont.norm" {
 }
 
 test "benchmark Fp2Mont.conj" {
-    const n = 10000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -421,6 +567,13 @@ test "benchmark Fp2Mont.conj" {
 
     for (0..n) |i| {
         inputs[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].conj();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -439,7 +592,7 @@ test "benchmark Fp2Mont.conj" {
 }
 
 test "benchmark Fp2Mont.scalarMul" {
-    const n = 1000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -452,6 +605,13 @@ test "benchmark Fp2Mont.scalarMul" {
     for (0..n) |i| {
         inputs[i] = randomFp2Mont();
         scalars[i] = randomFpMont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].scalarMul(&scalars[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -470,7 +630,7 @@ test "benchmark Fp2Mont.scalarMul" {
 }
 
 test "benchmark Fp2Mont.frobeniusMap" {
-    const n = 10000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -480,6 +640,13 @@ test "benchmark Fp2Mont.frobeniusMap" {
 
     for (0..n) |i| {
         inputs[i] = randomFp2Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].frobeniusMap();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -502,7 +669,7 @@ test "benchmark Fp2Mont.frobeniusMap" {
 // =============================================================================
 
 test "benchmark Fp6Mont.add" {
-    const n = 1000;
+    const n = 100000;
 
     var inputs_a = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -512,6 +679,13 @@ test "benchmark Fp6Mont.add" {
     for (0..n) |i| {
         inputs_a[i] = randomFp6Mont();
         inputs_b[i] = randomFp6Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -529,7 +703,7 @@ test "benchmark Fp6Mont.add" {
 }
 
 test "benchmark Fp6Mont.sub" {
-    const n = 1000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -542,6 +716,13 @@ test "benchmark Fp6Mont.sub" {
     for (0..n) |i| {
         inputs_a[i] = randomFp6Mont();
         inputs_b[i] = randomFp6Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].sub(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -560,7 +741,7 @@ test "benchmark Fp6Mont.sub" {
 }
 
 test "benchmark Fp6Mont.mul" {
-    const n = 1000;
+    const n = 100000;
 
     var inputs_a = try std.testing.allocator.alloc(Fp6Mont, n);
     defer std.testing.allocator.free(inputs_a);
@@ -570,6 +751,13 @@ test "benchmark Fp6Mont.mul" {
     for (0..n) |i| {
         inputs_a[i] = randomFp6Mont();
         inputs_b[i] = randomFp6Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].mul(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -586,8 +774,39 @@ test "benchmark Fp6Mont.mul" {
     std.debug.print("Fp6Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
+test "benchmark Fp6Mont.square" {
+    const n = 100000;
+
+    var inputs = try std.testing.allocator.alloc(Fp6Mont, n);
+    defer std.testing.allocator.free(inputs);
+
+    for (0..n) |i| {
+        inputs[i] = randomFp6Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+    const end = std.time.nanoTimestamp();
+
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+
+    const time = formatTime(avg_ns);
+    std.debug.print("Fp6Mont.square n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+}
+
 test "benchmark Fp6Mont.pow" {
-    const n = 500;
+    const n = 5000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -600,6 +819,13 @@ test "benchmark Fp6Mont.pow" {
     for (0..n) |i| {
         inputs[i] = randomFp6Mont();
         exponents[i] = nextRandom();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].pow(exponents[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -618,7 +844,7 @@ test "benchmark Fp6Mont.pow" {
 }
 
 test "benchmark Fp6Mont.inv" {
-    const n = 500;
+    const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -637,6 +863,13 @@ test "benchmark Fp6Mont.inv" {
         }
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].inv();
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].inv();
@@ -653,7 +886,7 @@ test "benchmark Fp6Mont.inv" {
 }
 
 test "benchmark Fp6Mont.neg" {
-    const n = 1000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -663,6 +896,13 @@ test "benchmark Fp6Mont.neg" {
 
     for (0..n) |i| {
         inputs[i] = randomFp6Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].neg();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -681,7 +921,7 @@ test "benchmark Fp6Mont.neg" {
 }
 
 test "benchmark Fp6Mont.norm" {
-    const n = 1000;
+    const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -691,6 +931,13 @@ test "benchmark Fp6Mont.norm" {
 
     for (0..n) |i| {
         inputs[i] = randomFp6Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].norm();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -709,7 +956,7 @@ test "benchmark Fp6Mont.norm" {
 }
 
 test "benchmark Fp6Mont.scalarMul" {
-    const n = 1000;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -722,6 +969,13 @@ test "benchmark Fp6Mont.scalarMul" {
     for (0..n) |i| {
         inputs[i] = randomFp6Mont();
         scalars[i] = randomFpMont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].scalarMul(&scalars[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -744,7 +998,7 @@ test "benchmark Fp6Mont.scalarMul" {
 // =============================================================================
 
 test "benchmark Fp12Mont.add" {
-    const n = 500;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -757,6 +1011,13 @@ test "benchmark Fp12Mont.add" {
     for (0..n) |i| {
         inputs_a[i] = randomFp12Mont();
         inputs_b[i] = randomFp12Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -775,40 +1036,42 @@ test "benchmark Fp12Mont.add" {
 }
 
 test "benchmark Fp12Mont.sub" {
-    const sample_sizes = [_]usize{ 5, 50, 500 };
+    const n = 100000;
 
-    for (sample_sizes) |n| {
-        // Random number generation
-        // Using deterministic PRNG
+    var inputs_a = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(inputs_a);
+    var inputs_b = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(inputs_b);
 
-        var inputs_a = try std.testing.allocator.alloc(Fp12Mont, n);
-        defer std.testing.allocator.free(inputs_a);
-        var inputs_b = try std.testing.allocator.alloc(Fp12Mont, n);
-        defer std.testing.allocator.free(inputs_b);
-
-        for (0..n) |i| {
-            inputs_a[i] = randomFp12Mont();
-            inputs_b[i] = randomFp12Mont();
-        }
-
-        const start = std.time.nanoTimestamp();
-        for (0..n) |i| {
-            const result = inputs_a[i].sub(&inputs_b[i]);
-            std.mem.doNotOptimizeAway(result);
-        }
-        const end = std.time.nanoTimestamp();
-
-        const duration_ns = @as(u64, @intCast(end - start));
-        const avg_ns = duration_ns / n;
-        // ops_per_sec calculation removed
-
-        const time = formatTime(avg_ns);
-        std.debug.print("Fp12Mont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+    for (0..n) |i| {
+        inputs_a[i] = randomFp12Mont();
+        inputs_b[i] = randomFp12Mont();
     }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].sub(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        const result = inputs_a[i].sub(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+    const end = std.time.nanoTimestamp();
+
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+    // ops_per_sec calculation removed
+
+    const time = formatTime(avg_ns);
+    std.debug.print("Fp12Mont.sub n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
 test "benchmark Fp12Mont.mul" {
-    const n = 250;
+    const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -821,6 +1084,13 @@ test "benchmark Fp12Mont.mul" {
     for (0..n) |i| {
         inputs_a[i] = randomFp12Mont();
         inputs_b[i] = randomFp12Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].mul(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -838,8 +1108,39 @@ test "benchmark Fp12Mont.mul" {
     std.debug.print("Fp12Mont.mul n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
 }
 
+test "benchmark Fp12Mont.square" {
+    const n = 10000;
+
+    var inputs = try std.testing.allocator.alloc(Fp12Mont, n);
+    defer std.testing.allocator.free(inputs);
+
+    for (0..n) |i| {
+        inputs[i] = randomFp12Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+
+    const start = std.time.nanoTimestamp();
+    for (0..n) |i| {
+        const result = inputs[i].square();
+        std.mem.doNotOptimizeAway(result);
+    }
+    const end = std.time.nanoTimestamp();
+
+    const duration_ns = @as(u64, @intCast(end - start));
+    const avg_ns = duration_ns / n;
+
+    const time = formatTime(avg_ns);
+    std.debug.print("Fp12Mont.square n={}: {d:.2} {s}/op\n", .{ n, time.value, time.unit });
+}
+
 test "benchmark Fp12Mont.pow" {
-    const n = 100;
+    const n = 500;
 
     // Random number generation
     // Using deterministic PRNG
@@ -852,6 +1153,13 @@ test "benchmark Fp12Mont.pow" {
     for (0..n) |i| {
         inputs[i] = randomFp12Mont();
         exponents[i] = nextRandom();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].pow(exponents[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -870,7 +1178,7 @@ test "benchmark Fp12Mont.pow" {
 }
 
 test "benchmark Fp12Mont.inv" {
-    const n = 100;
+    const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -892,6 +1200,13 @@ test "benchmark Fp12Mont.inv" {
         }
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].inv();
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].inv();
@@ -908,7 +1223,7 @@ test "benchmark Fp12Mont.inv" {
 }
 
 test "benchmark Fp12Mont.neg" {
-    const n = 500;
+    const n = 100000;
 
     // Random number generation
     // Using deterministic PRNG
@@ -918,6 +1233,13 @@ test "benchmark Fp12Mont.neg" {
 
     for (0..n) |i| {
         inputs[i] = randomFp12Mont();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].neg();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -955,6 +1277,13 @@ test "benchmark Fr.add" {
         inputs_b[i] = randomFr();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs_a[i].add(&inputs_b[i]);
@@ -984,6 +1313,13 @@ test "benchmark Fr.sub" {
     for (0..n) |i| {
         inputs_a[i] = randomFr();
         inputs_b[i] = randomFr();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].sub(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1017,6 +1353,13 @@ test "benchmark Fr.mul" {
         inputs_b[i] = randomFr();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].mul(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs_a[i].mul(&inputs_b[i]);
@@ -1046,6 +1389,13 @@ test "benchmark Fr.pow" {
     for (0..n) |i| {
         inputs[i] = randomFr();
         exponents[i] = nextRandom();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].pow(exponents[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1078,6 +1428,13 @@ test "benchmark Fr.inv" {
         if (inputs[i].value == 0) inputs[i] = Fr.ONE;
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].inv();
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].inv();
@@ -1104,6 +1461,13 @@ test "benchmark Fr.neg" {
 
     for (0..n) |i| {
         inputs[i] = randomFr();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].neg();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1141,6 +1505,13 @@ test "benchmark G1.add" {
         inputs_b[i] = randomG1();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs_a[i].add(&inputs_b[i]);
@@ -1167,6 +1538,13 @@ test "benchmark G1.double" {
 
     for (0..n) |i| {
         inputs[i] = randomG1();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].double();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1200,6 +1578,13 @@ test "benchmark G1.mul" {
         scalars[i] = randomFr();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].mul(&scalars[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].mul(&scalars[i]);
@@ -1226,6 +1611,13 @@ test "benchmark G1.neg" {
 
     for (0..n) |i| {
         inputs[i] = randomG1();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].neg();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1256,6 +1648,13 @@ test "benchmark G1.toAffine" {
         inputs[i] = randomG1();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].toAffine();
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].toAffine();
@@ -1282,6 +1681,13 @@ test "benchmark G1.isOnCurve" {
 
     for (0..n) |i| {
         inputs[i] = randomG1();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].isOnCurve();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1319,6 +1725,13 @@ test "benchmark G2.add" {
         inputs_b[i] = randomG2();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs_a[i].add(&inputs_b[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs_a[i].add(&inputs_b[i]);
@@ -1345,6 +1758,13 @@ test "benchmark G2.double" {
 
     for (0..n) |i| {
         inputs[i] = randomG2();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].double();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1378,6 +1798,13 @@ test "benchmark G2.mul" {
         scalars[i] = randomFr();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].mul(&scalars[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].mul(&scalars[i]);
@@ -1404,6 +1831,13 @@ test "benchmark G2.neg" {
 
     for (0..n) |i| {
         inputs[i] = randomG2();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].neg();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1434,6 +1868,13 @@ test "benchmark G2.toAffine" {
         inputs[i] = randomG2();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].toAffine();
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = inputs[i].toAffine();
@@ -1460,6 +1901,13 @@ test "benchmark G2.isOnCurve" {
 
     for (0..n) |i| {
         inputs[i] = randomG2();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = inputs[i].isOnCurve();
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1497,6 +1945,13 @@ test "benchmark pairing.pairing" {
         g2_inputs[i] = randomG2();
     }
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = pairing_mod.pairing(&g1_inputs[i], &g2_inputs[i]);
+        std.mem.doNotOptimizeAway(result);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         const result = pairing_mod.pairing(&g1_inputs[i], &g2_inputs[i]);
@@ -1526,6 +1981,13 @@ test "benchmark pairing.miller_loop" {
     for (0..n) |i| {
         g1_inputs[i] = randomG1();
         g2_inputs[i] = randomG2();
+    }
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const result = pairing_mod.miller_loop(&g1_inputs[i], &g2_inputs[i]);
+        std.mem.doNotOptimizeAway(result);
     }
 
     const start = std.time.nanoTimestamp();
@@ -1559,6 +2021,13 @@ test "benchmark pairing.final_exponentiation" {
     var results = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(results);
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const tmp = pairing_mod.final_exponentiation(&inputs[i]);
+        std.mem.doNotOptimizeAway(tmp);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         results[i] = pairing_mod.final_exponentiation(&inputs[i]);
@@ -1590,6 +2059,13 @@ test "benchmark pairing.final_exponentiation_hard_part" {
     var results = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(results);
 
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const tmp = pairing_mod.final_exponentiation_hard_part(&inputs[i]);
+        std.mem.doNotOptimizeAway(tmp);
+    }
+
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {
         results[i] = pairing_mod.final_exponentiation_hard_part(&inputs[i]);
@@ -1620,6 +2096,13 @@ test "benchmark pairing.final_exponentiation_easy_part" {
 
     var results = try std.testing.allocator.alloc(Fp12Mont, n);
     defer std.testing.allocator.free(results);
+
+    // dry run
+    const dry = if (n < 10000) n else 10000;
+    for (0..dry) |i| {
+        const tmp = pairing_mod.final_exponentiation_easy_part(&inputs[i]);
+        std.mem.doNotOptimizeAway(tmp);
+    }
 
     const start = std.time.nanoTimestamp();
     for (0..n) |i| {

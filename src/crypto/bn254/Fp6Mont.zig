@@ -63,6 +63,16 @@ pub fn subAssign(self: *Fp6Mont, other: *const Fp6Mont) void {
     self.* = self.sub(other);
 }
 
+pub fn mul_by_v(self: *const Fp6Mont) Fp6Mont {
+    const xi = curve_parameters.XI;
+    return Fp6Mont{
+        .v0 = self.v2.mul(&xi),
+        .v1 = self.v0,
+        .v2 = self.v1,
+    };
+}
+
+// using the Karatsuba algorithm
 pub fn mul(self: *const Fp6Mont, other: *const Fp6Mont) Fp6Mont {
     // ξ = 9 + u ∈ Fp2
     const xi = curve_parameters.XI;
@@ -122,9 +132,24 @@ pub fn mulBySmallIntAssign(self: *Fp6Mont, other: u8) void {
     self.* = self.mulBySmallInt(other);
 }
 
-// TODO: optimize this
+// using CH-SQR2 algorithm
 pub fn square(self: *const Fp6Mont) Fp6Mont {
-    return self.mul(self);
+    const xi = curve_parameters.XI;
+    const s0 = self.v0.square();
+    const s1 = self.v0.mul(&self.v1).mulBySmallInt(2);
+    const s2 = self.v0.sub(&self.v1).add(&self.v2).square();
+    const s3 = self.v1.mul(&self.v2).mulBySmallInt(2);
+    const s4 = self.v2.square();
+
+    const c0 = s0.add(&xi.mul(&s3));
+    const c1 = s1.add(&xi.mul(&s4));
+    const c2 = s1.add(&s2).add(&s3).sub(&s4).sub(&s0);
+
+    return Fp6Mont{
+        .v0 = c0,
+        .v1 = c1,
+        .v2 = c2,
+    };
 }
 
 pub fn squareAssign(self: *Fp6Mont) void {
@@ -236,7 +261,5 @@ pub fn frobeniusMap(self: *const Fp6Mont) Fp6Mont {
 }
 
 pub fn frobeniusMapAssign(self: *Fp6Mont) void {
-    self.v0.frobeniusMapAssign();
-    self.v1.frobeniusMapAssign();
-    self.v2.frobeniusMapAssign();
+    self.* = self.frobeniusMap();
 }
