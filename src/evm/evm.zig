@@ -1246,7 +1246,7 @@ test "fuzz_evm_initialization_states" {
             const hardfork = hardforks[hardfork_idx];
 
             // Test initialization with various state combinations
-        const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
+            const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
             const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
             var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();
