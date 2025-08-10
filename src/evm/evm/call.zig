@@ -30,7 +30,7 @@ const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 // 128 KB is about the limit most rpc providers limit call data to so we use it as the default
 pub const MAX_INPUT_SIZE: u18 = 128 * 1024; // 128 kb
 
-pub inline fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult {
+pub fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
     Log.debug("[call] Starting call execution", .{});
 

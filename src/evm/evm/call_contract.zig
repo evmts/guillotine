@@ -28,7 +28,7 @@ pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error ||
 /// @param gas Gas limit available for the call
 /// @param is_static Whether this is a static call (no state changes allowed)
 /// @return CallResult indicating success/failure and return data
-pub inline fn call_contract(self: *@This(), caller: primitives.Address.Address, to: primitives.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
+pub fn call_contract(self: *@This(), caller: primitives.Address.Address, to: primitives.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
     @branchHint(.likely);
 
     Log.debug("VM.call_contract: Call from {any} to {any}, gas={}, static={}", .{ caller, to, gas, is_static });

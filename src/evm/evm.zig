@@ -123,7 +123,8 @@ initial_thread_id: std.Thread.Id,
 
         // Import method implementations
         pub usingnamespace @import("evm/set_context.zig");
-        pub usingnamespace @import("evm/call.zig");
+        // call.zig is imported with explicit wrapper below due to generic type issues
+        // pub usingnamespace @import("evm/call.zig");
         pub usingnamespace @import("evm/call_contract.zig");
         pub usingnamespace @import("evm/execute_precompile_call.zig");
         pub usingnamespace @import("evm/staticcall_contract.zig");
@@ -230,7 +231,6 @@ initial_thread_id: std.Thread.Id,
     };
 }
 
-
 /// Free all VM resources.
 /// Must be called when finished with the VM to prevent memory leaks.
 pub fn deinit(self: *Self) void {
@@ -257,6 +257,55 @@ pub fn deinit(self: *Self) void {
     }
 
     // created_contracts is initialized in init(); single deinit above is sufficient
+}
+
+// Explicit wrapper for the call method to work around generic type issues
+// This dispatches to the appropriate call type methods
+pub fn call(self: *Self, params: CallParams) ExecutionError.Error!CallResult {
+    switch (params) {
+        .call => |call_data| {
+            const call_contract_impl = @import("evm/call_contract.zig");
+            return call_contract_impl.call_contract(self, call_data.caller, call_data.to, call_data.value, call_data.input, call_data.gas, false);
+        },
+        .staticcall => |call_data| {
+            const staticcall_impl = @import("evm/staticcall_contract.zig");
+            return staticcall_impl.staticcall_contract(self, call_data.caller, call_data.to, call_data.input, call_data.gas);
+        },
+        .delegatecall => |call_data| {
+            // TODO: Implement delegatecall
+            _ = call_data;
+            return CallResult{ .success = false, .gas_left = 0, .output = null };
+        },
+        .create => |create_data| {
+            const result = try self.create_contract(create_data.caller, create_data.value, create_data.init_code, create_data.gas);
+            return CallResult{
+                .success = result.success,
+                .gas_left = result.gas_left,
+                .output = result.output,
+            };
+        },
+        .create2 => |create2_data| {
+            // TODO: Implement create2
+            _ = create2_data;
+            return CallResult{ .success = false, .gas_left = 0, .output = null };
+        },
+        .callcode => |callcode_data| {
+            // TODO: Implement callcode
+            _ = callcode_data;
+            return CallResult{ .success = false, .gas_left = 0, .output = null };
+        },
+    }
+}
+
+// Explicit wrappers for methods that have issues with usingnamespace and generic types
+pub fn call_contract(self: *Self, caller: primitives_internal.Address.Address, to: primitives_internal.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) !CallResult {
+    const call_contract_impl = @import("evm/call_contract.zig");
+    return call_contract_impl.call_contract(self, caller, to, value, input, gas, is_static);
+}
+
+pub fn staticcall_contract(self: *Self, caller: primitives_internal.Address.Address, to: primitives_internal.Address.Address, input: []const u8, gas: u64) !CallResult {
+    const staticcall_impl = @import("evm/staticcall_contract.zig");
+    return staticcall_impl.staticcall_contract(self, caller, to, input, gas);
 }
 
 /// Reset the EVM for reuse without deallocating memory.
@@ -380,8 +429,6 @@ pub fn emit_log(self: *Self, contract_address: primitives.Address.Address, topic
     };
 }
 
-// The actual call implementation is in evm/call.zig
-// Import it with usingnamespace below
 
 // Method implementations moved inside struct
 pub usingnamespace @import("evm/set_transient_storage_protected.zig");

@@ -12,6 +12,11 @@ const allocator = gpa.allocator();
 const DefaultEvmConfig = Evm.EvmConfig.init(.CANCUN);
 const DefaultEvmType = Evm.Evm(DefaultEvmConfig);
 
+// Helper function to call the EVM
+fn callEvm(evm: *DefaultEvmType, params: CallParams) !Evm.CallResult {
+    return evm.call(params);
+}
+
 // Wrapper to own the EVM and its backing in-memory DB for testing
 const EvmWrapper = struct {
     evm: *DefaultEvmType,
@@ -119,7 +124,7 @@ export fn zigEvmCall(evm_ptr: ?*anyopaque, req: *const CCallRequest, res: *CCall
         .CREATE2 => .{ .create2 = .{ .caller = caller, .value = value, .init_code = input, .salt = salt, .gas = gas } },
     };
 
-    const result = wrapper.evm.*.call(params) catch {
+    const result = callEvm(wrapper.evm, params) catch {
         res.* = .{ .success = false, .gas_left = 0, .output = .{ .ptr = undefined, .len = 0 } };
         return 0;
     };
