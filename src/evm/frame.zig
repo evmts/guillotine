@@ -1,8 +1,21 @@
-/// Minimal execution context for EVM opcodes - replaces the heavy Frame struct
-///
-/// This struct contains only the essential data needed by EVM execution handlers,
-/// following data-oriented design principles for better cache performance and
-/// eliminating circular dependencies.
+//! EVM execution frame and chain configuration
+//!
+//! This module defines the execution context (Frame) for running EVM bytecode
+//! and the chain rules configuration for different hardforks and EIPs.
+//!
+//! ## Key Components
+//!
+//! - **Frame**: The execution context containing stack, memory, gas, and state
+//! - **ChainRules**: Configuration for hardforks and EIPs
+//! - **Flags**: Optimized packed struct for runtime execution flags
+//!
+//! ## Design Principles
+//!
+//! - Data-oriented design for cache efficiency
+//! - Hot fields grouped together for better locality
+//! - Minimal allocations during execution
+//! - Clear separation between pre-execution setup and runtime checks
+
 const std = @import("std");
 const builtin = @import("builtin");
 const primitives = @import("primitives");

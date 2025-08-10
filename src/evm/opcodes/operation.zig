@@ -1,3 +1,38 @@
+//! Operation metadata and execution functions for EVM opcodes
+//!
+//! This module defines the structure for EVM operations, including their
+//! execution logic, gas costs, and stack requirements. Each opcode in the
+//! EVM is associated with an Operation that controls its behavior.
+//!
+//! ## Design Philosophy
+//! Operations encapsulate all opcode-specific logic:
+//! - Execution function that implements the opcode
+//! - Gas calculation (both constant and dynamic)
+//! - Stack validation requirements
+//! - Memory expansion calculations
+//!
+//! ## Function Types
+//! The module uses function pointers for flexibility, allowing:
+//! - Different implementations for different hardforks
+//! - Optimized variants for specific conditions
+//! - Mock implementations for testing
+//!
+//! ## Gas Model
+//! EVM gas costs consist of:
+//! - Constant gas: Fixed cost for the operation
+//! - Dynamic gas: Variable cost based on operation parameters
+//!
+//! ## Usage Example
+//! ```zig
+//! // ADD operation
+//! const add_op = Operation{
+//!     .execute = execute_add,
+//!     .constant_gas = 3,
+//!     .min_stack = 2,
+//!     .max_stack = Stack.CAPACITY - 1,
+//! };
+//! ```
+
 const std = @import("std");
 const Opcode = @import("opcode.zig");
 const ExecutionError = @import("../execution/execution_error.zig");

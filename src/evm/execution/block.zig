@@ -1,8 +1,31 @@
+//! Block information opcodes for the Ethereum Virtual Machine
+//!
+//! This module implements opcodes that provide access to block-level data including
+//! block hashes, timestamps, miner address, block number, difficulty/prevrandao,
+//! gas limit, chain ID, and base fee.
+//!
+//! ## Gas Costs
+//! - BLOCKHASH: 20 gas
+//! - COINBASE, TIMESTAMP, NUMBER, GASLIMIT, CHAINID: 2 gas
+//! - DIFFICULTY/PREVRANDAO, BASEFEE, BLOBBASEFEE: 2 gas
+//!
+//! ## EIP Changes
+//! - EIP-3651: Warm COINBASE address (Shanghai)
+//! - EIP-4399: DIFFICULTY becomes PREVRANDAO (Merge)
+//! - EIP-3198: BASEFEE opcode (London)
+//! - EIP-4844: BLOBBASEFEE opcode (Cancun)
+
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
 const primitives = @import("primitives");
 
+/// BLOCKHASH opcode (0x40) - Get hash of specific block
+///
+/// Returns the hash of one of the 256 most recent blocks. If the requested block
+/// is not within this range or is the current block or a future block, returns 0.
+///
+/// Stack: [block_number] → [hash]
 pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     const block_number = try context.stack.pop();
@@ -19,13 +42,18 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
         @branchHint(.unlikely);
         try context.stack.append(0);
     } else {
-        // TODO: In production, this would retrieve the actual block hash from chain history
-        // For now, return a pseudo-hash based on block number for testing
+        // TODO: Implement proper block hash retrieval from chain history
         const hash = std.hash.Wyhash.hash(0, std.mem.asBytes(&block_number));
         try context.stack.append(hash);
     }
 }
 
+/// COINBASE opcode (0x41) - Get current block miner's address
+///
+/// Pushes the address of the miner who produced the current block.
+/// Note: After EIP-3651 (Shanghai), the coinbase address is pre-warmed.
+///
+/// Stack: [] → [coinbase_address]
 pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
 
@@ -36,16 +64,32 @@ pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(primitives.Address.to_u256(context.block_coinbase));
 }
 
+/// TIMESTAMP opcode (0x42) - Get current block timestamp
+///
+/// Pushes the Unix timestamp of the current block.
+///
+/// Stack: [] → [timestamp]
 pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     try context.stack.append(@as(u256, @intCast(context.block_timestamp)));
 }
 
+/// NUMBER opcode (0x43) - Get current block number
+///
+/// Pushes the number of the current block.
+///
+/// Stack: [] → [block_number]
 pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     try context.stack.append(@as(u256, @intCast(context.block_number)));
 }
 
+/// DIFFICULTY/PREVRANDAO opcode (0x44) - Get block difficulty or prevrandao
+///
+/// Pre-merge: Returns the difficulty of the current block.
+/// Post-merge (EIP-4399): Returns the prevrandao value from the beacon chain.
+///
+/// Stack: [] → [difficulty/prevrandao]
 pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     // Post-merge this returns PREVRANDAO, pre-merge it returns difficulty
@@ -53,16 +97,33 @@ pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(context.block_difficulty);
 }
 
+/// PREVRANDAO opcode - Alias for DIFFICULTY post-merge
+///
+/// Returns the prevrandao value from the beacon chain.
+/// This is an alias for DIFFICULTY that makes the semantic change explicit.
+///
+/// Stack: [] → [prevrandao]
 pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
     // Same as difficulty post-merge
     return op_difficulty(context_ptr);
 }
 
+/// GASLIMIT opcode (0x45) - Get current block gas limit
+///
+/// Pushes the gas limit of the current block.
+///
+/// Stack: [] → [gas_limit]
 pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     try context.stack.append(@as(u256, @intCast(context.block_gas_limit)));
 }
 
+/// BASEFEE opcode (0x48) - Get current block base fee
+///
+/// Returns the base fee per gas of the current block (EIP-3198, London).
+/// This value is determined by the network's fee market mechanism.
+///
+/// Stack: [] → [base_fee]
 pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
 
@@ -77,6 +138,12 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(context.block_base_fee);
 }
 
+/// BLOBHASH opcode (0x49) - Get versioned hash of blob
+///
+/// Returns the versioned hash of the blob at the given index (EIP-4844, Cancun).
+/// If index is out of bounds, returns 0.
+///
+/// Stack: [index] → [blob_hash]
 pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     const index = try context.stack.pop();
@@ -96,6 +163,12 @@ pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     try context.stack.append(0);
 }
 
+/// BLOBBASEFEE opcode (0x4A) - Get current blob base fee
+///
+/// Returns the base fee per blob gas of the current block (EIP-4844, Cancun).
+/// Used for blob transaction pricing.
+///
+/// Stack: [] → [blob_base_fee]
 pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     // Push blob base fee (EIP-4844, Cancun+)

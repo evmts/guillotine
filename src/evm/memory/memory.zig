@@ -1,3 +1,20 @@
+//! EVM memory implementation with hierarchical isolation
+//!
+//! This module provides the memory abstraction for EVM execution contexts.
+//! Memory is byte-addressable, dynamically expandable, and supports hierarchical
+//! isolation for nested calls through a checkpoint system.
+//!
+//! ## Design Features
+//! - Shared buffer with checkpoints for efficient nested calls
+//! - Lazy expansion with gas cost calculation
+//! - Zero-initialized on expansion
+//! - Bounded memory operations for safe partial copies
+//!
+//! ## Gas Model
+//! Memory expansion follows the quadratic gas cost formula:
+//! - cost = (memory_size_word ^ 2) / 512 + (3 * memory_size_word)
+//! - Gas is only charged when expanding beyond current size
+
 const std = @import("std");
 const builtin = @import("builtin");
 const constants = @import("constants.zig");

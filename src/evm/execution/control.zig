@@ -1,3 +1,19 @@
+//! Control flow operations for the Ethereum Virtual Machine
+//!
+//! This module implements control flow opcodes including STOP, JUMP, JUMPI,
+//! PC, JUMPDEST, RETURN, REVERT, and INVALID.
+//!
+//! ## Architecture Note
+//! JUMP and JUMPI are handled directly by the interpreter for performance.
+//! The functions here are stubs that should never be called.
+//!
+//! ## Gas Costs
+//! - STOP, JUMPDEST: 0 gas
+//! - PC: 2 gas
+//! - JUMP, JUMPI: 8 gas
+//! - RETURN, REVERT: dynamic based on returned data size
+//! - INVALID: consumes all remaining gas
+
 const std = @import("std");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
@@ -7,43 +23,58 @@ const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const from_u256 = primitives.Address.from_u256;
 
+/// STOP opcode (0x00) - Halt execution
+///
+/// Halts execution of the current context and returns successfully with no data.
+/// Stack: [] → [] (execution ends)
 pub fn op_stop(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
 
     return ExecutionError.Error.STOP;
 }
 
-// DEPRECATED: JUMP is now handled directly in interpret.zig via .jump_target instruction type
-// This function is no longer called and should be deleted
+/// JUMP opcode (0x56) - Unconditional jump
+///
+/// Note: This is a stub. JUMP is handled directly by the interpreter.
 pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // JUMP is handled inline by the interpreter based on pre-resolved targets
-    // in the instruction stream; this function must never be called.
+    // Handled by interpreter for performance
     unreachable;
 }
 
-// DEPRECATED: JUMPI is now handled directly in interpret.zig via .jump_target instruction type
-// This function is no longer called and should be deleted
+/// JUMPI opcode (0x57) - Conditional jump
+///
+/// Note: This is a stub. JUMPI is handled directly by the interpreter.
 pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // JUMPI is handled inline by the interpreter based on pre-resolved targets
-    // in the instruction stream; this function must never be called.
+    // Handled by interpreter for performance
     unreachable;
 }
 
-// TODO_PC_DELETE: PC operations are deprecated in the new architecture
+/// PC opcode (0x58) - Get program counter
+///
+/// Note: This is a stub. PC is handled directly by the interpreter.
 pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // PC is handled within the interpreter loop; this stub must never be called.
+    // Handled by interpreter
     unreachable;
 }
 
+/// JUMPDEST opcode (0x5B) - Mark valid jump destination
+///
+/// This is a no-op that marks a valid destination for JUMP/JUMPI.
+/// Has no effect on execution or stack.
+/// Stack: [] → []
 pub fn op_jumpdest(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-
     // No-op, just marks valid jump destination
 }
 
+/// RETURN opcode (0xF3) - Halt execution and return data
+///
+/// Halts execution and returns data from memory. The returned data becomes
+/// available to the caller.
+/// Stack: [offset, size] → [] (execution ends)
 pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*Frame, @ptrCast(@alignCast(context)));
     const frame = ctx;
@@ -100,6 +131,11 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
     return ExecutionError.Error.STOP; // RETURN ends execution normally
 }
 
+/// REVERT opcode (0xFD) - Halt execution and revert state changes
+///
+/// Halts execution, reverts all state changes made in the current context,
+/// and returns data from memory. The returned data is available to the caller.
+/// Stack: [offset, size] → [] (execution ends)
 pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*Frame, @ptrCast(@alignCast(context)));
     const frame = ctx;
@@ -144,14 +180,17 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
     return ExecutionError.Error.REVERT;
 }
 
+/// INVALID opcode (0xFE) - Invalid instruction
+///
+/// Represents an invalid opcode. Consumes all remaining gas and causes
+/// execution to fail with an error.
+/// Stack: [] → [] (execution fails)
 pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*Frame, @ptrCast(@alignCast(context)));
     const frame = ctx;
 
-    // Debug: op_invalid entered
     // INVALID opcode consumes all remaining gas
     frame.gas_remaining = 0;
-    // Debug: op_invalid returning InvalidOpcode
 
     return ExecutionError.Error.InvalidOpcode;
 }

@@ -1,39 +1,40 @@
-/// EVM opcode definitions and utilities.
-///
-/// This module defines all EVM opcodes as specified in the Ethereum Yellow Paper
-/// and various EIPs. Each opcode is a single byte instruction that the EVM
-/// interpreter executes.
-///
-/// ## Opcode Categories
-/// - Arithmetic: ADD, MUL, SUB, DIV, MOD, EXP, etc.
-/// - Comparison: LT, GT, EQ, ISZERO
-/// - Bitwise: AND, OR, XOR, NOT, SHL, SHR, SAR
-/// - Environmental: ADDRESS, BALANCE, CALLER, CALLVALUE
-/// - Block Information: BLOCKHASH, COINBASE, TIMESTAMP, NUMBER
-/// - Stack Operations: POP, PUSH1-PUSH32, DUP1-DUP16, SWAP1-SWAP16
-/// - Memory Operations: MLOAD, MSTORE, MSTORE8, MSIZE
-/// - Storage Operations: SLOAD, SSTORE, TLOAD, TSTORE
-/// - Flow Control: JUMP, JUMPI, PC, JUMPDEST
-/// - System Operations: CREATE, CALL, RETURN, REVERT, SELFDESTRUCT
-/// - Logging: LOG0-LOG4
-///
-/// ## Opcode Encoding
-/// Opcodes are encoded as single bytes (0x00-0xFF). Not all byte values
-/// are assigned; unassigned values are treated as INVALID operations.
-///
-/// ## Hardfork Evolution
-/// New opcodes are introduced through EIPs and activated at specific
-/// hardforks. Examples:
-/// - PUSH0 (EIP-3855): Shanghai hardfork
-/// - TLOAD/TSTORE (EIP-1153): Cancun hardfork
-/// - MCOPY (EIP-5656): Cancun hardfork
-///
-/// Example:
-/// ```zig
-/// const opcode = Opcode.Enum.ADD;
-/// const byte_value = opcode.to_u8(); // 0x01
-/// const name = opcode.get_name(); // "ADD"
-/// ```
+//! EVM opcode definitions and utilities
+//!
+//! This module defines all EVM opcodes as specified in the Ethereum Yellow Paper
+//! and various EIPs. Each opcode is a single byte instruction that the EVM
+//! interpreter executes.
+//!
+//! ## Opcode Categories
+//! - Arithmetic: ADD, MUL, SUB, DIV, MOD, EXP, etc.
+//! - Comparison: LT, GT, EQ, ISZERO
+//! - Bitwise: AND, OR, XOR, NOT, SHL, SHR, SAR
+//! - Environmental: ADDRESS, BALANCE, CALLER, CALLVALUE
+//! - Block Information: BLOCKHASH, COINBASE, TIMESTAMP, NUMBER
+//! - Stack Operations: POP, PUSH1-PUSH32, DUP1-DUP16, SWAP1-SWAP16
+//! - Memory Operations: MLOAD, MSTORE, MSTORE8, MSIZE
+//! - Storage Operations: SLOAD, SSTORE, TLOAD, TSTORE
+//! - Flow Control: JUMP, JUMPI, PC, JUMPDEST
+//! - System Operations: CREATE, CALL, RETURN, REVERT, SELFDESTRUCT
+//! - Logging: LOG0-LOG4
+//!
+//! ## Opcode Encoding
+//! Opcodes are encoded as single bytes (0x00-0xFF). Not all byte values
+//! are assigned; unassigned values are treated as INVALID operations.
+//!
+//! ## Hardfork Evolution
+//! New opcodes are introduced through EIPs and activated at specific
+//! hardforks. Examples:
+//! - PUSH0 (EIP-3855): Shanghai hardfork
+//! - TLOAD/TSTORE (EIP-1153): Cancun hardfork
+//! - MCOPY (EIP-5656): Cancun hardfork
+//!
+//! ## Usage Example
+//! ```zig
+//! const opcode = Opcode.Enum.ADD;
+//! const byte_value = opcode.to_u8(); // 0x01
+//! const name = opcode.get_name(); // "ADD"
+//! ```
+
 pub const MemorySize = @import("memory_size.zig");
 const evm_limits = @import("../constants/evm_limits.zig");
 
