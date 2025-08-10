@@ -1,7 +1,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const EvmConfig = evm.EvmConfig;
-const Memory = evm.Memory.createMemory(EvmConfig.DEFAULT);
+const Memory = evm.Memory;
 const testing = std.testing;
 
 pub fn calculate_num_words(len: usize) usize {

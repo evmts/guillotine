@@ -13,11 +13,11 @@ const Address = primitives.Address.Address;
 const ecmul = evm.precompiles.ecmul;
 const ecpairing = evm.precompiles.ecpairing;
 const precompiles = evm.precompiles.precompiles;
-const ChainRules = evm.chain_rules;
+const ChainRules = evm.hardforks.HardforkChainRules;
 const Frame = evm.Frame;
 
 test "BN254 ECMUL basic functionality" {
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test multiplying point at infinity by any scalar
     var input = [_]u8{0} ** 96; // All zeros = point at infinity, scalar = 0
@@ -35,7 +35,7 @@ test "BN254 ECMUL basic functionality" {
 }
 
 test "BN254 ECMUL generator point by one" {
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test multiplying generator point (1, 2) by scalar 1
     var input = [_]u8{0} ** 96;
@@ -58,7 +58,7 @@ test "BN254 ECMUL generator point by one" {
 }
 
 test "BN254 ECPAIRING empty input" {
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test empty input (k=0) - should return true
     const input: []const u8 = &[_]u8{};
@@ -77,7 +77,7 @@ test "BN254 ECPAIRING empty input" {
 }
 
 test "BN254 ECPAIRING single pair - identity pairing" {
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test single pair with point at infinity (should result in identity pairing)
     var input = [_]u8{0} ** 192; // G1 = O, G2 = O
@@ -97,7 +97,7 @@ test "BN254 ECPAIRING single pair - identity pairing" {
 }
 
 test "BN254 precompile dispatcher integration" {
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test ECMUL through the dispatcher
     const ecmul_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x07 };
@@ -119,7 +119,7 @@ test "BN254 precompile dispatcher integration" {
 }
 
 test "BN254 gas estimation" {
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test ECMUL gas estimation
     const ecmul_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x07 };
@@ -139,7 +139,7 @@ test "BN254 gas estimation" {
 test "BN254 output size validation" {
     const ecmul_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x07 };
     const ecpairing_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x08 };
-    const chain_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
 
     // Test output sizes
     const ecmul_size = precompiles.get_output_size(ecmul_address, 96, chain_rules) catch unreachable;
@@ -153,7 +153,7 @@ test "BN254 hardfork gas differences" {
     // Test that gas costs change between hardforks
 
     // Byzantium costs (higher)
-    const byzantium_rules = Frame.chainRulesForHardfork(.BYZANTIUM);
+    const byzantium_rules = ChainRules.for_hardfork(.BYZANTIUM);
     const byzantium_ecmul_gas = ecmul.calculate_gas(byzantium_rules);
     try testing.expectEqual(@as(u64, 40000), byzantium_ecmul_gas);
 
@@ -161,7 +161,7 @@ test "BN254 hardfork gas differences" {
     try testing.expectEqual(@as(u64, 180000), byzantium_ecpairing_gas); // 100000 + 80000 * 1
 
     // Istanbul costs (lower)
-    const istanbul_rules = Frame.chainRulesForHardfork(.ISTANBUL);
+    const istanbul_rules = ChainRules.for_hardfork(.ISTANBUL);
     const istanbul_ecmul_gas = ecmul.calculate_gas(istanbul_rules);
     try testing.expectEqual(@as(u64, 6000), istanbul_ecmul_gas);
 

@@ -202,6 +202,7 @@ pub const AccessList = @import("access_list/access_list.zig");
 pub const hardforks = struct {
     pub const chain_rules = @import("frame.zig").ChainRules;
     pub const hardfork = @import("hardforks/hardfork.zig");
+    pub const HardforkChainRules = @import("hardforks/chain_rules.zig").ChainRules;
 };
 
 /// EVM opcode definitions and utilities

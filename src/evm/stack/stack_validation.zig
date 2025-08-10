@@ -8,8 +8,8 @@ const Log = @import("../log.zig");
 const stack_module = @import("stack.zig");
 const EvmConfig = @import("../config.zig").EvmConfig;
 
-// Use default Stack type for compatibility
-const Stack = stack_module.Stack(EvmConfig.DEFAULT);
+// Stack is now a plain struct, not a generic function
+const Stack = stack_module;
 
 /// Stack validation utilities for EVM operations.
 ///

@@ -3,8 +3,8 @@ const testing = std.testing;
 const evm = @import("evm");
 const EvmConfig = evm.EvmConfig;
 
-// Create a Stack type with default configuration
-const Stack = evm.Stack.Stack(EvmConfig.DEFAULT);
+// Stack is now a plain struct, not a generic function
+const Stack = evm.Stack;
 
 fn setup_stack(allocator: std.mem.Allocator, items: []const u256) !Stack {
     var stack = try Stack.init(allocator);

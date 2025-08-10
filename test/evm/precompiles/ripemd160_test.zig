@@ -11,7 +11,7 @@ const ripemd160 = Evm.precompiles.ripemd160;
 const precompiles = Evm.precompiles.precompiles;
 const PrecompileOutput = Evm.precompiles.precompile_result.PrecompileOutput;
 const PrecompileError = Evm.precompiles.precompile_result.PrecompileError;
-const ChainRules = Evm.hardforks.chain_rules;
+const ChainRules = Evm.hardforks.HardforkChainRules;
 
 // Known RIPEMD160 test vectors from official specification
 // and Bitcoin Core implementation
