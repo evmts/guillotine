@@ -28,30 +28,30 @@ pub const JumpdestArray = struct {
     /// u15 allows max value 32767, sufficient for MAX_CONTRACT_SIZE (24576).
     /// Packed to maximize cache line utilization.
     positions: []const u15,
-    
+
     /// Original code length for bounds checking and search hint calculation
     code_len: usize,
-    
+
     allocator: std.mem.Allocator,
-    
+
     /// Convert a DynamicBitSet bitmap to a packed array of JUMPDEST positions.
     /// Collects all set bits from the bitmap into a sorted, packed array.
     pub fn from_bitmap(allocator: std.mem.Allocator, bitmap: *const DynamicBitSet, code_len: usize) !JumpdestArray {
         comptime {
             std.debug.assert(std.math.maxInt(u15) >= limits.MAX_CONTRACT_SIZE);
         }
-        
+
         // First pass: count set bits to determine array size
         var count: usize = 0;
         var i: usize = 0;
         while (i < code_len) : (i += 1) {
             if (bitmap.isSet(i)) count += 1;
         }
-        
+
         // Allocate packed array
         const positions = try allocator.alloc(u15, count);
         errdefer allocator.free(positions);
-        
+
         // Second pass: collect positions into array
         var pos_idx: usize = 0;
         i = 0;
@@ -61,40 +61,40 @@ pub const JumpdestArray = struct {
                 pos_idx += 1;
             }
         }
-        
+
         return JumpdestArray{
             .positions = positions,
             .code_len = code_len,
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *JumpdestArray) void {
         self.allocator.free(self.positions);
     }
-    
+
     /// Validates if a program counter is a valid JUMPDEST using cache-friendly linear search.
     /// Uses proportional starting point (pc / code_len * positions.len) then searches
     /// bidirectionally to maximize cache hits on the packed array.
     pub fn is_valid_jumpdest(self: *const JumpdestArray, pc: usize) bool {
         if (self.positions.len == 0 or pc >= self.code_len) return false;
-        
+
         // Calculate proportional starting index for linear search
         // This distributes search starting points across the array for better cache locality
         const start_idx = (pc * self.positions.len) / self.code_len;
         const safe_start = @min(start_idx, self.positions.len - 1);
-        
+
         // Linear search from calculated starting point - forwards then backwards
         // Linear search maximizes CPU cache hit rates on packed consecutive memory
         if (self.positions[safe_start] == pc) return true;
-        
+
         // Search forward
         var i = safe_start + 1;
         while (i < self.positions.len and self.positions[i] <= pc) : (i += 1) {
             if (self.positions[i] == pc) return true;
         }
-        
-        // Search backward  
+
+        // Search backward
         i = safe_start;
         while (i > 0) {
             i -= 1;
@@ -102,7 +102,7 @@ pub const JumpdestArray = struct {
                 if (self.positions[i] == pc) return true;
             } else break;
         }
-        
+
         return false;
     }
 };
@@ -130,6 +130,9 @@ pc_to_block_start: []u16,
 /// For each instruction index, indicates if it is a JUMP or JUMPI (or other).
 /// Size = instructions.len
 inst_jump_type: []JumpType,
+
+/// Mapping from instruction index to original bytecode PC (for debugging/tracing)
+inst_to_pc: []u16,
 
 /// Original code length (used for bounds checks)
 code_len: usize,
@@ -227,14 +230,14 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     // Frequency: Once per analysis
     var code_segments = try createCodeBitmap(allocator, code);
     defer code_segments.deinit();
-    
+
     // MEMORY ALLOCATION: Jumpdest bitmap
     // Expected size: code_len bits (rounded up)
     // Lifetime: Per analysis
     // Frequency: Once per unique contract bytecode
     var jumpdest_bitmap = try DynamicBitSet.initEmpty(allocator, code.len);
     errdefer jumpdest_bitmap.deinit();
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // Bitmap sizes should be proportional to code length
         // Each bit represents one byte of code
@@ -247,16 +250,18 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         // For empty code, convert empty bitmap to empty array and create empty instruction array
         const jumpdest_array = try JumpdestArray.from_bitmap(allocator, &jumpdest_bitmap, code.len);
         jumpdest_bitmap.deinit(); // Free the temporary bitmap
-        
+
         const empty_instructions = try allocator.alloc(Instruction, 0);
         const empty_jump_types = try allocator.alloc(JumpType, 0);
         const empty_pc_map = try allocator.alloc(u16, 0);
+        const empty_inst_to_pc = try allocator.alloc(u16, 0);
         return CodeAnalysis{
             .instructions = empty_instructions,
             .code = &[_]u8{},
             .jumpdest_array = jumpdest_array,
             .pc_to_block_start = empty_pc_map,
             .inst_jump_type = empty_jump_types,
+            .inst_to_pc = empty_inst_to_pc,
             .code_len = 0,
             .allocator = allocator,
         };
@@ -351,6 +356,7 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         .jumpdest_array = jumpdest_array,
         .pc_to_block_start = gen.pc_to_block_start,
         .inst_jump_type = gen.inst_jump_type,
+        .inst_to_pc = gen.inst_to_pc,
         .code_len = code.len,
         .allocator = allocator,
     };
@@ -365,6 +371,7 @@ pub fn deinit(self: *CodeAnalysis) void {
     // Free auxiliary arrays
     self.allocator.free(self.inst_jump_type);
     self.allocator.free(self.pc_to_block_start);
+    self.allocator.free(self.inst_to_pc);
 
     // Free the packed jumpdest array
     self.jumpdest_array.deinit();
@@ -425,6 +432,7 @@ const CodeGenResult = struct {
     instructions: []Instruction,
     pc_to_block_start: []u16,
     inst_jump_type: []JumpType,
+    inst_to_pc: []u16,
 };
 
 fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const OpcodeMetadata, jumpdest_bitmap: *const DynamicBitSet) !CodeGenResult {
@@ -437,7 +445,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     // Note: MAX_INSTRUCTIONS=65536, Instruction contains fn ptr + u256 union (~48 bytes)
     const instructions = try allocator.alloc(Instruction, instruction_limits.MAX_INSTRUCTIONS + 1);
     errdefer allocator.free(instructions);
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // Verify instruction allocation is within expected bounds
         const inst_size = instructions.len * @sizeOf(Instruction);
@@ -453,7 +461,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     const pc_to_instruction = try allocator.alloc(u16, code.len);
     defer allocator.free(pc_to_instruction);
     @memset(pc_to_instruction, std.math.maxInt(u16)); // Initialize with invalid values
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // PC mapping should be proportional to code size
         const pc_map_size = pc_to_instruction.len * @sizeOf(u16);
@@ -467,7 +475,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     // Frequency: Once per unique contract bytecode
     var inst_jump_type = try allocator.alloc(JumpType, instruction_limits.MAX_INSTRUCTIONS + 1);
     errdefer allocator.free(inst_jump_type);
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // Jump type array should be MAX_INSTRUCTIONS * 1 byte
         const jump_type_size = inst_jump_type.len * @sizeOf(JumpType);
@@ -539,6 +547,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     .opcode_fn = operation.execute,
                     .arg = .none,
                 };
+                Log.debug("[analysis] JUMPDEST at pc={}", .{pc});
                 instruction_count += 1;
                 pc += 1;
             },
@@ -671,6 +680,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     .opcode_fn = UnreachableHandler,
                     .arg = .{ .push_value = value },
                 };
+                Log.debug("[analysis] PUSH at pc={} size={} value={x}", .{ original_pc, push_size, value });
                 instruction_count += 1;
             },
 
@@ -779,7 +789,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     // Frequency: Once per unique contract bytecode
     var pc_to_block_start = try allocator.alloc(u16, code.len);
     errdefer allocator.free(pc_to_block_start);
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // PC to block mapping should be proportional to code size
         const block_map_size = pc_to_block_start.len * @sizeOf(u16);
@@ -805,10 +815,23 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     const final_instructions = try allocator.realloc(instructions, instruction_count);
     const final_jump_types = try allocator.realloc(inst_jump_type, instruction_count);
 
+    // Build inst_to_pc mapping
+    var inst_to_pc = try allocator.alloc(u16, instruction_count);
+    errdefer allocator.free(inst_to_pc);
+    @memset(inst_to_pc, std.math.maxInt(u16));
+    var map_pc: usize = 0;
+    while (map_pc < code.len) : (map_pc += 1) {
+        const idx = pc_to_instruction[map_pc];
+        if (idx != std.math.maxInt(u16) and idx < instruction_count) {
+            inst_to_pc[idx] = @intCast(map_pc);
+        }
+    }
+
     return CodeGenResult{
         .instructions = final_instructions,
         .pc_to_block_start = pc_to_block_start,
         .inst_jump_type = final_jump_types,
+        .inst_to_pc = inst_to_pc,
     };
 }
 
@@ -895,7 +918,6 @@ test "from_code basic functionality" {
     try std.testing.expect(analysis.instructions.len >= 3);
     try std.testing.expect(analysis.instructions[0].opcode_fn != null);
     try std.testing.expect(analysis.instructions[1].opcode_fn != null);
-
 }
 
 test "from_code with jumpdest" {

@@ -287,7 +287,42 @@ pub const Frame = struct {
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
         std.debug.assert(dest <= std.math.maxInt(u32));
         const dest_usize = @as(usize, @intCast(dest));
-        return self.analysis.jumpdest_array.is_valid_jumpdest(dest_usize);
+        const is_valid = self.analysis.jumpdest_array.is_valid_jumpdest(dest_usize);
+        // Add debug logging to trace jump dest validation during failures
+        if (!is_valid) {
+            const in_bounds = dest_usize < self.analysis.code_len;
+            const opcode: u8 = if (in_bounds) self.analysis.code[dest_usize] else 0xff;
+            var nearest: isize = -1;
+            if (in_bounds) {
+                var offset: isize = -3;
+                while (offset <= 3) : (offset += 1) {
+                    if (offset == 0) continue;
+                    const idx_isize: isize = @as(isize, @intCast(dest_usize)) + offset;
+                    if (idx_isize >= 0 and @as(usize, @intCast(idx_isize)) < self.analysis.code_len) {
+                        if (self.analysis.jumpdest_array.is_valid_jumpdest(@as(usize, @intCast(idx_isize)))) {
+                            nearest = offset;
+                            break;
+                        }
+                    }
+                }
+            }
+            // Dump a small code window for visibility
+            const window_start: usize = if (dest_usize >= 5) dest_usize - 5 else 0;
+            const window_end: usize = @min(self.analysis.code_len, dest_usize + 6);
+            std.debug.print("[frame.valid_jumpdest] window [{}..{}): ", .{ window_start, window_end });
+            var i: usize = window_start;
+            while (i < window_end) : (i += 1) {
+                const b: u8 = self.analysis.code[i];
+                if (i == dest_usize) {
+                    std.debug.print("[>>0x{x}<<]", .{b});
+                } else {
+                    std.debug.print(" 0x{x}", .{b});
+                }
+            }
+            std.debug.print("\n", .{});
+            std.debug.print("[frame.valid_jumpdest] Invalid jumpdest: dest={} in_bounds={} code_len={} opcode_at_dest=0x{x} nearest_jumpdest_offset={}\n", .{ dest_usize, in_bounds, self.analysis.code_len, opcode, nearest });
+        }
+        return is_valid;
     }
 
     /// Address access for EIP-2929 - uses direct access list pointer

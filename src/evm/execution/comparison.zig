@@ -23,8 +23,8 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the new top operand (a) unsafely
     const a = frame.stack.peek_unsafe().*;
 
-    // EVM LT computes: b < a (where b was top, a was second from top)
-    const result: u256 = switch (std.math.order(b, a)) {
+    // EVM LT computes: a < b (second-from-top < top)
+    const result: u256 = switch (std.math.order(a, b)) {
         .lt => 1,
         .eq, .gt => 0,
     };
@@ -42,8 +42,8 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the new top operand (a) unsafely
     const a = frame.stack.peek_unsafe().*;
 
-    // EVM GT computes: b > a (where b was top, a was second from top)
-    const result: u256 = switch (std.math.order(b, a)) {
+    // EVM GT computes: a > b (second-from-top > top)
+    const result: u256 = switch (std.math.order(a, b)) {
         .gt => 1,
         .eq, .lt => 0,
     };
@@ -61,11 +61,11 @@ pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the new top operand (a) unsafely
     const a = frame.stack.peek_unsafe().*;
 
-    // Signed less than: b < a (where b was popped first, a is remaining top)
+    // Signed less than: a < b (second-from-top < top)
     const a_i256 = @as(i256, @bitCast(a));
     const b_i256 = @as(i256, @bitCast(b));
 
-    const result: u256 = switch (std.math.order(b_i256, a_i256)) {
+    const result: u256 = switch (std.math.order(a_i256, b_i256)) {
         .lt => 1,
         .eq, .gt => 0,
     };
@@ -83,11 +83,11 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the new top operand (a) unsafely
     const a = frame.stack.peek_unsafe().*;
 
-    // Signed greater than: b > a (where b was popped first, a is remaining top)
+    // Signed greater than: a > b (second-from-top > top)
     const a_i256 = @as(i256, @bitCast(a));
     const b_i256 = @as(i256, @bitCast(b));
 
-    const result: u256 = if (b_i256 > a_i256) 1 else 0;
+    const result: u256 = if (a_i256 > b_i256) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);

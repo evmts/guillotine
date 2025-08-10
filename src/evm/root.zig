@@ -112,6 +112,19 @@ pub const Evm = @import("evm.zig");
 /// Execution context and frame management
 pub const Frame = @import("frame.zig").Frame;
 pub const ExecutionContext = @import("frame.zig").Frame;
+/// Backwards-compatibility builder used by older tests
+pub const EvmBuilder = struct {
+    allocator: std.mem.Allocator,
+    database: @import("state/database_interface.zig").DatabaseInterface,
+
+    pub fn init(allocator: std.mem.Allocator, database: @import("state/database_interface.zig").DatabaseInterface) EvmBuilder {
+        return .{ .allocator = allocator, .database = database };
+    }
+
+    pub fn build(self: *EvmBuilder) !Evm {
+        return Evm.init(self.allocator, self.database, null, null, null, 0, false, null);
+    }
+};
 
 /// EVM state management (accounts, storage, logs)
 pub const EvmState = @import("state/state.zig");
@@ -369,7 +382,7 @@ pub const Contract = struct {
             .is_static = false,
         };
     }
-    
+
     pub fn deinit(self: *Contract, allocator: std.mem.Allocator, result: ?*anyopaque) void {
         _ = self;
         _ = allocator;

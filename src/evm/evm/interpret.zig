@@ -1,5 +1,6 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
+const Tracer = @import("../tracer.zig").Tracer;
 const Frame = @import("../frame.zig").Frame;
 const Log = @import("../log.zig");
 const Evm = @import("../evm.zig");
@@ -40,11 +41,40 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             }
         }
 
-        // Handle instruction
+        // Optional tracing hook (REVM-compatible JSON) using inst->pc mapping
+        if (self.tracer) |writer| {
+            if (current_index < frame.analysis.inst_to_pc.len) {
+                const pc_u16 = frame.analysis.inst_to_pc[current_index];
+                if (pc_u16 != std.math.maxInt(u16)) {
+                    const pc: usize = pc_u16;
+                    const opcode: u8 = if (pc < frame.analysis.code_len) frame.analysis.code[pc] else 0x00;
+                    const stack_len: usize = frame.stack.size();
+                    const stack_view: []const u256 = frame.stack.data[0..stack_len];
+                    const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
+                    const mem_size: usize = frame.memory.size();
+                    var tr = Tracer.init(writer);
+                    // Best-effort tracing; ignore errors to avoid affecting execution
+                    _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth())) catch {};
+                }
+            }
+        }
         switch (nextInstruction.arg) {
             // BEGINBLOCK instructions - validate entire basic block upfront
             // This eliminates per-instruction gas and stack validation for the entire block
             .block_info => |block| {
+                // Debug: show block-level validation details
+                const dbg_pc: usize = if (current_index < frame.analysis.inst_to_pc.len) blk: {
+                    const pc16 = frame.analysis.inst_to_pc[current_index];
+                    break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
+                } else 0;
+                Log.debug("[interpret] BEGINBLOCK at inst_idx={} pc={} gas_cost={} stack_req={} max_growth={} curr_stack={}", .{
+                    current_index,
+                    dbg_pc,
+                    block.gas_cost,
+                    block.stack_req,
+                    block.stack_max_growth,
+                    frame.stack.size(),
+                });
                 // Validate gas for the entire block up-front
                 if (frame.gas_remaining < block.gas_cost) {
                     @branchHint(.cold);
@@ -56,6 +86,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 // Validate stack requirements for this block
                 const current_stack_size: u16 = @intCast(frame.stack.size());
                 if (current_stack_size < block.stack_req) {
+                    Log.debug("[interpret] StackUnderflow at block entry: need {} have {}", .{ block.stack_req, current_stack_size });
                     return ExecutionError.Error.StackUnderflow;
                 }
                 // EVM stack limit is 1024
@@ -76,32 +107,59 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 switch (jump_target.jump_type) {
                     .jump => {
                         const dest = frame.stack.pop_unsafe();
+                        Log.debug("[interpret] JUMP requested to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index, self.depth, frame.gas_remaining });
                         if (!frame.valid_jumpdest(dest)) {
+                            Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
                             return ExecutionError.Error.InvalidJump;
                         }
-                        current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                        Log.debug("[interpret] JUMP valid destination: dest={} -> jumping", .{dest});
+                        const dest_usize: usize = @intCast(dest);
+                        const idx = frame.analysis.pc_to_block_start[dest_usize];
+                        if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
+                            Log.debug("[interpret] JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, instructions.len });
+                            return ExecutionError.Error.InvalidJump;
+                        }
+                        current_index = idx;
                     },
                     .jumpi => {
                         const pops = frame.stack.pop2_unsafe();
-                        const dest = pops.a;
-                        const condition = pops.b;
+                        // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
+                        const dest = pops.b;
+                        const condition = pops.a;
+                        Log.debug("[interpret] JUMPI requested to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index, self.depth, frame.gas_remaining });
                         if (condition != 0) {
                             if (!frame.valid_jumpdest(dest)) {
+                                Log.debug("[interpret] JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
                                 return ExecutionError.Error.InvalidJump;
                             }
-                            current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                            Log.debug("[interpret] JUMPI condition true, jumping to dest {}", .{dest});
+                            const dest_usize2: usize = @intCast(dest);
+                            const idx2 = frame.analysis.pc_to_block_start[dest_usize2];
+                            if (idx2 == std.math.maxInt(u16) or idx2 >= instructions.len) {
+                                Log.debug("[interpret] JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx2, instructions.len });
+                                return ExecutionError.Error.InvalidJump;
+                            }
+                            current_index = idx2;
                         } else {
+                            Log.debug("[interpret] JUMPI condition false, fallthrough to next instruction", .{});
                             current_index += 1;
                         }
                     },
                     .other => {
-                        current_index = @intFromPtr(jump_target.instruction) - @intFromPtr(instructions.ptr);
+                        Log.debug("[interpret] Jump target type .other redirecting flow (inst_idx from {} to target)", .{current_index});
+                        // Fallback: advance to next instruction if mapping is not applicable
+                        current_index += 1;
                     },
                 }
             },
             .push_value => |value| {
+                const pc_dbg: usize = if (current_index < frame.analysis.inst_to_pc.len) blk: {
+                    const pc16 = frame.analysis.inst_to_pc[current_index];
+                    break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
+                } else 0;
+                const op_dbg: u8 = if (pc_dbg < frame.analysis.code_len) frame.analysis.code[pc_dbg] else 0x00;
+                Log.debug("[interpret] PUSH at pc={} op=0x{x} value={x}", .{ pc_dbg, op_dbg, value });
                 current_index += 1;
-                Log.debug("[interpret] PUSH value: {x}", .{value});
                 try frame.stack.append(value);
             },
             .none => {
@@ -110,33 +168,65 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 const jt = frame.analysis.inst_jump_type[current_index];
                 switch (jt) {
                     .jump => {
+                        // Backtrace last few original PCs/opcodes to understand control flow
+                        var bt: usize = 1;
+                        while (bt <= 4 and current_index >= bt) : (bt += 1) {
+                            const iprev = current_index - bt;
+                            const pcprev16 = frame.analysis.inst_to_pc[iprev];
+                            if (pcprev16 == std.math.maxInt(u16)) break;
+                            const pcprev: usize = pcprev16;
+                            const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
+                            Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
+                        }
                         const dest = frame.stack.pop_unsafe();
+                        Log.debug("[interpret] Dynamic JUMP to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index, self.depth, frame.gas_remaining });
                         if (!frame.valid_jumpdest(dest)) {
+                            Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
                             return ExecutionError.Error.InvalidJump;
                         }
                         const dest_usize: usize = @intCast(dest);
                         const idx = frame.analysis.pc_to_block_start[dest_usize];
                         if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
+                            Log.debug("[interpret] Dynamic JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, instructions.len });
                             return ExecutionError.Error.InvalidJump;
                         }
+                        Log.debug("[interpret] Dynamic JUMP mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
+                        Log.debug("[interpret] Dynamic JUMP resolved to instruction index {} for dest {}", .{ idx, dest });
                         current_index = idx;
                         break; // proceed to next loop iteration
                     },
                     .jumpi => {
+                        // Backtrace before conditional jump as well
+                        var bt2: usize = 1;
+                        while (bt2 <= 4 and current_index >= bt2) : (bt2 += 1) {
+                            const iprev = current_index - bt2;
+                            const pcprev16 = frame.analysis.inst_to_pc[iprev];
+                            if (pcprev16 == std.math.maxInt(u16)) break;
+                            const pcprev: usize = pcprev16;
+                            const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
+                            Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt2, iprev, pcprev, opprev });
+                        }
                         const pops = frame.stack.pop2_unsafe();
-                        const dest = pops.a;
-                        const condition = pops.b;
+                        // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
+                        const dest = pops.b;
+                        const condition = pops.a;
+                        Log.debug("[interpret] Dynamic JUMPI to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index, self.depth, frame.gas_remaining });
                         if (condition != 0) {
                             if (!frame.valid_jumpdest(dest)) {
+                                Log.debug("[interpret] Dynamic JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
                                 return ExecutionError.Error.InvalidJump;
                             }
                             const dest_usize: usize = @intCast(dest);
                             const idx = frame.analysis.pc_to_block_start[dest_usize];
                             if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
+                                Log.debug("[interpret] Dynamic JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, instructions.len });
                                 return ExecutionError.Error.InvalidJump;
                             }
+                            Log.debug("[interpret] Dynamic JUMPI mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
+                            Log.debug("[interpret] Dynamic JUMPI condition true, jumping to instruction index {} for dest {}", .{ idx, dest });
                             current_index = idx;
                         } else {
+                            Log.debug("[interpret] Dynamic JUMPI condition false, fallthrough", .{});
                             current_index += 1;
                         }
                         break; // handled

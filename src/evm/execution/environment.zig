@@ -40,23 +40,13 @@ pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need caller field in ExecutionContext
-    // Push caller address
-    // const caller = to_u256(frame.caller);
-    // try frame.stack.append(caller);
-
-    // Placeholder implementation - push zero for now
-    try frame.stack.append(0);
+    const caller = to_u256(frame.caller);
+    try frame.stack.append(caller);
 }
 
 pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need call_value field in ExecutionContext
-    // Push call value
-    // try frame.stack.append(frame.call_value);
-
-    // Placeholder implementation - push zero for now
-    try frame.stack.append(0);
+    try frame.stack.append(frame.value);
 }
 
 pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
@@ -85,10 +75,11 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    const address_u256 = try frame.stack.pop();
-    const mem_offset = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
+    // Stack (top -> bottom): size, code_offset, mem_offset, address
     const size = try frame.stack.pop();
+    const code_offset = try frame.stack.pop();
+    const mem_offset = try frame.stack.pop();
+    const address_u256 = try frame.stack.pop();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -172,12 +163,7 @@ pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need input/calldata field in ExecutionContext
-    // Push size of calldata
-    // try frame.stack.append(@as(u256, @intCast(frame.input.len)));
-
-    // Placeholder implementation - push zero for now
-    try frame.stack.append(0);
+    try frame.stack.append(@as(u256, @intCast(frame.input.len)));
 }
 
 pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
@@ -188,32 +174,32 @@ pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need input/calldata field in ExecutionContext
-    // Pop offset from stack
     const offset = try frame.stack.pop();
-
     if (offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
-        // Offset too large, push zero
         try frame.stack.append(0);
         return;
     }
-
-    // TODO: Implement calldataload with ExecutionContext
-    // const offset_usize = @as(usize, @intCast(offset));
-    // const calldata = frame.input;
-    // ... load logic ...
-
-    try frame.stack.append(0);
+    const offset_usize: usize = @intCast(offset);
+    const calldata = frame.input;
+    if (offset_usize >= calldata.len) {
+        try frame.stack.append(0);
+        return;
+    }
+    var buf: [32]u8 = [_]u8{0} ** 32;
+    const available = @min(@as(usize, 32), calldata.len - offset_usize);
+    // Copy contiguous bytes starting at offset into the start of the buffer
+    @memcpy(buf[0..available], calldata[offset_usize .. offset_usize + available]);
+    const word = std.mem.readInt(u256, &buf, .big);
+    try frame.stack.append(word);
 }
 
 pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // TODO: Need input/calldata field in ExecutionContext
-    // Pop memory offset, data offset, and size
-    const mem_offset = try frame.stack.pop();
-    const data_offset = try frame.stack.pop();
+    // Stack (top -> bottom): size, data_offset, mem_offset
     const size = try frame.stack.pop();
+    const data_offset = try frame.stack.pop();
+    const mem_offset = try frame.stack.pop();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -222,31 +208,31 @@ pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
 
     if (mem_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize) or data_offset > std.math.maxInt(usize)) return ExecutionError.Error.OutOfOffset;
 
-    // TODO: Implement calldatacopy with ExecutionContext
-    // const mem_offset_usize = @as(usize, @intCast(mem_offset));
-    // const data_offset_usize = @as(usize, @intCast(data_offset));
-    // const size_usize = @as(usize, @intCast(size));
-    //
-    // // Calculate memory expansion gas cost
-    // const new_size = mem_offset_usize + size_usize;
-    // const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    // try frame.consume_gas(memory_gas);
-    //
-    // // Dynamic gas for copy operation (VERYLOW * word_count)
-    // const word_size = (size_usize + 31) / 32;
-    // try frame.consume_gas(GasConstants.CopyGas * word_size);
-    //
-    // // Copy from calldata to memory
-    // const calldata = frame.input;
-    // try frame.memory.set_data_bounded(mem_offset_usize, calldata, data_offset_usize, size_usize);
+    const mem_offset_usize = @as(usize, @intCast(mem_offset));
+    const data_offset_usize = @as(usize, @intCast(data_offset));
+    const size_usize = @as(usize, @intCast(size));
+
+    // Calculate memory expansion gas cost
+    const new_size = mem_offset_usize + size_usize;
+    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    try frame.consume_gas(memory_gas);
+
+    // Dynamic gas for copy operation (VERYLOW * word_count)
+    const word_size = (size_usize + 31) / 32;
+    try frame.consume_gas(GasConstants.CopyGas * word_size);
+
+    // Copy from calldata to memory with zero-fill as needed
+    try frame.memory.set_data_bounded(mem_offset_usize, frame.input, data_offset_usize, size_usize);
 }
 
 pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Pop memory offset, code offset, and size
-    const mem_offset = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
+    // Stack (top -> bottom): size, code_offset, mem_offset
+    // EVM pops top-first, so variables should be assigned in reverse use order
     const size = try frame.stack.pop();
+    const code_offset = try frame.stack.pop();
+    const mem_offset = try frame.stack.pop();
 
     if (size == 0) {
         @branchHint(.unlikely);

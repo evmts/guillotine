@@ -45,8 +45,9 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const offset = frame.stack.pop_unsafe();
+    // EVM stack order: [..., offset, size] with size on top
     const size = frame.stack.pop_unsafe();
+    const offset = frame.stack.pop_unsafe();
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
