@@ -1,7 +1,12 @@
-// Package file for memory modules
-// This file serves as the entry point for importing memory modules
+//! Memory subsystem package for the EVM
+//!
+//! This module re-exports all memory-related functionality including:
+//! - Core memory implementation with checkpointing
+//! - Memory constants and gas calculations
+//! - Read/write operations with bounds checking
+//! - Error types for memory operations
 
-// Re-export the main memory module
+/// Main memory implementation
 pub const memory = @import("./memory.zig");
 
 // Re-export individual modules for direct access if needed
