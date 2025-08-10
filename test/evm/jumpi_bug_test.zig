@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const Evm = @import("evm");
 const Address = @import("Address").Address;
+const configureEvm = Evm.configureEvm;
 const MemoryDatabase = @import("evm").MemoryDatabase;
 const CallParams = @import("evm").CallParams;
 

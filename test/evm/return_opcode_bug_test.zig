@@ -3,6 +3,7 @@ const Evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
 const CallParams = @import("evm").CallParams;
+const configureEvm = Evm.configureEvm;
 
 test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" {
     // std.testing.log_level = .debug;

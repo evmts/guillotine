@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const Evm = @import("evm");
 const Address = @import("Address").Address;
+const configureEvm = Evm.configureEvm;
 
 test "constructor REVERT should fail deployment, not deploy revert data" {
     const allocator = testing.allocator;
