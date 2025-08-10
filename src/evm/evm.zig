@@ -51,7 +51,10 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Initial arena capacity for temporary allocations (256KB)
         /// This covers most common contract executions without reallocation
-        const ARENA_INITIAL_CAPACITY = 256 * 1024;
+        const ARENA_INITIAL_CAPACITY = config.arena_initial_capacity;
+        
+        /// AnalysisCache type configured for this EVM instance
+        const AnalysisCache = analysis_cache_module.createAnalysisCache(config);
 
         // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)

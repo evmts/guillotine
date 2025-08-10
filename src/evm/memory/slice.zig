@@ -1,4 +1,8 @@
-const Memory = @import("./memory.zig").Memory;
+const memory = @import("./memory.zig");
+const EvmConfig = @import("../config.zig").EvmConfig;
+
+// Use default config for compatibility
+const Memory = memory.createMemory(EvmConfig.DEFAULT);
 const context = @import("context.zig");
 
 /// Get a mutable slice to the entire memory buffer (context-relative)

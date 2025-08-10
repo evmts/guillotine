@@ -5,6 +5,9 @@ const Stack = @import("../stack/stack.zig");
 const Frame = @import("../frame.zig").Frame;
 const Memory = @import("../memory/memory.zig");
 
+// Default stack capacity for NULL_OPERATION
+pub const DEFAULT_STACK_CAPACITY = 1024;
+
 /// Operation metadata and execution functions for EVM opcodes.
 ///
 /// This module defines the structure for EVM operations, including their

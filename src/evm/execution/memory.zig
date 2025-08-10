@@ -3,7 +3,8 @@ const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
-const Stack = @import("../stack/stack.zig");
+const operation_module = @import("../opcodes/operation.zig");
+const DEFAULT_STACK_CAPACITY = operation_module.DEFAULT_STACK_CAPACITY;
 const GasConstants = @import("primitives").GasConstants;
 
 pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
@@ -114,7 +115,7 @@ pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    if (frame.stack.size() >= Stack.CAPACITY) {
+    if (frame.stack.size() >= DEFAULT_STACK_CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }

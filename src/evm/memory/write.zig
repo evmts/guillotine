@@ -3,6 +3,10 @@ const Log = @import("../log.zig");
 const memory = @import("./memory.zig");
 const errors = @import("errors.zig");
 const context = @import("context.zig");
+const EvmConfig = @import("../config.zig").EvmConfig;
+
+// Use default config for compatibility
+const Memory = memory.createMemory(EvmConfig.DEFAULT);
 
 // NOTE: This file has been reviewed for issue #8 optimization opportunities.
 // All manual loops have been replaced with std.mem functions:
@@ -12,7 +16,7 @@ const context = @import("context.zig");
 // No further optimizations are needed.
 
 /// Write arbitrary data at context-relative offset.
-pub inline fn set_data(self: *memory.Memory, relative_offset: usize, data: []const u8) errors.MemoryError!void {
+pub inline fn set_data(self: *Memory, relative_offset: usize, data: []const u8) errors.MemoryError!void {
     // Debug logging removed for fuzz testing compatibility
     if (data.len == 0) return;
 
@@ -30,7 +34,7 @@ pub inline fn set_data(self: *memory.Memory, relative_offset: usize, data: []con
 
 /// Write data with source offset and length (handles partial copies and zero-fills).
 pub fn set_data_bounded(
-    self: *memory.Memory,
+    self: *Memory,
     relative_memory_offset: usize,
     data: []const u8,
     data_offset: usize,

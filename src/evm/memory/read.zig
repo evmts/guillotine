@@ -3,9 +3,13 @@ const Log = @import("../log.zig");
 const memory = @import("./memory.zig");
 const errors = @import("errors.zig");
 const context = @import("context.zig");
+const EvmConfig = @import("../config.zig").EvmConfig;
+
+// Use default config for compatibility
+const Memory = memory.createMemory(EvmConfig.DEFAULT);
 
 /// Read 32 bytes as u256 at context-relative offset.
-pub inline fn get_u256(self: *const memory.Memory, relative_offset: usize) errors.MemoryError!u256 {
+pub inline fn get_u256(self: *const Memory, relative_offset: usize) errors.MemoryError!u256 {
     if (relative_offset + 32 > self.context_size()) {
         return errors.MemoryError.InvalidOffset;
     }
@@ -15,7 +19,7 @@ pub inline fn get_u256(self: *const memory.Memory, relative_offset: usize) error
 }
 
 /// Read arbitrary slice of memory at context-relative offset.
-pub inline fn get_slice(self: *const memory.Memory, relative_offset: usize, len: usize) errors.MemoryError![]const u8 {
+pub inline fn get_slice(self: *const Memory, relative_offset: usize, len: usize) errors.MemoryError![]const u8 {
     // Debug logging removed for fuzz testing compatibility
     if (len == 0) return &[_]u8{};
     const end = std.math.add(usize, relative_offset, len) catch {
