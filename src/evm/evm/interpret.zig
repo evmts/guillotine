@@ -20,7 +20,7 @@ const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 /// The caller is responsible for creating and managing the Frame and its components.
 pub fn interpret(comptime config: EvmConfig) type {
     return struct {
-        pub inline fn interpretImpl(self: *EvmModule.Evm(config), frame: *Frame) ExecutionError.Error!void {
+        pub inline fn interpretImpl(self: *EvmModule.configureEvm(config), frame: *Frame) ExecutionError.Error!void {
     self.require_one_thread();
 
     Log.debug("[interpret] Starting with {} instructions, gas={}", .{ frame.analysis.instructions.len, frame.gas_remaining });

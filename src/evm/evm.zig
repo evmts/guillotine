@@ -7,7 +7,7 @@ const primitives_internal = primitives;
 const AccessList = @import("access_list/access_list.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
-const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
+// ChainRules is now imported via Frame type inside the generic struct
 const GasConstants = @import("primitives").GasConstants;
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
 const Host = @import("host.zig").Host;
@@ -21,7 +21,7 @@ const EvmState = @import("state/state.zig");
 const Memory = @import("memory/memory.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
 const evm_limits = @import("constants/evm_limits.zig");
-const Frame = @import("frame.zig").Frame;
+const frame_module = @import("frame.zig");
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 pub const StorageKey = @import("primitives").StorageKey;
@@ -55,6 +55,9 @@ pub fn Evm(comptime config: EvmConfig) type {
         
         /// AnalysisCache type configured for this EVM instance
         const AnalysisCache = analysis_cache_module.createAnalysisCache(config);
+        
+        /// Frame type configured for this EVM instance
+        const Frame = frame_module.createFrame(config);
 
         // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
@@ -68,7 +71,7 @@ read_only: bool = false,
 
 // Configuration fields (set at initialization)
 /// Protocol rules for the current hardfork
-chain_rules: ChainRules,
+chain_rules: Frame.ChainRules,
 /// Execution context providing transaction and block information
 context: Context,
 
@@ -267,7 +270,7 @@ initial_thread_id: std.Thread.Id,
             return Self{
                 .allocator = allocator,
                 .internal_arena = internal_arena,
-                .chain_rules = ChainRules.for_hardfork(config.hardfork),
+                .chain_rules = Frame.chainRulesForHardfork(config.hardfork),
         .state = state,
         .access_list = access_list,
         .context = ctx,
@@ -525,7 +528,7 @@ pub fn create_contract(self: *Self, caller: primitives_internal.Address.Address,
         &host,
         snapshot_id,
         self.state.database,
-        ChainRules.DEFAULT,
+        Frame.ChainRules.DEFAULT,
         &self.self_destruct,
         &self.created_contracts,
         &[_]u8{}, // constructor input (none for tests)
@@ -536,7 +539,8 @@ pub fn create_contract(self: *Self, caller: primitives_internal.Address.Address,
     );
 
     var exec_err: ?ExecutionError.Error = null;
-    @import("evm/interpret.zig").interpret(self, &frame) catch |err| {
+    const interpretImpl = @import("evm/interpret.zig").interpret(config).interpretImpl;
+    interpretImpl(self, &frame) catch |err| {
         if (err != ExecutionError.Error.STOP) {
             exec_err = err;
         }
