@@ -8,9 +8,13 @@ const CallParams = Evm.CallParams;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 
+// Define the default EVM type for FFI
+const DefaultEvmConfig = Evm.EvmConfig.init(.CANCUN);
+const DefaultEvmType = Evm.Evm(DefaultEvmConfig);
+
 // Wrapper to own the EVM and its backing in-memory DB for testing
 const EvmWrapper = struct {
-    evm: *Evm.Evm,
+    evm: *DefaultEvmType,
     memory_db: *Evm.MemoryDatabase,
 };
 
@@ -60,13 +64,13 @@ export fn zigEvmCreate() ?*anyopaque {
     memory_db.* = Evm.MemoryDatabase.init(allocator);
     const db_interface = memory_db.to_database_interface();
 
-    const evm = allocator.create(Evm.Evm) catch {
+    const evm = allocator.create(DefaultEvmType) catch {
         memory_db.deinit();
         allocator.destroy(memory_db);
         return null;
     };
 
-    evm.* = Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null) catch {
+    evm.* = DefaultEvmType.init(allocator, db_interface, null, 0, false, null) catch {
         memory_db.deinit();
         allocator.destroy(memory_db);
         allocator.destroy(evm);
@@ -115,7 +119,7 @@ export fn zigEvmCall(evm_ptr: ?*anyopaque, req: *const CCallRequest, res: *CCall
         .CREATE2 => .{ .create2 = .{ .caller = caller, .value = value, .init_code = input, .salt = salt, .gas = gas } },
     };
 
-    const result = wrapper.evm.call(params) catch {
+    const result = wrapper.evm.*.call(params) catch {
         res.* = .{ .success = false, .gas_left = 0, .output = .{ .ptr = undefined, .len = 0 } };
         return 0;
     };

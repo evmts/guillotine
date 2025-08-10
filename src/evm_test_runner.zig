@@ -29,11 +29,10 @@ pub fn main() !void {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(
+    const EvmType = Evm.Evm(comptime Evm.EvmConfig.init(.CANCUN));
+    var vm = try EvmType.init(
         allocator,
         db_interface,
-        null, // table
-        null, // chain_rules
         null, // context
         0, // depth
         false, // read_only
@@ -48,15 +47,19 @@ pub fn main() !void {
     try vm.state.set_code(contract_address, bytecode);
     try vm.state.set_balance(caller, std.math.maxInt(u256));
     
-    // Call contract
-    const result = try vm.call_contract(
+    // Create contract to execute
+    var contract = Evm.Contract.init_at_address(
         caller,
         contract_address,
-        0,
+        0, // value
+        1_000_000, // gas
+        bytecode,
         calldata,
-        1_000_000,
-        false
+        false, // is_static
     );
+    
+    // Call contract
+    const result = try vm.interpretCompat(&contract, calldata, false);
     defer if (result.output) |output| allocator.free(output);
     
     // Output results in a parseable format

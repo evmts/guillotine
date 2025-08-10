@@ -155,8 +155,8 @@ export fn evm_execute(
 
     // Caller and value are now passed to Contract.init
 
-    // Execute bytecode
-    const run_result = vm.interpret(&contract, &[_]u8{}, false) catch |err| {
+    // Execute bytecode using compatibility wrapper
+    const run_result = vm.interpretCompat(&contract, &[_]u8{}, false) catch |err| {
         log(.err, .evm_c, "Execution failed: {}", .{err});
         result_ptr.success = 0;
         result_ptr.error_code = @intFromEnum(EvmError.EVM_ERROR_EXECUTION_FAILED);
@@ -341,7 +341,7 @@ export fn guillotine_execute(
     contract.value = value_u256;
     
     // Execute
-    const exec_result = state.vm.interpret(&contract, input_slice, false) catch |err| {
+    const exec_result = state.vm.interpretCompat(&contract, input_slice, false) catch |err| {
         const err_msg = @errorName(err);
         const err_c_str = state.allocator.dupeZ(u8, err_msg) catch return result;
         result.error_message = err_c_str.ptr;

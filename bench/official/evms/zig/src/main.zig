@@ -4,7 +4,6 @@ const primitives = @import("primitives");
 
 const print = std.debug.print;
 const Address = primitives.Address.Address;
-const CallParams = evm.CallParams;
 const CallResult = evm.CallResult;
 
 const CALLER_ADDRESS = "0x1000000000000000000000000000000000000001";
@@ -110,11 +109,11 @@ pub fn main() !void {
 
     // Create EVM instance using new API
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(
+    const config = comptime evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(
         allocator,
         db_interface,
-        null, // table
-        null, // chain_rules
         null, // context
         0, // depth
         false, // read_only
@@ -130,16 +129,19 @@ pub fn main() !void {
     // Run benchmarks
     var run: u8 = 0;
     while (run < num_runs) : (run += 1) {
-        // Execute contract using new call API
-        const call_params = CallParams{ .call = .{
-            .caller = caller_address,
-            .to = contract_address,
-            .value = 0,
-            .input = calldata,
-            .gas = 1_000_000_000,
-        }};
-
-        const result = vm.call(call_params) catch |err| {
+        // Create contract struct for execution
+        var contract = evm.Contract.init_at_address(
+            caller_address,
+            contract_address,
+            0, // value
+            1_000_000_000, // gas
+            vm.state.get_code(contract_address),
+            calldata,
+            false, // is_static
+        );
+        
+        // Execute contract
+        const result = vm.interpretCompat(&contract, calldata, false) catch |err| {
             std.debug.print("Contract execution error: {}\n", .{err});
             std.process.exit(1);
         };
@@ -156,7 +158,7 @@ pub fn main() !void {
     }
 }
 
-fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
+fn deployContract(allocator: std.mem.Allocator, vm: anytype, caller: Address, bytecode: []const u8) !Address {
     _ = allocator;
     _ = caller;
 
