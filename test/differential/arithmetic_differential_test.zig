@@ -41,12 +41,16 @@ test "ADD opcode 0 + 0 = 0" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -132,12 +136,16 @@ test "ADD opcode 1 + 1 = 2" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -223,12 +231,16 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -286,8 +298,10 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
 
 test "SUB opcode 10 - 5 = 5" {
     const allocator = testing.allocator;
+    
+    std.debug.print("\n=== SUB test: Testing 10 - 5 = 5 ===\n", .{});
 
-    // PUSH32 5, PUSH32 10, SUB, MSTORE, RETURN (stack: [5, 10] -> SUB computes 10 - 5)
+    // PUSH32 5, PUSH32 10, SUB, MSTORE, RETURN (stack: [5, 10] -> SUB computes top - second = 10 - 5 = 5)
     const bytecode = [_]u8{
         0x7f, // PUSH32
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 5 (32 bytes)
@@ -314,12 +328,16 @@ test "SUB opcode 10 - 5 = 5" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -365,6 +383,15 @@ test "SUB opcode 10 - 5 = 5" {
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
+        std.debug.print("SUB test results: REVM={}, Guillotine={}, expected={}\n", .{ revm_value, guillotine_value, expected });
+        
+        // Debug: print first few bytes of output
+        std.debug.print("REVM output bytes: ", .{});
+        for (revm_result.output[0..@min(8, revm_result.output.len)]) |byte| {
+            std.debug.print("{x:0>2} ", .{byte});
+        }
+        std.debug.print("\n", .{});
+        
         try testing.expectEqual(revm_value, guillotine_value);
         try testing.expectEqual(expected, revm_value);
     } else {
@@ -406,12 +433,16 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -498,12 +529,16 @@ test "MUL opcode 7 * 6 = 42" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -563,7 +598,7 @@ test "MUL opcode 7 * 6 = 42" {
 test "DIV opcode 6 / 42 = 0" {
     const allocator = testing.allocator;
 
-    // PUSH32 42, PUSH32 6, DIV, MSTORE, RETURN (computes 6/42 = 0)
+    // PUSH32 42, PUSH32 6, DIV, MSTORE, RETURN (stack: [42, 6] -> DIV computes top / second = 6 / 42 = 0)
     const bytecode = [_]u8{
         0x7f, // PUSH32
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 42 (32 bytes)
@@ -590,12 +625,16 @@ test "DIV opcode 6 / 42 = 0" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -682,12 +721,16 @@ test "DIV opcode division by zero = 0" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -774,12 +817,16 @@ test "DIV opcode division by zero 42 / 0 = 0" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -865,12 +912,16 @@ test "MOD opcode 50 % 7 = 1" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -957,12 +1008,16 @@ test "EXP opcode 2 ** 3 = 8" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -1049,12 +1104,16 @@ test "SDIV opcode signed division -8 / 2 = -4" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -1140,12 +1199,16 @@ test "SMOD opcode signed modulo -8 % 3 = -2" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -1236,12 +1299,16 @@ test "ADDMOD opcode (5 + 10) % 7 = 1" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -1332,12 +1399,16 @@ test "MULMOD opcode (5 * 6) % 7 = 2" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -1424,12 +1495,16 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup

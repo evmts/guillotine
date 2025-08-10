@@ -29,9 +29,13 @@ test "STOP opcode halts execution" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -84,9 +88,13 @@ test "PC opcode returns current program counter" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -153,9 +161,13 @@ test "JUMPDEST opcode is a valid jump destination" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine

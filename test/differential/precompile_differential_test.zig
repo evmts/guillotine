@@ -30,9 +30,13 @@ test "ECRECOVER precompile recovers address from signature" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -100,9 +104,13 @@ test "SHA256 precompile hashes data" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -170,9 +178,13 @@ test "RIPEMD160 precompile hashes data" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -241,9 +253,13 @@ test "IDENTITY precompile copies data" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -312,9 +328,13 @@ test "MODEXP precompile performs modular exponentiation" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -383,9 +403,13 @@ test "BLAKE2F precompile performs BLAKE2F hashing" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -454,9 +478,13 @@ test "BLS12_381_G1MSM precompile performs G1 multi-scalar multiplication" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -525,9 +553,13 @@ test "BLS12_381_G2MSM precompile performs G2 multi-scalar multiplication" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine
@@ -596,9 +628,13 @@ test "BLS12_381_PAIRING precompile performs pairing check" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine

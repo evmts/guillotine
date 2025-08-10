@@ -43,12 +43,16 @@ test "SSTORE then SLOAD storage operations" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -129,12 +133,16 @@ test "SLOAD from empty storage slot returns 0" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
@@ -226,12 +234,16 @@ test "TSTORE then TLOAD transient storage operations" {
     defer revm_vm.deinit();
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
 
-    // Deploy the bytecode as a contract
-    var revm_result = try revm_vm.create(revm_deployer, 0, &bytecode, 1000000);
+    // Set the bytecode as contract code (like Guillotine does)
+    try revm_vm.setCode(revm_contract_address, &bytecode);
+
+    // Call the contract to execute the bytecode
+    var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
     // Execute on Guillotine - inline all setup
