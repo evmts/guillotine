@@ -67,7 +67,7 @@ pub fn mul(self: *const Fp12Mont, other: *const Fp12Mont) Fp12Mont {
     const self_w0_add_w1 = self.w0.add(&self.w1);
     const other_w0_add_w1 = other.w0.add(&other.w1);
 
-    const result_w0 = w0_mul_w0.add(&w1_mul_w1.mul_by_v());
+    const result_w0 = w0_mul_w0.add(&w1_mul_w1.mulByV());
     const result_w1 = self_w0_add_w1.mul(&other_w0_add_w1).sub(&w0_mul_w0).sub(&w1_mul_w1);
 
     return Fp12Mont{
@@ -103,9 +103,9 @@ pub fn square(self: *const Fp12Mont) Fp12Mont {
     // const v = curve_parameters.V;
     const w0_mul_w1 = self.w0.mul(&self.w1);
     const w0_plus_w1 = self.w0.add(&self.w1);
-    const w0_plus_v_w1 = self.w0.add(&self.w1.mul_by_v());
+    const w0_plus_v_w1 = self.w0.add(&self.w1.mulByV());
 
-    const result_w0 = w0_plus_w1.mul(&w0_plus_v_w1).sub(&w0_mul_w1).sub(&w0_mul_w1.mul_by_v());
+    const result_w0 = w0_plus_w1.mul(&w0_plus_v_w1).sub(&w0_mul_w1).sub(&w0_mul_w1.mulByV());
     const result_w1 = w0_mul_w1.mulBySmallInt(2);
 
     return Fp12Mont{

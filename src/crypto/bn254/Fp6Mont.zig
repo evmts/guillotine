@@ -63,7 +63,7 @@ pub fn subAssign(self: *Fp6Mont, other: *const Fp6Mont) void {
     self.* = self.sub(other);
 }
 
-pub fn mul_by_v(self: *const Fp6Mont) Fp6Mont {
+pub fn mulByV(self: *const Fp6Mont) Fp6Mont {
     const xi = curve_parameters.XI;
     return Fp6Mont{
         .v0 = self.v2.mul(&xi),

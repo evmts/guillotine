@@ -92,6 +92,7 @@ pub fn mulBySmallIntAssign(self: *Fp2Mont, other: u8) void {
     self.* = self.mulBySmallInt(other);
 }
 
+// using complex squaring
 pub fn square(self: *const Fp2Mont) Fp2Mont {
     const apb = self.u0.add(&self.u1);
     const amb = self.u0.sub(&self.u1);
