@@ -6,125 +6,346 @@ const wasm = @import("build_utils/wasm.zig");
 const devtool = @import("build_utils/devtool.zig");
 const typescript = @import("build_utils/typescript.zig");
 
-// Import the extracted build modules
-const modules = @import("build_config/modules.zig");
-const rust = @import("build_config/rust.zig");
-const artifacts = @import("build_config/artifacts.zig");
-const benchmarks = @import("build_config/benchmarks.zig");
-const test_setup = @import("build_config/tests.zig");
-const fuzzing = @import("build_config/fuzzing.zig");
-
 pub fn build(b: *std.Build) void {
-    // Standard target and optimization options
+    // Standard target options allows the person running `zig build` to choose
+    // what target to build for. Here we do not override the defaults, which
+    // means any target is allowed, and the default is native. Other options
+    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
+
+    // Standard optimization options allow the person running `zig build` to select
+    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
+    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    // Custom build options
+    // Custom build option to disable precompiles
     const no_precompiles = b.option(bool, "no_precompiles", "Disable all EVM precompiles for minimal build") orelse false;
+
+    // Detect Ubuntu native build (has Rust library linking issues)
     const force_bn254 = b.option(bool, "force_bn254", "Force BN254 even on Ubuntu") orelse false;
     const is_ubuntu_native = target.result.os.tag == .linux and target.result.cpu.arch == .x86_64 and !force_bn254;
+
+    // Disable BN254 on Ubuntu native builds to avoid Rust library linking issues
     const no_bn254 = no_precompiles or is_ubuntu_native;
 
-    // Setup modules
-    const module_config = modules.ModuleConfig{
+    // Create build options module
+    const build_options = b.addOptions();
+    build_options.addOption(bool, "no_precompiles", no_precompiles);
+    build_options.addOption(bool, "no_bn254", no_bn254);
+    const build_options_mod = build_options.createModule();
+
+    const lib_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
-        .no_precompiles = no_precompiles,
-        .no_bn254 = no_bn254,
-    };
-    const mods = modules.createModules(b, module_config);
+    });
+    lib_mod.addIncludePath(b.path("src/bn254_wrapper"));
+    lib_mod.addImport("build_options", build_options_mod);
 
-    // Setup Rust integration
-    const rust_config = rust.RustConfig{
+    // Create primitives module
+    const primitives_mod = b.createModule(.{
+        .root_source_file = b.path("src/primitives/root.zig"),
         .target = target,
         .optimize = optimize,
-        .no_bn254 = no_bn254,
+    });
+
+    // Create crypto module
+    const crypto_mod = b.createModule(.{
+        .root_source_file = b.path("src/crypto/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    crypto_mod.addImport("primitives", primitives_mod);
+
+    // Create utils module
+    const utils_mod = b.createModule(.{
+        .root_source_file = b.path("src/utils.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Create the trie module
+    const trie_mod = b.createModule(.{
+        .root_source_file = b.path("src/trie/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    trie_mod.addImport("primitives", primitives_mod);
+    trie_mod.addImport("utils", utils_mod);
+
+    // Create the provider module
+    const provider_mod = b.createModule(.{
+        .root_source_file = b.path("src/provider/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    provider_mod.addImport("primitives", primitives_mod);
+
+    // BN254 Rust library integration for ECMUL and ECPAIRING precompiles
+    // Uses arkworks ecosystem for production-grade elliptic curve operations
+    // Skip on Ubuntu native builds due to Rust library linking issues
+
+    // Determine the Rust target triple based on the Zig target
+    // Always specify explicit Rust target for consistent library format
+    const rust_target = switch (target.result.os.tag) {
+        .linux => switch (target.result.cpu.arch) {
+            .x86_64 => "x86_64-unknown-linux-gnu",
+            .aarch64 => "aarch64-unknown-linux-gnu",
+            else => null,
+        },
+        .macos => switch (target.result.cpu.arch) {
+            .x86_64 => "x86_64-apple-darwin",
+            .aarch64 => "aarch64-apple-darwin",
+            else => null,
+        },
+        else => null,
     };
-    const rust_libs = rust.setupRustIntegration(b, rust_config);
 
-    // Create REVM module if Rust is available
-    const revm_mod = rust.createRevmModule(b, rust_config, mods.primitives, rust_libs.revm_lib);
-    if (revm_mod) |mod| {
-        mods.lib.addImport("revm", mod);
-    }
+    // Single workspace build command that builds all Rust crates at once
+    const workspace_build_step = if (rust_target != null) blk: {
+        const rust_cmd = b.addSystemCommand(&[_][]const u8{
+            "cargo",     "build",
+            "--profile", if (optimize == .Debug) "dev" else "release",
+        });
+        if (rust_target) |target_triple| {
+            rust_cmd.addArgs(&[_][]const u8{ "--target", target_triple });
+        }
+        break :blk rust_cmd;
+    } else null;
 
-    // C-KZG-4844 Zig bindings
+    // Create BN254 library that depends on workspace build
+    const bn254_lib = if (!no_bn254 and rust_target != null) blk: {
+        const lib = b.addStaticLibrary(.{
+            .name = "bn254_wrapper",
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const profile_dir = if (optimize == .Debug) "debug" else "release";
+        const lib_path = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/libbn254_wrapper.a", .{ target_triple, profile_dir })
+        else
+            b.fmt("target/{s}/libbn254_wrapper.a", .{profile_dir});
+
+        lib.addObjectFile(b.path(lib_path));
+        lib.linkLibC();
+        lib.addIncludePath(b.path("src/bn254_wrapper"));
+
+        // Make sure workspace builds first
+        if (workspace_build_step) |build_step| {
+            lib.step.dependOn(&build_step.step);
+        }
+
+        break :blk lib;
+    } else null;
+
+    // C-KZG-4844 Zig bindings from evmts/c-kzg-4844
     const c_kzg_dep = b.dependency("c_kzg_4844", .{
         .target = target,
         .optimize = optimize,
     });
-    const c_kzg_lib = c_kzg_dep.artifact("c_kzg_4844");
-    mods.primitives.linkLibrary(c_kzg_lib);
 
-    // Link BN254 Rust library to EVM module
-    if (rust_libs.bn254_lib) |lib| {
-        mods.evm.linkLibrary(lib);
-        mods.evm.addIncludePath(b.path("src/bn254_wrapper"));
+    const c_kzg_lib = c_kzg_dep.artifact("c_kzg_4844");
+    primitives_mod.linkLibrary(c_kzg_lib);
+
+    // Create the main evm module that exports everything
+    const evm_mod = b.createModule(.{
+        .root_source_file = b.path("src/evm/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evm_mod.addImport("primitives", primitives_mod);
+    evm_mod.addImport("crypto", crypto_mod);
+    evm_mod.addImport("build_options", build_options_mod);
+
+    // Link BN254 Rust library to EVM module (native targets only, if enabled)
+    if (bn254_lib) |lib| {
+        evm_mod.linkLibrary(lib);
+        evm_mod.addIncludePath(b.path("src/bn254_wrapper"));
     }
 
     // Link c-kzg library to EVM module
-    mods.evm.linkLibrary(c_kzg_lib);
+    evm_mod.linkLibrary(c_kzg_lib);
 
-    // Build artifacts
-    artifacts.buildArtifacts(b, mods, rust_libs, target, optimize);
+    // Create REVM library that depends on workspace build
+    const revm_lib = if (rust_target != null) blk: {
+        const lib = b.addStaticLibrary(.{
+            .name = "revm_wrapper",
+            .target = target,
+            .optimize = optimize,
+        });
 
-    // Setup WASM builds
-    setupWasmBuilds(b, optimize, mods.build_options);
+        const profile_dir = if (optimize == .Debug) "debug" else "release";
+        const lib_path = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.a", .{ target_triple, profile_dir })
+        else
+            b.fmt("target/{s}/librevm_wrapper.a", .{profile_dir});
 
-    // Setup devtool
-    setupDevtool(b, mods, target, optimize);
+        lib.addObjectFile(b.path(lib_path));
+        lib.linkLibC();
+        lib.addIncludePath(b.path("src/revm_wrapper"));
 
-    // Setup debug and crash test executables
-    setupDebugExecutables_new(b, mods, rust_libs, target, optimize);
+        // Make sure workspace builds first
+        if (workspace_build_step) |build_step| {
+            lib.step.dependOn(&build_step.step);
+        }
 
-    // Setup benchmarks
-    benchmarks.setupBenchmarks(b, mods, target);
+        break :blk lib;
+    } else null;
 
-    // Setup tests
-    test_setup.setupTests(b, mods, target, optimize);
+    // Create REVM module
+    const revm_mod = b.createModule(.{
+        .root_source_file = b.path("src/revm_wrapper/revm.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    revm_mod.addImport("primitives", primitives_mod);
 
-    // Setup fuzzing
-    fuzzing.setupFuzzing(b, mods, rust_libs, target, optimize);
+    // Link REVM Rust library if available
+    if (revm_lib) |lib| {
+        revm_mod.linkLibrary(lib);
+        revm_mod.addIncludePath(b.path("src/revm_wrapper"));
+    }
 
-    // Setup integration tests
-    setupIntegrationTests(b, mods, target, optimize);
+    // EVM Benchmark Rust crate integration - removed guillotine-rs
 
-    // Setup special opcode test
-    setupOpcodeRustTests(b, mods, target, optimize);
+    // Add Rust Foundry wrapper integration
+    // TODO: Fix Rust integration - needs proper zabi dependency
+    // const rust_build = @import("src/compilers/rust_build.zig");
+    // const rust_step = rust_build.add_rust_integration(b, target, optimize) catch |err| {
+    //     std.debug.print("Failed to add Rust integration: {}\n", .{err});
+    //     return;
+    // };
 
-    // Build artifacts
-    artifacts.buildArtifacts(b, mods, rust_libs, target, optimize);
-}
+    // Create compilers module
+    const compilers_mod = b.createModule(.{
+        .root_source_file = b.path("src/compilers/package.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    compilers_mod.addImport("primitives", primitives_mod);
+    compilers_mod.addImport("evm", evm_mod);
 
-fn setupWasmBuilds(b: *std.Build, optimize: std.builtin.OptimizeMode, build_options_mod: *std.Build.Module) void {
+    // Add modules to lib_mod so tests can access them
+    lib_mod.addImport("primitives", primitives_mod);
+    lib_mod.addImport("crypto", crypto_mod);
+    lib_mod.addImport("evm", evm_mod);
+    lib_mod.addImport("provider", provider_mod);
+    lib_mod.addImport("compilers", compilers_mod);
+    lib_mod.addImport("trie", trie_mod);
+    if (revm_lib != null) {
+        lib_mod.addImport("revm", revm_mod);
+    }
+
+    const exe_mod = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
+    exe_mod.addImport("Guillotine_lib", lib_mod);
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "Guillotine",
+        .root_module = lib_mod,
+    });
+
+    // Link BN254 Rust library to the library artifact (if enabled)
+    if (bn254_lib) |bn254| {
+        lib.linkLibrary(bn254);
+        lib.addIncludePath(b.path("src/bn254_wrapper"));
+    }
+
+    // Note: c-kzg is now available as a module import, no need to link to main library
+
+    // This declares intent for the library to be installed into the standard
+    // location when the user invokes the "install" step (the default step when
+    // running `zig build`).
+    b.installArtifact(lib);
+
+    // Create shared library for Python FFI
+    const shared_lib = b.addLibrary(.{
+        .linkage = .dynamic,
+        .name = "Guillotine",
+        .root_module = lib_mod,
+    });
+
+    // Link BN254 Rust library to the shared library artifact (if enabled)
+    if (bn254_lib) |bn254| {
+        shared_lib.linkLibrary(bn254);
+        shared_lib.addIncludePath(b.path("src/bn254_wrapper"));
+    }
+
+    b.installArtifact(shared_lib);
+
+    // This creates another `std.Build.Step.Compile`, but this one builds an executable
+    // rather than a static library.
+    const exe = b.addExecutable(.{
+        .name = "Guillotine",
+        .root_module = exe_mod,
+    });
+
+    // This declares intent for the executable to be installed into the
+    // standard location when the user invokes the "install" step (the default
+    // step when running `zig build`).
+    b.installArtifact(exe);
+
+    // Add evm_test_runner executable
+    const evm_test_runner = b.addExecutable(.{
+        .name = "evm_test_runner",
+        .root_source_file = b.path("src/evm_test_runner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evm_test_runner.root_module.addImport("evm", evm_mod);
+    evm_test_runner.root_module.addImport("primitives", primitives_mod);
+    b.installArtifact(evm_test_runner);
+
+    // WASM library build optimized for size
     const wasm_target = wasm.setupWasmTarget(b);
     const wasm_optimize = optimize;
 
-    // Create WASM modules
-    const wasm_mods = modules.createWasmModules(b, wasm_target, wasm_optimize, build_options_mod);
+    // Create WASM-specific modules with minimal dependencies
+    const wasm_primitives_mod = wasm.createWasmModule(b, "src/primitives/root.zig", wasm_target, wasm_optimize);
+    // Note: WASM build excludes c-kzg-4844 (not available for WASM)
 
-    // Main WASM build
+    const wasm_crypto_mod = wasm.createWasmModule(b, "src/crypto/root.zig", wasm_target, wasm_optimize);
+    wasm_crypto_mod.addImport("primitives", wasm_primitives_mod);
+
+    const wasm_evm_mod = wasm.createWasmModule(b, "src/evm/root.zig", wasm_target, wasm_optimize);
+    wasm_evm_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_evm_mod.addImport("crypto", wasm_crypto_mod);
+    wasm_evm_mod.addImport("build_options", build_options_mod);
+    // Note: WASM build uses pure Zig implementations for BN254 operations
+
+    // Main WASM build (includes both primitives and EVM)
+    const wasm_lib_mod = wasm.createWasmModule(b, "src/root.zig", wasm_target, wasm_optimize);
+    wasm_lib_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_lib_mod.addImport("evm", wasm_evm_mod);
+
     const wasm_lib_build = wasm.buildWasmExecutable(b, .{
         .name = "guillotine",
         .root_source_file = "src/root.zig",
         .dest_sub_path = "guillotine.wasm",
-    }, wasm_mods.lib);
+    }, wasm_lib_mod);
 
     // Primitives-only WASM build
+    const wasm_primitives_lib_mod = wasm.createWasmModule(b, "src/primitives_c.zig", wasm_target, wasm_optimize);
+    wasm_primitives_lib_mod.addImport("primitives", wasm_primitives_mod);
+
     const wasm_primitives_build = wasm.buildWasmExecutable(b, .{
         .name = "guillotine-primitives",
         .root_source_file = "src/primitives_c.zig",
         .dest_sub_path = "guillotine-primitives.wasm",
-    }, wasm_mods.primitives_lib);
+    }, wasm_primitives_lib_mod);
 
     // EVM-only WASM build
+    const wasm_evm_lib_mod = wasm.createWasmModule(b, "src/evm_c.zig", wasm_target, wasm_optimize);
+    wasm_evm_lib_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_evm_lib_mod.addImport("evm", wasm_evm_mod);
+
     const wasm_evm_build = wasm.buildWasmExecutable(b, .{
         .name = "guillotine-evm",
         .root_source_file = "src/evm_c.zig",
         .dest_sub_path = "guillotine-evm.wasm",
-    }, wasm_mods.evm_lib);
+    }, wasm_evm_lib_mod);
 
-    // Add step to report WASM bundle sizes
+    // Add step to report WASM bundle sizes for all three builds
     const wasm_size_step = wasm.addWasmSizeReportStep(
         b,
         &[_][]const u8{ "guillotine.wasm", "guillotine-primitives.wasm", "guillotine-evm.wasm" },
@@ -145,10 +366,10 @@ fn setupWasmBuilds(b: *std.Build, optimize: std.builtin.OptimizeMode, build_opti
     const wasm_evm_step = b.step("wasm-evm", "Build EVM-only WASM library");
     wasm_evm_step.dependOn(&wasm_evm_build.install.step);
 
-    // Debug WASM build
+    // Debug WASM build for analysis
     const wasm_debug_mod = wasm.createWasmModule(b, "src/root.zig", wasm_target, .Debug);
-    wasm_debug_mod.addImport("primitives", wasm_mods.primitives);
-    wasm_debug_mod.addImport("evm", wasm_mods.evm);
+    wasm_debug_mod.addImport("primitives", wasm_primitives_mod);
+    wasm_debug_mod.addImport("evm", wasm_evm_mod);
 
     const wasm_debug_build = wasm.buildWasmExecutable(b, .{
         .name = "guillotine-debug",
@@ -159,9 +380,26 @@ fn setupWasmBuilds(b: *std.Build, optimize: std.builtin.OptimizeMode, build_opti
 
     const wasm_debug_step = b.step("wasm-debug", "Build debug WASM for analysis");
     wasm_debug_step.dependOn(&wasm_debug_build.install.step);
-}
 
-fn setupDevtool(b: *std.Build, mods: modules.Modules, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
+    // This *creates* a Run step in the build graph, to be executed when another
+    // step is evaluated that depends on it. The next line below will establish
+    // such a dependency.
+    const run_cmd = b.addRunArtifact(exe);
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    // This allows the user to pass arguments to the application in the build
+    // command itself, like this: `zig build run -- arg1 arg2 etc`
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+
+    // This creates a build step. It will be visible in the `zig build --help` menu,
+    // and can be selected like this: `zig build run`
+    // This will evaluate the `run` step rather than the default, which is "install".
+    const run_step = b.step("run", "Run the app");
+    run_step.dependOn(&run_cmd.step);
+
+    // Devtool executable
     // Add webui dependency
     const webui = b.dependency("webui", .{
         .target = target,
@@ -171,14 +409,16 @@ fn setupDevtool(b: *std.Build, mods: modules.Modules, target: std.Build.Resolved
         .verbose = .err,
     });
 
-    // Check and build npm dependencies
+    // First, check if npm is installed and build the Solid app
     const npm_check = b.addSystemCommand(&[_][]const u8{ "which", "npm" });
     npm_check.addCheck(.{ .expect_stdout_match = "npm" });
 
+    // Install npm dependencies for devtool
     const npm_install = b.addSystemCommand(&[_][]const u8{ "npm", "install" });
     npm_install.setCwd(b.path("src/devtool"));
     npm_install.step.dependOn(&npm_check.step);
 
+    // Build the Solid app
     const npm_build = b.addSystemCommand(&[_][]const u8{ "npm", "run", "build" });
     npm_build.setCwd(b.path("src/devtool"));
     npm_build.step.dependOn(&npm_install.step);
@@ -192,10 +432,10 @@ fn setupDevtool(b: *std.Build, mods: modules.Modules, target: std.Build.Resolved
         .target = target,
         .optimize = optimize,
     });
-    devtool_mod.addImport("Guillotine_lib", mods.lib);
-    devtool_mod.addImport("evm", mods.evm);
-    devtool_mod.addImport("primitives", mods.primitives);
-    devtool_mod.addImport("provider", mods.provider);
+    devtool_mod.addImport("Guillotine_lib", lib_mod);
+    devtool_mod.addImport("evm", evm_mod);
+    devtool_mod.addImport("primitives", primitives_mod);
+    devtool_mod.addImport("provider", provider_mod);
 
     const devtool_exe = b.addExecutable(.{
         .name = "guillotine-devtool",
@@ -206,13 +446,38 @@ fn setupDevtool(b: *std.Build, mods: modules.Modules, target: std.Build.Resolved
 
     // Add native menu implementation on macOS
     if (target.result.os.tag == .macos) {
-        setupMacOSDevtool(b, devtool_exe, target);
+        // Compile Swift code to dynamic library
+        const swift_compile = b.addSystemCommand(&[_][]const u8{
+            "swiftc",
+            "-emit-library",
+            "-parse-as-library",
+            "-target",
+            "arm64-apple-macosx15.0",
+            "-o",
+            "zig-out/libnative_menu_swift.dylib",
+            "src/devtool/native_menu.swift",
+        });
+
+        // Create output directory
+        const mkdir_cmd = b.addSystemCommand(&[_][]const u8{
+            "mkdir", "-p", "zig-out",
+        });
+        swift_compile.step.dependOn(&mkdir_cmd.step);
+
+        // Link the compiled Swift dynamic library
+        devtool_exe.addLibraryPath(b.path("zig-out"));
+        devtool_exe.linkSystemLibrary("native_menu_swift");
+        devtool_exe.step.dependOn(&swift_compile.step);
+
+        // Add Swift runtime library search paths
+        devtool_exe.addLibraryPath(.{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx" });
+        devtool_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/swift" });
     }
 
     // Link webui library
     devtool_exe.linkLibrary(webui.artifact("webui"));
 
-    // Link external libraries
+    // Link external libraries if needed for WebUI
     devtool_exe.linkLibC();
     if (target.result.os.tag == .macos) {
         devtool_exe.linkFramework("WebKit");
@@ -232,37 +497,9 @@ fn setupDevtool(b: *std.Build, mods: modules.Modules, target: std.Build.Resolved
     const devtool_step = b.step("devtool", "Build and run the Ethereum devtool");
     devtool_step.dependOn(&run_devtool_cmd.step);
 
+    // Add build-only step for devtool
     const build_devtool_step = b.step("build-devtool", "Build the Ethereum devtool (without running)");
     build_devtool_step.dependOn(b.getInstallStep());
-}
-
-fn setupMacOSDevtool(b: *std.Build, devtool_exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget) void {
-    // Compile Swift code to dynamic library
-    const swift_compile = b.addSystemCommand(&[_][]const u8{
-        "swiftc",
-        "-emit-library",
-        "-parse-as-library",
-        "-target",
-        "arm64-apple-macosx15.0",
-        "-o",
-        "zig-out/libnative_menu_swift.dylib",
-        "src/devtool/native_menu.swift",
-    });
-
-    // Create output directory
-    const mkdir_cmd = b.addSystemCommand(&[_][]const u8{
-        "mkdir", "-p", "zig-out",
-    });
-    swift_compile.step.dependOn(&mkdir_cmd.step);
-
-    // Link the compiled Swift dynamic library
-    devtool_exe.addLibraryPath(b.path("zig-out"));
-    devtool_exe.linkSystemLibrary("native_menu_swift");
-    devtool_exe.step.dependOn(&swift_compile.step);
-
-    // Add Swift runtime library search paths
-    devtool_exe.addLibraryPath(.{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx" });
-    devtool_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/swift" });
 
     // macOS app bundle creation
     if (target.result.os.tag == .macos) {
@@ -292,9 +529,7 @@ fn setupMacOSDevtool(b: *std.Build, devtool_exe: *std.Build.Step.Compile, target
         const dmg_step = b.step("macos-dmg", "Create macOS DMG installer");
         dmg_step.dependOn(&create_dmg.step);
     }
-}
 
-fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: rust.RustLibraries, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
     // Crash Debug executable (only if source exists)
     const have_crash_debug = blk: {
         std.fs.cwd().access("src/crash-debug.zig", .{}) catch break :blk false;
@@ -307,8 +542,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .target = target,
             .optimize = .Debug, // Use Debug for better diagnostics
         });
-        crash_debug_exe.root_module.addImport("evm", mods.evm);
-        crash_debug_exe.root_module.addImport("primitives", mods.primitives);
+        crash_debug_exe.root_module.addImport("evm", evm_mod);
+        crash_debug_exe.root_module.addImport("primitives", primitives_mod);
         b.installArtifact(crash_debug_exe);
 
         const run_crash_debug_cmd = b.addRunArtifact(crash_debug_exe);
@@ -328,8 +563,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .target = target,
             .optimize = .Debug,
         });
-        simple_crash_test_exe.root_module.addImport("evm", mods.evm);
-        simple_crash_test_exe.root_module.addImport("primitives", mods.primitives);
+        simple_crash_test_exe.root_module.addImport("evm", evm_mod);
+        simple_crash_test_exe.root_module.addImport("primitives", primitives_mod);
         b.installArtifact(simple_crash_test_exe);
 
         const run_simple_crash_test_cmd = b.addRunArtifact(simple_crash_test_exe);
@@ -344,8 +579,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = .ReleaseFast, // Always use ReleaseFast for benchmarks
     });
-    evm_runner_exe.root_module.addImport("evm", mods.evm);
-    evm_runner_exe.root_module.addImport("primitives", mods.primitives);
+    evm_runner_exe.root_module.addImport("evm", evm_mod);
+    evm_runner_exe.root_module.addImport("primitives", primitives_mod);
 
     b.installArtifact(evm_runner_exe);
 
@@ -449,13 +684,13 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    opcode_test_lib.root_module.addImport("evm", mods.evm);
-    opcode_test_lib.root_module.addImport("primitives", mods.primitives);
-    opcode_test_lib.root_module.addImport("crypto", mods.crypto);
-    opcode_test_lib.root_module.addImport("build_options", mods.build_options);
+    opcode_test_lib.root_module.addImport("evm", evm_mod);
+    opcode_test_lib.root_module.addImport("primitives", primitives_mod);
+    opcode_test_lib.root_module.addImport("crypto", crypto_mod);
+    opcode_test_lib.root_module.addImport("build_options", build_options_mod);
 
     // Link BN254 library if available
-    if (rust_libs.bn254_lib) |bn254| {
+    if (bn254_lib) |bn254| {
         opcode_test_lib.linkLibrary(bn254);
         opcode_test_lib.addIncludePath(b.path("src/bn254_wrapper"));
     }
@@ -465,13 +700,13 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_module = mods.lib,
+        .root_module = lib_mod,
     });
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
-        .root_module = mods.exe,
+        .root_module = exe_mod,
     });
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
@@ -483,8 +718,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    memory_test.root_module.addImport("evm", mods.evm);
-    memory_test.root_module.addImport("primitives", mods.primitives);
+    memory_test.root_module.addImport("evm", evm_mod);
+    memory_test.root_module.addImport("primitives", primitives_mod);
 
     const run_memory_test = b.addRunArtifact(memory_test);
     const memory_test_step = b.step("test-memory", "Run Memory tests");
@@ -497,8 +732,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    memory_leak_test.root_module.addImport("evm", mods.evm);
-    memory_leak_test.root_module.addImport("primitives", mods.primitives);
+    memory_leak_test.root_module.addImport("evm", evm_mod);
+    memory_leak_test.root_module.addImport("primitives", primitives_mod);
 
     const run_memory_leak_test = b.addRunArtifact(memory_leak_test);
     const memory_leak_test_step = b.step("test-memory-leak", "Run Memory leak prevention tests");
@@ -511,7 +746,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    stack_test.root_module.addImport("evm", mods.evm);
+    stack_test.root_module.addImport("evm", evm_mod);
 
     const run_stack_test = b.addRunArtifact(stack_test);
     const stack_test_step = b.step("test-stack", "Run Stack tests");
@@ -524,8 +759,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    newevm_test.root_module.addImport("evm", mods.evm);
-    newevm_test.root_module.addImport("primitives", mods.primitives);
+    newevm_test.root_module.addImport("evm", evm_mod);
+    newevm_test.root_module.addImport("primitives", primitives_mod);
 
     const run_newevm_test = b.addRunArtifact(newevm_test);
     const newevm_test_step = b.step("test-newevm", "Run new EVM tests");
@@ -538,8 +773,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    newevm_arithmetic_test.root_module.addImport("evm", mods.evm);
-    newevm_arithmetic_test.root_module.addImport("primitives", mods.primitives);
+    newevm_arithmetic_test.root_module.addImport("evm", evm_mod);
+    newevm_arithmetic_test.root_module.addImport("primitives", primitives_mod);
 
     const run_newevm_arithmetic_test = b.addRunArtifact(newevm_arithmetic_test);
     newevm_test_step.dependOn(&run_newevm_arithmetic_test.step);
@@ -551,8 +786,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    newevm_bitwise_test.root_module.addImport("evm", mods.evm);
-    newevm_bitwise_test.root_module.addImport("primitives", mods.primitives);
+    newevm_bitwise_test.root_module.addImport("evm", evm_mod);
+    newevm_bitwise_test.root_module.addImport("primitives", primitives_mod);
 
     const run_newevm_bitwise_test = b.addRunArtifact(newevm_bitwise_test);
     newevm_test_step.dependOn(&run_newevm_bitwise_test.step);
@@ -564,8 +799,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    newevm_comparison_test.root_module.addImport("evm", mods.evm);
-    newevm_comparison_test.root_module.addImport("primitives", mods.primitives);
+    newevm_comparison_test.root_module.addImport("evm", evm_mod);
+    newevm_comparison_test.root_module.addImport("primitives", primitives_mod);
 
     const run_newevm_comparison_test = b.addRunArtifact(newevm_comparison_test);
     newevm_test_step.dependOn(&run_newevm_comparison_test.step);
@@ -577,8 +812,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    newevm_block_test.root_module.addImport("evm", mods.evm);
-    newevm_block_test.root_module.addImport("primitives", mods.primitives);
+    newevm_block_test.root_module.addImport("evm", evm_mod);
+    newevm_block_test.root_module.addImport("primitives", primitives_mod);
 
     const run_newevm_block_test = b.addRunArtifact(newevm_block_test);
     newevm_test_step.dependOn(&run_newevm_block_test.step);
@@ -590,8 +825,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    newevm_stack_test.root_module.addImport("evm", mods.evm);
-    newevm_stack_test.root_module.addImport("primitives", mods.primitives);
+    newevm_stack_test.root_module.addImport("evm", evm_mod);
+    newevm_stack_test.root_module.addImport("primitives", primitives_mod);
 
     const run_newevm_stack_test = b.addRunArtifact(newevm_stack_test);
     newevm_test_step.dependOn(&run_newevm_stack_test.step);
@@ -605,7 +840,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     stack_validation_test.root_module.stack_check = false;
-    stack_validation_test.root_module.addImport("evm", mods.evm);
+    stack_validation_test.root_module.addImport("evm", evm_mod);
 
     const run_stack_validation_test = b.addRunArtifact(stack_validation_test);
     const stack_validation_test_step = b.step("test-stack-validation", "Run Stack validation tests");
@@ -620,8 +855,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     jump_table_test.root_module.stack_check = false;
-    jump_table_test.root_module.addImport("primitives", mods.primitives);
-    jump_table_test.root_module.addImport("evm", mods.evm);
+    jump_table_test.root_module.addImport("primitives", primitives_mod);
+    jump_table_test.root_module.addImport("evm", evm_mod);
 
     const run_jump_table_test = b.addRunArtifact(jump_table_test);
     const jump_table_test_step = b.step("test-jump-table", "Run Jump table tests");
@@ -636,8 +871,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     config_test.root_module.stack_check = false;
-    config_test.root_module.addImport("primitives", mods.primitives);
-    config_test.root_module.addImport("evm", mods.evm);
+    config_test.root_module.addImport("primitives", primitives_mod);
+    config_test.root_module.addImport("evm", evm_mod);
 
     const run_config_test = b.addRunArtifact(config_test);
     const config_test_step = b.step("test-config", "Run Config tests");
@@ -652,8 +887,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     opcodes_test.root_module.stack_check = false;
-    opcodes_test.root_module.addImport("primitives", mods.primitives);
-    opcodes_test.root_module.addImport("evm", mods.evm);
+    opcodes_test.root_module.addImport("primitives", primitives_mod);
+    opcodes_test.root_module.addImport("evm", evm_mod);
 
     const run_opcodes_test = b.addRunArtifact(opcodes_test);
     const opcodes_test_step = b.step("test-opcodes", "Run Opcodes tests");
@@ -670,8 +905,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     minimal_call_test.root_module.stack_check = false;
-    minimal_call_test.root_module.addImport("primitives", mods.primitives);
-    minimal_call_test.root_module.addImport("evm", mods.evm);
+    minimal_call_test.root_module.addImport("primitives", primitives_mod);
+    minimal_call_test.root_module.addImport("evm", evm_mod);
 
     const run_minimal_call_test = b.addRunArtifact(minimal_call_test);
     const minimal_call_test_step = b.step("test-minimal-call", "Run Minimal Call test");
@@ -686,8 +921,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     debug_analysis_test.root_module.stack_check = false;
-    debug_analysis_test.root_module.addImport("primitives", mods.primitives);
-    debug_analysis_test.root_module.addImport("evm", mods.evm);
+    debug_analysis_test.root_module.addImport("primitives", primitives_mod);
+    debug_analysis_test.root_module.addImport("evm", evm_mod);
 
     const run_debug_analysis_test = b.addRunArtifact(debug_analysis_test);
     const debug_analysis_test_step = b.step("test-debug-analysis", "Run Debug Analysis test");
@@ -702,8 +937,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     super_minimal_test.root_module.stack_check = false;
-    super_minimal_test.root_module.addImport("primitives", mods.primitives);
-    super_minimal_test.root_module.addImport("evm", mods.evm);
+    super_minimal_test.root_module.addImport("primitives", primitives_mod);
+    super_minimal_test.root_module.addImport("evm", evm_mod);
 
     const run_super_minimal_test = b.addRunArtifact(super_minimal_test);
     const super_minimal_test_step = b.step("test-super-minimal", "Run Super Minimal test");
@@ -718,11 +953,11 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     opcode_comparison_test.root_module.stack_check = false;
-    opcode_comparison_test.root_module.addImport("primitives", mods.primitives);
-    opcode_comparison_test.root_module.addImport("evm", mods.evm);
-    opcode_comparison_test.root_module.addImport("Address", mods.primitives);
-    opcode_comparison_test.root_module.addImport("crypto", mods.crypto);
-    opcode_comparison_test.root_module.addImport("build_options", mods.build_options);
+    opcode_comparison_test.root_module.addImport("primitives", primitives_mod);
+    opcode_comparison_test.root_module.addImport("evm", evm_mod);
+    opcode_comparison_test.root_module.addImport("Address", primitives_mod);
+    opcode_comparison_test.root_module.addImport("crypto", crypto_mod);
+    opcode_comparison_test.root_module.addImport("build_options", build_options_mod);
 
     const run_opcode_comparison_test = b.addRunArtifact(opcode_comparison_test);
     const opcode_comparison_test_step = b.step("test-opcode-comparison", "Run opcode comparison tests");
@@ -737,8 +972,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     vm_opcode_test.root_module.stack_check = false;
-    vm_opcode_test.root_module.addImport("primitives", mods.primitives);
-    vm_opcode_test.root_module.addImport("evm", mods.evm);
+    vm_opcode_test.root_module.addImport("primitives", primitives_mod);
+    vm_opcode_test.root_module.addImport("evm", evm_mod);
 
     const run_vm_opcode_test = b.addRunArtifact(vm_opcode_test);
     const vm_opcode_test_step = b.step("test-vm-opcodes", "Run VM opcode tests");
@@ -753,8 +988,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     integration_test.root_module.stack_check = false;
-    integration_test.root_module.addImport("primitives", mods.primitives);
-    integration_test.root_module.addImport("evm", mods.evm);
+    integration_test.root_module.addImport("primitives", primitives_mod);
+    integration_test.root_module.addImport("evm", evm_mod);
 
     const run_integration_test = b.addRunArtifact(integration_test);
     const integration_test_step = b.step("test-integration", "Run Integration tests");
@@ -769,9 +1004,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     evm_package_test.root_module.stack_check = false;
-    evm_package_test.root_module.addImport("primitives", mods.primitives);
-    evm_package_test.root_module.addImport("evm", mods.evm);
-    evm_package_test.root_module.addImport("Address", mods.primitives);
+    evm_package_test.root_module.addImport("primitives", primitives_mod);
+    evm_package_test.root_module.addImport("evm", evm_mod);
+    evm_package_test.root_module.addImport("Address", primitives_mod);
 
     const run_evm_package_test = b.addRunArtifact(evm_package_test);
     const evm_package_test_step = b.step("test-evm-all", "Run all EVM tests via package");
@@ -786,8 +1021,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     opcodes_package_test.root_module.stack_check = false;
-    opcodes_package_test.root_module.addImport("primitives", mods.primitives);
-    opcodes_package_test.root_module.addImport("evm", mods.evm);
+    opcodes_package_test.root_module.addImport("primitives", primitives_mod);
+    opcodes_package_test.root_module.addImport("evm", evm_mod);
 
     const run_opcodes_package_test = b.addRunArtifact(opcodes_package_test);
     const opcodes_package_test_step = b.step("test-opcodes-all", "Run all opcode tests via package");
@@ -802,8 +1037,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     differential_test.root_module.stack_check = false;
-    differential_test.root_module.addImport("primitives", mods.primitives);
-    differential_test.root_module.addImport("evm", mods.evm);
+    differential_test.root_module.addImport("primitives", primitives_mod);
+    differential_test.root_module.addImport("evm", evm_mod);
 
     const run_differential_test = b.addRunArtifact(differential_test);
     const differential_test_step = b.step("test-differential", "Run differential tests");
@@ -818,11 +1053,10 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     all_tests_package.root_module.stack_check = false;
-    all_tests_package.root_module.addImport("primitives", mods.primitives);
-    all_tests_package.root_module.addImport("evm", mods.evm);
-    all_tests_package.root_module.addImport("Address", mods.primitives);
-    // Note: revm import is conditional and added through mods.lib if available
-    // all_tests_package.root_module.addImport("revm", revm_mod);
+    all_tests_package.root_module.addImport("primitives", primitives_mod);
+    all_tests_package.root_module.addImport("evm", evm_mod);
+    all_tests_package.root_module.addImport("Address", primitives_mod);
+    all_tests_package.root_module.addImport("revm", revm_mod);
 
     const run_all_tests_package = b.addRunArtifact(all_tests_package);
     const all_tests_package_step = b.step("test-all-comprehensive", "Run ALL tests via package system");
@@ -837,8 +1071,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     gas_test.root_module.stack_check = false;
-    gas_test.root_module.addImport("primitives", mods.primitives);
-    gas_test.root_module.addImport("evm", mods.evm);
+    gas_test.root_module.addImport("primitives", primitives_mod);
+    gas_test.root_module.addImport("evm", evm_mod);
 
     const run_gas_test = b.addRunArtifact(gas_test);
     const gas_test_step = b.step("test-gas", "Run Gas Accounting tests");
@@ -853,18 +1087,16 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     static_protection_test.root_module.stack_check = false;
-    static_protection_test.root_module.addImport("primitives", mods.primitives);
-    static_protection_test.root_module.addImport("evm", mods.evm);
+    static_protection_test.root_module.addImport("primitives", primitives_mod);
+    static_protection_test.root_module.addImport("evm", evm_mod);
 
     const run_static_protection_test = b.addRunArtifact(static_protection_test);
     const static_protection_test_step = b.step("test-static-protection", "Run Static Call Protection tests");
     static_protection_test_step.dependOn(&run_static_protection_test.step);
 
     // Add Precompile SHA256 tests (only if precompiles are enabled)
-    // TODO: Fix precompile detection in modular build
-    // var run_sha256_test: ?*std.Build.Step.Run = null;
-    // if (!no_precompiles) {
-    if (false) { // Temporarily disabled
+    var run_sha256_test: ?*std.Build.Step.Run = null;
+    if (!no_precompiles) {
         const sha256_test = b.addTest(.{
             .name = "sha256-test",
             .root_source_file = b.path("test/evm/precompiles/sha256_test.zig"),
@@ -872,17 +1104,17 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .optimize = optimize,
         });
         sha256_test.root_module.stack_check = false;
-        sha256_test.root_module.addImport("primitives", mods.primitives);
-        sha256_test.root_module.addImport("evm", mods.evm);
+        sha256_test.root_module.addImport("primitives", primitives_mod);
+        sha256_test.root_module.addImport("evm", evm_mod);
 
-        // run_sha256_test = b.addRunArtifact(sha256_test);
-        // const sha256_test_step = b.step("test-sha256", "Run SHA256 precompile tests");
-        // sha256_test_step.dependOn(&run_sha256_test.?.step);
+        run_sha256_test = b.addRunArtifact(sha256_test);
+        const sha256_test_step = b.step("test-sha256", "Run SHA256 precompile tests");
+        sha256_test_step.dependOn(&run_sha256_test.?.step);
     }
 
     // Add RIPEMD160 precompile tests (only if precompiles are enabled)
-    // var run_ripemd160_test: ?*std.Build.Step.Run = null;
-    if (false) { // Temporarily disabled - was: if (!no_precompiles) {
+    var run_ripemd160_test: ?*std.Build.Step.Run = null;
+    if (!no_precompiles) {
         const ripemd160_test = b.addTest(.{
             .name = "ripemd160-test",
             .root_source_file = b.path("test/evm/precompiles/ripemd160_test.zig"),
@@ -890,12 +1122,12 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .optimize = optimize,
         });
         ripemd160_test.root_module.stack_check = false;
-        ripemd160_test.root_module.addImport("primitives", mods.primitives);
-        ripemd160_test.root_module.addImport("evm", mods.evm);
+        ripemd160_test.root_module.addImport("primitives", primitives_mod);
+        ripemd160_test.root_module.addImport("evm", evm_mod);
 
-        // run_ripemd160_test = b.addRunArtifact(ripemd160_test);
-        // const ripemd160_test_step = b.step("test-ripemd160", "Run RIPEMD160 precompile tests");
-        // ripemd160_test_step.dependOn(&run_ripemd160_test.?.step);
+        run_ripemd160_test = b.addRunArtifact(ripemd160_test);
+        const ripemd160_test_step = b.step("test-ripemd160", "Run RIPEMD160 precompile tests");
+        ripemd160_test_step.dependOn(&run_ripemd160_test.?.step);
     }
 
     // Add BLAKE2f tests
@@ -906,14 +1138,14 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .optimize = optimize,
     });
     blake2f_test.root_module.stack_check = false;
-    blake2f_test.root_module.addImport("primitives", mods.primitives);
-    blake2f_test.root_module.addImport("evm", mods.evm);
+    blake2f_test.root_module.addImport("primitives", primitives_mod);
+    blake2f_test.root_module.addImport("evm", evm_mod);
     const run_blake2f_test = b.addRunArtifact(blake2f_test);
     const blake2f_test_step = b.step("test-blake2f", "Run BLAKE2f precompile tests");
     blake2f_test_step.dependOn(&run_blake2f_test.step);
 
     // Add BN254 Rust wrapper tests (only if BN254 is enabled)
-    const run_bn254_rust_test = if (rust_libs.bn254_lib) |bn254_library| blk: {
+    const run_bn254_rust_test = if (bn254_lib) |bn254_library| blk: {
         const bn254_rust_test = b.addTest(.{
             .name = "bn254-rust-test",
             .root_source_file = b.path("test/evm/precompiles/bn254_rust_test.zig"),
@@ -921,8 +1153,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .optimize = optimize,
         });
         bn254_rust_test.root_module.stack_check = false;
-        bn254_rust_test.root_module.addImport("primitives", mods.primitives);
-        bn254_rust_test.root_module.addImport("evm", mods.evm);
+        bn254_rust_test.root_module.addImport("primitives", primitives_mod);
+        bn254_rust_test.root_module.addImport("evm", evm_mod);
         // Link BN254 Rust library to tests
         bn254_rust_test.linkLibrary(bn254_library);
         bn254_rust_test.addIncludePath(b.path("src/bn254_wrapper"));
@@ -943,8 +1175,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     e2e_simple_test.root_module.stack_check = false;
-    e2e_simple_test.root_module.addImport("primitives", mods.primitives);
-    e2e_simple_test.root_module.addImport("evm", mods.evm);
+    e2e_simple_test.root_module.addImport("primitives", primitives_mod);
+    e2e_simple_test.root_module.addImport("evm", evm_mod);
 
     const run_e2e_simple_test = b.addRunArtifact(e2e_simple_test);
     const e2e_simple_test_step = b.step("test-e2e-simple", "Run E2E simple tests");
@@ -959,8 +1191,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     e2e_error_test.root_module.stack_check = false;
-    e2e_error_test.root_module.addImport("primitives", mods.primitives);
-    e2e_error_test.root_module.addImport("evm", mods.evm);
+    e2e_error_test.root_module.addImport("primitives", primitives_mod);
+    e2e_error_test.root_module.addImport("evm", evm_mod);
 
     const run_e2e_error_test = b.addRunArtifact(e2e_error_test);
     const e2e_error_test_step = b.step("test-e2e-error", "Run E2E error handling tests");
@@ -975,56 +1207,59 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     e2e_data_test.root_module.stack_check = false;
-    e2e_data_test.root_module.addImport("primitives", mods.primitives);
-    e2e_data_test.root_module.addImport("evm", mods.evm);
+    e2e_data_test.root_module.addImport("primitives", primitives_mod);
+    e2e_data_test.root_module.addImport("evm", evm_mod);
 
     const run_e2e_data_test = b.addRunArtifact(e2e_data_test);
     const e2e_data_test_step = b.step("test-e2e-data", "Run E2E data structures tests");
     e2e_data_test_step.dependOn(&run_e2e_data_test.step);
 
-    // TODO: Misplaced macOS bundle code during conflict resolution - already handled in setupMacOSDevtool
-    // const bundle_dir = "macos/GuillotineDevtool.app/Contents/MacOS";
-    // const copy_to_bundle = b.addSystemCommand(&[_][]const u8{
-    //     "cp", "-f", "zig-out/bin/guillotine-devtool", bundle_dir,
-    // });
-    // copy_to_bundle.step.dependOn(&devtool_exe.step);
-    // copy_to_bundle.step.dependOn(&mkdir_bundle.step);
-    //
-    // const macos_app_step = b.step("macos-app", "Create macOS app bundle");
-    // macos_app_step.dependOn(&copy_to_bundle.step);
-    //
-    // const create_dmg = b.addSystemCommand(&[_][]const u8{
-    //     "scripts/create-dmg-fancy.sh",
-    // });
-    // create_dmg.step.dependOn(&copy_to_bundle.step);
-    //
-    // const dmg_step = b.step("macos-dmg", "Create macOS DMG installer");
-    // dmg_step.dependOn(&create_dmg.step);
+    // Add E2E Inheritance tests
+    const e2e_inheritance_test = b.addTest(.{
+        .name = "e2e-inheritance-test",
+        .root_source_file = b.path("test/evm/e2e_inheritance_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    e2e_inheritance_test.root_module.stack_check = false;
+    e2e_inheritance_test.root_module.addImport("primitives", primitives_mod);
+    e2e_inheritance_test.root_module.addImport("evm", evm_mod);
 
-    // TODO: Misplaced compiler test code during conflict resolution - need proper test definition
-    // compiler_test.root_module.addImport("primitives", mods.primitives);
-    // compiler_test.root_module.addImport("evm", mods.evm);
-    //
-    // // TODO: Re-enable when Rust integration is fixed
-    // // // Make the compiler test depend on the Rust build
-    // // compiler_test.step.dependOn(rust_step);
-    //
-    // // // Link the Rust library to the compiler test
-    // // compiler_test.addObjectFile(b.path("zig-out/lib/libfoundry_wrapper.a"));
-    // // compiler_test.linkLibC();
-    //
-    // // // Link system libraries required by Rust static lib
-    // // if (target.result.os.tag == .linux) {
-    // //     compiler_test.linkSystemLibrary("unwind");
-    // //     compiler_test.linkSystemLibrary("gcc_s");
-    // // } else if (target.result.os.tag == .macos) {
-    // //     compiler_test.linkFramework("CoreFoundation");
-    // //     compiler_test.linkFramework("Security");
-    // // }
-    //
-    // const run_compiler_test = b.addRunArtifact(compiler_test);
-    // const compiler_test_step = b.step("test-compiler", "Run Compiler tests");
-    // compiler_test_step.dependOn(&run_compiler_test.step);
+    const run_e2e_inheritance_test = b.addRunArtifact(e2e_inheritance_test);
+    const e2e_inheritance_test_step = b.step("test-e2e-inheritance", "Run E2E inheritance tests");
+    e2e_inheritance_test_step.dependOn(&run_e2e_inheritance_test.step);
+
+    // Add Compiler tests
+    const compiler_test = b.addTest(.{
+        .name = "compiler-test",
+        .root_source_file = b.path("src/compilers/compiler.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    compiler_test.root_module.addImport("primitives", primitives_mod);
+    compiler_test.root_module.addImport("evm", evm_mod);
+
+    // TODO: Re-enable when Rust integration is fixed
+    // // Make the compiler test depend on the Rust build
+    // compiler_test.step.dependOn(rust_step);
+
+    // // Link the Rust library to the compiler test
+    // compiler_test.addObjectFile(b.path("zig-out/lib/libfoundry_wrapper.a"));
+    // compiler_test.linkLibC();
+
+    // // Link system libraries required by Rust static lib
+    // if (target.result.os.tag == .linux) {
+    //     compiler_test.linkSystemLibrary("unwind");
+    //     compiler_test.linkSystemLibrary("gcc_s");
+    // } else if (target.result.os.tag == .macos) {
+    //     compiler_test.linkFramework("CoreFoundation");
+    //     compiler_test.linkFramework("Security");
+    // }
+
+    const run_compiler_test = b.addRunArtifact(compiler_test);
+    const compiler_test_step = b.step("test-compiler", "Run Compiler tests");
+    compiler_test_step.dependOn(&run_compiler_test.step);
 
     // Add Devtool tests
     const devtool_test = b.addTest(.{
@@ -1033,8 +1268,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    devtool_test.root_module.addImport("evm", mods.evm);
-    devtool_test.root_module.addImport("primitives", mods.primitives);
+    devtool_test.root_module.addImport("evm", evm_mod);
+    devtool_test.root_module.addImport("primitives", primitives_mod);
 
     const run_devtool_test = b.addRunArtifact(devtool_test);
     const devtool_test_step = b.step("test-devtool", "Run Devtool tests");
@@ -1047,8 +1282,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    snail_shell_benchmark_test.root_module.addImport("primitives", mods.primitives);
-    snail_shell_benchmark_test.root_module.addImport("evm", mods.evm);
+    snail_shell_benchmark_test.root_module.addImport("primitives", primitives_mod);
+    snail_shell_benchmark_test.root_module.addImport("evm", evm_mod);
 
     const run_snail_shell_benchmark_test = b.addRunArtifact(snail_shell_benchmark_test);
     const snail_shell_benchmark_test_step = b.step("test-benchmark", "Run SnailShellBenchmark tests");
@@ -1061,7 +1296,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_fuzz_test.root_module.addImport("primitives", mods.primitives);
+    bn254_fuzz_test.root_module.addImport("primitives", primitives_mod);
 
     const run_bn254_fuzz_test = b.addRunArtifact(bn254_fuzz_test);
     if (b.args) |args| {
@@ -1077,9 +1312,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    ecmul_fuzz_test.root_module.addImport("primitives", mods.primitives);
-    ecmul_fuzz_test.root_module.addImport("crypto", mods.crypto);
-    ecmul_fuzz_test.root_module.addImport("evm", mods.evm);
+    ecmul_fuzz_test.root_module.addImport("primitives", primitives_mod);
+    ecmul_fuzz_test.root_module.addImport("crypto", crypto_mod);
+    ecmul_fuzz_test.root_module.addImport("evm", evm_mod);
 
     const run_ecmul_fuzz_test = b.addRunArtifact(ecmul_fuzz_test);
     if (b.args) |args| {
@@ -1095,9 +1330,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    ecpairing_fuzz_test.root_module.addImport("primitives", mods.primitives);
-    ecpairing_fuzz_test.root_module.addImport("crypto", mods.crypto);
-    ecpairing_fuzz_test.root_module.addImport("evm", mods.evm);
+    ecpairing_fuzz_test.root_module.addImport("primitives", primitives_mod);
+    ecpairing_fuzz_test.root_module.addImport("crypto", crypto_mod);
+    ecpairing_fuzz_test.root_module.addImport("evm", evm_mod);
 
     const run_ecpairing_fuzz_test = b.addRunArtifact(ecpairing_fuzz_test);
     if (b.args) |args| {
@@ -1113,10 +1348,10 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_comparison_fuzz_test.root_module.addImport("primitives", mods.primitives);
-    bn254_comparison_fuzz_test.root_module.addImport("crypto", mods.crypto);
-    bn254_comparison_fuzz_test.root_module.addImport("evm", mods.evm);
-    if (rust_libs.bn254_lib) |bn254| {
+    bn254_comparison_fuzz_test.root_module.addImport("primitives", primitives_mod);
+    bn254_comparison_fuzz_test.root_module.addImport("crypto", crypto_mod);
+    bn254_comparison_fuzz_test.root_module.addImport("evm", evm_mod);
+    if (bn254_lib) |bn254| {
         bn254_comparison_fuzz_test.linkLibrary(bn254);
     }
 
@@ -1142,8 +1377,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .optimize = optimize,
         .single_threaded = true,
     });
-    constructor_bug_test.root_module.addImport("primitives", mods.primitives);
-    constructor_bug_test.root_module.addImport("evm", mods.evm);
+    constructor_bug_test.root_module.addImport("primitives", primitives_mod);
+    constructor_bug_test.root_module.addImport("evm", evm_mod);
     const run_constructor_bug_test = b.addRunArtifact(constructor_bug_test);
     const constructor_bug_test_step = b.step("test-constructor-bug", "Run Constructor Bug test");
     constructor_bug_test_step.dependOn(&run_constructor_bug_test.step);
@@ -1156,8 +1391,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .optimize = optimize,
         .single_threaded = true,
     });
-    solidity_constructor_test.root_module.addImport("primitives", mods.primitives);
-    solidity_constructor_test.root_module.addImport("evm", mods.evm);
+    solidity_constructor_test.root_module.addImport("primitives", primitives_mod);
+    solidity_constructor_test.root_module.addImport("evm", evm_mod);
     const run_solidity_constructor_test = b.addRunArtifact(solidity_constructor_test);
     const solidity_constructor_test_step = b.step("test-solidity-constructor", "Run Solidity Constructor test");
     solidity_constructor_test_step.dependOn(&run_solidity_constructor_test.step);
@@ -1170,8 +1405,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .optimize = optimize,
         .single_threaded = true,
     });
-    return_opcode_bug_test.root_module.addImport("primitives", mods.primitives);
-    return_opcode_bug_test.root_module.addImport("evm", mods.evm);
+    return_opcode_bug_test.root_module.addImport("primitives", primitives_mod);
+    return_opcode_bug_test.root_module.addImport("evm", evm_mod);
     const run_return_opcode_bug_test = b.addRunArtifact(return_opcode_bug_test);
     const return_opcode_bug_test_step = b.step("test-return-opcode-bug", "Run RETURN opcode bug test");
     return_opcode_bug_test_step.dependOn(&run_return_opcode_bug_test.step);
@@ -1183,8 +1418,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .optimize = optimize,
         .single_threaded = true,
     });
-    contract_call_test.root_module.addImport("primitives", mods.primitives);
-    contract_call_test.root_module.addImport("evm", mods.evm);
+    contract_call_test.root_module.addImport("primitives", primitives_mod);
+    contract_call_test.root_module.addImport("evm", evm_mod);
     const run_contract_call_test = b.addRunArtifact(contract_call_test);
     const contract_call_test_step = b.step("test-contract-call", "Run Contract Call tests");
     contract_call_test_step.dependOn(&run_contract_call_test.step);
@@ -1198,8 +1433,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    delegatecall_test.root_module.addImport("primitives", mods.primitives);
-    delegatecall_test.root_module.addImport("evm", mods.evm);
+    delegatecall_test.root_module.addImport("primitives", primitives_mod);
+    delegatecall_test.root_module.addImport("evm", evm_mod);
     const run_delegatecall_test = b.addRunArtifact(delegatecall_test);
     const delegatecall_test_step = b.step("test-delegatecall", "Run DELEGATECALL tests");
     delegatecall_test_step.dependOn(&run_delegatecall_test.step);
@@ -1211,7 +1446,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_fp_test.root_module.addImport("primitives", mods.primitives);
+    bn254_fp_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_fp_test = b.addRunArtifact(bn254_fp_test);
     const bn254_fp_test_step = b.step("test-bn254-fp", "Run BN254 Fp tests");
     bn254_fp_test_step.dependOn(&run_bn254_fp_test.step);
@@ -1222,7 +1457,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_fr_test.root_module.addImport("primitives", mods.primitives);
+    bn254_fr_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_fr_test = b.addRunArtifact(bn254_fr_test);
     const bn254_fr_test_step = b.step("test-bn254-fr", "Run BN254 Fr tests");
     bn254_fr_test_step.dependOn(&run_bn254_fr_test.step);
@@ -1233,7 +1468,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_fp2_test.root_module.addImport("primitives", mods.primitives);
+    bn254_fp2_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_fp2_test = b.addRunArtifact(bn254_fp2_test);
     const bn254_fp2_test_step = b.step("test-bn254-fp2", "Run BN254 Fp2 tests");
     bn254_fp2_test_step.dependOn(&run_bn254_fp2_test.step);
@@ -1244,7 +1479,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_fp6_test.root_module.addImport("primitives", mods.primitives);
+    bn254_fp6_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_fp6_test = b.addRunArtifact(bn254_fp6_test);
     const bn254_fp6_test_step = b.step("test-bn254-fp6", "Run BN254 Fp6 tests");
     bn254_fp6_test_step.dependOn(&run_bn254_fp6_test.step);
@@ -1255,7 +1490,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_fp12_test.root_module.addImport("primitives", mods.primitives);
+    bn254_fp12_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_fp12_test = b.addRunArtifact(bn254_fp12_test);
     const bn254_fp12_test_step = b.step("test-bn254-fp12", "Run BN254 Fp12 tests");
     bn254_fp12_test_step.dependOn(&run_bn254_fp12_test.step);
@@ -1266,7 +1501,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_g1_test.root_module.addImport("primitives", mods.primitives);
+    bn254_g1_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_g1_test = b.addRunArtifact(bn254_g1_test);
     const bn254_g1_test_step = b.step("test-bn254-g1", "Run BN254 G1 tests");
     bn254_g1_test_step.dependOn(&run_bn254_g1_test.step);
@@ -1277,7 +1512,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_g2_test.root_module.addImport("primitives", mods.primitives);
+    bn254_g2_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_g2_test = b.addRunArtifact(bn254_g2_test);
     const bn254_g2_test_step = b.step("test-bn254-g2", "Run BN254 G2 tests");
     bn254_g2_test_step.dependOn(&run_bn254_g2_test.step);
@@ -1288,7 +1523,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    bn254_pairing_test.root_module.addImport("primitives", mods.primitives);
+    bn254_pairing_test.root_module.addImport("primitives", primitives_mod);
     const run_bn254_pairing_test = b.addRunArtifact(bn254_pairing_test);
     const bn254_pairing_test_step = b.step("test-bn254-pairing", "Run BN254 pairing tests");
     bn254_pairing_test_step.dependOn(&run_bn254_pairing_test.step);
@@ -1323,8 +1558,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .single_threaded = true,
     });
     inline_ops_test.root_module.stack_check = false;
-    inline_ops_test.root_module.addImport("primitives", mods.primitives);
-    inline_ops_test.root_module.addImport("evm", mods.evm);
+    inline_ops_test.root_module.addImport("primitives", primitives_mod);
+    inline_ops_test.root_module.addImport("evm", evm_mod);
     const run_inline_ops_test = b.addRunArtifact(inline_ops_test);
 
     // Instruction tests moved to test/evm/instruction_test.zig to avoid circular dependencies
@@ -1358,7 +1593,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .target = target,
             .optimize = optimize,
         });
-        revm_test.root_module.addImport("primitives", mods.primitives);
+        revm_test.root_module.addImport("primitives", primitives_mod);
         revm_test.linkLibrary(revm_lib.?);
         revm_test.addIncludePath(b.path("src/revm_wrapper"));
         revm_test.linkLibC();
@@ -1416,8 +1651,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    erc20_deployment_test.root_module.addImport("evm", mods.evm);
-    erc20_deployment_test.root_module.addImport("primitives", mods.primitives);
+    erc20_deployment_test.root_module.addImport("evm", evm_mod);
+    erc20_deployment_test.root_module.addImport("primitives", primitives_mod);
     const run_erc20_deployment_test = b.addRunArtifact(erc20_deployment_test);
     test_step.dependOn(&run_erc20_deployment_test.step);
 
@@ -1428,9 +1663,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    erc20_mint_debug_test.root_module.addImport("primitives", mods.primitives);
-    erc20_mint_debug_test.root_module.addImport("evm", mods.evm);
-    erc20_mint_debug_test.root_module.addImport("Address", mods.primitives);
+    erc20_mint_debug_test.root_module.addImport("primitives", primitives_mod);
+    erc20_mint_debug_test.root_module.addImport("evm", evm_mod);
+    erc20_mint_debug_test.root_module.addImport("Address", primitives_mod);
     const run_erc20_mint_debug_test = b.addRunArtifact(erc20_mint_debug_test);
     const erc20_mint_debug_test_step = b.step("test-erc20-debug", "Run ERC20 mint test with full debug logging");
     erc20_mint_debug_test_step.dependOn(&run_erc20_mint_debug_test.step);
@@ -1442,9 +1677,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    constructor_revert_test.root_module.addImport("primitives", mods.primitives);
-    constructor_revert_test.root_module.addImport("evm", mods.evm);
-    constructor_revert_test.root_module.addImport("Address", mods.primitives);
+    constructor_revert_test.root_module.addImport("primitives", primitives_mod);
+    constructor_revert_test.root_module.addImport("evm", evm_mod);
+    constructor_revert_test.root_module.addImport("Address", primitives_mod);
     const run_constructor_revert_test = b.addRunArtifact(constructor_revert_test);
     const constructor_revert_test_step = b.step("test-constructor-revert", "Run constructor REVERT test");
     constructor_revert_test_step.dependOn(&run_constructor_revert_test.step);
@@ -1457,9 +1692,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    erc20_constructor_debug_test.root_module.addImport("primitives", mods.primitives);
-    erc20_constructor_debug_test.root_module.addImport("evm", mods.evm);
-    erc20_constructor_debug_test.root_module.addImport("Address", mods.primitives);
+    erc20_constructor_debug_test.root_module.addImport("primitives", primitives_mod);
+    erc20_constructor_debug_test.root_module.addImport("evm", evm_mod);
+    erc20_constructor_debug_test.root_module.addImport("Address", primitives_mod);
     const run_erc20_constructor_debug_test = b.addRunArtifact(erc20_constructor_debug_test);
     const erc20_constructor_debug_test_step = b.step("test-erc20-constructor", "Run ERC20 constructor debug test");
     erc20_constructor_debug_test_step.dependOn(&run_erc20_constructor_debug_test.step);
@@ -1471,9 +1706,9 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    trace_erc20_test.root_module.addImport("primitives", mods.primitives);
-    trace_erc20_test.root_module.addImport("evm", mods.evm);
-    trace_erc20_test.root_module.addImport("Address", mods.primitives);
+    trace_erc20_test.root_module.addImport("primitives", primitives_mod);
+    trace_erc20_test.root_module.addImport("evm", evm_mod);
+    trace_erc20_test.root_module.addImport("Address", primitives_mod);
     const run_trace_erc20_test = b.addRunArtifact(trace_erc20_test);
     const trace_erc20_test_step = b.step("test-trace-erc20", "Trace ERC20 constructor execution");
     trace_erc20_test_step.dependOn(&run_trace_erc20_test.step);
@@ -1485,8 +1720,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    string_storage_test.root_module.addImport("evm", mods.evm);
-    string_storage_test.root_module.addImport("Address", mods.primitives);
+    string_storage_test.root_module.addImport("evm", evm_mod);
+    string_storage_test.root_module.addImport("Address", primitives_mod);
 
     const run_string_storage_test = b.addRunArtifact(string_storage_test);
     const string_storage_test_step = b.step("test-string-storage", "Run string storage tests");
@@ -1499,8 +1734,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    jumpi_bug_test.root_module.addImport("evm", mods.evm);
-    jumpi_bug_test.root_module.addImport("Address", mods.primitives);
+    jumpi_bug_test.root_module.addImport("evm", evm_mod);
+    jumpi_bug_test.root_module.addImport("Address", primitives_mod);
 
     const run_jumpi_bug_test = b.addRunArtifact(jumpi_bug_test);
     test_step.dependOn(&run_jumpi_bug_test.step);
@@ -1516,8 +1751,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    block_execution_erc20_test.root_module.addImport("evm", mods.evm);
-    block_execution_erc20_test.root_module.addImport("primitives", mods.primitives);
+    block_execution_erc20_test.root_module.addImport("evm", evm_mod);
+    block_execution_erc20_test.root_module.addImport("primitives", primitives_mod);
 
     const run_block_execution_erc20_test = b.addRunArtifact(block_execution_erc20_test);
     const block_execution_erc20_test_step = b.step("test-block-execution-erc20", "Run block execution ERC20 test");
@@ -1530,8 +1765,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    block_execution_simple_test.root_module.addImport("evm", mods.evm);
-    block_execution_simple_test.root_module.addImport("primitives", mods.primitives);
+    block_execution_simple_test.root_module.addImport("evm", evm_mod);
+    block_execution_simple_test.root_module.addImport("primitives", primitives_mod);
 
     const run_block_execution_simple_test = b.addRunArtifact(block_execution_simple_test);
     test_step.dependOn(&run_block_execution_simple_test.step);
@@ -1546,8 +1781,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
     //     .target = target,
     //     .optimize = optimize,
     // });
-    // tracer_test.root_module.addImport("evm", mods.evm);
-    // tracer_test.root_module.addImport("Address", mods.primitives);
+    // tracer_test.root_module.addImport("evm", evm_mod);
+    // tracer_test.root_module.addImport("Address", primitives_mod);
     //
     // const run_tracer_test = b.addRunArtifact(tracer_test);
     // test_step.dependOn(&run_tracer_test.step);
@@ -1562,8 +1797,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
     //     .target = target,
     //     .optimize = optimize,
     // });
-    // compare_test.root_module.addImport("evm", mods.evm);
-    // compare_test.root_module.addImport("primitives", mods.primitives);
+    // compare_test.root_module.addImport("evm", evm_mod);
+    // compare_test.root_module.addImport("primitives", primitives_mod);
 
     // const run_compare_test = b.addRunArtifact(compare_test);
     // test_step.dependOn(&run_compare_test.step);
@@ -1577,14 +1812,13 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    comprehensive_compare.root_module.addImport("evm", mods.evm);
-    comprehensive_compare.root_module.addImport("primitives", mods.primitives);
-    comprehensive_compare.root_module.addImport("Address", mods.primitives);
-    // Note: revm import is conditional and added through mods.lib if available
-    // comprehensive_compare.root_module.addImport("revm", revm_mod);
+    comprehensive_compare.root_module.addImport("evm", evm_mod);
+    comprehensive_compare.root_module.addImport("primitives", primitives_mod);
+    comprehensive_compare.root_module.addImport("Address", primitives_mod);
+    comprehensive_compare.root_module.addImport("revm", revm_mod);
 
     // Link REVM wrapper library if available
-    if (rust_libs.revm_lib) |revm_library| {
+    if (revm_lib) |revm_library| {
         comprehensive_compare.linkLibrary(revm_library);
         comprehensive_compare.addIncludePath(b.path("src/revm_wrapper"));
         comprehensive_compare.linkLibC();
@@ -1610,7 +1844,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
     }
 
     // Link BN254 library if available (required by REVM)
-    if (rust_libs.bn254_lib) |bn254_library| {
+    if (bn254_lib) |bn254_library| {
         comprehensive_compare.linkLibrary(bn254_library);
         comprehensive_compare.addIncludePath(b.path("src/bn254_wrapper"));
     }
@@ -1626,8 +1860,8 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
         .target = target,
         .optimize = optimize,
     });
-    erc20_trace_test.root_module.addImport("evm", mods.evm);
-    erc20_trace_test.root_module.addImport("primitives", mods.primitives);
+    erc20_trace_test.root_module.addImport("evm", evm_mod);
+    erc20_trace_test.root_module.addImport("primitives", primitives_mod);
 
     const run_erc20_trace_test = b.addRunArtifact(erc20_trace_test);
     const erc20_trace_test_step = b.step("test-erc20-trace", "Run ERC20 constructor trace test");
@@ -1648,7 +1882,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             .target = target,
             .optimize = optimize,
         });
-        fuzz_test.root_module.addImport("evm", mods.evm);
+        fuzz_test.root_module.addImport("evm", evm_mod);
 
         // Some fuzz tests also need primitives
         if (std.mem.indexOf(u8, test_info.name, "arithmetic") != null or
@@ -1660,7 +1894,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
             std.mem.indexOf(u8, test_info.name, "storage") != null or
             std.mem.indexOf(u8, test_info.name, "state") != null)
         {
-            fuzz_test.root_module.addImport("primitives", mods.primitives);
+            fuzz_test.root_module.addImport("primitives", primitives_mod);
         }
 
         const run_fuzz_test = b.addRunArtifact(fuzz_test);
@@ -1726,29 +1960,151 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
     // Go build commands
     addGoSteps(b);
 
-    const dmg_step = b.step("macos-dmg", "Create macOS DMG installer");
-    dmg_step.dependOn(&create_dmg.step);
+    // TypeScript build commands
+    addTypeScriptSteps(b);
 }
 
-fn setupDebugExecutables(b: *std.Build, mods: modules.Modules, target: std.Build.ResolvedTarget) void {
-    _ = b;
-    _ = mods;
-    _ = target;
-    // Debug executables removed - source files don't exist
+fn addSwiftSteps(b: *std.Build) void {
+    // Swift build step
+    const swift_build_cmd = b.addSystemCommand(&[_][]const u8{ "swift", "build" });
+    swift_build_cmd.setCwd(b.path("src/guillotine-swift"));
+    swift_build_cmd.step.dependOn(b.getInstallStep()); // Ensure native library is built first
+
+    const swift_build_step = b.step("swift", "Build Swift bindings");
+    swift_build_step.dependOn(&swift_build_cmd.step);
+
+    // Swift test step
+    const swift_test_cmd = b.addSystemCommand(&[_][]const u8{ "swift", "test" });
+    swift_test_cmd.setCwd(b.path("src/guillotine-swift"));
+    swift_test_cmd.step.dependOn(&swift_build_cmd.step);
+
+    const swift_test_step = b.step("swift-test", "Run Swift binding tests");
+    swift_test_step.dependOn(&swift_test_cmd.step);
+
+    // Swift package validation step
+    const swift_validate_cmd = b.addSystemCommand(&[_][]const u8{ "swift", "package", "validate" });
+    swift_validate_cmd.setCwd(b.path("src/guillotine-swift"));
+
+    const swift_validate_step = b.step("swift-validate", "Validate Swift package");
+    swift_validate_step.dependOn(&swift_validate_cmd.step);
 }
 
-fn setupIntegrationTests(b: *std.Build, mods: modules.Modules, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
-    _ = b;
-    _ = mods;
-    _ = target;
-    _ = optimize;
-    // Integration tests removed - source files don't exist
+fn addGoSteps(b: *std.Build) void {
+    // Go mod tidy step to download dependencies
+    const go_mod_tidy_cmd = b.addSystemCommand(&[_][]const u8{ "go", "mod", "tidy" });
+    go_mod_tidy_cmd.setCwd(b.path("src/guillotine-go"));
+    go_mod_tidy_cmd.step.dependOn(b.getInstallStep()); // Ensure native library is built first
+
+    // Go build step
+    const go_build_cmd = b.addSystemCommand(&[_][]const u8{ "go", "build", "./..." });
+    go_build_cmd.setCwd(b.path("src/guillotine-go"));
+    go_build_cmd.step.dependOn(&go_mod_tidy_cmd.step);
+
+    const go_build_step = b.step("go", "Build Go bindings");
+    go_build_step.dependOn(&go_build_cmd.step);
+
+    // Go test step
+    const go_test_cmd = b.addSystemCommand(&[_][]const u8{ "go", "test", "./..." });
+    go_test_cmd.setCwd(b.path("src/guillotine-go"));
+    go_test_cmd.step.dependOn(&go_build_cmd.step);
+
+    const go_test_step = b.step("go-test", "Run Go binding tests");
+    go_test_step.dependOn(&go_test_cmd.step);
+
+    // Go vet step for code analysis
+    const go_vet_cmd = b.addSystemCommand(&[_][]const u8{ "go", "vet", "./..." });
+    go_vet_cmd.setCwd(b.path("src/guillotine-go"));
+    go_vet_cmd.step.dependOn(&go_build_cmd.step);
+
+    const go_vet_step = b.step("go-vet", "Run Go code analysis");
+    go_vet_step.dependOn(&go_vet_cmd.step);
+
+    // Go format check step
+    const go_fmt_check_cmd = b.addSystemCommand(&[_][]const u8{ "sh", "-c", "test -z \"$(gofmt -l .)\" || (echo 'Code is not formatted. Run: go fmt ./...' && exit 1)" });
+    go_fmt_check_cmd.setCwd(b.path("src/guillotine-go"));
+
+    const go_fmt_check_step = b.step("go-fmt-check", "Check Go code formatting");
+    go_fmt_check_step.dependOn(&go_fmt_check_cmd.step);
+
+    // Go format step
+    const go_fmt_cmd = b.addSystemCommand(&[_][]const u8{ "go", "fmt", "./..." });
+    go_fmt_cmd.setCwd(b.path("src/guillotine-go"));
+
+    const go_fmt_step = b.step("go-fmt", "Format Go code");
+    go_fmt_step.dependOn(&go_fmt_cmd.step);
 }
 
-fn setupOpcodeRustTests(b: *std.Build, mods: modules.Modules, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
-    _ = b;
-    _ = mods;
-    _ = target;
-    _ = optimize;
-    // Opcode Rust tests removed - source files don't exist
+fn addTypeScriptSteps(b: *std.Build) void {
+    // TypeScript install dependencies step
+    const ts_install_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "install" });
+    ts_install_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_install_cmd.step.dependOn(b.getInstallStep()); // Ensure native library is built first
+
+    // Copy WASM files step
+    const ts_copy_wasm_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "copy-wasm" });
+    ts_copy_wasm_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_copy_wasm_cmd.step.dependOn(&ts_install_cmd.step);
+
+    // TypeScript build step
+    const ts_build_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "build" });
+    ts_build_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_build_cmd.step.dependOn(&ts_copy_wasm_cmd.step);
+
+    const ts_build_step = b.step("ts", "Build TypeScript bindings");
+    ts_build_step.dependOn(&ts_build_cmd.step);
+
+    // TypeScript test step
+    const ts_test_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "test" });
+    ts_test_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_test_cmd.step.dependOn(&ts_build_cmd.step);
+
+    const ts_test_step = b.step("ts-test", "Run TypeScript binding tests");
+    ts_test_step.dependOn(&ts_test_cmd.step);
+
+    // TypeScript lint step
+    const ts_lint_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "lint" });
+    ts_lint_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_lint_cmd.step.dependOn(&ts_install_cmd.step);
+
+    const ts_lint_step = b.step("ts-lint", "Run TypeScript linting");
+    ts_lint_step.dependOn(&ts_lint_cmd.step);
+
+    // TypeScript format check step
+    const ts_format_check_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "format:check" });
+    ts_format_check_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_format_check_cmd.step.dependOn(&ts_install_cmd.step);
+
+    const ts_format_check_step = b.step("ts-format-check", "Check TypeScript code formatting");
+    ts_format_check_step.dependOn(&ts_format_check_cmd.step);
+
+    // TypeScript format step
+    const ts_format_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "format" });
+    ts_format_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_format_cmd.step.dependOn(&ts_install_cmd.step);
+
+    const ts_format_step = b.step("ts-format", "Format TypeScript code");
+    ts_format_step.dependOn(&ts_format_cmd.step);
+
+    // TypeScript type check step
+    const ts_typecheck_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "typecheck" });
+    ts_typecheck_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_typecheck_cmd.step.dependOn(&ts_install_cmd.step);
+
+    const ts_typecheck_step = b.step("ts-typecheck", "Run TypeScript type checking");
+    ts_typecheck_step.dependOn(&ts_typecheck_cmd.step);
+
+    // TypeScript development step (watch mode)
+    const ts_dev_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "dev" });
+    ts_dev_cmd.setCwd(b.path("src/guillotine-ts"));
+    ts_dev_cmd.step.dependOn(&ts_install_cmd.step);
+
+    const ts_dev_step = b.step("ts-dev", "Run TypeScript in development/watch mode");
+    ts_dev_step.dependOn(&ts_dev_cmd.step);
+
+    // TypeScript clean step
+    const ts_clean_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "clean" });
+    ts_clean_cmd.setCwd(b.path("src/guillotine-ts"));
+
+    const ts_clean_step = b.step("ts-clean", "Clean TypeScript build artifacts");
+    ts_clean_step.dependOn(&ts_clean_cmd.step);
 }
