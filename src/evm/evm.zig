@@ -106,9 +106,9 @@ analysis_cache: ?AnalysisCache = null,
 journal: CallJournal = undefined,
 
 /// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
-/// This tracks refunds to be applied at transaction end per EIP-3529
-gas_refunds: u64 = 0,
-
+/// Signed accumulator: EIP-2200 allows negative deltas during execution.
+/// Applied at transaction end with EIP-3529 cap.
+gas_refunds: i64 = 0,
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
@@ -169,13 +169,13 @@ pub fn init(
     var internal_arena = std.heap.ArenaAllocator.init(allocator);
     // Preallocate memory to avoid frequent allocations during execution
     const arena_buffer = try internal_arena.allocator().alloc(u8, ARENA_INITIAL_CAPACITY);
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // Verify arena allocation is exactly what we expect
         std.debug.assert(arena_buffer.len == ARENA_INITIAL_CAPACITY);
         std.debug.assert(ARENA_INITIAL_CAPACITY == 256 * 1024); // 256KB
     }
-    
+
     _ = internal_arena.reset(.retain_capacity);
 
     std.debug.print("[Evm.init] Creating EVM state...\n", .{});
@@ -289,10 +289,18 @@ pub fn arena_allocator(self: *Evm) std.mem.Allocator {
 /// Refunds are accumulated at the transaction level and applied at the end.
 ///
 /// @param amount The amount of gas to refund
+/// Adjust gas refund by signed delta (can be negative per EIP-2200)
+pub fn adjust_gas_refund(self: *Evm, delta: i64) void {
+    // Saturating addition on i64 bounds
+    const sum = @as(i128, self.gas_refunds) + @as(i128, delta);
+    const clamped = if (sum > @as(i128, std.math.maxInt(i64))) @as(i64, std.math.maxInt(i64)) else if (sum < @as(i128, std.math.minInt(i64))) @as(i64, std.math.minInt(i64)) else @as(i64, @intCast(sum));
+    self.gas_refunds = clamped;
+    Log.debug("Gas refund adjusted by {} (total: {})", .{ delta, self.gas_refunds });
+}
+
+/// Backward-compatible helper for positive refunds
 pub fn add_gas_refund(self: *Evm, amount: u64) void {
-    // Use saturating addition to prevent overflow
-    self.gas_refunds = self.gas_refunds +| amount;
-    Log.debug("Gas refund added: {} (total: {})", .{ amount, self.gas_refunds });
+    self.adjust_gas_refund(@as(i64, @intCast(amount)));
 }
 
 /// Apply gas refunds at transaction end with EIP-3529 cap.
@@ -305,9 +313,12 @@ pub fn apply_gas_refunds(self: *Evm, total_gas_used: u64) u64 {
     // Pre-London: Maximum refund is gas_used / 2
     const max_refund_quotient: u64 = if (self.chain_rules.is_london) 5 else 2;
     const max_refund = total_gas_used / max_refund_quotient;
-    const actual_refund = @min(self.gas_refunds, max_refund);
 
-    Log.debug("Applying gas refunds: requested={}, max={}, actual={}", .{ self.gas_refunds, max_refund, actual_refund });
+    // Only positive refunds apply; negative deltas reduce previous credits during execution
+    const requested: u64 = if (self.gas_refunds > 0) @as(u64, @intCast(self.gas_refunds)) else 0;
+    const actual_refund: u64 = @min(requested, max_refund);
+
+    Log.debug("Applying gas refunds: requested={}, max={}, actual={}", .{ requested, max_refund, actual_refund });
 
     // Reset refunds after application
     self.gas_refunds = 0;
@@ -1493,18 +1504,18 @@ test "gas refund accumulation" {
     defer evm.deinit();
 
     // Initially no refunds
-    try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    try std.testing.expectEqual(@as(i64, 0), evm.gas_refunds);
 
     // Add some refunds
     evm.add_gas_refund(1000);
-    try std.testing.expectEqual(@as(u64, 1000), evm.gas_refunds);
+    try std.testing.expectEqual(@as(i64, 1000), evm.gas_refunds);
 
     evm.add_gas_refund(500);
-    try std.testing.expectEqual(@as(u64, 1500), evm.gas_refunds);
+    try std.testing.expectEqual(@as(i64, 1500), evm.gas_refunds);
 
     // Test saturating addition
     evm.add_gas_refund(std.math.maxInt(u64));
-    try std.testing.expectEqual(std.math.maxInt(u64), evm.gas_refunds);
+    try std.testing.expectEqual(std.math.maxInt(i64), evm.gas_refunds);
 }
 
 test "gas refund application with EIP-3529 cap" {
@@ -1526,7 +1537,7 @@ test "gas refund application with EIP-3529 cap" {
         try std.testing.expectEqual(@as(u64, 6000), refund);
 
         // Refunds should be reset after application
-        try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+        try std.testing.expectEqual(@as(i64, 0), evm.gas_refunds);
     }
 
     // Test pre-London hardfork (gas_used / 2 cap)
@@ -1543,7 +1554,7 @@ test "gas refund application with EIP-3529 cap" {
         try std.testing.expectEqual(@as(u64, 5000), refund);
 
         // Refunds should be reset after application
-        try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+        try std.testing.expectEqual(@as(i64, 0), evm.gas_refunds);
     }
 }
 
@@ -1557,14 +1568,14 @@ test "gas refund reset" {
 
     // Add refunds
     evm.add_gas_refund(5000);
-    try std.testing.expectEqual(@as(u64, 5000), evm.gas_refunds);
+    try std.testing.expectEqual(@as(i64, 5000), evm.gas_refunds);
 
     // Reset should clear refunds
     evm.reset_gas_refunds();
-    try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    try std.testing.expectEqual(@as(i64, 0), evm.gas_refunds);
 
     // Reset in general reset function
     evm.add_gas_refund(3000);
     evm.reset();
-    try std.testing.expectEqual(@as(u64, 0), evm.gas_refunds);
+    try std.testing.expectEqual(@as(i64, 0), evm.gas_refunds);
 }

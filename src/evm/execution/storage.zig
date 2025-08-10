@@ -67,8 +67,8 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
 
     try frame.set_storage(slot, value);
 
-    // Apply refund delta if any
-    if (cost.refund > 0) frame.add_gas_refund(cost.refund);
+    // Apply refund delta (can be negative per EIP-2200)
+    frame.adjust_gas_refund(cost.refund);
 }
 
 pub fn op_tload(context: *anyopaque) ExecutionError.Error!void {

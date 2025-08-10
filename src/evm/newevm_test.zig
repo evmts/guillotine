@@ -19,15 +19,12 @@ test "EVM can be initialized successfully" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM with defaults
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -35,7 +32,7 @@ test "EVM can be initialized successfully" {
     try testing.expect(vm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(u11, 0), vm.depth);
     try testing.expectEqual(false, vm.read_only);
-    try testing.expectEqual(@as(u64, 0), vm.gas_refunds);
+    try testing.expectEqual(@as(i64, 0), vm.gas_refunds);
 }
 
 test "EVM state can read and write balances" {
@@ -49,15 +46,12 @@ test "EVM state can read and write balances" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -94,15 +88,12 @@ test "EVM state can read and write storage" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -138,15 +129,12 @@ test "EVM state can read and write code" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -182,15 +170,12 @@ test "EVM state can read and write nonces" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -225,15 +210,12 @@ test "EVM state can handle transient storage" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -274,15 +256,12 @@ test "EVM state can emit and track logs" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -326,15 +305,12 @@ test "EVM state persistence across operations" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
@@ -343,10 +319,10 @@ test "EVM state persistence across operations" {
     // Set up complete account state
     try vm.state.set_balance(addr, 1000000);
     try vm.state.set_nonce(addr, 5);
-    
+
     const code = &[_]u8{ 0x60, 0x80, 0x60, 0x40 };
     try vm.state.set_code(addr, code);
-    
+
     try vm.state.set_storage(addr, 0, 42);
     try vm.state.set_storage(addr, 1, 100);
 
@@ -395,23 +371,20 @@ test "Simple contract execution with PUSH and POP operations" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
     // Create simple bytecode: PUSH1 0x42, PUSH1 0x10, POP
-    const bytecode = &[_]u8{ 
+    const bytecode = &[_]u8{
         0x60, 0x42, // PUSH1 0x42
         0x60, 0x10, // PUSH1 0x10
-        0x50,       // POP
+        0x50, // POP
     };
 
     const contract_addr = testAddress(0xAAAA);
@@ -427,7 +400,7 @@ test "Simple contract execution with PUSH and POP operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = vm.call(call_params) catch |err| {
         std.debug.print("Contract execution failed with error: {}\n", .{err});
@@ -437,7 +410,7 @@ test "Simple contract execution with PUSH and POP operations" {
     // For now, just verify the call completed (even if not successfully)
     // We'll expand this test once the execution infrastructure is more complete
     try testing.expect(result.gas_left <= 100000);
-    
+
     // Clean up output if present
     if (result.output) |output| {
         allocator.free(output);
@@ -455,29 +428,26 @@ test "Contract with basic stack operations" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
     // Create bytecode that does stack operations and returns a value
     // PUSH1 0x05, PUSH1 0x03, ADD, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
-    const bytecode = &[_]u8{ 
-        0x60, 0x05,       // PUSH1 0x05
-        0x60, 0x03,       // PUSH1 0x03
-        0x01,             // ADD (5 + 3 = 8)
-        0x60, 0x00,       // PUSH1 0x00 (memory offset)
-        0x52,             // MSTORE (store result at memory[0])
-        0x60, 0x20,       // PUSH1 0x20 (32 bytes)
-        0x60, 0x00,       // PUSH1 0x00 (memory offset)
-        0xF3,             // RETURN
+    const bytecode = &[_]u8{
+        0x60, 0x05, // PUSH1 0x05
+        0x60, 0x03, // PUSH1 0x03
+        0x01, // ADD (5 + 3 = 8)
+        0x60, 0x00, // PUSH1 0x00 (memory offset)
+        0x52, // MSTORE (store result at memory[0])
+        0x60, 0x20, // PUSH1 0x20 (32 bytes)
+        0x60, 0x00, // PUSH1 0x00 (memory offset)
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0xCCCC);
@@ -485,7 +455,7 @@ test "Contract with basic stack operations" {
 
     // Deploy the contract
     try vm.state.set_code(contract_addr, bytecode);
-    
+
     // Set caller balance
     try vm.state.set_balance(caller, 1000000);
 
@@ -496,7 +466,7 @@ test "Contract with basic stack operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = vm.call(call_params) catch |err| {
         std.debug.print("Contract execution failed with error: {}\n", .{err});
@@ -505,7 +475,7 @@ test "Contract with basic stack operations" {
 
     // Verify gas was consumed
     try testing.expect(result.gas_left < 100000);
-    
+
     // Clean up output if present
     if (result.output) |output| {
         // Once execution works, we can verify output contains 8
@@ -516,7 +486,7 @@ test "Contract with basic stack operations" {
 test "Contract execution with PUSH0 operation" {
     const allocator = testing.allocator;
 
-    // Create a memory database for testing  
+    // Create a memory database for testing
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
@@ -524,26 +494,23 @@ test "Contract execution with PUSH0 operation" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM
-    var vm = try evm.Evm.init(
-        allocator,
-        db_interface,
-        null, // table
+    var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
-        null  // tracer
+        null // tracer
     );
     defer vm.deinit();
 
     // Create bytecode: PUSH0, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
-    const bytecode = &[_]u8{ 
-        0x5F,             // PUSH0
-        0x60, 0x00,       // PUSH1 0x00 (memory offset)
-        0x52,             // MSTORE (store 0 at memory[0])
-        0x60, 0x20,       // PUSH1 0x20 (32 bytes)
-        0x60, 0x00,       // PUSH1 0x00 (memory offset)
-        0xF3,             // RETURN
+    const bytecode = &[_]u8{
+        0x5F, // PUSH0
+        0x60, 0x00, // PUSH1 0x00 (memory offset)
+        0x52, // MSTORE (store 0 at memory[0])
+        0x60, 0x20, // PUSH1 0x20 (32 bytes)
+        0x60, 0x00, // PUSH1 0x00 (memory offset)
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0xEEEE);
@@ -559,7 +526,7 @@ test "Contract execution with PUSH0 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = vm.call(call_params) catch |err| {
         std.debug.print("Contract execution failed with error: {}\n", .{err});
@@ -568,7 +535,7 @@ test "Contract execution with PUSH0 operation" {
 
     // Verify gas was consumed
     try testing.expect(result.gas_left < 100000);
-    
+
     // Clean up output if present
     if (result.output) |output| {
         allocator.free(output);

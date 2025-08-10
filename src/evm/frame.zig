@@ -188,7 +188,7 @@ pub const Frame = struct {
                 const stack_ptr = try allocator.create(Stack);
                 errdefer allocator.destroy(stack_ptr);
                 stack_ptr.* = try Stack.init(allocator);
-                
+
                 if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                     // Stack should allocate exactly 32KB for data
                     std.debug.assert(stack_ptr.data.len == Stack.CAPACITY);
@@ -196,7 +196,7 @@ pub const Frame = struct {
                     const stack_size = stack_ptr.data.len * @sizeOf(u256);
                     std.debug.assert(stack_size == 32 * 1024); // Exactly 32KB
                 }
-                
+
                 break :blk stack_ptr;
             },
             .gas_remaining = gas_remaining,
@@ -210,7 +210,7 @@ pub const Frame = struct {
                 const memory_ptr = try allocator.create(Memory);
                 errdefer allocator.destroy(memory_ptr);
                 memory_ptr.* = try Memory.init_default(allocator);
-                
+
                 if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                     // Memory should start with reasonable initial capacity
                     std.debug.assert(memory_ptr.memory_limit > 0);
@@ -218,7 +218,7 @@ pub const Frame = struct {
                     // Initial capacity should be 4KB
                     std.debug.assert(Memory.INITIAL_CAPACITY == 4 * 1024);
                 }
-                
+
                 break :blk memory_ptr;
             },
             .analysis = analysis,
@@ -345,15 +345,18 @@ pub const Frame = struct {
         return gas_cost > 100;
     }
 
-    /// Add gas refund for storage operations (e.g., SSTORE refunds).
-    /// Forwards the refund to the EVM's transaction-level accumulator.
+    /// Adjust gas refund for storage operations (e.g., SSTORE refunds).
+    /// Forwards the refund delta (can be negative) to the EVM accumulator.
     /// The refunds will be applied at transaction end with EIP-3529 cap.
-    pub fn add_gas_refund(self: *Frame, amount: u64) void {
-        // For now, we need to cast the host back to Evm to access gas refunds
-        // This is safe because Evm acts as its own host
+    pub fn adjust_gas_refund(self: *Frame, delta: i64) void {
         const Evm = @import("evm.zig");
         const evm = @as(*Evm, @ptrCast(@alignCast(self.host.ptr)));
-        evm.add_gas_refund(amount);
+        evm.adjust_gas_refund(delta);
+    }
+
+    /// Backward-compatible helper for positive refunds
+    pub fn add_gas_refund(self: *Frame, amount: u64) void {
+        self.adjust_gas_refund(@as(i64, @intCast(amount)));
     }
 
     /// Backward compatibility accessors
