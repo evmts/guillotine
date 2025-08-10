@@ -24,7 +24,7 @@ const Vm = @import("../evm.zig");
 /// );
 /// vm.set_context(new_context);
 /// ```
-pub fn set_context(self: *Vm, context: Context) void {
+pub fn set_context(self: *@This(), context: Context) void {
     self.context = context;
     self.access_list.context = context;
 }

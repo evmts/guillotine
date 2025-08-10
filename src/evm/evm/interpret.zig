@@ -17,7 +17,7 @@ const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 /// Memory: Uses provided Frame, no internal allocations.
 ///
 /// The caller is responsible for creating and managing the Frame and its components.
-pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
+pub inline fn interpret(self: *@This(), frame: *Frame) ExecutionError.Error!void {
     self.require_one_thread();
 
     Log.debug("[interpret] Starting with {} instructions, gas={}", .{ frame.analysis.instructions.len, frame.gas_remaining });

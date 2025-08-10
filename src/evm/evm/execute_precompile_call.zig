@@ -22,7 +22,7 @@ const CallContractError = std.mem.Allocator.Error;
 /// @param gas Gas limit available for execution
 /// @param is_static Whether this is a static call (doesn't affect precompiles)
 /// @return CallResult with success/failure, gas usage, and output data
-pub fn execute_precompile_call(self: *Vm, address: primitives.Address.Address, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
+pub fn execute_precompile_call(self: *@This(), address: primitives.Address.Address, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
     _ = is_static; // Precompiles are inherently stateless, so static flag doesn't matter
 
     Log.debug("VM.execute_precompile_call: Executing precompile at {any}, input_size={}, gas={}", .{ address, input.len, gas });
@@ -84,7 +84,7 @@ pub fn execute_precompile_call(self: *Vm, address: primitives.Address.Address, i
 /// @param gas Gas limit available for execution
 /// @param is_static Whether this is a static call (doesn't affect precompiles)
 /// @return CallResult with success/failure, gas usage, and output data
-pub fn execute_precompile_call_by_id(self: *Vm, precompile_id: u8, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
+pub fn execute_precompile_call_by_id(self: *@This(), precompile_id: u8, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
     _ = is_static; // Precompiles are inherently stateless, so static flag doesn't matter
 
     Log.debug("VM.execute_precompile_call_by_id: Executing precompile ID {}, input_size={}, gas={}", .{ precompile_id, input.len, gas });

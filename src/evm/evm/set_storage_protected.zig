@@ -25,7 +25,7 @@ pub const SetStorageProtectedError = ExecutionError.Error;
 /// vm.read_only = true;
 /// const result = vm.set_storage_protected(address, slot, value); // Returns error.WriteProtection
 /// ```
-pub fn set_storage_protected(self: *Vm, address: primitives.Address.Address, slot: u256, value: u256) SetStorageProtectedError!void {
+pub fn set_storage_protected(self: *@This(), address: primitives.Address.Address, slot: u256, value: u256) SetStorageProtectedError!void {
     if (self.read_only) {
         return ExecutionError.Error.WriteProtection;
     }
