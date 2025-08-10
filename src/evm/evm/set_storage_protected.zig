@@ -1,5 +1,6 @@
 const std = @import("std");
-const Vm = @import("../evm.zig");
+const EvmModule = @import("../evm.zig");
+const EvmConfig = @import("../config.zig").EvmConfig;
 const ExecutionError = @import("../execution/execution_error.zig");
 const primitives = @import("primitives");
 
@@ -25,10 +26,14 @@ pub const SetStorageProtectedError = ExecutionError.Error;
 /// vm.read_only = true;
 /// const result = vm.set_storage_protected(address, slot, value); // Returns error.WriteProtection
 /// ```
-pub fn set_storage_protected(self: *@This(), address: primitives.Address.Address, slot: u256, value: u256) SetStorageProtectedError!void {
-    if (self.read_only) {
-        return ExecutionError.Error.WriteProtection;
-    }
+pub fn set_storage_protected(comptime config: EvmConfig) type {
+    return struct {
+        pub fn setStorageProtectedImpl(self: *EvmModule.Evm(config), address: primitives.Address.Address, slot: u256, value: u256) SetStorageProtectedError!void {
+            if (self.read_only) {
+                return ExecutionError.Error.WriteProtection;
+            }
 
-    try self.state.set_storage(address, slot, value);
+            try self.state.set_storage(address, slot, value);
+        }
+    };
 }

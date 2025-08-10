@@ -10,7 +10,8 @@ const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
 const Host = @import("../host.zig").Host;
 const CodeAnalysis = @import("../analysis.zig");
-const Evm = @import("../evm.zig");
+const EvmModule = @import("../evm.zig");
+const EvmConfig = @import("../config.zig").EvmConfig;
 const interpret = @import("interpret.zig").interpret;
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
@@ -30,7 +31,9 @@ const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 // 128 KB is about the limit most rpc providers limit call data to so we use it as the default
 pub const MAX_INPUT_SIZE: u18 = 128 * 1024; // 128 kb
 
-pub fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult {
+pub fn call(comptime config: EvmConfig) type {
+    return struct {
+        pub fn callImpl(self: *EvmModule.Evm(config), params: CallParams) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
     Log.debug("[call] Starting call execution", .{});
 
@@ -96,14 +99,14 @@ pub fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult 
     var analysis_owned = false;
     var analysis_ptr: *CodeAnalysis = if (self.analysis_cache) |*cache| blk: {
         Log.debug("[call] Using analysis cache for code analysis", .{});
-        break :blk cache.getOrAnalyze(call_info.code[0..call_info.code_size], &self.table) catch |err| {
+        break :blk cache.getOrAnalyze(call_info.code[0..call_info.code_size], &config.opcodes.jump_table) catch |err| {
             Log.err("[call] Cached code analysis failed: {}", .{err});
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
     } else blk: {
         Log.debug("[call] No cache available, analyzing code directly", .{});
         // Fallback to direct analysis if no cache
-        var analysis_val = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
+        var analysis_val = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &config.opcodes.jump_table) catch |err| {
             Log.err("[call] Code analysis failed: {}", .{err});
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
@@ -201,7 +204,7 @@ pub fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult 
         const new_depth = self.current_frame_depth + 1;
 
         // Check call depth limit
-        if (new_depth >= MAX_CALL_DEPTH) {
+        if (new_depth >= config.max_call_depth) {
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
@@ -209,7 +212,7 @@ pub fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult 
         if (self.frame_stack) |frames| {
             if (new_depth >= frames.len) {
                 // Need to grow the frame stack
-                const new_capacity = @min(frames.len * 2, MAX_CALL_DEPTH);
+                const new_capacity = @min(frames.len * 2, config.max_call_depth);
                 const new_frames = try self.allocator.realloc(frames, new_capacity);
                 self.frame_stack = new_frames;
             }
@@ -320,5 +323,7 @@ pub fn call(self: *@This(), params: CallParams) ExecutionError.Error!CallResult 
         .success = success,
         .gas_left = gas_remaining,
         .output = output,
+    };
+        }
     };
 }

@@ -4,7 +4,8 @@ const CallResult = @import("call_result.zig").CallResult;
 const precompiles = @import("../precompiles/precompiles.zig");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const Log = @import("../log.zig");
-const Vm = @import("../evm.zig");
+const EvmModule = @import("../evm.zig");
+const EvmConfig = @import("../config.zig").EvmConfig;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
 const CodeAnalysis = @import("../analysis.zig");
@@ -28,7 +29,9 @@ pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error ||
 /// @param gas Gas limit available for the call
 /// @param is_static Whether this is a static call (no state changes allowed)
 /// @return CallResult indicating success/failure and return data
-pub fn call_contract(self: *@This(), caller: primitives.Address.Address, to: primitives.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
+pub fn call_contract(comptime config: EvmConfig) type {
+    return struct {
+        pub fn callContractImpl(self: *EvmModule.Evm(config), caller: primitives.Address.Address, to: primitives.Address.Address, value: u256, input: []const u8, gas: u64, is_static: bool) CallContractError!CallResult {
     @branchHint(.likely);
 
     Log.debug("VM.call_contract: Call from {any} to {any}, gas={}, static={}", .{ caller, to, gas, is_static });
@@ -43,7 +46,7 @@ pub fn call_contract(self: *@This(), caller: primitives.Address.Address, to: pri
     Log.debug("VM.call_contract: Regular contract call to {any}", .{to});
 
     // Check call depth limit
-    if (self.depth >= evm_limits.MAX_CALL_DEPTH) {
+    if (self.depth >= config.max_call_depth) {
         @branchHint(.unlikely);
         Log.debug("VM.call_contract: Call depth limit exceeded", .{});
         return CallResult{ .success = false, .gas_left = gas, .output = null };
@@ -107,7 +110,7 @@ pub fn call_contract(self: *@This(), caller: primitives.Address.Address, to: pri
     }
 
     // Create code analysis for the contract bytecode
-    var analysis = CodeAnalysis.from_code(self.allocator, code, &self.table) catch |err| {
+    var analysis = CodeAnalysis.from_code(self.allocator, code, &config.opcodes.jump_table) catch |err| {
         Log.debug("VM.call_contract: Code analysis failed with error: {}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
@@ -170,4 +173,6 @@ pub fn call_contract(self: *@This(), caller: primitives.Address.Address, to: pri
 
     // The intrinsic gas is consumed, so we don't add it back to gas_left  
     return result;
+        }
+    };
 }
