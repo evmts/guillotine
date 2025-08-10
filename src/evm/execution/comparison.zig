@@ -18,13 +18,13 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
-    // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    // Pop the top operand unsafely
+    const top = frame.stack.pop_unsafe();
+    // Peek the second from top operand unsafely
+    const second_from_top = frame.stack.peek_unsafe().*;
 
-    // EVM LT computes: a < b (second-from-top < top)
-    const result: u256 = switch (std.math.order(a, b)) {
+    // REVM computes: top < second_from_top (not second_from_top < top)
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
         .lt => 1,
         .eq, .gt => 0,
     };
@@ -37,13 +37,13 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
-    // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    // Pop the top operand unsafely
+    const top = frame.stack.pop_unsafe();
+    // Peek the second from top operand unsafely
+    const second_from_top = frame.stack.peek_unsafe().*;
 
-    // EVM GT computes: a > b (second-from-top > top)
-    const result: u256 = switch (std.math.order(a, b)) {
+    // REVM computes: top > second_from_top (not second_from_top > top)
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
         .gt => 1,
         .eq, .lt => 0,
     };
@@ -56,16 +56,16 @@ pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
-    // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    // Pop the top operand unsafely
+    const top = frame.stack.pop_unsafe();
+    // Peek the second from top operand unsafely
+    const second_from_top = frame.stack.peek_unsafe().*;
 
-    // Signed less than: a < b (second-from-top < top)
-    const a_i256 = @as(i256, @bitCast(a));
-    const b_i256 = @as(i256, @bitCast(b));
+    // REVM computes: top < second_from_top (signed)
+    const top_i256 = @as(i256, @bitCast(top));
+    const second_from_top_i256 = @as(i256, @bitCast(second_from_top));
 
-    const result: u256 = switch (std.math.order(a_i256, b_i256)) {
+    const result: u256 = switch (std.math.order(top_i256, second_from_top_i256)) {
         .lt => 1,
         .eq, .gt => 0,
     };
@@ -78,16 +78,16 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
-    // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    // Pop the top operand unsafely
+    const top = frame.stack.pop_unsafe();
+    // Peek the second from top operand unsafely
+    const second_from_top = frame.stack.peek_unsafe().*;
 
-    // Signed greater than: a > b (second-from-top > top)
-    const a_i256 = @as(i256, @bitCast(a));
-    const b_i256 = @as(i256, @bitCast(b));
+    // REVM computes: top > second_from_top (signed)
+    const top_i256 = @as(i256, @bitCast(top));
+    const second_from_top_i256 = @as(i256, @bitCast(second_from_top));
 
-    const result: u256 = if (a_i256 > b_i256) 1 else 0;
+    const result: u256 = if (top_i256 > second_from_top_i256) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
