@@ -11,7 +11,9 @@ fn create_evm_context_for_precompiles(allocator: std.mem.Allocator) !struct {
     frame: evm.Frame,
 } {
     var db = evm.MemoryDatabase.init(allocator);
-    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null);
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     
     // Create a contract that calls precompiles
     const call_precompile_code = [_]u8{0xF1}; // CALL opcode

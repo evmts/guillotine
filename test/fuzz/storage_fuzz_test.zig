@@ -9,7 +9,9 @@ test "fuzz_storage_sload_operations" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -38,9 +40,9 @@ test "fuzz_storage_sload_operations" {
     // Test SLOAD operation (should return 0 for uninitialized storage)
     try frame.stack.append(slot);
     
-    var interpreter = evm.Operation.Interpreter = &vm;
-    var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x54); // SLOAD opcode
+    var interpreter: evm.Operation.Interpreter = &vm;
+    var state: evm.Operation.State = &frame;
+    _ = try config.opcodes.table.execute(0, interpreter, state, 0x54); // SLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result);
@@ -52,7 +54,9 @@ test "fuzz_storage_sstore_sload_roundtrip" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -83,13 +87,13 @@ test "fuzz_storage_sstore_sload_roundtrip" {
     try frame.stack.append(value);
     try frame.stack.append(slot);
     
-    var interpreter = evm.Operation.Interpreter = &vm;
-    var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x55); // SSTORE opcode
+    var interpreter: evm.Operation.Interpreter = &vm;
+    var state: evm.Operation.State = &frame;
+    _ = try config.opcodes.table.execute(0, interpreter, state, 0x55); // SSTORE opcode
     
     // Now test SLOAD to retrieve the stored value
     try frame.stack.append(slot);
-    _ = try vm.table.execute(0, interpreter, state, 0x54); // SLOAD opcode
+    _ = try config.opcodes.table.execute(0, interpreter, state, 0x54); // SLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(value, result);
@@ -101,7 +105,9 @@ test "fuzz_storage_tload_operations" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -130,9 +136,9 @@ test "fuzz_storage_tload_operations" {
     // Test TLOAD operation (should return 0 for uninitialized transient storage)
     try frame.stack.append(slot);
     
-    var interpreter = evm.Operation.Interpreter = &vm;
-    var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x5C); // TLOAD opcode
+    var interpreter: evm.Operation.Interpreter = &vm;
+    var state: evm.Operation.State = &frame;
+    _ = try config.opcodes.table.execute(0, interpreter, state, 0x5C); // TLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result);
@@ -144,7 +150,9 @@ test "fuzz_storage_tstore_tload_roundtrip" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -175,13 +183,13 @@ test "fuzz_storage_tstore_tload_roundtrip" {
     try frame.stack.append(value);
     try frame.stack.append(slot);
     
-    var interpreter = evm.Operation.Interpreter = &vm;
-    var state = evm.Operation.State = &frame;
-    _ = try vm.table.execute(0, interpreter, state, 0x5D); // TSTORE opcode
+    var interpreter: evm.Operation.Interpreter = &vm;
+    var state: evm.Operation.State = &frame;
+    _ = try config.opcodes.table.execute(0, interpreter, state, 0x5D); // TSTORE opcode
     
     // Now test TLOAD to retrieve the stored value
     try frame.stack.append(slot);
-    _ = try vm.table.execute(0, interpreter, state, 0x5C); // TLOAD opcode
+    _ = try config.opcodes.table.execute(0, interpreter, state, 0x5C); // TLOAD opcode
     
     const result = try frame.stack.pop();
     try testing.expectEqual(value, result);

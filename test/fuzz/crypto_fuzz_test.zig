@@ -14,7 +14,9 @@ test "fuzz_crypto_keccak256_empty" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -59,7 +61,9 @@ test "fuzz_crypto_keccak256_basic" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -112,7 +116,9 @@ test "fuzz_crypto_keccak256_edge_cases" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    const config = evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.Evm(config);
+    var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
