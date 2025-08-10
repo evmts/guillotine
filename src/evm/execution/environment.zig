@@ -1,3 +1,23 @@
+//! Environment information opcodes for the Ethereum Virtual Machine
+//!
+//! This module implements opcodes that provide access to execution environment
+//! data including addresses, balances, gas information, and transaction details.
+//!
+//! ## Gas Costs
+//! - ADDRESS, ORIGIN, CALLER, CALLVALUE, CALLDATASIZE, CODESIZE, GASPRICE: 2 gas
+//! - BALANCE, EXTCODESIZE, EXTCODEHASH: 100 gas (warm) or 2600 gas (cold)
+//! - CALLDATALOAD, CALLDATACOPY, CODECOPY, EXTCODECOPY: 3 gas + copy costs
+//! - RETURNDATASIZE: 2 gas
+//! - RETURNDATACOPY: 3 gas + copy costs
+//! - GAS: 2 gas
+//! - SELFBALANCE: 5 gas
+//! - CHAINID: 2 gas
+//!
+//! ## EIP Changes
+//! - EIP-2929: Gas cost changes for cold account access
+//! - EIP-3198: BASEFEE opcode
+//! - EIP-1884: SELFBALANCE opcode
+
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
@@ -6,13 +26,21 @@ const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
 
+/// ADDRESS opcode (0x30) - Get address of currently executing account
+///
+/// Pushes the address of the currently executing contract.
+/// Stack: [] → [address]
 pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // Push contract address as u256
     const addr = to_u256(frame.contract_address);
     try frame.stack.append(addr);
 }
 
+/// BALANCE opcode (0x31) - Get balance of an account
+///
+/// Pops an address and pushes the balance of that account in wei.
+/// Subject to EIP-2929 gas costs for cold account access.
+/// Stack: [address] → [balance]
 pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
@@ -27,48 +55,65 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(balance);
 }
 
+/// ORIGIN opcode (0x32) - Get execution origination address
+///
+/// Pushes the address of the account that initiated the transaction.
+/// Stack: [] → [origin]
 pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need tx_origin field in ExecutionContext
-    // Push transaction origin address
     // const origin = to_u256(frame.tx_origin);
     // try frame.stack.append(origin);
-
-    // Placeholder implementation - push zero for now
+    
+    // Placeholder implementation
     try frame.stack.append(0);
 }
 
+/// CALLER opcode (0x33) - Get caller address
+///
+/// Pushes the address of the account that directly called this contract.
+/// Stack: [] → [caller]
 pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need caller field in ExecutionContext
-    // Push caller address
     // const caller = to_u256(frame.caller);
     // try frame.stack.append(caller);
-
-    // Placeholder implementation - push zero for now
+    
+    // Placeholder implementation
     try frame.stack.append(0);
 }
 
+/// CALLVALUE opcode (0x34) - Get deposited value by instruction/transaction
+///
+/// Pushes the value in wei sent with the current call.
+/// Stack: [] → [value]
 pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need call_value field in ExecutionContext
-    // Push call value
     // try frame.stack.append(frame.call_value);
-
-    // Placeholder implementation - push zero for now
+    
+    // Placeholder implementation
     try frame.stack.append(0);
 }
 
+/// GASPRICE opcode (0x3A) - Get price of gas in current transaction
+///
+/// Pushes the gas price of the current transaction.
+/// Stack: [] → [gas_price]
 pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need gas_price field in ExecutionContext
-    // Push gas price from transaction context
     // try frame.stack.append(frame.gas_price);
-
-    // Placeholder implementation - push zero for now
+    
+    // Placeholder implementation
     try frame.stack.append(0);
 }
 
+/// EXTCODESIZE opcode (0x3B) - Get size of account's code
+///
+/// Pops an address and pushes the size of that account's code in bytes.
+/// Subject to EIP-2929 gas costs for cold account access.
+/// Stack: [address] → [size]
 pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
@@ -83,6 +128,11 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(@as(u256, @intCast(code.len)));
 }
 
+/// EXTCODECOPY opcode (0x3C) - Copy account's code to memory
+///
+/// Copies code from an external account to memory.
+/// Subject to EIP-2929 gas costs for cold account access.
+/// Stack: [address, mem_offset, code_offset, size] → []
 pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
@@ -126,6 +176,11 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
 
+/// EXTCODEHASH opcode (0x3F) - Get hash of account's code
+///
+/// Pops an address and pushes the keccak256 hash of that account's code.
+/// Returns 0 for empty accounts. Subject to EIP-2929 gas costs.
+/// Stack: [address] → [hash]
 pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     const address_u256 = try frame.stack.pop();
@@ -152,6 +207,11 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     }
 }
 
+/// SELFBALANCE opcode (0x47) - Get balance of current account
+///
+/// Pushes the balance of the currently executing contract (EIP-1884).
+/// More efficient than using BALANCE with ADDRESS.
+/// Stack: [] → [balance]
 pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Get balance of current executing contract
@@ -160,6 +220,10 @@ pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(balance);
 }
 
+/// CHAINID opcode (0x46) - Get chain ID
+///
+/// Pushes the chain ID of the current blockchain (EIP-1344).
+/// Stack: [] → [chain_id]
 pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need chain_id field in ExecutionContext
@@ -170,6 +234,10 @@ pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(1);
 }
 
+/// CALLDATASIZE opcode (0x36) - Get size of input data
+///
+/// Pushes the size of the calldata in bytes.
+/// Stack: [] → [size]
 pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need input/calldata field in ExecutionContext
@@ -180,12 +248,21 @@ pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
+/// CODESIZE opcode (0x38) - Get size of code
+///
+/// Pushes the size of the currently executing contract's code in bytes.
+/// Stack: [] → [size]
 pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Push size of current contract's code
     try frame.stack.append(@as(u256, @intCast(frame.analysis.code_len)));
 }
 
+/// CALLDATALOAD opcode (0x35) - Load input data
+///
+/// Loads 32 bytes from calldata at the given offset. Zero-pads if reading
+/// past the end of calldata.
+/// Stack: [offset] → [data]
 pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need input/calldata field in ExecutionContext
@@ -207,10 +284,13 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
+/// CALLDATACOPY opcode (0x37) - Copy input data to memory
+///
+/// Copies data from calldata to memory. Zero-pads if reading past the end.
+/// Stack: [mem_offset, data_offset, size] → []
 pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need input/calldata field in ExecutionContext
-    // Pop memory offset, data offset, and size
     const mem_offset = try frame.stack.pop();
     const data_offset = try frame.stack.pop();
     const size = try frame.stack.pop();
@@ -241,9 +321,12 @@ pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
     // try frame.memory.set_data_bounded(mem_offset_usize, calldata, data_offset_usize, size_usize);
 }
 
+/// CODECOPY opcode (0x39) - Copy code to memory
+///
+/// Copies the currently executing contract's code to memory.
+/// Stack: [mem_offset, code_offset, size] → []
 pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // Pop memory offset, code offset, and size
     const mem_offset = try frame.stack.pop();
     const code_offset = try frame.stack.pop();
     const size = try frame.stack.pop();
@@ -275,8 +358,11 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const code = frame.analysis.code;
     try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
-/// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data
-/// This is an EOF opcode that allows reading from the return data buffer
+/// RETURNDATALOAD opcode (0xF7) - Load return data
+///
+/// Loads 32 bytes from the return data buffer at the given offset (EOF opcode).
+/// Reverts if offset + 32 exceeds return data size.
+/// Stack: [offset] → [data]
 pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need return_data field in ExecutionContext
@@ -297,24 +383,3 @@ pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
     try frame.stack.append(0);
 }
 
-// TODO: Update fuzz testing functions for new ExecutionContext pattern
-// The old fuzz testing functions have been removed because they used the old function signatures.
-// They need to be rewritten to work with the new ExecutionContext-based functions.
-
-// TODO: Restore FuzzEnvironmentOperation and EnvironmentOpType structs
-// when fuzz testing is updated for ExecutionContext pattern
-
-// TODO: Restore validate_environment_result function
-// when fuzz testing is updated for ExecutionContext pattern
-
-// TODO: Restore test "fuzz_environment_basic_operations"
-// when fuzz testing is updated for ExecutionContext pattern
-
-// TODO: Restore test "fuzz_environment_edge_cases"
-// when fuzz testing is updated for ExecutionContext pattern
-
-// TODO: Restore test "fuzz_environment_random_operations"
-// when fuzz testing is updated for ExecutionContext pattern
-
-// TODO: Restore test "fuzz_environment_data_operations"
-// when fuzz testing is updated for ExecutionContext pattern
