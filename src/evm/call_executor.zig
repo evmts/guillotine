@@ -86,7 +86,7 @@ pub const CallExecutor = struct {
         // For now, we'll use a placeholder
         const placeholder_analysis = CodeAnalysis{
             .code = &.{}, // Empty code
-            .jumpdest_bitmap = undefined, // Would be properly initialized
+            .jumpdest_array = undefined, // Would be properly initialized
         };
         
         const params = CallParams{
@@ -129,7 +129,7 @@ pub const CallExecutor = struct {
     ) !CallExecutionResult {
         const placeholder_analysis = CodeAnalysis{
             .code = &.{},
-            .jumpdest_bitmap = undefined,
+            .jumpdest_array = undefined,
         };
         
         const params = CallParams{
@@ -170,7 +170,7 @@ pub const CallExecutor = struct {
     ) !CallExecutionResult {
         const placeholder_analysis = CodeAnalysis{
             .code = &.{},
-            .jumpdest_bitmap = undefined,
+            .jumpdest_array = undefined,
         };
         
         const params = CallParams{
@@ -216,7 +216,7 @@ pub const CallExecutor = struct {
         
         const placeholder_analysis = CodeAnalysis{
             .code = init_code,
-            .jumpdest_bitmap = undefined,
+            .jumpdest_array = undefined,
         };
         
         const params = CallParams{
@@ -269,7 +269,7 @@ pub const CallExecutor = struct {
         
         const placeholder_analysis = CodeAnalysis{
             .code = init_code,
-            .jumpdest_bitmap = undefined,
+            .jumpdest_array = undefined,
         };
         
         const params = CallParams{

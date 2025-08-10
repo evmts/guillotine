@@ -19,6 +19,94 @@ const Log = @import("log.zig");
 const stack_height_changes = @import("opcodes/stack_height_changes.zig");
 const dynamic_gas = @import("gas/dynamic_gas.zig");
 
+/// Packed array of valid JUMPDEST positions for cache-efficient validation.
+/// Because JUMPDEST opcodes are sparse (typically <50 per contract vs 24KB max size),
+/// a packed array with linear search provides better cache locality than a bitmap.
+/// Uses u15 to pack positions tightly while supporting max contract size (24KB < 32KB).
+pub const JumpdestArray = struct {
+    /// Sorted array of valid JUMPDEST program counters.
+    /// u15 allows max value 32767, sufficient for MAX_CONTRACT_SIZE (24576).
+    /// Packed to maximize cache line utilization.
+    positions: []const u15,
+    
+    /// Original code length for bounds checking and search hint calculation
+    code_len: usize,
+    
+    allocator: std.mem.Allocator,
+    
+    /// Convert a DynamicBitSet bitmap to a packed array of JUMPDEST positions.
+    /// Collects all set bits from the bitmap into a sorted, packed array.
+    pub fn from_bitmap(allocator: std.mem.Allocator, bitmap: *const DynamicBitSet, code_len: usize) !JumpdestArray {
+        comptime {
+            std.debug.assert(std.math.maxInt(u15) >= limits.MAX_CONTRACT_SIZE);
+        }
+        
+        // First pass: count set bits to determine array size
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i < code_len) : (i += 1) {
+            if (bitmap.isSet(i)) count += 1;
+        }
+        
+        // Allocate packed array
+        const positions = try allocator.alloc(u15, count);
+        errdefer allocator.free(positions);
+        
+        // Second pass: collect positions into array
+        var pos_idx: usize = 0;
+        i = 0;
+        while (i < code_len) : (i += 1) {
+            if (bitmap.isSet(i)) {
+                positions[pos_idx] = @intCast(i);
+                pos_idx += 1;
+            }
+        }
+        
+        return JumpdestArray{
+            .positions = positions,
+            .code_len = code_len,
+            .allocator = allocator,
+        };
+    }
+    
+    pub fn deinit(self: *JumpdestArray) void {
+        self.allocator.free(self.positions);
+    }
+    
+    /// Validates if a program counter is a valid JUMPDEST using cache-friendly linear search.
+    /// Uses proportional starting point (pc / code_len * positions.len) then searches
+    /// bidirectionally to maximize cache hits on the packed array.
+    pub fn is_valid_jumpdest(self: *const JumpdestArray, pc: usize) bool {
+        if (self.positions.len == 0 or pc >= self.code_len) return false;
+        
+        // Calculate proportional starting index for linear search
+        // This distributes search starting points across the array for better cache locality
+        const start_idx = (pc * self.positions.len) / self.code_len;
+        const safe_start = @min(start_idx, self.positions.len - 1);
+        
+        // Linear search from calculated starting point - forwards then backwards
+        // Linear search maximizes CPU cache hit rates on packed consecutive memory
+        if (self.positions[safe_start] == pc) return true;
+        
+        // Search forward
+        var i = safe_start + 1;
+        while (i < self.positions.len and self.positions[i] <= pc) : (i += 1) {
+            if (self.positions[i] == pc) return true;
+        }
+        
+        // Search backward  
+        i = safe_start;
+        while (i > 0) {
+            i -= 1;
+            if (self.positions[i] >= pc) {
+                if (self.positions[i] == pc) return true;
+            } else break;
+        }
+        
+        return false;
+    }
+};
+
 /// Optimized code analysis for EVM bytecode execution.
 /// Contains only the essential data needed during execution.
 pub const CodeAnalysis = @This();
@@ -30,9 +118,10 @@ instructions: []Instruction,
 /// Original contract bytecode for this analysis (used by CODECOPY).
 code: []const u8,
 
-/// Heap-allocated bitmap marking all valid JUMPDEST positions in the bytecode.
+/// Packed array of valid JUMPDEST positions in the bytecode.
 /// Required for JUMP/JUMPI validation during execution.
-jumpdest_bitmap: DynamicBitSet,
+/// Uses cache-efficient linear search on packed u15 array.
+jumpdest_array: JumpdestArray,
 
 /// Mapping from bytecode PC to the BEGINBLOCK instruction index that contains that PC.
 /// Size = code_len. Value = maxInt(u16) if unmapped.
@@ -155,14 +244,17 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     }
 
     if (code.len == 0) {
-        // For empty code, just create empty instruction array
+        // For empty code, convert empty bitmap to empty array and create empty instruction array
+        const jumpdest_array = try JumpdestArray.from_bitmap(allocator, &jumpdest_bitmap, code.len);
+        jumpdest_bitmap.deinit(); // Free the temporary bitmap
+        
         const empty_instructions = try allocator.alloc(Instruction, 0);
         const empty_jump_types = try allocator.alloc(JumpType, 0);
         const empty_pc_map = try allocator.alloc(u16, 0);
         return CodeAnalysis{
             .instructions = empty_instructions,
             .code = &[_]u8{},
-            .jumpdest_bitmap = jumpdest_bitmap,
+            .jumpdest_array = jumpdest_array,
             .pc_to_block_start = empty_pc_map,
             .inst_jump_type = empty_jump_types,
             .code_len = 0,
@@ -249,10 +341,14 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     // Convert to instruction stream using temporary data
     const gen = try codeToInstructions(allocator, code, jump_table, &jumpdest_bitmap);
 
+    // Convert bitmap to packed array for cache-efficient validation
+    const jumpdest_array = try JumpdestArray.from_bitmap(allocator, &jumpdest_bitmap, code.len);
+    jumpdest_bitmap.deinit(); // Free the temporary bitmap
+
     return CodeAnalysis{
         .instructions = gen.instructions,
         .code = code,
-        .jumpdest_bitmap = jumpdest_bitmap,
+        .jumpdest_array = jumpdest_array,
         .pc_to_block_start = gen.pc_to_block_start,
         .inst_jump_type = gen.inst_jump_type,
         .code_len = code.len,
@@ -260,7 +356,7 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     };
 }
 
-/// Clean up allocated instruction array and bitmap.
+/// Clean up allocated instruction array and packed jumpdest array.
 /// Must be called by the caller to prevent memory leaks.
 pub fn deinit(self: *CodeAnalysis) void {
     // Free the instruction array (now a slice)
@@ -270,8 +366,8 @@ pub fn deinit(self: *CodeAnalysis) void {
     self.allocator.free(self.inst_jump_type);
     self.allocator.free(self.pc_to_block_start);
 
-    // Free the bitmap
-    self.jumpdest_bitmap.deinit();
+    // Free the packed jumpdest array
+    self.jumpdest_array.deinit();
 }
 
 /// Get the dynamic gas function for a specific opcode
@@ -673,7 +769,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     // No terminator needed for slices
 
     // Resolve jump targets after initial translation, passing the PC to instruction mapping
-    resolveJumpTargets(code, instructions[0..instruction_count], jumpdest_bitmap, pc_to_instruction) catch {
+    resolveJumpTargets(code, instructions[0..instruction_count], &jumpdest_bitmap, pc_to_instruction) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
     };
 
@@ -795,10 +891,10 @@ test "from_code basic functionality" {
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
 
-    // Verify we got instructions
-    try std.testing.expect(analysis.instructions[0] != null);
-    try std.testing.expect(analysis.instructions[1] != null);
-    try std.testing.expect(analysis.instructions[2] == null); // null terminator
+    // Verify we got instructions (slice should have at least 3 instructions)
+    try std.testing.expect(analysis.instructions.len >= 3);
+    try std.testing.expect(analysis.instructions[0].opcode_fn != null);
+    try std.testing.expect(analysis.instructions[1].opcode_fn != null);
 
 }
 
@@ -813,8 +909,8 @@ test "from_code with jumpdest" {
     defer analysis.deinit();
 
     // Verify jumpdest is marked
-    try std.testing.expect(analysis.jumpdest_bitmap.isSet(0));
-    try std.testing.expect(!analysis.jumpdest_bitmap.isSet(1));
+    try std.testing.expect(analysis.jumpdest_array.is_valid_jumpdest(0));
+    try std.testing.expect(!analysis.jumpdest_array.is_valid_jumpdest(1));
 }
 
 test "jump target resolution with BEGINBLOCK injections" {
@@ -840,7 +936,7 @@ test "jump target resolution with BEGINBLOCK injections" {
     defer analysis.deinit();
 
     // Verify JUMPDEST is marked correctly
-    try std.testing.expect(analysis.jumpdest_bitmap.isSet(5));
+    try std.testing.expect(analysis.jumpdest_array.is_valid_jumpdest(5));
 
     // Count BEGINBLOCK instructions - should have at least 2:
     // 1. At the start
@@ -895,7 +991,7 @@ test "conditional jump (JUMPI) target resolution" {
     defer analysis.deinit();
 
     // Verify JUMPDEST is marked correctly
-    try std.testing.expect(analysis.jumpdest_bitmap.isSet(6));
+    try std.testing.expect(analysis.jumpdest_array.is_valid_jumpdest(6));
 
     var jumpi_found = false;
     var jumpi_target_valid = false;
@@ -938,7 +1034,7 @@ test "invalid jump target handling" {
     defer analysis.deinit();
 
     // Verify PC 5 is NOT marked as JUMPDEST
-    try std.testing.expect(!analysis.jumpdest_bitmap.isSet(5));
+    try std.testing.expect(!analysis.jumpdest_array.is_valid_jumpdest(5));
 
     // The JUMP instruction should not have a resolved target
     var unresolved_jump_found = false;

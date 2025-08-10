@@ -282,13 +282,12 @@ pub const Frame = struct {
         self.gas_remaining -= amount;
     }
 
-    /// Jump destination validation - uses direct bitmap access
-    /// This is significantly faster than the previous function pointer approach
+    /// Jump destination validation - uses cache-efficient packed array
+    /// This is significantly faster than bitmap access due to better cache locality
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
         std.debug.assert(dest <= std.math.maxInt(u32));
         const dest_usize = @as(usize, @intCast(dest));
-        if (dest_usize >= self.analysis.code_len) return false;
-        return self.analysis.jumpdest_bitmap.isSet(dest_usize);
+        return self.analysis.jumpdest_array.is_valid_jumpdest(dest_usize);
     }
 
     /// Address access for EIP-2929 - uses direct access list pointer
