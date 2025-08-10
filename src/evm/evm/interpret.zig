@@ -162,6 +162,11 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 current_index += 1;
                 try frame.stack.append(value);
             },
+            .pc_value => |pc| {
+                Log.debug("[interpret] PC at pc={} pushing value={}", .{ pc, pc });
+                current_index += 1;
+                try frame.stack.append(@as(u256, pc));
+            },
             .none => {
                 @branchHint(.likely);
                 // Handle dynamic JUMP/JUMPI at runtime if needed

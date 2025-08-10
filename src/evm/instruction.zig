@@ -47,5 +47,6 @@ pub const Instruction = struct {
         gas_cost: u32,
         block_info: BlockInfo,
         dynamic_gas: DynamicGas,
+        pc_value: u16,  // For PC opcode - stores the program counter value
     },
 };

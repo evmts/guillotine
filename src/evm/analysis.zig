@@ -684,6 +684,24 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 instruction_count += 1;
             },
 
+            // PC opcode - needs special handling to store the PC value
+            .PC => {
+                const operation = jump_table.get_operation(opcode_byte);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
+
+                // Record PC to instruction mapping for PC opcode
+                pc_to_instruction[pc] = @intCast(instruction_count);
+
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = operation.execute,
+                    .arg = .{ .pc_value = @intCast(pc) },
+                };
+                Log.debug("[analysis] PC opcode at pc={}", .{pc});
+                instruction_count += 1;
+                pc += 1;
+            },
+
             // Special opcodes that need individual gas tracking for dynamic calculations
             .GAS, .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL, .CREATE, .CREATE2, .SSTORE => {
                 const operation = jump_table.get_operation(opcode_byte);

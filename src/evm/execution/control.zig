@@ -31,10 +31,12 @@ pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
     unreachable;
 }
 
-// TODO_PC_DELETE: PC operations are deprecated in the new architecture
 pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    // PC is handled within the interpreter loop; this stub must never be called.
+    
+    // PC opcode pushes the current program counter onto the stack
+    // This should never be called - PC is handled by storing the value in the instruction
+    // If we get here, it's a bug in the analysis
     unreachable;
 }
 
