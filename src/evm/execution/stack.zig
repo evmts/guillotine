@@ -1,3 +1,20 @@
+//! Stack manipulation operations for the Ethereum Virtual Machine
+//!
+//! This module implements stack-related opcodes including POP, DUP1-DUP16,
+//! SWAP1-SWAP16, and PUSH0-PUSH32.
+//!
+//! ## Stack Model
+//! - Stack holds 256-bit words (u256)
+//! - Maximum depth: 1024 elements
+//! - LIFO (Last In, First Out) operation
+//! - Stack underflow/overflow causes execution failure
+//!
+//! ## Gas Costs
+//! - POP: 2 gas
+//! - DUP operations: 3 gas
+//! - SWAP operations: 3 gas
+//! - PUSH operations: 3 gas
+
 const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
 const Frame = @import("../frame.zig").Frame;
@@ -8,12 +25,19 @@ const Vm = @import("../evm.zig");
 const StackValidation = @import("../stack/stack_validation.zig");
 const Address = @import("primitives").Address;
 
+/// POP opcode (0x50) - Remove top stack item
+///
+/// Removes and discards the top item from the stack.
+/// Stack: [a] → []
 pub fn op_pop(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     _ = try frame.stack.pop();
 }
 
-// ExecutionContext-based factory function for DUP operations
+/// Factory function for creating DUP operations
+///
+/// Creates a DUP function for duplicating the nth stack item (1-indexed).
+/// The created function duplicates the nth item and pushes it to the top.
 pub fn make_dup_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
     return struct {
         pub fn dup_ec(context: *Frame) ExecutionError.Error!void {
@@ -22,10 +46,10 @@ pub fn make_dup_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
     }.dup_ec;
 }
 
-// Runtime dispatch versions for DUP operations (used in ReleaseSmall mode)
-// Each DUP operation gets its own function to avoid opcode detection issues
-
-// Helper function for DUP operations - using ExecutionContext
+/// Helper function for DUP operations
+///
+/// Duplicates the nth item from the top of the stack (1-indexed).
+/// DUP1 duplicates the top item, DUP2 the second from top, etc.
 fn dup_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
     // Compile-time validation: DUP operations pop 0 items, push 1
     // At compile time, this validates that DUP has valid EVM stack effects
@@ -41,12 +65,19 @@ fn dup_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
     context.stack.dup_unsafe(n);
 }
 
-// ExecutionContext versions of DUP operations (new pattern)
+/// DUP1 opcode (0x80) - Duplicate 1st stack item
+///
+/// Duplicates the top stack item.
+/// Stack: [a] → [a, a]
 pub fn op_dup1(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     return dup_impl_context(1, frame);
 }
 
+/// DUP2 opcode (0x81) - Duplicate 2nd stack item
+///
+/// Duplicates the second item from the top.
+/// Stack: [a, b] → [a, b, a]
 pub fn op_dup2(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     return dup_impl_context(2, frame);
@@ -124,7 +155,10 @@ pub fn op_dup16(context: *anyopaque) ExecutionError.Error!void {
 
 // DUP operations are now generated directly in jump_table.zig using make_dup()
 
-// ExecutionContext-based factory function for SWAP operations
+/// Factory function for creating SWAP operations
+///
+/// Creates a SWAP function for exchanging the top stack item with the nth item.
+/// SWAP1 exchanges top with 2nd, SWAP2 exchanges top with 3rd, etc.
 pub fn make_swap_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
     return struct {
         pub fn swap_ec(context: *Frame) ExecutionError.Error!void {
@@ -133,7 +167,9 @@ pub fn make_swap_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
     }.swap_ec;
 }
 
-// Helper function for SWAP operations - using ExecutionContext
+/// Helper function for SWAP operations
+///
+/// Swaps the top stack item with the item at position n+1 (1-indexed).
 fn swap_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
     // Stack underflow check - SWAP needs n+1 items
     if (context.stack.size() < n + 1) {
@@ -143,12 +179,19 @@ fn swap_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
     context.stack.swap_unsafe(n);
 }
 
-// ExecutionContext versions of SWAP operations (new pattern)
+/// SWAP1 opcode (0x90) - Exchange 1st and 2nd stack items
+///
+/// Swaps the top two stack items.
+/// Stack: [a, b] → [b, a]
 pub fn op_swap1(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     return swap_impl_context(1, frame);
 }
 
+/// SWAP2 opcode (0x91) - Exchange 1st and 3rd stack items
+///
+/// Swaps the top item with the third item.
+/// Stack: [a, b, c] → [c, b, a]
 pub fn op_swap2(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     return swap_impl_context(2, frame);
