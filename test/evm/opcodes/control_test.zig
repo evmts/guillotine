@@ -348,7 +348,7 @@ test "Control: RETURN with data" {
     // Test 1: Return with data
     const test_data = [_]u8{ 0xde, 0xad, 0xbe, 0xef };
     try frame.memory.set_data(10, &test_data);
-    try frame.stack.append(4);  // size (first)
+    try frame.stack.append(4); // size (first)
     try frame.stack.append(10); // offset (second, on top)
 
     const result = evm.table.execute(0, interpreter, state, 0xF3);

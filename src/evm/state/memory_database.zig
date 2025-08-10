@@ -322,7 +322,7 @@ pub const MemoryDatabase = struct {
             // Error occurred, return empty code
             return &[_]u8{};
         }
-        
+
         // Account doesn't exist, return empty code
         return &[_]u8{};
     }

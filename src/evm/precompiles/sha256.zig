@@ -183,11 +183,11 @@ test "SHA256 precompile with hardware acceleration" {
             },
         },
     };
-    
+
     for (test_vectors) |tv| {
         const output = try std.testing.allocator.alloc(u8, 32);
         defer std.testing.allocator.free(output);
-        
+
         const result = execute(tv.input, output, 100000);
         try std.testing.expect(result.is_ok);
         try std.testing.expectEqualSlices(u8, &tv.expected, output);
@@ -200,7 +200,7 @@ test "SHA256 precompile gas calculation" {
     try std.testing.expectEqual(@as(u64, 72), calculate_gas(32)); // 1 word
     try std.testing.expectEqual(@as(u64, 84), calculate_gas(64)); // 2 words
     try std.testing.expectEqual(@as(u64, 96), calculate_gas(96)); // 3 words
-    
+
     // Test partial word boundaries
     try std.testing.expectEqual(@as(u64, 72), calculate_gas(1)); // 1 byte = 1 word
     try std.testing.expectEqual(@as(u64, 72), calculate_gas(31)); // 31 bytes = 1 word
@@ -212,7 +212,7 @@ test "SHA256 precompile gas overflow protection" {
     const max_size = std.math.maxInt(usize);
     const result = calculate_gas_checked(max_size);
     try std.testing.expectError(error.Overflow, result);
-    
+
     // Test near-overflow
     const large_size = std.math.maxInt(usize) - 1000;
     const result2 = calculate_gas_checked(large_size);
@@ -224,10 +224,10 @@ test "SHA256 precompile consistency" {
     const test_data = "The quick brown fox jumps over the lazy dog";
     const output = try std.testing.allocator.alloc(u8, 32);
     defer std.testing.allocator.free(output);
-    
+
     const result = execute(test_data, output, 100000);
     try std.testing.expect(result.is_ok);
-    
+
     // Compare with standard library
     var expected: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(test_data, &expected, .{});
@@ -237,19 +237,19 @@ test "SHA256 precompile consistency" {
 test "SHA256 precompile edge cases" {
     const output = try std.testing.allocator.alloc(u8, 32);
     defer std.testing.allocator.free(output);
-    
+
     // Test insufficient gas
     const result_low_gas = execute("test", output, 10);
     try std.testing.expect(!result_low_gas.is_ok);
     try std.testing.expectEqual(PrecompileError.OutOfGas, result_low_gas.error_value);
-    
+
     // Test output buffer too small
     const small_output = try std.testing.allocator.alloc(u8, 10);
     defer std.testing.allocator.free(small_output);
     const result_small_buf = execute("test", small_output, 100000);
     try std.testing.expect(!result_small_buf.is_ok);
     try std.testing.expectEqual(PrecompileError.InvalidInput, result_small_buf.error_value);
-    
+
     // Test exactly enough gas
     const gas_needed = calculate_gas(4); // "test" is 4 bytes
     const result_exact_gas = execute("test", output, gas_needed);

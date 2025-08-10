@@ -61,7 +61,6 @@ pub fn add_rust_integration(b: *std.Build, target: std.Build.ResolvedTarget, opt
     // Add include path to the module for C imports
     compiler_mod.addIncludePath(b.path("include"));
 
-
     // Create a custom step to build the Rust library
     const build_rust_step = b.step("build-rust", "Build the Rust Foundry wrapper library");
     build_rust_step.dependOn(&cbindgen_cmd.step);
@@ -100,7 +99,6 @@ pub fn add_rust_integration(b: *std.Build, target: std.Build.ResolvedTarget, opt
     // Add a separate step for testing Foundry integration
     const foundry_test_step = b.step("test-foundry", "Run Foundry integration tests");
     foundry_test_step.dependOn(&run_foundry_test.step);
-
 
     // Return the cbindgen step so it can be used as a dependency
     return &cbindgen_cmd.step;

@@ -88,7 +88,7 @@ fn run_bytecode(
 
     // Execute the contract with traditional interpreter
     const result = try evm_instance.interpretCompat(&contract, input orelse &[_]u8{}, false);
-    
+
     // Also test with block interpreter for parallel validation
     // SKIP: Bug #3 - interpret_block causes test to hang
     // var contract_block = Contract.init_at_address(
@@ -103,11 +103,11 @@ fn run_bytecode(
     // defer contract_block.deinit(evm_instance.allocator, null);
     // const result_block = try evm_instance.interpret_block_write(&contract_block, input orelse &[_]u8{});
     // defer if (result_block.output) |output| evm_instance.allocator.free(output);
-    // 
+    //
     // // Verify both interpreters produce same result
     // try std.testing.expectEqual(result.status, result_block.status);
     // try std.testing.expectEqual(result.gas_used, result_block.gas_used);
-    
+
     return result;
 }
 
@@ -1149,7 +1149,7 @@ test "VM: SDIV by zero returns zero" {
 
     const bytecode = [_]u8{
         0x60, 0x00, // PUSH1 0 (divisor)
-        0x60, 0x0A, // PUSH1 10 (dividend) 
+        0x60, 0x0A, // PUSH1 10 (dividend)
         0x05, // SDIV (10 / 0)
         0x60, 0x00, // PUSH1 0
         0x52, // MSTORE

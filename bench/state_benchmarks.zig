@@ -72,10 +72,10 @@ pub fn zbench_storage_ops(allocator: std.mem.Allocator) void {
     while (i < iterations) : (i += 1) {
         const key = primitives.Numeric.U256.from_u64(i);
         const value = primitives.Numeric.U256.from_u64(i * 2);
-        
+
         // Write storage
         db_interface.set_storage(test_address, key, value) catch unreachable;
-        
+
         // Read storage
         _ = db_interface.get_storage(test_address, key) catch unreachable;
     }
@@ -97,10 +97,10 @@ pub fn zbench_state_root(allocator: std.mem.Allocator) void {
     while (i < num_accounts) : (i += 1) {
         var address = primitives.Address.zero();
         address.bytes[19] = @intCast(i); // Modify last byte for unique addresses
-        
+
         const balance = primitives.Numeric.U256.from_u64(i * 1000);
         state.set_balance(address, balance) catch unreachable;
-        
+
         // Add some storage entries
         const key = primitives.Numeric.U256.from_u64(i);
         const value = primitives.Numeric.U256.from_u64(i * 2);
@@ -123,11 +123,11 @@ pub fn zbench_journal_ops(allocator: std.mem.Allocator) void {
     const iterations = 1000;
     var i: usize = 0;
     var sum: u64 = 0;
-    
+
     while (i < iterations) : (i += 1) {
         sum += i;
     }
-    
+
     // Prevent compiler from optimizing away the work
     std.debug.assert(sum > 0);
 }
@@ -148,15 +148,15 @@ pub fn zbench_evm_state_full(allocator: std.mem.Allocator) void {
     while (tx < num_transactions) : (tx += 1) {
         // Create snapshot for transaction
         const snapshot = state.snapshot();
-        
+
         var address = primitives.Address.zero();
         address.bytes[19] = @intCast(tx % 256);
-        
+
         // Account operations
         const balance = primitives.Numeric.U256.from_u64(tx * 1000);
         state.set_balance(address, balance) catch unreachable;
         _ = state.get_balance(address) catch unreachable;
-        
+
         // Storage operations
         var slot: usize = 0;
         while (slot < 10) : (slot += 1) {
@@ -165,25 +165,25 @@ pub fn zbench_evm_state_full(allocator: std.mem.Allocator) void {
             state.set_storage(address, key, value) catch unreachable;
             _ = state.get_storage(address, key) catch unreachable;
         }
-        
+
         // Log operations
-        const log_data = [_]u8{0x01, 0x02, 0x03, 0x04};
+        const log_data = [_]u8{ 0x01, 0x02, 0x03, 0x04 };
         const topics = [_]primitives.Numeric.B256{primitives.Numeric.B256.ZERO};
         state.emit_log(address, &topics, &log_data) catch unreachable;
-        
+
         // Simulate transaction success/failure (revert some transactions)
         if (tx % 7 == 0) {
             state.revert(snapshot) catch unreachable;
         }
     }
-    
+
     // Final state root calculation
     _ = state.state_root() catch unreachable;
 }
 
 test "state benchmarks compile and run" {
     const allocator = std.testing.allocator;
-    
+
     // Test that all benchmark functions can be called without panicking
     zbench_account_read(allocator);
     zbench_account_write(allocator);
@@ -191,7 +191,7 @@ test "state benchmarks compile and run" {
     zbench_state_root(allocator);
     zbench_journal_ops(allocator);
     zbench_evm_state_full(allocator);
-    
+
     // If we reach here, all benchmarks executed successfully
     try std.testing.expect(true);
 }

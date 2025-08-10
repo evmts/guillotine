@@ -148,21 +148,21 @@ pub const Error = error{
     NoBatchInProgress,
     /// Snapshot not found
     SnapshotNotFound,
-    
+
     // Instruction translation errors
     /// Instruction limit exceeded during translation
     InstructionLimitExceeded,
     /// Opcode not implemented in translator
     OpcodeNotImplemented,
-    
+
     /// Contract input (calldata) size exceeds maximum allowed size
     /// Typically 128KB limit imposed by RPC providers
     InputSizeExceeded,
-    
+
     /// Contract code size mismatch between expected and actual size
     /// Occurs when contract.code_size doesn't match contract.input.len
     CodeSizeMismatch,
-    
+
     /// SELFDESTRUCT opcode not available in current hardfork
     /// Some hardforks disable SELFDESTRUCT functionality
     SelfDestructNotAvailable,

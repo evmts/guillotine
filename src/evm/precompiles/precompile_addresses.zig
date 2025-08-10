@@ -86,7 +86,7 @@ pub fn get_precompile_id_checked(address: primitives.Address.Address) ?u8 {
 
 test "get_precompile_id_checked optimization" {
     const testing = std.testing;
-    
+
     // Test all valid precompile addresses
     try testing.expectEqual(@as(?u8, 1), get_precompile_id_checked(ECRECOVER_ADDRESS));
     try testing.expectEqual(@as(?u8, 2), get_precompile_id_checked(SHA256_ADDRESS));
@@ -98,12 +98,12 @@ test "get_precompile_id_checked optimization" {
     try testing.expectEqual(@as(?u8, 8), get_precompile_id_checked(ECPAIRING_ADDRESS));
     try testing.expectEqual(@as(?u8, 9), get_precompile_id_checked(BLAKE2F_ADDRESS));
     try testing.expectEqual(@as(?u8, 10), get_precompile_id_checked(POINT_EVALUATION_ADDRESS));
-    
+
     // Test non-precompile addresses
     const non_precompile1 = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF };
     const non_precompile2 = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }; // All zeros
     const non_precompile3 = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11 }; // ID out of range
-    
+
     try testing.expectEqual(@as(?u8, null), get_precompile_id_checked(non_precompile1));
     try testing.expectEqual(@as(?u8, null), get_precompile_id_checked(non_precompile2));
     try testing.expectEqual(@as(?u8, null), get_precompile_id_checked(non_precompile3));

@@ -8,6 +8,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Check formatting
+        run: |
+          echo "Checking code formatting..."
+          if ! zig fmt --check .; then
+            echo "❌ Code formatting issues found!"
+            echo "Please run 'zig fmt .' locally and commit the changes."
+            exit 1
+          else
+            echo "✅ All code is properly formatted!"
+          fi
+
   build-and-test-native:
     name: Build and Test (Native - ${{ matrix.os }} - ${{ matrix.optimize }})
     strategy:
@@ -235,7 +261,7 @@ jobs:
 
   ci-summary:
     name: CI Summary
-    needs: [build-and-test-native, build-and-test-docker, build-wasm]
+    needs: [format-check, build-and-test-native, build-and-test-docker, build-wasm]
     runs-on: ubuntu-latest
     if: always()
     
@@ -257,12 +283,14 @@ jobs:
           echo ""
           
           # Check job statuses
-          if [ "${{ needs.build-and-test-native.result }}" = "success" ] && \
+          if [ "${{ needs.format-check.result }}" = "success" ] && \
+             [ "${{ needs.build-and-test-native.result }}" = "success" ] && \
              [ "${{ needs.build-and-test-docker.result }}" = "success" ] && \
              [ "${{ needs.build-wasm.result }}" = "success" ]; then
-            echo "✅ **All build configurations passed successfully!**"
+            echo "✅ **All checks and build configurations passed successfully!**"
           else
-            echo "❌ **Some build configurations failed:**"
+            echo "❌ **Some checks or build configurations failed:**"
+            [ "${{ needs.format-check.result }}" != "success" ] && echo "  - Format check: ${{ needs.format-check.result }}"
             [ "${{ needs.build-and-test-native.result }}" != "success" ] && echo "  - Native builds: ${{ needs.build-and-test-native.result }}"
             [ "${{ needs.build-and-test-docker.result }}" != "success" ] && echo "  - Docker builds: ${{ needs.build-and-test-docker.result }}"
             [ "${{ needs.build-wasm.result }}" != "success" ] && echo "  - WASM builds: ${{ needs.build-wasm.result }}"

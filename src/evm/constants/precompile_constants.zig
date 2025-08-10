@@ -3,13 +3,12 @@ const primitives = @import("primitives");
 const GasConstants = primitives.GasConstants;
 
 /// EVM Precompile Constants
-/// 
+///
 /// This file contains all constants related to precompiled contracts including:
 /// - Precompile addresses
 /// - Gas costs for precompiled operations
 /// - Input/output sizes for precompiles
 /// - Cryptographic constants
-
 /// Precompile addresses
 pub const ECRECOVER = 0x0000000000000000000000000000000000000001;
 pub const SHA256 = 0x0000000000000000000000000000000000000002;

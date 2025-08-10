@@ -69,17 +69,17 @@ pub const Provider = struct {
         // Remove quotes and 0x prefix
         const trimmed = std.mem.trim(u8, result, "\"");
         const hex = if (std.mem.startsWith(u8, trimmed, "0x")) trimmed[2..] else trimmed;
-        
+
         return try std.fmt.parseInt(u64, hex, 16);
     }
 
     pub fn getBalance(self: *Provider, addr: Address) !primitives.u256 {
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
-        
+
         const addrHex = try std.fmt.allocPrint(self.allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&addr.bytes)});
         defer self.allocator.free(addrHex);
-        
+
         try params.append(std.json.Value{ .string = addrHex });
         try params.append(std.json.Value{ .string = "latest" });
 
@@ -88,17 +88,17 @@ pub const Provider = struct {
 
         const trimmed = std.mem.trim(u8, result, "\"");
         const hex = if (std.mem.startsWith(u8, trimmed, "0x")) trimmed[2..] else trimmed;
-        
+
         return try std.fmt.parseInt(primitives.u256, hex, 16);
     }
 
     pub fn getTransactionCount(self: *Provider, addr: Address) !u64 {
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
-        
+
         const addrHex = try std.fmt.allocPrint(self.allocator, "0x{s}", .{std.fmt.fmtSliceHexLower(&addr.bytes)});
         defer self.allocator.free(addrHex);
-        
+
         try params.append(std.json.Value{ .string = addrHex });
         try params.append(std.json.Value{ .string = "latest" });
 
@@ -107,17 +107,17 @@ pub const Provider = struct {
 
         const trimmed = std.mem.trim(u8, result, "\"");
         const hex = if (std.mem.startsWith(u8, trimmed, "0x")) trimmed[2..] else trimmed;
-        
+
         return try std.fmt.parseInt(u64, hex, 16);
     }
 
     pub fn getBlockByNumber(self: *Provider, blockNumber: u64, fullTxs: bool) !Block {
         var params = std.json.Array.init(self.allocator);
         defer params.deinit();
-        
+
         const blockHex = try std.fmt.allocPrint(self.allocator, "0x{x}", .{blockNumber});
         defer self.allocator.free(blockHex);
-        
+
         try params.append(std.json.Value{ .string = blockHex });
         try params.append(std.json.Value{ .bool = fullTxs });
 

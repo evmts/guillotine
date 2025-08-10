@@ -38,7 +38,7 @@ test "STOP (0x00): Halt execution" {
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x22} ** 20;
     const code = [_]u8{0x00}; // STOP
-    
+
     // Store contract code in state
     try evm.state.set_code(contract_addr, &code);
 
@@ -49,14 +49,14 @@ test "STOP (0x00): Halt execution" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000,
-    }};
+    } };
 
     const result = try evm.call(call_params);
 
-    // STOP should complete successfully 
+    // STOP should complete successfully
     try testing.expect(result.success);
     try testing.expectEqual(@as(usize, 0), result.output.?.len);
-    
+
     // Clean up allocated output
     if (result.output) |output| {
         allocator.free(output);
@@ -88,10 +88,10 @@ test "ADD (0x01): Basic addition" {
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x22} ** 20;
-    
+
     // Test basic addition: 5 + 10 = 15 - PUSH 5, PUSH 10, ADD
-    const code = [_]u8{0x60, 0x05, 0x60, 0x0A, 0x01}; // PUSH1 5, PUSH1 10, ADD
-    
+    const code = [_]u8{ 0x60, 0x05, 0x60, 0x0A, 0x01 }; // PUSH1 5, PUSH1 10, ADD
+
     // Store contract code in state
     try evm.state.set_code(contract_addr, &code);
 
@@ -102,13 +102,13 @@ test "ADD (0x01): Basic addition" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000,
-    }};
+    } };
 
     const result = try evm.call(call_params);
 
     // Should complete successfully
     try testing.expect(result.success);
-    
+
     // Clean up allocated output
     if (result.output) |output| {
         allocator.free(output);
@@ -136,27 +136,27 @@ test "ADD: Overflow wraps to zero" {
 
     const caller = [_]u8{0x11} ** 20;
     const contract_addr = [_]u8{0x22} ** 20;
-    
+
     // Test overflow: MAX + 1 = 0
     const max_u256 = std.math.maxInt(u256);
-    
+
     // Build code to push MAX value and 1, then ADD
     var code = std.ArrayList(u8).init(allocator);
     defer code.deinit();
-    
+
     // PUSH32 for MAX value
     try code.append(0x7F); // PUSH32
     var max_bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &max_bytes, max_u256, .big);
     try code.appendSlice(&max_bytes);
-    
+
     // PUSH1 1
     try code.append(0x60); // PUSH1
     try code.append(0x01);
-    
+
     // ADD
     try code.append(0x01);
-    
+
     // Store contract code in state
     try evm.state.set_code(contract_addr, code.items);
 
@@ -167,13 +167,13 @@ test "ADD: Overflow wraps to zero" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 10000,
-    }};
+    } };
 
     const result = try evm.call(call_params);
 
     // Should complete successfully
     try testing.expect(result.success);
-    
+
     // Clean up allocated output
     if (result.output) |output| {
         allocator.free(output);

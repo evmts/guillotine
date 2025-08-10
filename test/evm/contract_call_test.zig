@@ -30,7 +30,7 @@ test "contract call: empty contract returns success" {
         .value = 0,
         .input = &.{},
         .gas = 100000,
-    }};
+    } };
     const result = try evm.call(call_params);
     defer if (result.output.len > 0) allocator.free(result.output);
 
@@ -65,7 +65,7 @@ test "contract call: value transfer to empty contract" {
         .value = transfer_amount,
         .input = &.{},
         .gas = 100000,
-    }};
+    } };
     const result = try evm.call(call_params);
     defer if (result.output.len > 0) allocator.free(result.output);
 
@@ -93,13 +93,15 @@ test "contract call: insufficient balance for value transfer" {
     try evm.state.set_balance(caller, 500);
 
     // Try to transfer more than balance
-    const call_params = CallParams{ .call = .{
-        .caller = caller,
-        .to = recipient,
-        .value = 1000, // more than caller has
-        .input = &.{},
-        .gas = 100000,
-    }};
+    const call_params = CallParams{
+        .call = .{
+            .caller = caller,
+            .to = recipient,
+            .value = 1000, // more than caller has
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
     const result = try evm.call(call_params);
     defer if (result.output.len > 0) allocator.free(result.output);
 
@@ -132,7 +134,7 @@ test "contract call: static call cannot transfer value" {
         .to = recipient,
         .input = &.{},
         .gas = 100000,
-    }};
+    } };
     const result = try evm.call(call_params);
     defer if (result.output.len > 0) allocator.free(result.output);
 

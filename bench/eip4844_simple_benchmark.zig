@@ -5,10 +5,9 @@ const primitives = root.primitives;
 const Allocator = std.mem.Allocator;
 
 /// Simplified EIP-4844 Blob Transaction Benchmarks
-/// 
+///
 /// Measures performance of core blob and access list operations
 /// that are available and working in the current implementation.
-
 pub fn blob_gas_market_simple_benchmark(allocator: Allocator) void {
     blob_gas_market_simple_benchmark_impl(allocator) catch |err| {
         std.log.err("Simple blob gas market benchmark failed: {}", .{err});
@@ -17,21 +16,21 @@ pub fn blob_gas_market_simple_benchmark(allocator: Allocator) void {
 
 fn blob_gas_market_simple_benchmark_impl(allocator: Allocator) !void {
     _ = allocator;
-    
+
     // Create blob gas market instance
     var market = Evm.blob.BlobGasMarket.init();
-    
+
     // Simulate a series of blocks with varying blob usage
     const blob_usages = [_]u64{ 0, 131072, 262144, 393216, 524288, 393216, 262144, 131072 };
-    
+
     for (blob_usages) |blob_gas_used| {
         // Calculate blob base fee for this block
         const base_fee = market.calculate_blob_base_fee(blob_gas_used);
         std.mem.doNotOptimizeAway(base_fee);
-        
+
         // Update market state
         market.update_blob_base_fee(blob_gas_used);
-        
+
         // Calculate data gas fee for transactions
         const data_gas_fee = market.calculate_data_gas_fee(Evm.blob.GAS_PER_BLOB * 2); // 2 blobs
         std.mem.doNotOptimizeAway(data_gas_fee);
@@ -46,11 +45,11 @@ pub fn blob_data_creation_benchmark(allocator: Allocator) void {
 
 fn blob_data_creation_benchmark_impl(allocator: Allocator) !void {
     _ = allocator;
-    
+
     // Benchmark blob data structure creation and manipulation
     for (0..100) |blob_idx| {
         var blob = Evm.blob.Blob{};
-        
+
         // Fill blob with test data pattern
         for (0..Evm.blob.FIELD_ELEMENTS_PER_BLOB) |field_idx| {
             const value = (@as(u32, @intCast(blob_idx)) << 16) | @as(u32, @intCast(field_idx));
@@ -58,11 +57,11 @@ fn blob_data_creation_benchmark_impl(allocator: Allocator) !void {
                 blob.data[field_idx * 32 + byte_idx] = @intCast((value + @as(u32, @intCast(byte_idx))) % 256);
             }
         }
-        
+
         // Simulate basic blob validation (size checks, etc.)
         const blob_size = blob.data.len;
         std.mem.doNotOptimizeAway(blob_size);
-        
+
         // Calculate simple checksum
         var checksum: u32 = 0;
         for (blob.data) |byte| {
@@ -80,18 +79,18 @@ pub fn versioned_hash_simple_benchmark(allocator: Allocator) void {
 
 fn versioned_hash_simple_benchmark_impl(allocator: Allocator) !void {
     _ = allocator;
-    
+
     // Create test commitment data
     var commitment_data: [48]u8 = undefined;
     for (&commitment_data, 0..) |*byte, i| {
         byte.* = @intCast(i % 256);
     }
-    
+
     // Benchmark versioned hash operations
     for (0..1000) |_| {
         const versioned_hash = Evm.blob.blob_types.commitment_to_versioned_hash(&commitment_data);
         std.mem.doNotOptimizeAway(versioned_hash.hash);
-        
+
         // Validate hash format
         const is_valid = Evm.blob.validate_commitment_hash(&commitment_data, &versioned_hash.hash);
         std.mem.doNotOptimizeAway(is_valid);
@@ -120,15 +119,15 @@ fn access_list_integration_benchmark_impl(allocator: Allocator) !void {
     for (0..500) |i| {
         const addr = primitives.Address.from_u256(@as(u256, 0x10000 + i));
         const slot = @as(u256, i * 7919);
-        
+
         // Access address (simulating blob transaction touching contracts)
         const addr_cost = try access_list.access_address(addr);
         std.mem.doNotOptimizeAway(addr_cost);
-        
+
         // Access storage (simulating blob data retrieval)
         const storage_cost = try access_list.access_storage_slot(addr, slot);
         std.mem.doNotOptimizeAway(storage_cost);
-        
+
         // Check if warm
         if (i % 10 == 0) {
             const is_addr_warm = access_list.is_address_warm(addr);
@@ -147,11 +146,11 @@ pub fn transaction_type_detection_simple_benchmark(allocator: Allocator) void {
 
 fn transaction_type_detection_simple_benchmark_impl(allocator: Allocator) !void {
     _ = allocator;
-    
+
     // Create test transaction data for different types
     const legacy_tx_data = &[_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple legacy transaction
     const eip1559_tx_data = &[_]u8{ 0x02, 0xf8, 0x6f }; // EIP-1559 transaction prefix
-    const eip2930_tx_data = &[_]u8{ 0x01, 0xf8, 0x6f }; // EIP-2930 transaction prefix  
+    const eip2930_tx_data = &[_]u8{ 0x01, 0xf8, 0x6f }; // EIP-2930 transaction prefix
     const eip4844_tx_data = &[_]u8{ 0x03, 0xf8, 0x6f }; // EIP-4844 transaction prefix
 
     const test_data = [_][]const u8{
@@ -178,35 +177,35 @@ pub fn gas_calculation_benchmark(allocator: Allocator) void {
 
 fn gas_calculation_benchmark_impl(allocator: Allocator) !void {
     _ = allocator;
-    
+
     // Test data for different transaction types and market conditions
     const base_fees = [_]u64{ 10, 50, 100, 200, 500, 1000 }; // gwei
     const priority_fees = [_]u64{ 1, 2, 5, 10, 50 }; // gwei
     const blob_base_fees = [_]u64{ 1, 10, 100, 1000 }; // wei
-    
+
     // Benchmark EIP-1559 gas price calculations
     for (base_fees) |base_fee| {
         for (priority_fees) |priority_fee| {
             const max_fee = base_fee + priority_fee + 10; // Add buffer
-            
+
             // Calculate effective gas price
             const effective_price = @min(max_fee, base_fee + priority_fee);
             std.mem.doNotOptimizeAway(effective_price);
-            
+
             // Calculate gas cost
             const gas_cost = effective_price * 21000; // Standard transfer
             std.mem.doNotOptimizeAway(gas_cost);
         }
     }
 
-    // Benchmark blob gas price calculations  
+    // Benchmark blob gas price calculations
     for (blob_base_fees) |blob_base_fee| {
         const max_blob_fee = blob_base_fee * 2; // Max willing to pay
-        
+
         // Calculate blob fee
         const blob_fee = @min(max_blob_fee, blob_base_fee);
         std.mem.doNotOptimizeAway(blob_fee);
-        
+
         // Calculate total blob cost (for max blobs)
         const blob_gas_used = Evm.blob.GAS_PER_BLOB * Evm.blob.MAX_BLOBS_PER_TRANSACTION;
         const total_blob_cost = blob_fee * blob_gas_used;
@@ -216,7 +215,7 @@ fn gas_calculation_benchmark_impl(allocator: Allocator) !void {
 
 test "simplified EIP-4844 benchmarks compile and basic execution" {
     const allocator = std.testing.allocator;
-    
+
     // Basic compilation and execution test
     blob_gas_market_simple_benchmark(allocator);
     blob_data_creation_benchmark(allocator);

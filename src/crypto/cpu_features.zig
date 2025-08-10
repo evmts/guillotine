@@ -10,9 +10,9 @@ pub const CpuFeatures = struct {
     has_aes_ni: bool,
     has_arm_crypto: bool,
     has_arm_neon: bool,
-    
+
     const Self = @This();
-    
+
     pub fn init() Self {
         // Only detect features for the actual target architecture
         return switch (builtin.target.cpu.arch) {
@@ -51,7 +51,6 @@ pub const CpuFeatures = struct {
 };
 
 pub const cpu_features = CpuFeatures.init();
-
 
 test "CPU feature detection" {
     const features = CpuFeatures.init();

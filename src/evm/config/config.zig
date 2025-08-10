@@ -1,8 +1,7 @@
 /// EVM configuration module exports
-/// 
+///
 /// This module provides a centralized configuration system for the EVM
 /// with support for hardfork-based EIP derivation and L2 overrides.
-
 pub const EvmConfig = @import("../config.zig").EvmConfig;
 pub const EipFlags = @import("eip_flags.zig").EipFlags;
 pub const EipOverrides = @import("overrides.zig").EipOverrides;

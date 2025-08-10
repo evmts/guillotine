@@ -72,6 +72,6 @@ pub fn set_data_bounded(
 pub inline fn set_u256(self: *Memory, relative_offset: usize, value: u256) errors.MemoryError!void {
     _ = try self.ensure_context_capacity(relative_offset + 32);
     const abs_offset = self.my_checkpoint + relative_offset;
-    const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + 32].ptr);
+    const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset .. abs_offset + 32].ptr);
     std.mem.writeInt(u256, bytes_ptr, value, .big);
 }

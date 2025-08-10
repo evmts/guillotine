@@ -243,7 +243,7 @@ pub const Event = extern struct {
         if (context == null) return WebUIError.GenericError;
         return context;
     }
-    
+
     /// Get context pointer as a specific type (convenience method)
     pub fn get_ptr(e: *Event) *anyopaque {
         return webui_get_context(e);

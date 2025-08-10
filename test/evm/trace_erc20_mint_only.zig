@@ -20,24 +20,24 @@ fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
 
 test "trace ERC20 mint deployment only" {
     const allocator = testing.allocator;
-    
+
     // Read the ERC20 mint bytecode
     const file_content = try std.fs.cwd().readFileAlloc(allocator, "test/evm/erc20_mint.hex", 1024 * 1024);
     defer allocator.free(file_content);
-    
+
     const bytecode = try hexDecode(allocator, std.mem.trim(u8, file_content, " \n\r\t"));
     defer allocator.free(bytecode);
-    
+
     // Setup EVM with tracer
     var memory_db = Evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    
+
     // Create trace output
     var trace_buffer = std.ArrayList(u8).init(allocator);
     defer trace_buffer.deinit();
-    
+
     const config = Evm.EvmConfig.init(.CANCUN);
     const EvmType = Evm.Evm(config);
     var vm = try EvmType.init(allocator, db_interface, null, 0, false, trace_buffer.writer().any());
@@ -49,19 +49,11 @@ test "trace ERC20 mint deployment only" {
 
     // Deploy contract
     std.debug.print("\n=== Deploying ERC20 Contract (for mint test) ===\n", .{});
-    const create_result = try vm.create_contract(
-        caller,
-        0,
-        bytecode,
-        1_000_000_000 // 1B gas for deployment
+    const create_result = try vm.create_contract(caller, 0, bytecode, 1_000_000_000 // 1B gas for deployment
     );
     defer if (create_result.output) |output| allocator.free(output);
 
-    std.debug.print("Deployment result - success: {}, gas_left: {}, gas_used: {}\n", .{
-        create_result.success,
-        create_result.gas_left,
-        1_000_000_000 - create_result.gas_left
-    });
+    std.debug.print("Deployment result - success: {}, gas_left: {}, gas_used: {}\n", .{ create_result.success, create_result.gas_left, 1_000_000_000 - create_result.gas_left });
 
     if (!create_result.success) {
         std.debug.print("Deployment failed! Writing trace for debugging.\n", .{});
@@ -71,9 +63,9 @@ test "trace ERC20 mint deployment only" {
     const trace_file = try std.fs.cwd().createFile("zig_erc20_mint_deploy_trace.json", .{});
     defer trace_file.close();
     try trace_file.writeAll(trace_buffer.items);
-    
+
     std.debug.print("Trace written to zig_erc20_mint_deploy_trace.json\n", .{});
-    
+
     // Also check for OutOfOffset errors in the trace
     var lines = std.mem.tokenizeScalar(u8, trace_buffer.items, '\n');
     var line_count: usize = 0;

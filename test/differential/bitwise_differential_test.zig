@@ -72,7 +72,7 @@ test "AND opcode 0xFF & 0x0F = 0x0F" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -167,7 +167,7 @@ test "OR opcode 0x0F | 0xF0 = 0xFF" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -262,7 +262,7 @@ test "SHL opcode 1 << 4 = 16" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -357,7 +357,7 @@ test "XOR opcode 0xF0 ^ 0x0F = 0xFF" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -446,7 +446,7 @@ test "NOT opcode ~0x0F = 0xFF...F0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -540,7 +540,7 @@ test "SHR opcode 16 >> 2 = 4" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -635,7 +635,7 @@ test "SAR opcode arithmetic right shift with sign" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -730,7 +730,7 @@ test "BYTE opcode extract byte from word" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);

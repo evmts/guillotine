@@ -120,7 +120,7 @@ pub const DatabaseInterface = struct {
         // Storage operations
         get_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256,
         set_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void,
-        
+
         // Transient storage operations (EIP-1153)
         get_transient_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256,
         set_transient_storage: *const fn (ptr: *anyopaque, address: [20]u8, key: u256, value: u256) DatabaseError!void,
@@ -204,7 +204,7 @@ pub const DatabaseInterface = struct {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.set_storage(address, key, value);
             }
-            
+
             fn vtable_get_transient_storage(ptr: *anyopaque, address: [20]u8, key: u256) DatabaseError!u256 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.get_transient_storage(address, key);

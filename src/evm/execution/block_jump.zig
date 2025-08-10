@@ -14,18 +14,18 @@ pub fn block_jump(
 ) ExecutionError.Error!?[*]const Instruction {
     _ = pc;
     _ = interpreter;
-    
+
     const frame = state;
-    
+
     // Pop the destination from stack (still needed for validation)
     const dest = frame.stack.pop_unsafe();
-    
+
     // Validate that the jump destination matches what we expect
     // This ensures the jump target hasn't been manipulated
     if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
         return ExecutionError.Error.InvalidJump;
     }
-    
+
     // Return the pre-resolved target instruction pointer
     return @ptrCast(target);
 }
@@ -41,23 +41,23 @@ pub fn block_jumpi(
 ) ExecutionError.Error!?[*]const Instruction {
     _ = pc;
     _ = interpreter;
-    
+
     const frame = state;
-    
+
     // Pop destination and condition
     const dest = frame.stack.pop_unsafe();
     const condition = frame.stack.pop_unsafe();
-    
+
     // If condition is false, continue to next instruction
     if (condition == 0) {
         return next;
     }
-    
+
     // Validate jump destination
     if (!frame.contract.valid_jumpdest(frame.allocator, dest)) {
         return ExecutionError.Error.InvalidJump;
     }
-    
+
     // Jump to target
     return @ptrCast(target);
 }

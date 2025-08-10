@@ -6,12 +6,12 @@ test "check revm availability" {
     if (has_revm) {
         const revm = @import("revm");
         std.debug.print("revm module loaded successfully\n", .{});
-        
+
         // Try to create a basic revm instance
         const allocator = std.testing.allocator;
         var vm = try revm.Revm.init(allocator, .{});
         defer vm.deinit();
-        
+
         std.debug.print("revm instance created successfully\n", .{});
     } else {
         std.debug.print("revm module not available\n", .{});

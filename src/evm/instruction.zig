@@ -4,9 +4,9 @@ const ExecutionError = @import("execution/execution_error.zig");
 const Frame = @import("frame.zig").Frame;
 
 pub const JumpType = enum {
-    jump,       // Unconditional jump (JUMP)
-    jumpi,      // Conditional jump (JUMPI)  
-    other,      // Other jump targets (for future use)
+    jump, // Unconditional jump (JUMP)
+    jumpi, // Conditional jump (JUMPI)
+    other, // Other jump targets (for future use)
 };
 
 pub const JumpTarget = struct {

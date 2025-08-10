@@ -16,7 +16,7 @@ pub fn setupDevtool(b: *std.Build, config: DevtoolConfig) struct {
     run_cmd: *std.Build.Step.Run,
 } {
     // Check for npm
-    const npm_check = b.addSystemCommand(&[_][]const u8{"which", "npm"});
+    const npm_check = b.addSystemCommand(&[_][]const u8{ "which", "npm" });
     npm_check.addCheck(.{ .expect_stdout_match = "npm" });
 
     // Install npm dependencies
@@ -90,22 +90,22 @@ fn setupPlatformSpecific(b: *std.Build, target: std.Build.ResolvedTarget, exe: *
             "-static",
             "-whole-module-optimization",
             "-O",
-            "-target", "arm64-apple-macosx15.0",
-            "-o", "zig-out/libnative_menu_swift.dylib",
+            "-target",
+            "arm64-apple-macosx15.0",
+            "-o",
+            "zig-out/libnative_menu_swift.dylib",
             "src/devtool/native_menu.swift",
         });
-        
+
         // Ensure output directory exists
-        const mkdir_cmd = b.addSystemCommand(&[_][]const u8{
-            "mkdir", "-p", "zig-out"
-        });
+        const mkdir_cmd = b.addSystemCommand(&[_][]const u8{ "mkdir", "-p", "zig-out" });
         swift_compile.step.dependOn(&mkdir_cmd.step);
-        
+
         // Link the compiled Swift dynamic library
         exe.addLibraryPath(b.path("zig-out"));
         exe.linkSystemLibrary("native_menu_swift");
         exe.step.dependOn(&swift_compile.step);
-        
+
         // Add Swift runtime library search paths
         exe.addLibraryPath(.{ .cwd_relative = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx" });
         exe.addLibraryPath(.{ .cwd_relative = "/usr/lib/swift" });
@@ -115,19 +115,19 @@ fn setupPlatformSpecific(b: *std.Build, target: std.Build.ResolvedTarget, exe: *
 pub fn createMacOSAppBundle(b: *std.Build, exe: *std.Build.Step.Compile) void {
     if (b.host.result.os.tag == .macos) {
         const bundle_dir = "zig-out/Guillotine DevTool.app/Contents/MacOS";
-        
+
         // Create app bundle structure
         const mkdir_bundle = b.addSystemCommand(&[_][]const u8{
             "mkdir", "-p", bundle_dir,
         });
-        
+
         // Copy executable to app bundle
         const copy_to_bundle = b.addSystemCommand(&[_][]const u8{
             "cp", "-f", "zig-out/bin/guillotine-devtool", bundle_dir,
         });
         copy_to_bundle.step.dependOn(&exe.step);
         copy_to_bundle.step.dependOn(&mkdir_bundle.step);
-        
+
         // Create Info.plist
         const info_plist_content =
             \\<?xml version="1.0" encoding="UTF-8"?>
@@ -153,10 +153,10 @@ pub fn createMacOSAppBundle(b: *std.Build, exe: *std.Build.Step.Compile) void {
             \\</dict>
             \\</plist>
         ;
-        
+
         const write_plist = b.addWriteFile("Guillotine DevTool.app/Contents/Info.plist", info_plist_content);
         copy_to_bundle.step.dependOn(&write_plist.step);
-        
+
         const app_bundle_step = b.step("app-bundle", "Create macOS app bundle for devtool");
         app_bundle_step.dependOn(&copy_to_bundle.step);
     }

@@ -529,7 +529,7 @@ test "calculate_create_address with nonce 1" {
     const addr = try calculate_create_address(allocator, deployer, 1);
     // Verify it's a valid address length and different from nonce 0
     try std.testing.expect(addr.len == 20);
-    
+
     const addr_nonce_0 = try calculate_create_address(allocator, deployer, 0);
     try std.testing.expect(!std.mem.eql(u8, &addr, &addr_nonce_0));
 }
@@ -539,7 +539,7 @@ test "calculate_create_address with various nonces" {
     const deployer = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
 
     const nonces = [_]u64{ 0, 1, 2, 10, 255, 256, 65535, 65536, 16777215, 16777216 };
-    
+
     for (nonces) |nonce| {
         const addr = try calculate_create_address(allocator, deployer, nonce);
         try std.testing.expect(addr.len == 20);
@@ -615,18 +615,18 @@ test "calculate_create_address nonce encoding edge cases" {
 
     // Test boundary values for nonce encoding
     const boundary_nonces = [_]u64{
-        0,          // Empty bytes
-        1,          // Single byte
-        127,        // Max single byte without high bit
-        128,        // First two-byte value  
-        255,        // Max single byte
-        256,        // First true two-byte value
-        65535,      // Max two bytes
-        65536,      // First three-byte value
-        16777215,   // Max three bytes
-        16777216,   // First four-byte value
+        0, // Empty bytes
+        1, // Single byte
+        127, // Max single byte without high bit
+        128, // First two-byte value
+        255, // Max single byte
+        256, // First true two-byte value
+        65535, // Max two bytes
+        65536, // First three-byte value
+        16777215, // Max three bytes
+        16777216, // First four-byte value
     };
-    
+
     for (boundary_nonces) |nonce| {
         const addr = try calculate_create_address(allocator, deployer, nonce);
         try std.testing.expect(addr.len == 20);
@@ -636,17 +636,17 @@ test "calculate_create_address nonce encoding edge cases" {
 test "calculate_create_address sequential nonces produce different addresses" {
     const allocator = std.testing.allocator;
     const deployer = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
-    
+
     var prev_addr: ?Address = null;
     var nonce: u64 = 0;
-    
+
     while (nonce < 10) : (nonce += 1) {
         const addr = try calculate_create_address(allocator, deployer, nonce);
-        
+
         if (prev_addr) |prev| {
             try std.testing.expect(!std.mem.eql(u8, &prev, &addr));
         }
-        
+
         prev_addr = addr;
     }
 }
@@ -701,7 +701,7 @@ test "calculate_create2_address with init code" {
     const allocator = std.testing.allocator;
     const deployer = try from_hex("0x0000000000000000000000000000000000000000");
     const salt: u256 = 0;
-    const init_code = [_]u8{0x60, 0x80, 0x60, 0x40, 0x52}; // Simple bytecode
+    const init_code = [_]u8{ 0x60, 0x80, 0x60, 0x40, 0x52 }; // Simple bytecode
 
     const addr = try calculate_create2_address(allocator, deployer, salt, &init_code);
 
@@ -749,7 +749,7 @@ test "calculate_create2_address deterministic with same inputs" {
     const allocator = std.testing.allocator;
     const deployer = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
     const salt: u256 = 0x123456789abcdef0;
-    const init_code = [_]u8{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0};
+    const init_code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0 };
 
     const addr1 = try calculate_create2_address(allocator, deployer, salt, &init_code);
     const addr2 = try calculate_create2_address(allocator, deployer, salt, &init_code);
@@ -760,7 +760,7 @@ test "calculate_create2_address deterministic with same inputs" {
 test "calculate_create2_address different with different salt" {
     const allocator = std.testing.allocator;
     const deployer = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
-    const init_code = [_]u8{0x60, 0x00};
+    const init_code = [_]u8{ 0x60, 0x00 };
 
     const addr1 = try calculate_create2_address(allocator, deployer, 0x1, &init_code);
     const addr2 = try calculate_create2_address(allocator, deployer, 0x2, &init_code);
@@ -771,7 +771,7 @@ test "calculate_create2_address different with different salt" {
 test "calculate_create2_address different with different deployer" {
     const allocator = std.testing.allocator;
     const salt: u256 = 0x123456789abcdef0;
-    const init_code = [_]u8{0x60, 0x00};
+    const init_code = [_]u8{ 0x60, 0x00 };
 
     const deployer1 = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
     const deployer2 = try from_hex("0x8ba1f109551bD432803012645Hac136c69b95Ee4");
@@ -787,8 +787,8 @@ test "calculate_create2_address different with different init code" {
     const deployer = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
     const salt: u256 = 0x123456789abcdef0;
 
-    const init_code1 = [_]u8{0x60, 0x00};
-    const init_code2 = [_]u8{0x60, 0x01};
+    const init_code1 = [_]u8{ 0x60, 0x00 };
+    const init_code2 = [_]u8{ 0x60, 0x01 };
 
     const addr1 = try calculate_create2_address(allocator, deployer, salt, &init_code1);
     const addr2 = try calculate_create2_address(allocator, deployer, salt, &init_code2);
@@ -800,7 +800,7 @@ test "calculate_create2_address with large init code" {
     const allocator = std.testing.allocator;
     const deployer = try from_hex("0x742d35Cc6632C0532925a3b8D39c0E6cfC8C74E4");
     const salt: u256 = 0xdeadbeef;
-    
+
     var large_init_code: [1024]u8 = undefined;
     for (&large_init_code, 0..) |*byte, i| {
         byte.* = @intCast(i % 256);

@@ -31,7 +31,6 @@
 //! }
 //! ```
 
-
 /// ExecutionResult holds the result of executing a single EVM opcode
 ///
 /// This struct is returned by every opcode execution function to indicate:

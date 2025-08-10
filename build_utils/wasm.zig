@@ -46,14 +46,14 @@ pub fn buildWasmExecutable(
         .name = config.name,
         .root_module = module,
     });
-    
+
     if (config.entry_disabled) {
         exe.entry = .disabled;
     }
     exe.rdynamic = config.rdynamic;
-    
+
     const install = b.addInstallArtifact(exe, .{ .dest_sub_path = config.dest_sub_path });
-    
+
     return .{ .exe = exe, .install = install };
 }
 
@@ -65,23 +65,23 @@ pub fn addWasmSizeReportStep(
     var cmd = std.ArrayList([]const u8).init(b.allocator);
     cmd.append("sh") catch @panic("OOM");
     cmd.append("-c") catch @panic("OOM");
-    
+
     var script = std.ArrayList(u8).init(b.allocator);
     script.appendSlice("echo '\\n=== WASM Bundle Size Report ===' && ") catch @panic("OOM");
-    
+
     for (wasm_files) |file| {
         const name = std.fs.path.stem(file);
         script.writer().print("echo '{s} WASM build:' && ", .{name}) catch @panic("OOM");
         script.writer().print("ls -lh zig-out/bin/{s} | awk '{{print \"  Size: \" $5}}' && ", .{file}) catch @panic("OOM");
     }
-    
+
     script.appendSlice("echo '=== End Report ===\\n'") catch @panic("OOM");
     cmd.append(script.items) catch @panic("OOM");
-    
+
     const size_step = b.addSystemCommand(cmd.items);
     for (dependencies) |dep| {
         size_step.step.dependOn(dep);
     }
-    
+
     return size_step;
 }

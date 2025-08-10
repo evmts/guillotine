@@ -23,12 +23,12 @@ test "Bitwise: AND basic operations" {
         const bytecode = &[_]u8{
             0x61, 0xF0, 0xF0, // PUSH2 0xF0F0
             0x61, 0xFF, 0x00, // PUSH2 0xFF00
-            0x16,             // AND
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x16, // AND
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1000);
@@ -42,7 +42,7 @@ test "Bitwise: AND basic operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -62,13 +62,13 @@ test "Bitwise: AND basic operations" {
     {
         const bytecode = &[_]u8{
             0x61, 0xFF, 0xFF, // PUSH2 0xFFFF
-            0x60, 0x00,       // PUSH1 0
-            0x16,             // AND
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x60, 0x00, // PUSH1 0
+            0x16, // AND
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1001);
@@ -82,7 +82,7 @@ test "Bitwise: AND basic operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -112,12 +112,12 @@ test "Bitwise: OR basic operations" {
         const bytecode = &[_]u8{
             0x61, 0x00, 0xFF, // PUSH2 0x00FF
             0x61, 0xFF, 0x00, // PUSH2 0xFF00
-            0x17,             // OR
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x17, // OR
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1002);
@@ -131,7 +131,7 @@ test "Bitwise: OR basic operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -163,12 +163,12 @@ test "Bitwise: XOR basic operations" {
         const bytecode = &[_]u8{
             0x61, 0xAB, 0xCD, // PUSH2 0xABCD
             0x61, 0xAB, 0xCD, // PUSH2 0xABCD
-            0x18,             // XOR
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x18, // XOR
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1003);
@@ -182,7 +182,7 @@ test "Bitwise: XOR basic operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -211,12 +211,12 @@ test "Bitwise: NOT operations" {
     {
         const bytecode = &[_]u8{
             0x60, 0x00, // PUSH1 0
-            0x19,       // NOT
+            0x19, // NOT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1004);
@@ -230,7 +230,7 @@ test "Bitwise: NOT operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -259,13 +259,13 @@ test "Bitwise: BYTE operation" {
     {
         const bytecode = &[_]u8{
             0x61, 0xAB, 0xCD, // PUSH2 0xABCD
-            0x60, 0x1F,       // PUSH1 31 (get rightmost byte)
-            0x1A,             // BYTE
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x60, 0x1F, // PUSH1 31 (get rightmost byte)
+            0x1A, // BYTE
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1005);
@@ -279,7 +279,7 @@ test "Bitwise: BYTE operation" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -310,12 +310,12 @@ test "Bitwise: SHL (shift left)" {
         const bytecode = &[_]u8{
             0x60, 0x01, // PUSH1 1
             0x60, 0x04, // PUSH1 4
-            0x1B,       // SHL
+            0x1B, // SHL
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1006);
@@ -329,7 +329,7 @@ test "Bitwise: SHL (shift left)" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -360,12 +360,12 @@ test "Bitwise: SHR (shift right)" {
         const bytecode = &[_]u8{
             0x60, 0x10, // PUSH1 16
             0x60, 0x04, // PUSH1 4
-            0x1C,       // SHR
+            0x1C, // SHR
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1007);
@@ -379,7 +379,7 @@ test "Bitwise: SHR (shift right)" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);

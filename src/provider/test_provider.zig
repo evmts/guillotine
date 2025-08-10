@@ -3,7 +3,7 @@ const Provider = @import("provider.zig").Provider;
 
 test "provider initialization" {
     const allocator = std.testing.allocator;
-    
+
     var provider = try Provider.init(allocator, "https://eth.llamarpc.com");
     defer provider.deinit();
 
@@ -13,7 +13,7 @@ test "provider initialization" {
 
 test "parse hex numbers" {
     const allocator = std.testing.allocator;
-    
+
     var provider = try Provider.init(allocator, "https://eth.llamarpc.com");
     defer provider.deinit();
 

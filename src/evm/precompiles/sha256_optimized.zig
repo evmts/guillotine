@@ -9,13 +9,12 @@ const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 /// SHA256 precompile implementation (Optimized Version)
 ///
 /// This module implements the SHA256 cryptographic hash function precompile at address 0x02.
-/// 
+///
 /// Optimizations implemented:
 /// 1. Direct hash to output buffer (Issue #332) - eliminates intermediate buffers
 /// 2. Uniform interface (Issue #333) - compatible with optimized dispatch
 /// 3. Inline gas calculation - reduces function calls
 /// 4. Hardware acceleration - uses crypto.SHA256_Accel when available
-
 /// Base gas cost for SHA256 precompile
 const SHA256_BASE_COST: u64 = 60;
 
@@ -58,7 +57,7 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 }
 
 /// Execute SHA256 precompile (Optimized Version)
-/// 
+///
 /// Key optimizations:
 /// 1. Direct hash to output buffer - no intermediate buffers (Issue #332)
 /// 2. Uniform interface - accepts chain_rules parameter (Issue #333)
@@ -66,27 +65,27 @@ pub fn calculate_gas_checked(input_size: usize) !u64 {
 /// 4. Hardware acceleration - uses optimized crypto implementation
 pub fn execute(input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput {
     _ = chain_rules; // Not used by SHA256, but required for uniform interface
-    
+
     // Validate output buffer size inline
     if (output.len < SHA256_OUTPUT_SIZE) {
         @branchHint(.cold);
         return PrecompileOutput.failure_result(PrecompileError.BufferTooSmall);
     }
-    
+
     // Calculate gas cost inline
     const word_count = (input.len + 31) / 32;
     const gas_cost = SHA256_BASE_COST + SHA256_WORD_COST * @as(u64, @intCast(word_count));
-    
+
     // Check gas limit
     if (gas_cost > gas_limit) {
         @branchHint(.unlikely);
         return PrecompileOutput.failure_result(PrecompileError.OutOfGas);
     }
-    
+
     // Direct hash to output buffer - no intermediate copy (Issue #332)
     const output_array: *[SHA256_OUTPUT_SIZE]u8 = output[0..SHA256_OUTPUT_SIZE];
     crypto.SHA256_Accel.SHA256_Accel.hash(input, output_array);
-    
+
     return PrecompileOutput.success_result(gas_cost, SHA256_OUTPUT_SIZE);
 }
 
@@ -123,12 +122,12 @@ test "SHA256 optimized precompile" {
             },
         },
     };
-    
+
     const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
-    
+
     for (test_vectors) |tv| {
         var output: [32]u8 = undefined;
-        
+
         const result = execute(tv.input, &output, 100000, chain_rules);
         try testing.expect(result.is_success());
         try testing.expectEqualSlices(u8, &tv.expected, &output);
@@ -141,7 +140,7 @@ test "SHA256 optimized gas calculation" {
     try testing.expectEqual(@as(u64, 72), calculate_gas(32)); // 1 word
     try testing.expectEqual(@as(u64, 84), calculate_gas(64)); // 2 words
     try testing.expectEqual(@as(u64, 96), calculate_gas(96)); // 3 words
-    
+
     // Test partial word boundaries
     try testing.expectEqual(@as(u64, 72), calculate_gas(1)); // 1 byte = 1 word
     try testing.expectEqual(@as(u64, 72), calculate_gas(31)); // 31 bytes = 1 word
@@ -151,18 +150,18 @@ test "SHA256 optimized gas calculation" {
 test "SHA256 optimized edge cases" {
     const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
     var output: [32]u8 = undefined;
-    
+
     // Test insufficient gas
     const result_low_gas = execute("test", &output, 10, chain_rules);
     try testing.expect(result_low_gas.is_failure());
     try testing.expectEqual(PrecompileError.OutOfGas, result_low_gas.get_error().?);
-    
+
     // Test output buffer too small
     var small_output: [10]u8 = undefined;
     const result_small_buf = execute("test", &small_output, 100000, chain_rules);
     try testing.expect(result_small_buf.is_failure());
     try testing.expectEqual(PrecompileError.BufferTooSmall, result_small_buf.get_error().?);
-    
+
     // Test exactly enough gas
     const gas_needed = calculate_gas(4); // "test" is 4 bytes
     const result_exact_gas = execute("test", &output, gas_needed, chain_rules);

@@ -113,7 +113,7 @@ test "E2E: Revert conditions - require and revert opcodes" {
     try testing.expect(conditional_result.status == .Success);
     // Test block interpreter result
     try testing.expect(conditional_result_block.status == .Success);
-    
+
     if (conditional_result.output) |output| {
         var value: u256 = 0;
         for (output) |byte| {
@@ -121,7 +121,7 @@ test "E2E: Revert conditions - require and revert opcodes" {
         }
         try testing.expectEqual(@as(u256, 42), value);
     }
-    
+
     if (conditional_result_block.output) |output| {
         var value: u256 = 0;
         for (output) |byte| {

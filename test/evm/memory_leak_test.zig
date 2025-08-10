@@ -26,11 +26,11 @@ test "Memory leak prevention: EvmState transaction clearing" {
 
         // Each transaction emits logs
         for (0..10) |i| {
-            const topics = [_]u256{tx_num, i};
+            const topics = [_]u256{ tx_num, i };
             const data = try allocator.alloc(u8, 100);
             defer allocator.free(data);
             @memset(data, @as(u8, @intCast(i)));
-            
+
             try state.emit_log(addr, &topics, data);
         }
 
@@ -70,16 +70,16 @@ test "Memory leak stress test: logs allocation pattern" {
         // State operations
         for (0..20) |i| {
             const addr = testAddress(base_addr + i);
-            
+
             // Emit log with allocated data
             const data_size = (i + 1) * 10;
             const data = try allocator.alloc(u8, data_size);
             defer allocator.free(data);
             @memset(data, @as(u8, @intCast(i)));
-            
-            const topics = [_]u256{iter, i};
+
+            const topics = [_]u256{ iter, i };
             try state.emit_log(addr, &topics, data);
-            
+
             // Set transient storage
             try state.set_transient_storage(addr, i, iter * i);
         }

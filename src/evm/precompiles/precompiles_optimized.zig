@@ -34,7 +34,7 @@ const MAX_PRECOMPILES = 10;
 /// Direct function pointers, no union overhead
 const PRECOMPILE_TABLE = blk: {
     var table: [MAX_PRECOMPILES]?PrecompileFn = .{null} ** MAX_PRECOMPILES;
-    
+
     // All precompiles now use uniform interface
     table[0] = &uniform_wrappers.ecrecover_uniform; // ID 1: ECRECOVER
     table[1] = &sha256.execute; // ID 2: SHA256 (optimized)
@@ -46,7 +46,7 @@ const PRECOMPILE_TABLE = blk: {
     table[7] = &ecpairing.execute; // ID 8: ECPAIRING (already has chain_rules)
     table[8] = &uniform_wrappers.blake2f_uniform; // ID 9: BLAKE2F
     table[9] = &uniform_wrappers.kzg_point_evaluation_uniform; // ID 10: POINT_EVALUATION
-    
+
     break :blk table;
 };
 
@@ -82,7 +82,7 @@ pub fn execute_precompile(address: primitives.Address.Address, input: []const u8
     if (comptime no_precompiles) {
         return PrecompileOutput.failure_result(PrecompileError.ExecutionFailed);
     }
-    
+
     // Check if this is a valid precompile address
     if (!is_precompile(address)) {
         @branchHint(.cold);

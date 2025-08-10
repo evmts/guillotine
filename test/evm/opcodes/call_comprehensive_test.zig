@@ -62,12 +62,12 @@ test "CALL: stub behavior always returns 0" {
     // Push valid CALL parameters onto stack
     // Stack order (top to bottom): gas, to, value, argsOffset, argsSize, retOffset, retSize
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value (0 ETH)
+
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value (0 ETH)
     try frame.stack.append(Address.to_u256(target_address)); // to address
     try frame.stack.append(100000); // gas
 
@@ -116,20 +116,20 @@ test "CALL: memory expansion undercharging" {
     defer frame.deinit();
 
     const initial_gas = frame.gas_remaining;
-    
+
     // Push parameters that require large memory expansion
     const large_offset: u256 = 0x100000; // 1MB offset
-    const large_size: u256 = 0x1000;     // 4KB size
-    
+    const large_size: u256 = 0x1000; // 4KB size
+
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
-    try frame.stack.append(large_size);    // retSize (requires memory expansion)
-    try frame.stack.append(large_offset);  // retOffset (1MB offset)
-    try frame.stack.append(0);             // argsSize
-    try frame.stack.append(0);             // argsOffset
-    try frame.stack.append(0);             // value
+
+    try frame.stack.append(large_size); // retSize (requires memory expansion)
+    try frame.stack.append(large_offset); // retOffset (1MB offset)
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(100000);        // gas
+    try frame.stack.append(100000); // gas
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -138,12 +138,12 @@ test "CALL: memory expansion undercharging" {
     _ = try evm.table.execute(0, interpreter, state, 0xF1);
 
     const gas_used = initial_gas - frame.gas_remaining;
-    
+
     // Current implementation severely undercharges for memory expansion
     // This test documents the vulnerability: memory expansion should cost
     // thousands of gas units for 1MB expansion, but currently costs very little
     try testing.expect(gas_used < 1000); // Currently passes, but shouldn't!
-    
+
     // In correct implementation, this should be:
     // try testing.expect(gas_used > 10000); // Memory expansion should be expensive
 }
@@ -183,13 +183,13 @@ test "CALL: value transfer in static context fails" {
     defer frame.deinit();
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
+
     // Try to transfer value in static context
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(1000);  // value (non-zero, should fail in static)
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(1000); // value (non-zero, should fail in static)
     try frame.stack.append(Address.to_u256(target_address)); // to
     try frame.stack.append(100000); // gas
 
@@ -242,12 +242,12 @@ test "CALL: with calldata" {
     }
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
-    try frame.stack.append(32);    // retSize
-    try frame.stack.append(64);    // retOffset (write return data at offset 64)
-    try frame.stack.append(4);     // argsSize (4 bytes of calldata)
-    try frame.stack.append(0);     // argsOffset (calldata at offset 0)
-    try frame.stack.append(0);     // value
+
+    try frame.stack.append(32); // retSize
+    try frame.stack.append(64); // retOffset (write return data at offset 64)
+    try frame.stack.append(4); // argsSize (4 bytes of calldata)
+    try frame.stack.append(0); // argsOffset (calldata at offset 0)
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
     try frame.stack.append(100000); // gas
 
@@ -299,12 +299,12 @@ test "CALL: at maximum depth" {
     frame.depth = 1024;
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
     try frame.stack.append(100000); // gas
 
@@ -354,13 +354,13 @@ test "CALL: gas calculation" {
 
     const initial_gas = frame.gas_remaining;
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
+
     // Test with different gas amounts
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
     try frame.stack.append(50000); // gas limit for call
 
@@ -370,10 +370,10 @@ test "CALL: gas calculation" {
     _ = try evm.table.execute(0, interpreter, state, 0xF1);
 
     const gas_used = initial_gas - frame.gas_remaining;
-    
+
     // Verify some gas was consumed
     try testing.expect(gas_used > 0);
-    
+
     // Result should be 0 (stub)
     const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result);
@@ -413,12 +413,12 @@ test "CALL: to zero address" {
     defer frame.deinit();
 
     // Call to zero address
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
-    try frame.stack.append(0);     // to (zero address)
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
+    try frame.stack.append(0); // to (zero address)
     try frame.stack.append(100000); // gas
 
     const interpreter: Evm.Operation.Interpreter = &evm;
@@ -465,14 +465,14 @@ test "CALL: insufficient gas" {
     defer frame.deinit();
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(50);    // gas (requesting 50)
+    try frame.stack.append(50); // gas (requesting 50)
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
@@ -530,13 +530,13 @@ test "CALL: overlapping memory regions" {
     }
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
+
     // Overlapping regions: args at 0-4, return at 2-6
-    try frame.stack.append(4);     // retSize
-    try frame.stack.append(2);     // retOffset (overlaps with args)
-    try frame.stack.append(4);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+    try frame.stack.append(4); // retSize
+    try frame.stack.append(2); // retOffset (overlaps with args)
+    try frame.stack.append(4); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
     try frame.stack.append(100000); // gas
 
@@ -637,13 +637,13 @@ test "CALL: stack overflow" {
     }
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
+
     // Push CALL parameters (7 items, will cause overflow when pushing result)
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(target_address)); // to
     try frame.stack.append(100000); // gas
 
@@ -690,7 +690,7 @@ test "CALL: max u256 values" {
 
     const max_u256 = std.math.maxInt(u256);
     const target_address = Address.from_hex("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF") catch unreachable;
-    
+
     // Use maximum values for offsets/sizes (should handle overflow)
     try frame.stack.append(max_u256); // retSize
     try frame.stack.append(max_u256); // retOffset
@@ -749,12 +749,12 @@ test "CALL: self-call recursion" {
 
     // Call self
     const self_address = Address.init(contract_addr);
-    
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(self_address)); // to (self)
     try frame.stack.append(100000); // gas
 
@@ -803,12 +803,12 @@ test "CALL: precompiled contract" {
 
     // Call precompiled contract at address 0x01 (ecrecover)
     const precompile_address = Address.from_hex("0x0000000000000000000000000000000000000001") catch unreachable;
-    
-    try frame.stack.append(32);    // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(0);     // value
+
+    try frame.stack.append(32); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(0); // value
     try frame.stack.append(Address.to_u256(precompile_address)); // to (precompile)
     try frame.stack.append(100000); // gas
 
@@ -856,15 +856,15 @@ test "CALL: gas stipend for value transfer" {
     defer frame.deinit();
 
     const target_address = Address.from_hex("0x3333333333333333333333333333333333333333") catch unreachable;
-    
+
     // Call with value transfer (should add 2300 gas stipend in correct implementation)
-    try frame.stack.append(0);     // retSize
-    try frame.stack.append(0);     // retOffset
-    try frame.stack.append(0);     // argsSize
-    try frame.stack.append(0);     // argsOffset
-    try frame.stack.append(1);     // value (non-zero, triggers stipend)
+    try frame.stack.append(0); // retSize
+    try frame.stack.append(0); // retOffset
+    try frame.stack.append(0); // argsSize
+    try frame.stack.append(0); // argsOffset
+    try frame.stack.append(1); // value (non-zero, triggers stipend)
     try frame.stack.append(Address.to_u256(target_address)); // to
-    try frame.stack.append(0);     // gas (0, but should get stipend)
+    try frame.stack.append(0); // gas (0, but should get stipend)
 
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;

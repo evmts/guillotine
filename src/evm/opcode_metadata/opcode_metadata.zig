@@ -126,10 +126,10 @@ pub inline fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationVi
     };
 }
 
-    // Note: JUMP/JUMPI and PUSH opcodes are executed inline by the interpreter
-    // using information produced by analysis. The execute functions for those
-    // entries are intentionally unreachable (invalid) and serve only as metadata
-    // carriers for gas/stack validation.
+// Note: JUMP/JUMPI and PUSH opcodes are executed inline by the interpreter
+// using information produced by analysis. The execute functions for those
+// entries are intentionally unreachable (invalid) and serve only as metadata
+// carriers for gas/stack validation.
 
 /// Validate and fix the opcode jt.
 ///
@@ -399,17 +399,17 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         const include_op = switch (spec.opcode) {
             0x3d => flags.eip211_returndatasize, // RETURNDATASIZE
             0x3e => flags.eip211_returndatacopy, // RETURNDATACOPY
-            0xfa => flags.eip214_staticcall,     // STATICCALL
-            0xf5 => flags.eip1014_create2,       // CREATE2
-            0x3f => flags.eip1052_extcodehash,   // EXTCODEHASH
-            0x46 => flags.eip1344_chainid,       // CHAINID
-            0x48 => flags.eip3198_basefee,       // BASEFEE
+            0xfa => flags.eip214_staticcall, // STATICCALL
+            0xf5 => flags.eip1014_create2, // CREATE2
+            0x3f => flags.eip1052_extcodehash, // EXTCODEHASH
+            0x46 => flags.eip1344_chainid, // CHAINID
+            0x48 => flags.eip3198_basefee, // BASEFEE
             0x5c => flags.eip1153_transient_storage, // TLOAD
             0x5d => flags.eip1153_transient_storage, // TSTORE
-            0x5e => flags.eip5656_mcopy,         // MCOPY
-            0x49 => flags.eip4844_blob_tx,       // BLOBHASH
-            0x4a => flags.eip7516_blobbasefee,   // BLOBBASEFEE
-            0x5f => flags.eip3855_push0,         // PUSH0
+            0x5e => flags.eip5656_mcopy, // MCOPY
+            0x49 => flags.eip4844_blob_tx, // BLOBHASH
+            0x4a => flags.eip7516_blobbasefee, // BLOBBASEFEE
+            0x5f => flags.eip3855_push0, // PUSH0
             else => true,
         };
 
@@ -446,9 +446,9 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
 
     // DUP1..DUP16
     const dup_functions = [_]ExecutionFunc{
-        execution.stack.op_dup1, execution.stack.op_dup2, execution.stack.op_dup3, execution.stack.op_dup4,
-        execution.stack.op_dup5, execution.stack.op_dup6, execution.stack.op_dup7, execution.stack.op_dup8,
-        execution.stack.op_dup9, execution.stack.op_dup10, execution.stack.op_dup11, execution.stack.op_dup12,
+        execution.stack.op_dup1,  execution.stack.op_dup2,  execution.stack.op_dup3,  execution.stack.op_dup4,
+        execution.stack.op_dup5,  execution.stack.op_dup6,  execution.stack.op_dup7,  execution.stack.op_dup8,
+        execution.stack.op_dup9,  execution.stack.op_dup10, execution.stack.op_dup11, execution.stack.op_dup12,
         execution.stack.op_dup13, execution.stack.op_dup14, execution.stack.op_dup15, execution.stack.op_dup16,
     };
     i = 0;
@@ -463,9 +463,9 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
 
     // SWAP1..SWAP16
     const swap_functions = [_]ExecutionFunc{
-        execution.stack.op_swap1, execution.stack.op_swap2, execution.stack.op_swap3, execution.stack.op_swap4,
-        execution.stack.op_swap5, execution.stack.op_swap6, execution.stack.op_swap7, execution.stack.op_swap8,
-        execution.stack.op_swap9, execution.stack.op_swap10, execution.stack.op_swap11, execution.stack.op_swap12,
+        execution.stack.op_swap1,  execution.stack.op_swap2,  execution.stack.op_swap3,  execution.stack.op_swap4,
+        execution.stack.op_swap5,  execution.stack.op_swap6,  execution.stack.op_swap7,  execution.stack.op_swap8,
+        execution.stack.op_swap9,  execution.stack.op_swap10, execution.stack.op_swap11, execution.stack.op_swap12,
         execution.stack.op_swap13, execution.stack.op_swap14, execution.stack.op_swap15, execution.stack.op_swap16,
     };
     i = 0;

@@ -10,15 +10,15 @@ const ExecutionError = @import("../execution/execution_error.zig");
 pub const InterpretResult = struct {
     /// Basic execution result (status, gas, output)
     run_result: RunResult,
-    
+
     /// Access list tracking warm/cold address and storage access (EIP-2929)
     /// Always present - manages gas cost optimization
     access_list: AccessList,
-    
+
     /// Self destruct tracking for contracts marked for destruction
     /// Optional - only present if hardfork supports SELFDESTRUCT
     self_destruct: ?SelfDestruct,
-    
+
     /// Allocator used for all components (for recursive cleanup)
     allocator: std.mem.Allocator,
 
@@ -46,12 +46,12 @@ pub const InterpretResult = struct {
     pub fn deinit(self: *InterpretResult) void {
         // Clean up access list
         self.access_list.deinit();
-        
+
         // Clean up self destruct if present
         if (self.self_destruct) |*sd| {
             sd.deinit();
         }
-        
+
         // Note: run_result.output is cleaned up by caller if needed
         // since it's allocated with the main allocator
     }
@@ -89,15 +89,15 @@ pub const InterpretResult = struct {
 
 test "InterpretResult - initialization and cleanup" {
     const allocator = std.testing.allocator;
-    
+
     // Create components
     const access_list = AccessList.init(allocator);
     const self_destruct = SelfDestruct.init(allocator);
-    
+
     // Initialize result
     var result = InterpretResult.init(allocator, 1000, 500, .Success, null, null, access_list, self_destruct);
     defer result.deinit();
-    
+
     // Verify initialization
     try std.testing.expectEqual(@as(u64, 500), result.run_result.gas_left);
     try std.testing.expectEqual(@as(u64, 500), result.run_result.gas_used);
@@ -107,14 +107,14 @@ test "InterpretResult - initialization and cleanup" {
 
 test "InterpretResult - without selfdestruct support" {
     const allocator = std.testing.allocator;
-    
+
     // Create components without self destruct
     const access_list = AccessList.init(allocator);
-    
+
     // Initialize result
     var result = InterpretResult.init(allocator, 1000, 500, .Success, null, null, access_list, null);
     defer result.deinit();
-    
+
     // Verify no selfdestruct support
     try std.testing.expect(!result.has_selfdestruct_support());
     try std.testing.expect(!result.has_destructions());
@@ -124,24 +124,24 @@ test "InterpretResult - without selfdestruct support" {
 test "InterpretResult - destruction tracking" {
     const allocator = std.testing.allocator;
     const primitives = @import("primitives");
-    
+
     // Create components
     const access_list = AccessList.init(allocator);
     const self_destruct = SelfDestruct.init(allocator);
-    
+
     // Initialize result
     var result = InterpretResult.init(allocator, 1000, 500, .Success, null, null, access_list, self_destruct);
     defer result.deinit();
-    
+
     // Initially no destructions
     try std.testing.expect(!result.has_destructions());
     try std.testing.expectEqual(@as(u32, 0), result.destruction_count());
-    
+
     // Mark a contract for destruction
     const contract_addr = primitives.Address.ZERO_ADDRESS;
     const recipient_addr = [_]u8{0x01} ++ [_]u8{0} ** 19;
     try result.self_destruct.?.mark_for_destruction(contract_addr, recipient_addr);
-    
+
     // Should now have destructions
     try std.testing.expect(result.has_destructions());
     try std.testing.expectEqual(@as(u32, 1), result.destruction_count());

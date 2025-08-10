@@ -384,7 +384,7 @@ pub fn Uint(comptime bits: usize, comptime limbs: usize) type {
                         break;
                     }
 
-                    // Use optimized multiplication  
+                    // Use optimized multiplication
                     const mul_result = mul64x64(self.limbs[i], rhs.limbs[j]);
 
                     // Add low part + carry to current position
@@ -3868,7 +3868,7 @@ test "wrapping_mul" {
     try testing.expectEqual(ab_native, ab.to_u256().?);
 
     // Additional test cases for edge cases
-    
+
     // Test with max values that overflow
     const max = U256.MAX;
     const max_native = max.to_u256().?;

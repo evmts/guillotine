@@ -11,7 +11,7 @@ const print = std.debug.print;
 /// ```zig
 /// var orchestrator = try Orchestrator.init(allocator, "zig", 10);
 /// defer orchestrator.deinit();
-/// 
+///
 /// try orchestrator.discoverTestCases();
 /// try orchestrator.runBenchmarks();
 /// orchestrator.printSummary();
@@ -86,9 +86,9 @@ pub fn discoverTestCases(self: *Orchestrator) !void {
     // Get the absolute path to cases directory
     // This works whether we're in zig-out/bin or running from project root
     const cases_path = "/Users/williamcory/Guillotine/bench/official/cases";
-    
+
     const cases_dir = try std.fs.openDirAbsolute(cases_path, .{ .iterate = true });
-    
+
     var test_cases = std.ArrayList(TestCase).init(self.allocator);
     defer test_cases.deinit();
 
@@ -98,7 +98,7 @@ pub fn discoverTestCases(self: *Orchestrator) !void {
 
         const bytecode_path = try std.fs.path.join(self.allocator, &[_][]const u8{ cases_path, entry.name, "bytecode.txt" });
         errdefer self.allocator.free(bytecode_path);
-        
+
         const calldata_path = try std.fs.path.join(self.allocator, &[_][]const u8{ cases_path, entry.name, "calldata.txt" });
         errdefer self.allocator.free(calldata_path);
 
@@ -111,7 +111,7 @@ pub fn discoverTestCases(self: *Orchestrator) !void {
             self.allocator.free(calldata_path);
             continue;
         }
-        
+
         if (std.fs.cwd().openFile(calldata_path, .{})) |file| {
             file.close();
         } else |err| {
@@ -123,14 +123,8 @@ pub fn discoverTestCases(self: *Orchestrator) !void {
 
         // Filter to only working benchmarks unless --all flag is used
         if (!self.include_all_cases) {
-            const working_benchmarks = [_][]const u8{
-                "erc20-approval-transfer",
-                "erc20-mint", 
-                "erc20-transfer",
-                "ten-thousand-hashes",
-                "snailtracer"
-            };
-            
+            const working_benchmarks = [_][]const u8{ "erc20-approval-transfer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes", "snailtracer" };
+
             var is_working = false;
             for (working_benchmarks) |working_name| {
                 if (std.mem.eql(u8, entry.name, working_name)) {
@@ -138,7 +132,7 @@ pub fn discoverTestCases(self: *Orchestrator) !void {
                     break;
                 }
             }
-            
+
             if (!is_working) {
                 self.allocator.free(bytecode_path);
                 self.allocator.free(calldata_path);
@@ -168,15 +162,15 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     const is_js = std.mem.eql(u8, self.evm_name, "ethereumjs");
     const is_snailtracer = std.mem.eql(u8, test_case.name, "snailtracer");
     const is_js_snailtracer = is_js and is_snailtracer;
-    
+
     const runs_to_use = if (is_js_snailtracer) self.js_runs else self.num_runs;
-    
+
     // Apply internal runs logic:
     // 1. If JS snailtracer -> use js_snailtracer_internal_runs
-    // 2. If snailtracer (any EVM) -> use snailtracer_internal_runs  
+    // 2. If snailtracer (any EVM) -> use snailtracer_internal_runs
     // 3. If JS (any test) -> use js_internal_runs
     // 4. Otherwise -> use internal_runs
-    const internal_runs_to_use = if (is_js_snailtracer) 
+    const internal_runs_to_use = if (is_js_snailtracer)
         self.js_snailtracer_internal_runs
     else if (is_snailtracer)
         self.snailtracer_internal_runs
@@ -187,15 +181,15 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     // Read calldata
     const calldata_file = try std.fs.cwd().openFile(test_case.calldata_path, .{});
     defer calldata_file.close();
-    
+
     const calldata = try calldata_file.readToEndAlloc(self.allocator, 1024 * 1024); // 1MB max
     defer self.allocator.free(calldata);
-    
+
     // Trim whitespace
     const trimmed_calldata = std.mem.trim(u8, calldata, " \t\n\r");
-    
+
     // Build the runner path
-    const runner_path = if (std.mem.eql(u8, self.evm_name, "zig")) 
+    const runner_path = if (std.mem.eql(u8, self.evm_name, "zig"))
         "/Users/williamcory/Guillotine/zig-out/bin/evm-runner"
     else if (std.mem.eql(u8, self.evm_name, "ethereumjs"))
         "/Users/williamcory/Guillotine/bench/official/evms/ethereumjs/runner.js"
@@ -206,31 +200,29 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     else blk: {
         const runner_name = try std.fmt.allocPrint(self.allocator, "{s}-runner", .{self.evm_name});
         defer self.allocator.free(runner_name);
-        const path = try std.fmt.allocPrint(self.allocator, "/Users/williamcory/Guillotine/bench/official/evms/{s}/target/release/{s}", .{self.evm_name, runner_name});
+        const path = try std.fmt.allocPrint(self.allocator, "/Users/williamcory/Guillotine/bench/official/evms/{s}/target/release/{s}", .{ self.evm_name, runner_name });
         break :blk path;
     };
     defer if (!std.mem.eql(u8, self.evm_name, "zig") and !std.mem.eql(u8, self.evm_name, "ethereumjs") and !std.mem.eql(u8, self.evm_name, "geth") and !std.mem.eql(u8, self.evm_name, "evmone")) self.allocator.free(runner_path);
-    
+
     const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{runs_to_use});
     defer self.allocator.free(num_runs_str);
-    
+
     // Build hyperfine command
     const next_flag = if (self.use_next and std.mem.eql(u8, self.evm_name, "zig")) " --next" else "";
-    const hyperfine_cmd = try std.fmt.allocPrint(
-        self.allocator,
-        "{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}",
-        .{ runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag }
-    );
+    const hyperfine_cmd = try std.fmt.allocPrint(self.allocator, "{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}", .{ runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag });
     defer self.allocator.free(hyperfine_cmd);
 
     const result = try std.process.Child.run(.{
         .allocator = self.allocator,
         .argv = &[_][]const u8{
             "hyperfine",
-            "--runs", num_runs_str,
-            "--warmup", "3",
+            "--runs",
+            num_runs_str,
+            "--warmup",
+            "3",
             "--shell=none",
-            "--export-json", "-",  // Export to stdout
+            "--export-json", "-", // Export to stdout
             hyperfine_cmd,
         },
     });
@@ -256,13 +248,13 @@ const TimeUnit = enum {
 const FormattedTime = struct {
     value: f64,
     unit: TimeUnit,
-    
+
     pub fn format(self: FormattedTime, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
         const unit_str = switch (self.unit) {
             .microseconds => "μs",
-            .milliseconds => "ms", 
+            .milliseconds => "ms",
             .seconds => "s",
         };
         try writer.print("{d:.2} {s}", .{ self.value, unit_str });
@@ -286,13 +278,13 @@ fn formatTimeWithUnit(time_ms: f64) FormattedTime {
 fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []const u8, runs: u32, internal_runs: u32) !void {
     // Simple JSON parsing - look for the key values we need
     // This is a basic parser that extracts the values we need
-    
+
     var mean: f64 = 0;
     var min: f64 = 0;
     var max: f64 = 0;
     var median: f64 = 0;
     var stddev: f64 = 0;
-    
+
     // Find "mean": value
     if (std.mem.indexOf(u8, json_data, "\"mean\":")) |mean_pos| {
         const start = mean_pos + 8;
@@ -301,7 +293,7 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
             mean = try std.fmt.parseFloat(f64, mean_str);
         }
     }
-    
+
     // Find "min": value
     if (std.mem.indexOf(u8, json_data, "\"min\":")) |min_pos| {
         const start = min_pos + 7;
@@ -310,7 +302,7 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
             min = try std.fmt.parseFloat(f64, min_str);
         }
     }
-    
+
     // Find "max": value
     if (std.mem.indexOf(u8, json_data, "\"max\":")) |max_pos| {
         const start = max_pos + 7;
@@ -319,7 +311,7 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
             max = try std.fmt.parseFloat(f64, max_str);
         }
     }
-    
+
     // Find "median": value
     if (std.mem.indexOf(u8, json_data, "\"median\":")) |median_pos| {
         const start = median_pos + 10;
@@ -328,7 +320,7 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
             median = try std.fmt.parseFloat(f64, median_str);
         }
     }
-    
+
     // Find "stddev": value
     if (std.mem.indexOf(u8, json_data, "\"stddev\":")) |stddev_pos| {
         const start = stddev_pos + 10;
@@ -344,7 +336,7 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
             }
         }
     }
-    
+
     // Convert to milliseconds and normalize per internal run
     const result = BenchmarkResult{
         .test_case = try self.allocator.dupe(u8, test_name),
@@ -356,9 +348,9 @@ fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []c
         .runs = runs,
         .internal_runs = internal_runs,
     };
-    
+
     try self.results.append(result);
-    
+
     const mean_formatted = formatTimeWithUnit(result.mean_ms);
     const min_formatted = formatTimeWithUnit(result.min_ms);
     const max_formatted = formatTimeWithUnit(result.max_ms);
@@ -373,7 +365,7 @@ pub fn printSummary(self: *Orchestrator) void {
 
     print("{s:<30} {s:>15} {s:>15} {s:>15}\n", .{ "Test Case", "Mean (per run)", "Min (per run)", "Max (per run)" });
     print("{s:-<80}\n", .{""});
-    
+
     for (self.results.items) |result| {
         const mean_formatted = formatTimeWithUnit(result.mean_ms);
         const min_formatted = formatTimeWithUnit(result.min_ms);
@@ -393,10 +385,10 @@ pub fn exportResults(self: *Orchestrator, format: []const u8) !void {
 fn exportJSON(self: *Orchestrator) !void {
     const file = try std.fs.cwd().createFile("results.json", .{});
     defer file.close();
-    
+
     try file.writeAll("{\n");
     try file.writeAll("  \"benchmarks\": [\n");
-    
+
     for (self.test_cases, 0..) |tc, i| {
         try file.writer().print("    {{\n", .{});
         try file.writer().print("      \"name\": \"{s}\",\n", .{tc.name});
@@ -404,10 +396,10 @@ fn exportJSON(self: *Orchestrator) !void {
         try file.writer().print("      \"runs\": {}\n", .{self.num_runs});
         try file.writer().print("    }}{s}\n", .{if (i < self.test_cases.len - 1) "," else ""});
     }
-    
+
     try file.writeAll("  ]\n");
     try file.writeAll("}\n");
-    
+
     print("Results exported to results.json\n", .{});
 }
 
@@ -415,20 +407,20 @@ fn exportMarkdown(self: *Orchestrator) !void {
     // Create the file in bench/official/results.md
     var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const exe_path = try std.fs.selfExeDirPath(&exe_dir_buf);
-    
+
     const project_root = try std.fs.path.resolve(self.allocator, &[_][]const u8{ exe_path, "..", ".." });
     defer self.allocator.free(project_root);
-    
+
     const results_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "results.md" });
     defer self.allocator.free(results_path);
-    
+
     const file = try std.fs.createFileAbsolute(results_path, .{});
     defer file.close();
-    
+
     // Get current timestamp
     const timestamp = std.time.timestamp();
     const seconds = @as(u64, @intCast(timestamp));
-    
+
     // Write header
     try file.writer().print("# Guillotine EVM Benchmark Results\n\n", .{});
     try file.writer().print("## Summary\n\n", .{});
@@ -436,19 +428,19 @@ fn exportMarkdown(self: *Orchestrator) !void {
     try file.writer().print("**Test Runs per Case**: {}\n", .{self.num_runs});
     try file.writer().print("**Total Test Cases**: {}\n", .{self.results.items.len});
     try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
-    
+
     // Write performance table
     try file.writer().print("## Performance Results (Per Run)\n\n", .{});
     try file.writeAll("| Test Case | Mean | Median | Min | Max | Std Dev | Internal Runs |\n");
     try file.writeAll("|-----------|------|--------|-----|-----|---------|---------------|\n");
-    
+
     for (self.results.items) |result| {
         const mean_formatted = formatTimeWithUnit(result.mean_ms);
-        const median_formatted = formatTimeWithUnit(result.median_ms);  
+        const median_formatted = formatTimeWithUnit(result.median_ms);
         const min_formatted = formatTimeWithUnit(result.min_ms);
         const max_formatted = formatTimeWithUnit(result.max_ms);
         const stddev_formatted = formatTimeWithUnit(result.std_dev_ms);
-        
+
         try file.writer().print("| {s:<25} | {s:>10} | {s:>10} | {s:>9} | {s:>9} | {s:>11} | {d:>13} |\n", .{
             result.test_case,
             mean_formatted,
@@ -459,24 +451,24 @@ fn exportMarkdown(self: *Orchestrator) !void {
             result.internal_runs,
         });
     }
-    
+
     // Add test case descriptions
     try file.writer().print("\n## Test Case Descriptions\n\n", .{});
     try file.writeAll("### ERC20 Operations\n\n");
     try file.writeAll("- **erc20-transfer**: Standard ERC20 token transfer operation\n");
     try file.writeAll("- **erc20-mint**: ERC20 token minting operation\n");
     try file.writeAll("- **erc20-approval-transfer**: ERC20 approval followed by transferFrom\n\n");
-    
+
     try file.writeAll("### Computational Benchmarks\n\n");
     try file.writeAll("- **ten-thousand-hashes**: Performs 10,000 keccak256 hash operations\n");
     try file.writeAll("- **snailtracer**: Complex computational benchmark with intensive operations\n\n");
-    
+
     // Add environment information
     try file.writer().print("## Environment\n\n", .{});
     try file.writer().print("- **Benchmark Tool**: hyperfine\n", .{});
     try file.writer().print("- **Warmup Runs**: 3\n", .{});
     try file.writer().print("- **Statistical Confidence**: Based on {} runs per test case\n\n", .{self.num_runs});
-    
+
     // Add notes
     try file.writeAll("## Notes\n\n");
     try file.writeAll("- **All times are normalized per individual execution run**\n");
@@ -485,9 +477,9 @@ fn exportMarkdown(self: *Orchestrator) !void {
     try file.writeAll("- Standard deviation indicates consistency (lower is more consistent)\n");
     try file.writeAll("- Each hyperfine run executes the contract multiple times internally (see Internal Runs column)\n");
     try file.writeAll("- These benchmarks measure the full execution time including contract deployment\n\n");
-    
+
     try file.writeAll("---\n\n");
     try file.writeAll("*Generated by Guillotine Benchmark Orchestrator*\n");
-    
+
     print("Results exported to bench/official/results.md\n", .{});
 }

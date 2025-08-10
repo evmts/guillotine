@@ -416,7 +416,7 @@ test "Integration: Bitfield manipulation" {
     // We want to check if result > 0
     // With corrected GT: GT computes (top > second)
     // So we need stack [0, and_result] for and_result > 0
-    const and_result = try frame.stack.pop(); // Get AND result  
+    const and_result = try frame.stack.pop(); // Get AND result
     try frame.stack.append(0); // Push 0 (second)
     try frame.stack.append(and_result); // Push AND result (top), Stack: [0, and_result]
     _ = try vm.table.execute(0, interpreter, state, 0x11); // GT: computes and_result > 0
@@ -698,7 +698,7 @@ test "Integration: Multi-sig wallet threshold check" {
     // We want to check if confirmations >= required
     // This is equivalent to NOT(confirmations < required)
     try frame.stack.append(required_val); // Push required
-    try frame.stack.append(confirmations_val); // Push confirmations, Stack: [required, confirmations]  
+    try frame.stack.append(confirmations_val); // Push confirmations, Stack: [required, confirmations]
     _ = try vm.table.execute(0, interpreter, state, 0x10); // LT: confirmations < required
     _ = try vm.table.execute(0, interpreter, state, 0x15); // ISZERO: NOT(confirmations < required) = confirmations >= required
 
@@ -733,7 +733,7 @@ test "Integration: Multi-sig wallet threshold check" {
     // Compare: confirmations >= required with corrected stack order
     // Stack is [confirmations, required], LT computes required < confirmations
     try frame.stack.append(required); // Push required
-    try frame.stack.append(confirmations); // Push confirmations, Stack: [required, confirmations]  
+    try frame.stack.append(confirmations); // Push confirmations, Stack: [required, confirmations]
     _ = try vm.table.execute(0, interpreter, state, 0x10); // LT: confirmations < required
     _ = try vm.table.execute(0, interpreter, state, 0x15); // ISZERO: NOT(confirmations < required) = confirmations >= required
 

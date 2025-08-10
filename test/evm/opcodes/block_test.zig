@@ -44,12 +44,12 @@ test "Block: BLOCKHASH operations" {
     {
         const bytecode = &[_]u8{
             0x61, 0x03, 0xE7, // PUSH2 999 (block number - 1 block ago)
-            0x40,             // BLOCKHASH
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x40, // BLOCKHASH
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1000);
@@ -63,7 +63,7 @@ test "Block: BLOCKHASH operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -87,12 +87,12 @@ test "Block: BLOCKHASH operations" {
     {
         const bytecode = &[_]u8{
             0x61, 0x02, 0xBC, // PUSH2 700 (more than 256 blocks ago)
-            0x40,             // BLOCKHASH
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x40, // BLOCKHASH
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1001);
@@ -106,7 +106,7 @@ test "Block: BLOCKHASH operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -124,12 +124,12 @@ test "Block: BLOCKHASH operations" {
     {
         const bytecode = &[_]u8{
             0x61, 0x03, 0xE9, // PUSH2 1001 (future block)
-            0x40,             // BLOCKHASH
-            0x60, 0x00,       // PUSH1 0
-            0x52,             // MSTORE
-            0x60, 0x20,       // PUSH1 32
-            0x60, 0x00,       // PUSH1 0
-            0xF3,             // RETURN
+            0x40, // BLOCKHASH
+            0x60, 0x00, // PUSH1 0
+            0x52, // MSTORE
+            0x60, 0x20, // PUSH1 32
+            0x60, 0x00, // PUSH1 0
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1002);
@@ -143,7 +143,7 @@ test "Block: BLOCKHASH operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -187,12 +187,12 @@ test "Block: COINBASE operations" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x41,       // COINBASE
+        0x41, // COINBASE
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1003);
@@ -206,7 +206,7 @@ test "Block: COINBASE operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -251,12 +251,12 @@ test "Block: TIMESTAMP operations" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x42,       // TIMESTAMP
+        0x42, // TIMESTAMP
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1004);
@@ -270,7 +270,7 @@ test "Block: TIMESTAMP operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -314,12 +314,12 @@ test "Block: NUMBER operations" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x43,       // NUMBER
+        0x43, // NUMBER
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1005);
@@ -333,7 +333,7 @@ test "Block: NUMBER operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -377,12 +377,12 @@ test "Block: DIFFICULTY/PREVRANDAO operations" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x44,       // DIFFICULTY
+        0x44, // DIFFICULTY
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1006);
@@ -396,7 +396,7 @@ test "Block: DIFFICULTY/PREVRANDAO operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -440,12 +440,12 @@ test "Block: GASLIMIT operations" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x45,       // GASLIMIT
+        0x45, // GASLIMIT
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1007);
@@ -459,7 +459,7 @@ test "Block: GASLIMIT operations" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -503,12 +503,12 @@ test "Block: BASEFEE operations (London)" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x48,       // BASEFEE
+        0x48, // BASEFEE
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1008);
@@ -522,7 +522,7 @@ test "Block: BASEFEE operations (London)" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -574,12 +574,12 @@ test "Block: BLOBHASH operations (Cancun)" {
     {
         const bytecode = &[_]u8{
             0x60, 0x00, // PUSH1 0
-            0x49,       // BLOBHASH
+            0x49, // BLOBHASH
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1009);
@@ -593,7 +593,7 @@ test "Block: BLOBHASH operations (Cancun)" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -612,12 +612,12 @@ test "Block: BLOBHASH operations (Cancun)" {
     {
         const bytecode = &[_]u8{
             0x60, 0x01, // PUSH1 1
-            0x49,       // BLOBHASH
+            0x49, // BLOBHASH
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x100A);
@@ -631,7 +631,7 @@ test "Block: BLOBHASH operations (Cancun)" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -650,12 +650,12 @@ test "Block: BLOBHASH operations (Cancun)" {
     {
         const bytecode = &[_]u8{
             0x60, 0x03, // PUSH1 3 (out of bounds)
-            0x49,       // BLOBHASH
+            0x49, // BLOBHASH
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x100B);
@@ -669,7 +669,7 @@ test "Block: BLOBHASH operations (Cancun)" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -713,12 +713,12 @@ test "Block: BLOBBASEFEE operations (Cancun)" {
     vm.set_context(context);
 
     const bytecode = &[_]u8{
-        0x4A,       // BLOBBASEFEE
+        0x4A, // BLOBBASEFEE
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x100C);
@@ -732,7 +732,7 @@ test "Block: BLOBBASEFEE operations (Cancun)" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);

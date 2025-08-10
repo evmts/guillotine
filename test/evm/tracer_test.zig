@@ -7,7 +7,7 @@ const Address = @import("evm").primitives.Address;
 // Test that we can create a tracer and capture execution traces
 test "tracer captures opcode execution" {
     const allocator = testing.allocator;
-    
+
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
@@ -15,14 +15,14 @@ test "tracer captures opcode execution" {
     const config = Evm.EvmConfig.init(.CANCUN);
     const EvmType = Evm.Evm(config);
     var builder = try EvmType.init(allocator, db_interface, null, 0, false, null);
-    
+
     // Create a tracer that writes to a buffer
     var trace_buffer = std.ArrayList(u8).init(allocator);
     defer trace_buffer.deinit();
-    
+
     // Enable tracing on the builder
     _ = builder.withTracer(trace_buffer.writer().any());
-    
+
     var vm = try builder.build();
     defer vm.deinit();
 
@@ -31,10 +31,10 @@ test "tracer captures opcode execution" {
 
     // Simple bytecode: PUSH1 0x05, PUSH1 0x03, ADD, STOP
     const bytecode = &[_]u8{
-        0x60, 0x05,  // PUSH1 0x05
-        0x60, 0x03,  // PUSH1 0x03
-        0x01,        // ADD
-        0x00,        // STOP
+        0x60, 0x05, // PUSH1 0x05
+        0x60, 0x03, // PUSH1 0x03
+        0x01, // ADD
+        0x00, // STOP
     };
 
     // Deploy the contract
@@ -45,30 +45,30 @@ test "tracer captures opcode execution" {
 
     // Parse the trace output
     const trace_output = trace_buffer.items;
-    
+
     // Verify we have trace entries
     try testing.expect(trace_output.len > 0);
-    
+
     // Debug print can be removed now that JSON is working
     // std.debug.print("\nTrace output:\n{s}\n", .{trace_output});
-    
+
     // Parse JSON lines and verify structure
     var line_it = std.mem.tokenizeScalar(u8, trace_output, '\n');
     var found_push1 = false;
     var found_add = false;
-    
+
     while (line_it.next()) |line| {
         const parsed = try std.json.parseFromSlice(TraceEntry, allocator, line, .{});
         defer parsed.deinit();
-        
+
         const entry = parsed.value;
-        
+
         // Check for PUSH1 at pc=0
         if (entry.pc == 0 and entry.op == 0x60) {
             found_push1 = true;
             try testing.expectEqual(@as(usize, 0), entry.stack.len);
         }
-        
+
         // Check for ADD at pc=4
         if (entry.pc == 4 and entry.op == 0x01) {
             found_add = true;
@@ -77,7 +77,7 @@ test "tracer captures opcode execution" {
             try testing.expectEqualStrings("0x3", entry.stack[1]);
         }
     }
-    
+
     try testing.expect(found_push1);
     try testing.expect(found_add);
 }
@@ -85,7 +85,7 @@ test "tracer captures opcode execution" {
 // Test trace format matches REVM's format
 test "trace format matches REVM JSON structure" {
     const allocator = testing.allocator;
-    
+
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
@@ -93,12 +93,12 @@ test "trace format matches REVM JSON structure" {
     const config = Evm.EvmConfig.init(.CANCUN);
     const EvmType = Evm.Evm(config);
     var builder = try EvmType.init(allocator, db_interface, null, 0, false, null);
-    
+
     var trace_buffer = std.ArrayList(u8).init(allocator);
     defer trace_buffer.deinit();
-    
+
     _ = builder.withTracer(trace_buffer.writer().any());
-    
+
     var vm = try builder.build();
     defer vm.deinit();
 
@@ -114,12 +114,12 @@ test "trace format matches REVM JSON structure" {
     // Parse first trace line
     var line_it = std.mem.tokenizeScalar(u8, trace_buffer.items, '\n');
     const first_line = line_it.next().?;
-    
+
     const parsed = try std.json.parseFromSlice(TraceEntry, allocator, first_line, .{});
     defer parsed.deinit();
-    
+
     const entry = parsed.value;
-    
+
     // Verify all required fields are present
     try testing.expectEqual(@as(usize, 0), entry.pc);
     try testing.expectEqual(@as(u8, 0x00), entry.op);
@@ -136,7 +136,7 @@ const TraceEntry = struct {
     op: u8,
     gas: ?[]const u8 = null,
     gasCost: ?[]const u8 = null,
-    stack: []const []const u8,  // Stack values as hex strings
+    stack: []const []const u8, // Stack values as hex strings
     depth: ?u32 = null,
     returnData: ?[]const u8 = null,
     refund: ?[]const u8 = null,

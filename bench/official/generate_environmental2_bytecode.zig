@@ -37,7 +37,7 @@ pub fn main() !void {
     try bytecode.append(0x57); // JUMPI
 
     // Loop body - Environmental operations part 2
-    
+
     // CALLDATASIZE
     try bytecode.append(0x36); // CALLDATASIZE
     try bytecode.append(0x50); // POP
@@ -92,7 +92,7 @@ pub fn main() !void {
 
     // Calculate runtime code size
     const runtime_size = bytecode.items.len - runtime_start;
-    
+
     // Create final bytecode with constructor
     var final_bytecode = std.ArrayList(u8).init(allocator);
     defer final_bytecode.deinit();

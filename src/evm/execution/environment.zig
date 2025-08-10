@@ -64,7 +64,7 @@ pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
     // TODO: Need tx_origin field in ExecutionContext
     // const origin = to_u256(frame.tx_origin);
     // try frame.stack.append(origin);
-    
+
     // Placeholder implementation
     try frame.stack.append(0);
 }
@@ -78,7 +78,7 @@ pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
     // TODO: Need caller field in ExecutionContext
     // const caller = to_u256(frame.caller);
     // try frame.stack.append(caller);
-    
+
     // Placeholder implementation
     try frame.stack.append(0);
 }
@@ -91,7 +91,7 @@ pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need call_value field in ExecutionContext
     // try frame.stack.append(frame.call_value);
-    
+
     // Placeholder implementation
     try frame.stack.append(0);
 }
@@ -104,7 +104,7 @@ pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need gas_price field in ExecutionContext
     // try frame.stack.append(frame.gas_price);
-    
+
     // Placeholder implementation
     try frame.stack.append(0);
 }
@@ -382,4 +382,3 @@ pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
 
     try frame.stack.append(0);
 }
-

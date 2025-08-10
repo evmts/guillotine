@@ -5,16 +5,16 @@ const EipFlags = @import("eip_flags.zig").EipFlags;
 pub const GasCostOverrides = struct {
     // L1 data fee for optimistic rollups
     l1_data_fee: bool = false,
-    
+
     // L2-specific gas costs
     l2_specific_costs: bool = false,
-    
+
     // Custom precompile costs
     custom_precompile_costs: ?std.AutoHashMap(u8, u64) = null,
-    
+
     // Storage cost multipliers
     storage_cost_multiplier: u16 = 100, // 100 = 1.0x, 150 = 1.5x
-    
+
     // Memory expansion cost adjustments
     memory_cost_divisor: u64 = 512, // Standard is 512
 };
@@ -23,20 +23,20 @@ pub const GasCostOverrides = struct {
 pub const EipOverrides = struct {
     /// Force enable specific EIPs regardless of hardfork
     force_enable: []const u16 = &.{},
-    
-    /// Force disable specific EIPs regardless of hardfork  
+
+    /// Force disable specific EIPs regardless of hardfork
     force_disable: []const u16 = &.{},
-    
+
     /// Custom gas costs
     custom_gas_costs: ?GasCostOverrides = null,
-    
+
     /// Chain-specific behavior flags
     chain_behavior: ChainBehavior = .{},
-    
+
     // Predefined L2 configurations
     pub const OPTIMISM = EipOverrides{
         .force_enable = &.{3198}, // BASEFEE enabled earlier
-        .custom_gas_costs = .{ 
+        .custom_gas_costs = .{
             .l1_data_fee = true,
             .storage_cost_multiplier = 110, // 10% higher storage costs
         },
@@ -45,16 +45,16 @@ pub const EipOverrides = struct {
             .custom_block_context = true,
         },
     };
-    
+
     pub const POLYGON = EipOverrides{
         .force_disable = &.{1559}, // No EIP-1559 fee market
         .chain_behavior = .{
             .legacy_gas_only = true,
         },
     };
-    
+
     pub const ARBITRUM = EipOverrides{
-        .custom_gas_costs = .{ 
+        .custom_gas_costs = .{
             .l2_specific_costs = true,
             .memory_cost_divisor = 256, // More expensive memory
         },
@@ -63,7 +63,7 @@ pub const EipOverrides = struct {
             .supports_l1_data_fee = true,
         },
     };
-    
+
     pub const BASE = EipOverrides{
         .force_enable = &.{3198}, // BASEFEE enabled
         .custom_gas_costs = .{
@@ -73,7 +73,7 @@ pub const EipOverrides = struct {
             .supports_l1_data_fee = true,
         },
     };
-    
+
     pub const ZKSYNC = EipOverrides{
         .force_disable = &.{
             1153, // No transient storage
@@ -84,7 +84,7 @@ pub const EipOverrides = struct {
             .zk_specific_opcodes = true,
         },
     };
-    
+
     /// Test configuration with minimal features
     pub const TESTING_MINIMAL = EipOverrides{
         .force_disable = &.{
@@ -94,7 +94,7 @@ pub const EipOverrides = struct {
             1153, // No transient storage
         },
     };
-    
+
     /// Test configuration with all features
     pub const TESTING_MAXIMAL = EipOverrides{
         .force_enable = &.{
@@ -110,22 +110,22 @@ pub const EipOverrides = struct {
 pub const ChainBehavior = struct {
     /// Uses legacy gas pricing only (no EIP-1559)
     legacy_gas_only: bool = false,
-    
+
     /// Has custom gas metering rules
     custom_gas_metering: bool = false,
-    
+
     /// Supports L1 data fee calculation
     supports_l1_data_fee: bool = false,
-    
+
     /// Has custom block context fields
     custom_block_context: bool = false,
-    
+
     /// Uses custom execution model (e.g., zkSync)
     custom_execution_model: bool = false,
-    
+
     /// Has ZK-specific opcodes
     zk_specific_opcodes: bool = false,
-    
+
     /// Custom consensus rules
     custom_consensus: bool = false,
 };
@@ -171,7 +171,7 @@ pub fn applyOverrides(flags: *EipFlags, overrides: EipOverrides) void {
             else => {}, // Unknown EIP, ignore
         }
     }
-    
+
     // Apply force disables
     for (overrides.force_disable) |eip| {
         switch (eip) {
@@ -216,36 +216,36 @@ pub fn applyOverrides(flags: *EipFlags, overrides: EipOverrides) void {
 test "L2 override configurations" {
     const testing = std.testing;
     const deriveEipFlagsFromHardfork = @import("eip_flags.zig").deriveEipFlagsFromHardfork;
-    
+
     // Test Optimism overrides
     {
         var flags = deriveEipFlagsFromHardfork(.BERLIN); // Before London
         try testing.expect(!flags.eip3198_basefee); // Not enabled in Berlin
-        
+
         applyOverrides(&flags, EipOverrides.OPTIMISM);
         try testing.expect(flags.eip3198_basefee); // Force enabled for Optimism
     }
-    
+
     // Test Polygon overrides
     {
         var flags = deriveEipFlagsFromHardfork(.LONDON);
         try testing.expect(flags.eip1559_base_fee); // Enabled in London
-        
+
         applyOverrides(&flags, EipOverrides.POLYGON);
         try testing.expect(!flags.eip1559_base_fee); // Force disabled for Polygon
     }
-    
+
     // Test custom overrides
     {
         var flags = deriveEipFlagsFromHardfork(.SHANGHAI);
         try testing.expect(flags.eip3855_push0); // Enabled in Shanghai
         try testing.expect(!flags.eip5656_mcopy); // Not until Cancun
-        
+
         const custom = EipOverrides{
             .force_enable = &.{5656}, // Enable MCOPY early
             .force_disable = &.{3855}, // Disable PUSH0
         };
-        
+
         applyOverrides(&flags, custom);
         try testing.expect(!flags.eip3855_push0); // Disabled
         try testing.expect(flags.eip5656_mcopy); // Enabled early
@@ -255,23 +255,23 @@ test "L2 override configurations" {
 test "Testing configurations" {
     const testing = std.testing;
     const deriveEipFlagsFromHardfork = @import("eip_flags.zig").deriveEipFlagsFromHardfork;
-    
+
     // Test minimal configuration
     {
         var flags = deriveEipFlagsFromHardfork(.CANCUN);
         applyOverrides(&flags, EipOverrides.TESTING_MINIMAL);
-        
+
         try testing.expect(!flags.eip1559_base_fee);
         try testing.expect(!flags.eip4844_blob_tx);
         try testing.expect(!flags.eip2929_gas_costs);
         try testing.expect(!flags.eip1153_transient_storage);
     }
-    
+
     // Test maximal configuration
     {
         var flags = deriveEipFlagsFromHardfork(.FRONTIER); // Start with nothing
         applyOverrides(&flags, EipOverrides.TESTING_MAXIMAL);
-        
+
         try testing.expect(flags.eip3855_push0);
         try testing.expect(flags.eip5656_mcopy);
         try testing.expect(flags.eip1153_transient_storage);

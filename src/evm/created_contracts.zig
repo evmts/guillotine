@@ -12,7 +12,7 @@ pub const StateError = error{OutOfMemory};
 pub const CreatedContracts = struct {
     /// Set of addresses created in current transaction
     contracts: std.HashMap(Address, void, AddressContext, std.hash_map.default_max_load_percentage),
-    /// Allocator for HashMap operations  
+    /// Allocator for HashMap operations
     allocator: std.mem.Allocator,
 
     /// Context for Address HashMap

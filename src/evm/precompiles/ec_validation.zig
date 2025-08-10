@@ -2,7 +2,7 @@
 ///
 /// This module contains common validation functions used by EC precompiles:
 /// - ECADD (0x06): Point addition
-/// - ECMUL (0x07): Scalar multiplication  
+/// - ECMUL (0x07): Scalar multiplication
 /// - ECPAIRING (0x08): Pairing check
 ///
 /// By centralizing validation logic, we reduce code duplication and ensure
@@ -66,7 +66,7 @@ pub fn pad_input(input: []const u8, comptime padded_size: usize) [padded_size]u8
 ///
 /// @param point_bytes 64-byte buffer containing point coordinates
 /// @param output Output buffer to clear on failure
-/// @param gas_cost Gas cost to include in success result  
+/// @param gas_cost Gas cost to include in success result
 /// @return Either a valid G1Point or PrecompileOutput for early return
 pub fn parse_and_validate_point(
     point_bytes: []const u8,
@@ -148,7 +148,7 @@ test "gas requirement validation" {
 
 test "output buffer size validation" {
     var buffer = [_]u8{0} ** 64;
-    
+
     // Test sufficient buffer size
     const result1 = validate_output_buffer_size(&buffer, 32);
     try testing.expect(result1 == null);
@@ -162,7 +162,7 @@ test "output buffer size validation" {
 
 test "input padding" {
     // Test padding short input
-    const short_input = [_]u8{1, 2, 3};
+    const short_input = [_]u8{ 1, 2, 3 };
     const padded = pad_input(&short_input, 8);
     try testing.expectEqual(@as(u8, 1), padded[0]);
     try testing.expectEqual(@as(u8, 2), padded[1]);
@@ -171,7 +171,7 @@ test "input padding" {
     try testing.expectEqual(@as(u8, 0), padded[7]);
 
     // Test truncating long input
-    const long_input = [_]u8{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    const long_input = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
     const truncated = pad_input(&long_input, 5);
     try testing.expectEqual(@as(u8, 1), truncated[0]);
     try testing.expectEqual(@as(u8, 5), truncated[4]);
@@ -191,7 +191,7 @@ test "input size multiple validation" {
 
 test "point parsing and validation" {
     var output = [_]u8{0} ** 64;
-    
+
     // Test parsing valid point (point at infinity)
     var point_data = [_]u8{0} ** 64;
     const result1 = parse_and_validate_point(&point_data, &output, 150);
@@ -223,12 +223,12 @@ test "point parsing and validation" {
 test "G1 point result formatting" {
     const point = bn254.G1Point{ .x = 1, .y = 2 };
     var output = [_]u8{0} ** 64;
-    
+
     const result = format_g1_point_result(point, &output, 150);
     try testing.expect(result.is_success());
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
     try testing.expectEqual(@as(usize, 64), result.get_output_size());
-    
+
     // Check point was correctly formatted
     try testing.expectEqual(@as(u8, 1), output[31]); // x = 1
     try testing.expectEqual(@as(u8, 2), output[63]); // y = 2
@@ -236,12 +236,12 @@ test "G1 point result formatting" {
 
 test "point at infinity result" {
     var output = [_]u8{1} ** 64; // Start with non-zero data
-    
+
     const result = return_point_at_infinity(&output, 150);
     try testing.expect(result.is_success());
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
     try testing.expectEqual(@as(usize, 64), result.get_output_size());
-    
+
     // All bytes should be cleared
     for (output) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);

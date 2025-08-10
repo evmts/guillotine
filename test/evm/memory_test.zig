@@ -180,7 +180,7 @@ test "Memory child memory sharing" {
 
     // Child can write data that root can see
     try child_mem.set_data(5, " world");
-    
+
     // Root should see the child's write
     const root_slice = try root_mem.get_slice(15, 6); // Root's offset 15 = child's offset 5
     try testing.expectEqualSlices(u8, " world", root_slice);

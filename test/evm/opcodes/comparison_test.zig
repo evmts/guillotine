@@ -23,12 +23,12 @@ test "Comparison: LT (less than) operations" {
         const bytecode = &[_]u8{
             0x60, 0x0A, // PUSH1 10
             0x60, 0x05, // PUSH1 5
-            0x10,       // LT
+            0x10, // LT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1000);
@@ -42,7 +42,7 @@ test "Comparison: LT (less than) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -62,12 +62,12 @@ test "Comparison: LT (less than) operations" {
         const bytecode = &[_]u8{
             0x60, 0x05, // PUSH1 5
             0x60, 0x0A, // PUSH1 10
-            0x10,       // LT
+            0x10, // LT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1001);
@@ -81,7 +81,7 @@ test "Comparison: LT (less than) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -100,12 +100,12 @@ test "Comparison: LT (less than) operations" {
         const bytecode = &[_]u8{
             0x60, 0x2A, // PUSH1 42
             0x60, 0x2A, // PUSH1 42
-            0x10,       // LT
+            0x10, // LT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1002);
@@ -119,7 +119,7 @@ test "Comparison: LT (less than) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -149,12 +149,12 @@ test "Comparison: GT (greater than) operations" {
         const bytecode = &[_]u8{
             0x60, 0x05, // PUSH1 5
             0x60, 0x0A, // PUSH1 10
-            0x11,       // GT
+            0x11, // GT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1003);
@@ -168,7 +168,7 @@ test "Comparison: GT (greater than) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -199,12 +199,12 @@ test "Comparison: EQ (equal) operations" {
         const bytecode = &[_]u8{
             0x60, 0x2A, // PUSH1 42
             0x60, 0x2A, // PUSH1 42
-            0x14,       // EQ
+            0x14, // EQ
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1004);
@@ -218,7 +218,7 @@ test "Comparison: EQ (equal) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -238,12 +238,12 @@ test "Comparison: EQ (equal) operations" {
         const bytecode = &[_]u8{
             0x60, 0x05, // PUSH1 5
             0x60, 0x0A, // PUSH1 10
-            0x14,       // EQ
+            0x14, // EQ
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1005);
@@ -257,7 +257,7 @@ test "Comparison: EQ (equal) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -286,12 +286,12 @@ test "Comparison: ISZERO operations" {
     {
         const bytecode = &[_]u8{
             0x60, 0x00, // PUSH1 0
-            0x15,       // ISZERO
+            0x15, // ISZERO
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1006);
@@ -305,7 +305,7 @@ test "Comparison: ISZERO operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -324,12 +324,12 @@ test "Comparison: ISZERO operations" {
     {
         const bytecode = &[_]u8{
             0x60, 0x2A, // PUSH1 42
-            0x15,       // ISZERO
+            0x15, // ISZERO
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1007);
@@ -343,7 +343,7 @@ test "Comparison: ISZERO operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -372,17 +372,38 @@ test "Comparison: SLT (signed less than) operations" {
     {
         const bytecode = &[_]u8{
             0x60, 0x01, // PUSH1 1
-            0x7F,       // PUSH32
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0x7F, // PUSH32
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // -1 in two's complement
-            0x12,       // SLT
+            0x12, // SLT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1008);
@@ -396,7 +417,7 @@ test "Comparison: SLT (signed less than) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);
@@ -425,18 +446,39 @@ test "Comparison: SGT (signed greater than) operations" {
     // Test: 1 > -1 = true
     {
         const bytecode = &[_]u8{
-            0x7F,       // PUSH32
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0x7F, // PUSH32
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
             0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // -1 in two's complement
             0x60, 0x01, // PUSH1 1
-            0x13,       // SGT
+            0x13, // SGT
             0x60, 0x00, // PUSH1 0
-            0x52,       // MSTORE
+            0x52, // MSTORE
             0x60, 0x20, // PUSH1 32
             0x60, 0x00, // PUSH1 0
-            0xF3,       // RETURN
+            0xF3, // RETURN
         };
 
         const contract_addr = testAddress(0x1009);
@@ -450,7 +492,7 @@ test "Comparison: SGT (signed greater than) operations" {
             .value = 0,
             .input = &[_]u8{},
             .gas = 100000,
-        }};
+        } };
 
         const result = try vm.call(call_params);
         defer if (result.output) |output| allocator.free(output);

@@ -132,16 +132,9 @@ export fn evm_execute(
     // Calculate code hash
     var code_hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(bytecode, &code_hash, .{});
-    
-    var contract = Contract.init(
-        caller_address,
-        target_address,
-        @as(u256, value),
-        gas_limit,
-        bytecode,
-        code_hash,
-        &[_]u8{},  // empty input
-        false      // not static
+
+    var contract = Contract.init(caller_address, target_address, @as(u256, value), gas_limit, bytecode, code_hash, &[_]u8{}, // empty input
+        false // not static
     );
     defer contract.deinit(allocator, null);
 
@@ -229,16 +222,15 @@ const VmState = struct {
 
 // VM creation and destruction
 export fn guillotine_vm_create() ?*GuillotineVm {
-    
     const state = allocator.create(VmState) catch return null;
-    
+
     state.allocator = allocator;
     state.memory_db = allocator.create(MemoryDatabase) catch {
         allocator.destroy(state);
         return null;
     };
     state.memory_db.* = MemoryDatabase.init(allocator);
-    
+
     const db_interface = state.memory_db.to_database_interface();
     state.vm = allocator.create(Evm) catch {
         state.memory_db.deinit();
@@ -246,7 +238,7 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         allocator.destroy(state);
         return null;
     };
-    
+
     // Create EvmBuilder and build with defaults
     var builder = evm_root.EvmBuilder.init(allocator, db_interface);
     state.vm.* = builder.build() catch {
@@ -256,7 +248,7 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         allocator.destroy(state);
         return null;
     };
-    
+
     return @ptrCast(state);
 }
 
@@ -274,21 +266,21 @@ export fn guillotine_vm_destroy(vm: ?*GuillotineVm) void {
 // State management
 export fn guillotine_set_balance(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, balance: ?*const GuillotineU256) bool {
     if (vm == null or address == null or balance == null) return false;
-    
+
     const state: *VmState = @ptrCast(@alignCast(vm.?));
     const addr = address.?.bytes;
     const value = u256_from_bytes(&balance.?.bytes);
-    
+
     state.vm.state.set_balance(addr, value) catch return false;
     return true;
 }
 
 export fn guillotine_set_code(vm: ?*GuillotineVm, address: ?*const GuillotineAddress, code: ?[*]const u8, code_len: usize) bool {
     if (vm == null or address == null) return false;
-    
+
     const state: *VmState = @ptrCast(@alignCast(vm.?));
     const addr = address.?.bytes;
-    
+
     const code_slice = if (code) |c| c[0..code_len] else &[_]u8{};
     state.vm.state.set_code(addr, code_slice) catch return false;
     return true;
@@ -311,35 +303,28 @@ export fn guillotine_execute(
         .output_len = 0,
         .error_message = null,
     };
-    
+
     if (vm == null or from == null) return result;
-    
+
     const state: *VmState = @ptrCast(@alignCast(vm.?));
     const from_addr = from.?.bytes;
     const to_addr = if (to) |t| t.bytes else primitives.Address.ZERO_ADDRESS;
     const value_u256 = if (value) |v| u256_from_bytes(&v.bytes) else 0;
     const input_slice = if (input) |i| i[0..input_len] else &[_]u8{};
-    
+
     // Create contract for execution
     // Calculate code hash for empty code (for call target)
     var empty_code_hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(&[_]u8{}, &empty_code_hash, .{});
-    
-    var contract = Contract.init(
-        from_addr,
-        to_addr,
-        value_u256,
-        gas_limit,
-        &[_]u8{},         // empty code for calls
-        empty_code_hash,
-        input_slice,
-        false             // not static
+
+    var contract = Contract.init(from_addr, to_addr, value_u256, gas_limit, &[_]u8{}, // empty code for calls
+        empty_code_hash, input_slice, false // not static
     );
     defer contract.deinit(state.allocator, null);
-    
+
     // Frame is not needed - interpret takes the contract directly
     contract.value = value_u256;
-    
+
     // Execute
     const exec_result = state.vm.interpretCompat(&contract, input_slice, false) catch |err| {
         const err_msg = @errorName(err);
@@ -347,10 +332,10 @@ export fn guillotine_execute(
         result.error_message = err_c_str.ptr;
         return result;
     };
-    
+
     result.success = exec_result.status == .Success;
     result.gas_used = exec_result.gas_used;
-    
+
     // Copy output if any
     if (exec_result.output) |output| {
         if (output.len > 0) {
@@ -360,17 +345,17 @@ export fn guillotine_execute(
             result.output_len = output_copy.len;
         }
     }
-    
+
     return result;
 }
 
 // Utility functions
 export fn guillotine_u256_from_u64(value: u64, out_u256: ?*GuillotineU256) void {
     if (out_u256 == null) return;
-    
+
     // Clear the bytes first
     @memset(&out_u256.?.bytes, 0);
-    
+
     // Set the lower 8 bytes (little-endian)
     const value_bytes = std.mem.asBytes(&value);
     @memcpy(out_u256.?.bytes[0..8], value_bytes);

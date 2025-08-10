@@ -139,7 +139,7 @@ pub fn main() !void {
             calldata,
             false, // is_static
         );
-        
+
         // Execute contract
         const result = vm.interpretCompat(&contract, calldata, false) catch |err| {
             std.debug.print("Contract execution error: {}\n", .{err});
@@ -165,10 +165,10 @@ fn deployContract(allocator: std.mem.Allocator, vm: anytype, caller: Address, by
     // For benchmarking, we'll directly set the code at a known address
     // This avoids issues with CREATE not being fully implemented
     const contract_addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
-    
+
     // Store the bytecode directly in the state
     try vm.state.set_code(contract_addr, bytecode);
-    
+
     return contract_addr;
 }
 

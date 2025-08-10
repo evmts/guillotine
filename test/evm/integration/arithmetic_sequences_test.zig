@@ -276,7 +276,7 @@ test "Integration: Conditional arithmetic based on comparison" {
     // Test case 1: a=30, b=20 (want to check if a > b and calculate a - b)
     const a: u256 = 30;
     const b: u256 = 20;
-    
+
     try frame_ptr.stack.append(b); // Stack: [20]
     try frame_ptr.stack.append(a); // Stack: [20, 30]
 
@@ -293,7 +293,7 @@ test "Integration: Conditional arithmetic based on comparison" {
     frame_ptr.stack.clear();
     try frame_ptr.stack.append(b); // Stack: [20]
     try frame_ptr.stack.append(a); // Stack: [20, 30]
-    
+
     // SUB calculates top - second, so 30 - 20 = 10
     _ = try evm.table.execute(0, interpreter, state, 0x03); // SUB: Stack: [10]
 
@@ -304,7 +304,7 @@ test "Integration: Conditional arithmetic based on comparison" {
     frame_ptr.stack.clear();
     const a2: u256 = 15;
     const b2: u256 = 25;
-    
+
     try frame_ptr.stack.append(b2); // Stack: [25]
     try frame_ptr.stack.append(a2); // Stack: [25, 15]
 

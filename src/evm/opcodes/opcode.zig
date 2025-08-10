@@ -445,17 +445,17 @@ pub fn get_log_topic_count(op: u8) u8 {
 /// }
 /// ```
 pub fn is_terminating(op: u8) bool {
-    return op == @intFromEnum(Enum.STOP) or op == @intFromEnum(Enum.RETURN) or 
-           op == @intFromEnum(Enum.REVERT) or op == @intFromEnum(Enum.SELFDESTRUCT) or 
-           op == @intFromEnum(Enum.INVALID);
+    return op == @intFromEnum(Enum.STOP) or op == @intFromEnum(Enum.RETURN) or
+        op == @intFromEnum(Enum.REVERT) or op == @intFromEnum(Enum.SELFDESTRUCT) or
+        op == @intFromEnum(Enum.INVALID);
 }
 
 /// Check if an opcode is a call operation
 pub fn is_call(op: u8) bool {
-    return op == @intFromEnum(Enum.CALL) or op == @intFromEnum(Enum.CALLCODE) or 
-           op == @intFromEnum(Enum.DELEGATECALL) or op == @intFromEnum(Enum.STATICCALL) or
-           op == @intFromEnum(Enum.EXTCALL) or op == @intFromEnum(Enum.EXTDELEGATECALL) or 
-           op == @intFromEnum(Enum.EXTSTATICCALL);
+    return op == @intFromEnum(Enum.CALL) or op == @intFromEnum(Enum.CALLCODE) or
+        op == @intFromEnum(Enum.DELEGATECALL) or op == @intFromEnum(Enum.STATICCALL) or
+        op == @intFromEnum(Enum.EXTCALL) or op == @intFromEnum(Enum.EXTDELEGATECALL) or
+        op == @intFromEnum(Enum.EXTSTATICCALL);
 }
 
 /// Check if an opcode is a create operation
@@ -489,11 +489,11 @@ pub fn is_create(op: u8) bool {
 /// These operations will fail with an error if executed within
 /// a STATICCALL context.
 pub fn modifies_state(op: u8) bool {
-    return op == @intFromEnum(Enum.SSTORE) or op == @intFromEnum(Enum.CREATE) or 
-           op == @intFromEnum(Enum.CREATE2) or op == @intFromEnum(Enum.SELFDESTRUCT) or
-           op == @intFromEnum(Enum.LOG0) or op == @intFromEnum(Enum.LOG1) or 
-           op == @intFromEnum(Enum.LOG2) or op == @intFromEnum(Enum.LOG3) or 
-           op == @intFromEnum(Enum.LOG4);
+    return op == @intFromEnum(Enum.SSTORE) or op == @intFromEnum(Enum.CREATE) or
+        op == @intFromEnum(Enum.CREATE2) or op == @intFromEnum(Enum.SELFDESTRUCT) or
+        op == @intFromEnum(Enum.LOG0) or op == @intFromEnum(Enum.LOG1) or
+        op == @intFromEnum(Enum.LOG2) or op == @intFromEnum(Enum.LOG3) or
+        op == @intFromEnum(Enum.LOG4);
 }
 
 /// Check if an opcode is valid

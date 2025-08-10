@@ -31,7 +31,7 @@ pub const AccessList = struct {
 
         pub fn eql(self: StorageKey, other: StorageKey) bool {
             return std.mem.eql(u8, &self.address, &other.address) and
-                   std.mem.eql(u8, &self.slot, &other.slot);
+                std.mem.eql(u8, &self.slot, &other.slot);
         }
     };
 

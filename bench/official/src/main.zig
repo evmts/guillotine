@@ -187,14 +187,8 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
 
     // Determine which test cases to include
-    const working_test_cases = [_][]const u8{
-        "erc20-approval-transfer",
-        "erc20-mint", 
-        "erc20-transfer",
-        "ten-thousand-hashes",
-        "snailtracer"
-    };
-    
+    const working_test_cases = [_][]const u8{ "erc20-approval-transfer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes", "snailtracer" };
+
     const all_test_cases = [_][]const u8{
         "erc20-approval-transfer",
         "erc20-mint",
@@ -229,7 +223,7 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
         "precompile-ripemd160",
         "precompile-sha256",
     };
-    
+
     const test_cases = if (include_all_cases) all_test_cases[0..] else working_test_cases[0..];
 
     // Add summary statistics first

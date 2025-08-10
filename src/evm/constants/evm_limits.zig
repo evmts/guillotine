@@ -1,10 +1,9 @@
 const std = @import("std");
 
 /// EVM Runtime Limits
-/// 
+///
 /// This file contains constants that define execution limits and boundaries for the EVM,
 /// including call depth, code sizes, input limits, and other runtime constraints.
-
 /// Maximum call depth allowed in the EVM (1024 levels)
 /// This prevents infinite recursion and stack overflow attacks
 pub const MAX_CALL_DEPTH: u11 = 1024;
@@ -41,8 +40,8 @@ pub const BLOB_TX_TYPE = 0x03;
 pub const SMALL_MEMORY_LOOKUP_SIZE = 128;
 
 /// Buffer sizes for crypto operations
-pub const SMALL_BUFFER_SIZE = 64;   // Most common (addresses, small data)
-pub const MEDIUM_BUFFER_SIZE = 256; // Common for event data  
+pub const SMALL_BUFFER_SIZE = 64; // Most common (addresses, small data)
+pub const MEDIUM_BUFFER_SIZE = 256; // Common for event data
 pub const LARGE_BUFFER_SIZE = 1024; // Reasonable max for stack allocation
 
 /// Page size for memory allocator (4KB)
@@ -53,15 +52,15 @@ pub const COMPILE_TIME_LOG_VERSION = "2024_LOG_FIX_V2";
 
 test "evm limits are reasonable" {
     const testing = std.testing;
-    
+
     // Verify call depth is within reasonable bounds
     try testing.expect(MAX_CALL_DEPTH >= 256);
     try testing.expect(MAX_CALL_DEPTH <= 4096);
-    
+
     // Verify code size matches EIP-170
     try testing.expectEqual(@as(u32, 24576), MAX_CODE_SIZE);
     try testing.expectEqual(@as(u32, 0x6000), MAX_CODE_SIZE);
-    
+
     // Verify input size is reasonable
     try testing.expect(MAX_INPUT_SIZE >= 64 * 1024); // At least 64KB
     try testing.expect(MAX_INPUT_SIZE <= 1024 * 1024); // At most 1MB
@@ -69,11 +68,11 @@ test "evm limits are reasonable" {
 
 test "magic bytes are correct" {
     const testing = std.testing;
-    
+
     // EIP-7702 magic bytes
     try testing.expectEqual(@as(u8, 0xE7), EIP7702_MAGIC_BYTES[0]);
     try testing.expectEqual(@as(u8, 0x02), EIP7702_MAGIC_BYTES[1]);
-    
+
     // Blob transaction type
     try testing.expectEqual(@as(u8, 0x03), BLOB_TX_TYPE);
 }

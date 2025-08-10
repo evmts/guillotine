@@ -4,9 +4,9 @@ const std = @import("std");
 test "Instruction.execute RED phase" {
     // This should fail because execute expects a Frame, not our mock
     const Instruction = struct {
-        opcode_fn: *const fn() void,
+        opcode_fn: *const fn () void,
         arg: union(enum) { none },
-        
+
         pub fn execute(instructions: [*:null]const @This(), frame: anytype) !?[*:null]const @This() {
             _ = instructions;
             _ = frame;
@@ -14,13 +14,13 @@ test "Instruction.execute RED phase" {
             return error.NotImplemented;
         }
     };
-    
-    const inst = Instruction{ 
+
+    const inst = Instruction{
         .opcode_fn = undefined,
         .arg = .none,
     };
     const inst_ptr = @as([*:null]const Instruction, &inst);
-    
+
     const result = Instruction.execute(inst_ptr, undefined);
     try std.testing.expectError(error.NotImplemented, result);
 }

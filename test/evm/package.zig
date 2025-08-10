@@ -56,7 +56,7 @@ test {
     _ = precompiles;
     _ = gas;
     _ = state;
-    
+
     // Individual test files
     _ = block_execution_erc20_test;
     _ = block_executor_integration_test;

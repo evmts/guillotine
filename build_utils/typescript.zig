@@ -9,14 +9,12 @@ pub const TypeScriptStep = struct {
 
 pub fn addTypeScriptSteps(b: *std.Build) void {
     const working_dir = "src/guillotine-ts";
-    
+
     // Base install step
-    const ts_install_cmd = b.addSystemCommand(&[_][]const u8{
-        "npm", "install"
-    });
+    const ts_install_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "install" });
     ts_install_cmd.setCwd(b.path(working_dir));
     ts_install_cmd.step.dependOn(b.getInstallStep()); // Ensure native library is built first
-    
+
     // Define all TypeScript steps
     const ts_steps = [_]TypeScriptStep{
         .{ .name = "ts", .npm_command = "build", .description = "Build TypeScript bindings", .depends_on_install = true },
@@ -28,21 +26,17 @@ pub fn addTypeScriptSteps(b: *std.Build) void {
         .{ .name = "ts-dev", .npm_command = "dev", .description = "Run TypeScript in development/watch mode", .depends_on_install = true },
         .{ .name = "ts-clean", .npm_command = "clean", .description = "Clean TypeScript build artifacts", .depends_on_install = false },
     };
-    
+
     // Special handling for copy-wasm and build steps
-    const ts_copy_wasm_cmd = b.addSystemCommand(&[_][]const u8{
-        "npm", "run", "copy-wasm"
-    });
+    const ts_copy_wasm_cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", "copy-wasm" });
     ts_copy_wasm_cmd.setCwd(b.path(working_dir));
     ts_copy_wasm_cmd.step.dependOn(&ts_install_cmd.step);
-    
+
     // Create steps for each TypeScript command
     for (ts_steps) |step_config| {
-        const cmd = b.addSystemCommand(&[_][]const u8{
-            "npm", "run", step_config.npm_command
-        });
+        const cmd = b.addSystemCommand(&[_][]const u8{ "npm", "run", step_config.npm_command });
         cmd.setCwd(b.path(working_dir));
-        
+
         // Handle dependencies
         if (std.mem.eql(u8, step_config.name, "ts")) {
             // Build depends on copy-wasm
@@ -56,7 +50,7 @@ pub fn addTypeScriptSteps(b: *std.Build) void {
         } else if (step_config.depends_on_install) {
             cmd.step.dependOn(&ts_install_cmd.step);
         }
-        
+
         const step = b.step(step_config.name, step_config.description);
         step.dependOn(&cmd.step);
     }

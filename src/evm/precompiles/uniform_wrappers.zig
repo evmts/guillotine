@@ -3,7 +3,6 @@
 /// This module provides wrapper functions that adapt existing precompiles
 /// to the uniform interface required by the optimized dispatcher.
 /// These wrappers allow gradual migration while maintaining compatibility.
-
 const std = @import("std");
 const PrecompileOutput = @import("precompile_result.zig").PrecompileOutput;
 const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
@@ -50,7 +49,7 @@ const testing = std.testing;
 
 test "uniform wrappers maintain functionality" {
     const chain_rules = ChainRules.for_hardfork(.ISTANBUL);
-    
+
     // Test IDENTITY wrapper
     {
         const input = "test data";
@@ -59,7 +58,7 @@ test "uniform wrappers maintain functionality" {
         try testing.expect(result.is_success());
         try testing.expectEqualSlices(u8, input, output[0..input.len]);
     }
-    
+
     // Test BLAKE2F wrapper (with minimal valid input)
     {
         // Minimal valid BLAKE2F input is 213 bytes
@@ -67,7 +66,7 @@ test "uniform wrappers maintain functionality" {
         @memset(&input, 0);
         input[0] = 1; // rounds = 1
         var output: [64]u8 = undefined;
-        
+
         const result = blake2f_uniform(&input, &output, 1000, chain_rules);
         try testing.expect(result.is_success());
     }

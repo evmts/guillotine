@@ -7,7 +7,7 @@ pub fn fuzz(
     options: std.testing.FuzzInputOptions,
 ) anyerror!void {
     _ = options;
-    
+
     // For now, just run with a fixed input to test compilation
     // In a real implementation, this would integrate with libFuzzer
     const test_inputs = [_][]const u8{
@@ -16,7 +16,7 @@ pub fn fuzz(
         &[_]u8{0x01} ** 96,
         &[_]u8{0x00} ** 192,
     };
-    
+
     for (test_inputs) |input| {
         try testOne(context, input);
     }

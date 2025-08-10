@@ -116,22 +116,22 @@ pub fn run_precompile_benchmarks(allocator: std.mem.Allocator) !void {
 /// Simple micro-benchmark for just the dispatch overhead
 pub fn run_dispatch_microbenchmark() void {
     std.debug.print("\n=== Precompile Dispatch Micro-benchmark ===\n", .{});
-    
+
     const iterations = 1000000;
     const identity_addr = primitives.Address.from_u256(4);
-    
+
     // Time the dispatch overhead
     const start = std.time.nanoTimestamp();
-    
+
     var i: u32 = 0;
     while (i < iterations) : (i += 1) {
         _ = evm.Precompiles.execute_precompile(identity_addr, empty_input, &output_buffer, 100000, chain_rules);
     }
-    
+
     const end = std.time.nanoTimestamp();
     const total_ns = @as(u64, @intCast(end - start));
     const ns_per_call = total_ns / iterations;
-    
+
     std.debug.print("Dispatch overhead: {} ns per call\n", .{ns_per_call});
     std.debug.print("Calls per second: {}\n", .{1_000_000_000 / ns_per_call});
 }
@@ -144,7 +144,7 @@ pub fn run_comparative_benchmark(allocator: std.mem.Allocator) !void {
 
     // Run the standard benchmarks
     try run_precompile_benchmarks(allocator);
-    
+
     // Run the micro-benchmark
     run_dispatch_microbenchmark();
 

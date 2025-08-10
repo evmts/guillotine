@@ -224,7 +224,7 @@ test "VMCore: VM program counter management and control flow" {
     // Traditional interpreter assertions
     try testing.expect(result.success);
     try testing.expectEqual(@as(u64, 0), result.gas_used); // Minimal gas for simple operations
-    
+
     // Block interpreter assertions
     try testing.expect(result_block.success);
     try testing.expectEqual(@as(u64, 0), result_block.gas_used); // Minimal gas for simple operations
@@ -273,7 +273,7 @@ test "VMCore: VM execution loop with gas tracking" {
     try testing.expect(result.gas_used > 0); // Should consume gas
     try testing.expect(result.gas_used < initial_gas); // Should not consume all gas
     try testing.expectEqual(initial_gas, result.gas_used + result.gas_left);
-    
+
     // Block interpreter assertions
     try testing.expect(result_block.success);
     try testing.expect(result_block.gas_used > 0); // Should consume gas
@@ -315,7 +315,7 @@ test "VMCore: VM depth tracking in nested calls" {
 
     // Depth should be restored after execution
     try testing.expectEqual(@as(u16, 5), vm.depth);
-    
+
     // Test with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // vm.depth = 5; // Reset depth
@@ -394,7 +394,7 @@ test "VMCore: VM instruction dispatch error handling" {
     // Traditional interpreter assertions
     try testing.expectEqual(false, result.success);
     try testing.expectEqual(@as(u64, 0), result.gas_left); // Should consume all gas
-    
+
     // Block interpreter assertions
     try testing.expectEqual(false, result_block.success);
     try testing.expectEqual(@as(u64, 0), result_block.gas_left); // Should consume all gas
@@ -952,7 +952,7 @@ test "VMCore: Integration - Complete execution flow" {
     try testing.expect(result.success);
     try testing.expect(result.gas_used > 0);
     try testing.expect(result.gas_left < 100000);
-    
+
     // Block interpreter assertions
     try testing.expect(result_block.success);
     try testing.expect(result_block.gas_used > 0);
@@ -999,7 +999,7 @@ test "VMCore: Integration - Error propagation across components" {
     // Traditional interpreter assertions
     try testing.expectEqual(false, result.success);
     // Error should propagate through VM -> Frame -> Stack
-    
+
     // Block interpreter assertions
     try testing.expectEqual(false, result_block.success);
     // Error should propagate through VM -> Frame -> Stack
@@ -1053,7 +1053,7 @@ test "VMCore: Integration - Memory and gas coordination" {
         // If failed, should be due to gas exhaustion
         try testing.expect(result.gas_left == 0 or result.gas_used > 500);
     }
-    
+
     // Block interpreter assertions
     // Should either succeed or fail gracefully with OutOfGas
     if (!result_block.success) {

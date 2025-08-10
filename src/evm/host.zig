@@ -24,7 +24,7 @@ pub const CallParams = union(enum) {
     },
     /// DELEGATECALL operation (preserves caller context)
     delegatecall: struct {
-        caller: Address,  // Original caller, not current contract
+        caller: Address, // Original caller, not current contract
         to: Address,
         input: []const u8,
         gas: u64,
@@ -32,7 +32,7 @@ pub const CallParams = union(enum) {
     /// STATICCALL operation (read-only)
     staticcall: struct {
         caller: Address,
-        to: Address, 
+        to: Address,
         input: []const u8,
         gas: u64,
     },
@@ -199,20 +199,20 @@ pub const Host = struct {
 pub const MockHost = struct {
     allocator: std.mem.Allocator,
     logs: std.ArrayList(LogEntry),
-    
+
     pub const LogEntry = struct {
         contract_address: Address,
         topics: []const u256,
         data: []const u8,
     };
-    
+
     pub fn init(allocator: std.mem.Allocator) MockHost {
         return MockHost{
             .allocator = allocator,
             .logs = std.ArrayList(LogEntry).init(allocator),
         };
     }
-    
+
     pub fn deinit(self: *MockHost) void {
         // Clean up stored log data
         for (self.logs.items) |log| {
@@ -221,25 +221,25 @@ pub const MockHost = struct {
         }
         self.logs.deinit();
     }
-    
+
     pub fn get_balance(self: *MockHost, address: Address) u256 {
         _ = self;
         _ = address;
         return 1000; // Mock balance
     }
-    
+
     pub fn account_exists(self: *MockHost, address: Address) bool {
         _ = self;
         _ = address;
         return true; // Mock exists
     }
-    
+
     pub fn get_code(self: *MockHost, address: Address) []const u8 {
         _ = self;
         _ = address;
         return &.{}; // Mock empty code
     }
-    
+
     pub fn get_block_info(self: *MockHost) BlockInfo {
         _ = self;
         return BlockInfo{
@@ -252,7 +252,7 @@ pub const MockHost = struct {
             .prev_randao = [_]u8{0} ** 32,
         };
     }
-    
+
     pub fn emit_log(self: *MockHost, contract_address: Address, topics: []const u256, data: []const u8) void {
         // Store a copy of the log for testing
         const topics_copy = self.allocator.dupe(u256, topics) catch return;
@@ -260,7 +260,7 @@ pub const MockHost = struct {
             self.allocator.free(topics_copy);
             return;
         };
-        
+
         self.logs.append(LogEntry{
             .contract_address = contract_address,
             .topics = topics_copy,
@@ -270,7 +270,7 @@ pub const MockHost = struct {
             self.allocator.free(data_copy);
         };
     }
-    
+
     pub fn call(self: *MockHost, params: CallParams) CallResult {
         _ = self;
         _ = params;
@@ -281,7 +281,7 @@ pub const MockHost = struct {
             .output = &.{},
         };
     }
-    
+
     pub fn to_host(self: *MockHost) Host {
         return Host.init(self);
     }
@@ -289,33 +289,33 @@ pub const MockHost = struct {
 
 test "Host interface with MockHost" {
     const allocator = std.testing.allocator;
-    
+
     var mock_host = MockHost.init(allocator);
     defer mock_host.deinit();
-    
+
     const host = mock_host.to_host();
-    
+
     // Test balance
     const balance = host.get_balance(Address.ZERO);
     try std.testing.expectEqual(@as(u256, 1000), balance);
-    
+
     // Test account exists
     try std.testing.expect(host.account_exists(Address.ZERO));
-    
+
     // Test code
     const code = host.get_code(Address.ZERO);
     try std.testing.expectEqual(@as(usize, 0), code.len);
-    
+
     // Test block info
     const block_info = host.get_block_info();
     try std.testing.expectEqual(@as(u64, 1), block_info.number);
     try std.testing.expectEqual(@as(u64, 1000), block_info.timestamp);
-    
+
     // Test log emission
     const topics = [_]u256{ 0x1234, 0x5678 };
     const data = "test log data";
     host.emit_log(Address.ZERO, &topics, data);
-    
+
     // Verify log was stored
     try std.testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const stored_log = mock_host.logs.items[0];

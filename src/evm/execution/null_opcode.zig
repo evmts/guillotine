@@ -5,7 +5,7 @@ const ExecutionError = @import("execution_error.zig");
 /// for the jump table to reference rather than creating multiple invalid handlers.
 pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    
+
     // INVALID opcode consumes all remaining gas and returns InvalidOpcode error
     // This is the standard EVM behavior for invalid opcodes
     return ExecutionError.Error.InvalidOpcode;

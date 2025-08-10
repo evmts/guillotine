@@ -15,7 +15,7 @@ const weighted_opcodes = [_]u8{
     0x52, 0x52, 0x52, // MSTORE (8%)
     0x51, 0x51, 0x51, // MLOAD (7%)
     0x01, 0x01, 0x01, // ADD (6%)
-    
+
     // Common (1-5% each)
     0x57, 0x57, // JUMPI (4%)
     0x5b, 0x5b, // JUMPDEST (4%)
@@ -25,7 +25,7 @@ const weighted_opcodes = [_]u8{
     0x15, // ISZERO (2%)
     0x56, // JUMP (2%)
     0x35, // CALLDATALOAD (2%)
-    
+
     // Less common but still significant
     0x02, // MUL (1%)
     0x04, // DIV (1%)
@@ -45,10 +45,10 @@ const weighted_opcodes = [_]u8{
 pub fn zbench_aos_full_access(allocator: std.mem.Allocator) void {
     _ = allocator;
     const aos_table = Evm.JumpTable.DEFAULT;
-    
+
     var total_gas: u64 = 0;
     var total_stack: u64 = 0;
-    
+
     const iterations = 10_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -60,7 +60,7 @@ pub fn zbench_aos_full_access(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(op.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
     std.mem.doNotOptimizeAway(total_stack);
 }
@@ -70,10 +70,10 @@ pub fn zbench_soa_hot_fields(allocator: std.mem.Allocator) void {
     _ = allocator;
     const aos_table = Evm.JumpTable.DEFAULT;
     const soa_table = Evm.SoaJumpTable.init_from_aos(&aos_table);
-    
+
     var total_gas: u64 = 0;
     var total_stack: u64 = 0;
-    
+
     const iterations = 10_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -86,7 +86,7 @@ pub fn zbench_soa_hot_fields(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(hot.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
     std.mem.doNotOptimizeAway(total_stack);
 }
@@ -96,10 +96,10 @@ pub fn zbench_soa_full_access(allocator: std.mem.Allocator) void {
     _ = allocator;
     const aos_table = Evm.JumpTable.DEFAULT;
     const soa_table = Evm.SoaJumpTable.init_from_aos(&aos_table);
-    
+
     var total_gas: u64 = 0;
     var total_stack: u64 = 0;
-    
+
     const iterations = 10_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -111,7 +111,7 @@ pub fn zbench_soa_full_access(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(op.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
     std.mem.doNotOptimizeAway(total_stack);
 }
@@ -120,9 +120,9 @@ pub fn zbench_soa_full_access(allocator: std.mem.Allocator) void {
 pub fn zbench_aos_sequential(allocator: std.mem.Allocator) void {
     _ = allocator;
     const aos_table = Evm.JumpTable.DEFAULT;
-    
+
     var total_gas: u64 = 0;
-    
+
     const iterations = 1_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -134,7 +134,7 @@ pub fn zbench_aos_sequential(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(op.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
 }
 
@@ -143,9 +143,9 @@ pub fn zbench_soa_sequential(allocator: std.mem.Allocator) void {
     _ = allocator;
     const aos_table = Evm.JumpTable.DEFAULT;
     const soa_table = Evm.SoaJumpTable.init_from_aos(&aos_table);
-    
+
     var total_gas: u64 = 0;
-    
+
     const iterations = 1_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -157,26 +157,26 @@ pub fn zbench_soa_sequential(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(hot.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
 }
 
 /// Benchmark AoS jump table with random access pattern
 pub fn zbench_aos_random(allocator: std.mem.Allocator) void {
     const aos_table = Evm.JumpTable.DEFAULT;
-    
+
     // Create deterministic "random" sequence
     var prng = std.Random.DefaultPrng.init(0x12345678);
     const random = prng.random();
-    
+
     // Pre-generate random opcodes
     var random_opcodes: [1024]u8 = undefined;
     for (&random_opcodes) |*opcode| {
         opcode.* = random.int(u8);
     }
-    
+
     var total_gas: u64 = 0;
-    
+
     const iterations = 10_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -186,7 +186,7 @@ pub fn zbench_aos_random(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(op.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
     _ = allocator;
 }
@@ -195,19 +195,19 @@ pub fn zbench_aos_random(allocator: std.mem.Allocator) void {
 pub fn zbench_soa_random(allocator: std.mem.Allocator) void {
     const aos_table = Evm.JumpTable.DEFAULT;
     const soa_table = Evm.SoaJumpTable.init_from_aos(&aos_table);
-    
+
     // Create deterministic "random" sequence
     var prng = std.Random.DefaultPrng.init(0x12345678);
     const random = prng.random();
-    
+
     // Pre-generate random opcodes
     var random_opcodes: [1024]u8 = undefined;
     for (&random_opcodes) |*opcode| {
         opcode.* = random.int(u8);
     }
-    
+
     var total_gas: u64 = 0;
-    
+
     const iterations = 10_000;
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
@@ -217,7 +217,7 @@ pub fn zbench_soa_random(allocator: std.mem.Allocator) void {
             std.mem.doNotOptimizeAway(hot.execute);
         }
     }
-    
+
     std.mem.doNotOptimizeAway(total_gas);
     _ = allocator;
 }

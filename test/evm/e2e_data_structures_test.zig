@@ -90,7 +90,7 @@ test "E2E: Dynamic arrays - push, pop, and indexing" {
     try testing.expect(array_result.status == .Success);
     // Test block interpreter results
     try testing.expect(array_result_block.status == .Success);
-    
+
     if (array_result.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the array length (3)
@@ -100,7 +100,7 @@ test "E2E: Dynamic arrays - push, pop, and indexing" {
         }
         try testing.expectEqual(@as(u256, 3), length);
     }
-    
+
     if (array_result_block.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the array length (3)
@@ -180,7 +180,7 @@ test "E2E: Mappings - various key types and nested access" {
     try testing.expect(mapping_result.status == .Success);
     // Test block interpreter results
     try testing.expect(mapping_result_block.status == .Success);
-    
+
     if (mapping_result.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the stored balance (1000)
@@ -190,7 +190,7 @@ test "E2E: Mappings - various key types and nested access" {
         }
         try testing.expectEqual(@as(u256, 1000), balance);
     }
-    
+
     if (mapping_result_block.output) |output| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the stored balance (1000)

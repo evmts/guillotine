@@ -3,7 +3,7 @@ const Operation = @import("../opcodes/operation.zig").Operation;
 const ExecutionFunc = @import("../opcodes/operation.zig").ExecutionFunc;
 
 /// Struct-of-Arrays implementation of opcode metadata for improved cache locality.
-/// 
+///
 /// Instead of storing an array of Operation structs (AoS), we store separate arrays
 /// for each field (SoA). This improves cache utilization because:
 /// 1. Hot fields (execute, gas) are accessed together in tight loops
@@ -20,17 +20,17 @@ const ExecutionFunc = @import("../opcodes/operation.zig").ExecutionFunc;
 pub const SoaOpcodeMetadata = struct {
     /// Execution function pointers - hot path, accessed every opcode
     execute_funcs: [256]ExecutionFunc align(64),
-    
+
     /// Constant gas costs - hot path, accessed every opcode
     constant_gas: [256]u64 align(64),
-    
+
     /// Stack validation data - warm path, accessed every opcode but predictable
     min_stack: [256]u32 align(64),
     max_stack: [256]u32 align(64),
-    
+
     /// Undefined flags - cold path, rarely accessed
     undefined_flags: [256]bool align(64),
-    
+
     /// Initialize from existing AoS opcode metadata
     pub fn init_from_aos(aos_metadata: *const @import("opcode_metadata.zig")) SoaOpcodeMetadata {
         var soa = SoaOpcodeMetadata{
@@ -40,7 +40,7 @@ pub const SoaOpcodeMetadata = struct {
             .max_stack = undefined,
             .undefined_flags = undefined,
         };
-        
+
         // Convert AoS to SoA
         for (0..256) |i| {
             const op = aos_metadata.get_operation(@intCast(i));
@@ -50,10 +50,10 @@ pub const SoaOpcodeMetadata = struct {
             soa.max_stack[i] = op.max_stack;
             soa.undefined_flags[i] = op.undefined;
         }
-        
+
         return soa;
     }
-    
+
     /// Get operation data using SoA access pattern
     pub inline fn get_operation_soa(self: *const SoaOpcodeMetadata, opcode: u8) struct {
         execute: ExecutionFunc,
@@ -70,7 +70,7 @@ pub const SoaOpcodeMetadata = struct {
             .undefined = self.undefined_flags[opcode],
         };
     }
-    
+
     /// Optimized hot path - just get execute and gas
     pub inline fn get_hot_fields(self: *const SoaOpcodeMetadata, opcode: u8) struct {
         execute: ExecutionFunc,
@@ -81,7 +81,7 @@ pub const SoaOpcodeMetadata = struct {
             .gas = self.constant_gas[opcode],
         };
     }
-    
+
     /// Optimized stack validation - just get min/max stack
     pub inline fn get_stack_requirements(self: *const SoaOpcodeMetadata, opcode: u8) struct {
         min_stack: u32,

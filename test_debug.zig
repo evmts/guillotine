@@ -20,10 +20,10 @@ pub fn main() !void {
     const bytecode = &[_]u8{
         0x60, 0x42, // PUSH1 0x42
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1000);
@@ -37,14 +37,14 @@ pub fn main() !void {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
 
     std.debug.print("Success: {}\n", .{result.success});
     std.debug.print("Gas used: {}\n", .{result.gas_used});
-    
+
     if (result.output) |output| {
         std.debug.print("Output length: {}\n", .{output.len});
         std.debug.print("Output bytes: ", .{});
@@ -52,7 +52,7 @@ pub fn main() !void {
             std.debug.print("{x:0>2} ", .{byte});
         }
         std.debug.print("\n", .{});
-        
+
         // Check if it's 0x42 at the end
         if (output.len == 32) {
             const value = output[31];

@@ -23,7 +23,7 @@ pub const CallExecutionResult = struct {
     output: []const u8,
     /// Created address (for CREATE/CREATE2)
     created_address: ?Address = null,
-    
+
     pub fn success_result(gas_left: u64, output: []const u8) CallExecutionResult {
         return CallExecutionResult{
             .success = true,
@@ -31,7 +31,7 @@ pub const CallExecutionResult = struct {
             .output = output,
         };
     }
-    
+
     pub fn failure_result(gas_left: u64, output: []const u8) CallExecutionResult {
         return CallExecutionResult{
             .success = false,
@@ -39,7 +39,7 @@ pub const CallExecutionResult = struct {
             .output = output,
         };
     }
-    
+
     pub fn create_success_result(gas_left: u64, output: []const u8, created_address: Address) CallExecutionResult {
         return CallExecutionResult{
             .success = true,
@@ -58,7 +58,7 @@ pub const CallExecutor = struct {
     evm: *Evm,
     /// Allocator for temporary allocations
     allocator: Allocator,
-    
+
     pub fn init(allocator: Allocator, evm: *Evm, host: Host) !CallExecutor {
         return CallExecutor{
             .call_stack = try CallFrameStack.init(allocator, host),
@@ -66,11 +66,11 @@ pub const CallExecutor = struct {
             .allocator = allocator,
         };
     }
-    
+
     pub fn deinit(self: *CallExecutor) void {
         self.call_stack.deinit();
     }
-    
+
     /// Execute a CALL operation
     pub fn execute_call(
         self: *CallExecutor,
@@ -88,37 +88,37 @@ pub const CallExecutor = struct {
             .code = &.{}, // Empty code
             .jumpdest_array = undefined, // Would be properly initialized
         };
-        
+
         const params = CallParams{
             .target = to_address,
             .gas_limit = gas_limit,
             .input = input,
             .value = value,
         };
-        
+
         const child_frame = try self.call_stack.init_call_frame(
             .CALL,
             caller_frame,
             params,
             &placeholder_analysis,
         );
-        
+
         // Execute the child frame
         const result = self.execute_frame(child_frame) catch |err| {
             // Revert on error
             self.call_stack.revert_frame(child_frame);
             return CallExecutionResult.failure_result(0, &.{});
         };
-        
+
         if (result.success) {
             self.call_stack.complete_frame(child_frame);
         } else {
             self.call_stack.revert_frame(child_frame);
         }
-        
+
         return result;
     }
-    
+
     /// Execute a DELEGATECALL operation
     pub fn execute_delegatecall(
         self: *CallExecutor,
@@ -131,35 +131,35 @@ pub const CallExecutor = struct {
             .code = &.{},
             .jumpdest_array = undefined,
         };
-        
+
         const params = CallParams{
             .target = to_address,
             .gas_limit = gas_limit,
             .input = input,
             .value = 0, // DELEGATECALL preserves original value
         };
-        
+
         const child_frame = try self.call_stack.init_call_frame(
             .DELEGATECALL,
             caller_frame,
             params,
             &placeholder_analysis,
         );
-        
+
         const result = self.execute_frame(child_frame) catch |err| {
             self.call_stack.revert_frame(child_frame);
             return CallExecutionResult.failure_result(0, &.{});
         };
-        
+
         if (result.success) {
             self.call_stack.complete_frame(child_frame);
         } else {
             self.call_stack.revert_frame(child_frame);
         }
-        
+
         return result;
     }
-    
+
     /// Execute a STATICCALL operation
     pub fn execute_staticcall(
         self: *CallExecutor,
@@ -172,35 +172,35 @@ pub const CallExecutor = struct {
             .code = &.{},
             .jumpdest_array = undefined,
         };
-        
+
         const params = CallParams{
             .target = to_address,
             .gas_limit = gas_limit,
             .input = input,
             .value = 0,
         };
-        
+
         const child_frame = try self.call_stack.init_call_frame(
             .STATICCALL,
             caller_frame,
             params,
             &placeholder_analysis,
         );
-        
+
         const result = self.execute_frame(child_frame) catch |err| {
             self.call_stack.revert_frame(child_frame);
             return CallExecutionResult.failure_result(0, &.{});
         };
-        
+
         if (result.success) {
             self.call_stack.complete_frame(child_frame);
         } else {
             self.call_stack.revert_frame(child_frame);
         }
-        
+
         return result;
     }
-    
+
     /// Execute a CREATE operation
     pub fn execute_create(
         self: *CallExecutor,
@@ -213,12 +213,12 @@ pub const CallExecutor = struct {
         const creator_address = caller_frame.contract_address;
         const nonce = 0; // TODO: Get actual nonce from state
         const new_address = try primitives.Address.calculate_create_address(creator_address, nonce);
-        
+
         const placeholder_analysis = CodeAnalysis{
             .code = init_code,
             .jumpdest_array = undefined,
         };
-        
+
         const params = CallParams{
             .target = new_address,
             .gas_limit = gas_limit,
@@ -226,29 +226,29 @@ pub const CallExecutor = struct {
             .value = value,
             .init_code = init_code,
         };
-        
+
         const child_frame = try self.call_stack.init_call_frame(
             .CREATE,
             caller_frame,
             params,
             &placeholder_analysis,
         );
-        
+
         const result = self.execute_frame(child_frame) catch |err| {
             self.call_stack.revert_frame(child_frame);
             return CallExecutionResult.failure_result(0, &.{});
         };
-        
+
         if (result.success) {
             self.call_stack.complete_frame(child_frame);
             return CallExecutionResult.create_success_result(result.gas_left, result.output, new_address);
         } else {
             self.call_stack.revert_frame(child_frame);
         }
-        
+
         return result;
     }
-    
+
     /// Execute a CREATE2 operation
     pub fn execute_create2(
         self: *CallExecutor,
@@ -266,12 +266,12 @@ pub const CallExecutor = struct {
             salt,
             init_code,
         );
-        
+
         const placeholder_analysis = CodeAnalysis{
             .code = init_code,
             .jumpdest_array = undefined,
         };
-        
+
         const params = CallParams{
             .target = new_address,
             .gas_limit = gas_limit,
@@ -280,40 +280,40 @@ pub const CallExecutor = struct {
             .salt = salt,
             .init_code = init_code,
         };
-        
+
         const child_frame = try self.call_stack.init_call_frame(
             .CREATE2,
             caller_frame,
             params,
             &placeholder_analysis,
         );
-        
+
         const result = self.execute_frame(child_frame) catch |err| {
             self.call_stack.revert_frame(child_frame);
             return CallExecutionResult.failure_result(0, &.{});
         };
-        
+
         if (result.success) {
             self.call_stack.complete_frame(child_frame);
             return CallExecutionResult.create_success_result(result.gas_left, result.output, new_address);
         } else {
             self.call_stack.revert_frame(child_frame);
         }
-        
+
         return result;
     }
-    
+
     /// Execute a single frame using the EVM interpreter
     fn execute_frame(self: *CallExecutor, frame: *Frame) !CallExecutionResult {
         // This is where we would call the EVM interpreter
         // For now, we'll just return a placeholder result
-        
+
         // In the real implementation, this would be something like:
         // try self.evm.interpret(frame);
-        
+
         // Check if execution was successful
         const success = frame.gas_remaining > 0; // Placeholder logic
-        
+
         return CallExecutionResult{
             .success = success,
             .gas_left = frame.gas_remaining,
@@ -324,35 +324,35 @@ pub const CallExecutor = struct {
 
 test "CallExecutor basic CALL execution" {
     const allocator = std.testing.allocator;
-    
+
     // This test is a placeholder since we need a full EVM setup
     // In practice, we'd need:
     // 1. A mock EVM instance
     // 2. A mock database
     // 3. Proper code analysis
     // 4. Frame initialization
-    
+
     // For now, just test that the structure compiles
     const mock_evm: *Evm = undefined;
     var executor = try CallExecutor.init(allocator, mock_evm);
     defer executor.deinit();
-    
+
     // The actual test would execute calls and verify results
     // but requires more infrastructure
 }
 
 test "CallExecutor CREATE address calculation" {
     const allocator = std.testing.allocator;
-    
+
     // Test CREATE address calculation
     const creator = Address.ZERO;
     const nonce: u64 = 0;
-    
+
     const address = try primitives.Address.calculate_create_address(creator, nonce);
-    
+
     // Verify it's a valid address (20 bytes)
     try std.testing.expectEqual(@as(usize, 20), address.len);
-    
+
     // CREATE addresses should be deterministic
     const address2 = try primitives.Address.calculate_create_address(creator, nonce);
     try std.testing.expectEqualSlices(u8, &address, &address2);

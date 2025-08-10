@@ -148,7 +148,7 @@ pub inline fn executeHashPrecompile(
     // Compute hash directly into output buffer (avoids intermediate allocation)
     // Most hash functions can write directly to the output buffer
     hash_fn(input, output);
-    
+
     // Format output in-place if needed (e.g., for padding)
     format_output(output, output);
 
@@ -165,10 +165,10 @@ pub inline fn executeHashPrecompile(
 pub inline fn formatLeftPaddedHash(comptime hash_size: usize, hash_bytes: []const u8, output: []u8) void {
     const output_size = 32;
     const padding_size = output_size - hash_size;
-    
+
     // Zero out the entire output buffer
     @memset(output[0..output_size], 0);
-    
+
     // Copy hash to the right position (after padding)
     @memcpy(output[padding_size..output_size], hash_bytes[0..hash_size]);
 }
@@ -194,10 +194,10 @@ pub inline fn formatDirectHash(comptime hash_size: usize, hash_bytes: []const u8
 /// @param target_size Size to pad to
 pub inline fn padInput(input: []const u8, padded_buffer: []u8, target_size: usize) void {
     std.debug.assert(padded_buffer.len >= target_size);
-    
+
     // Zero out the entire buffer
     @memset(padded_buffer[0..target_size], 0);
-    
+
     // Copy input data (truncate if longer than target)
     const copy_len = @min(input.len, target_size);
     @memcpy(padded_buffer[0..copy_len], input[0..copy_len]);
@@ -213,11 +213,11 @@ pub inline fn padInput(input: []const u8, padded_buffer: []u8, target_size: usiz
 pub inline fn bytesToU256(bytes: []const u8) u256 {
     var result: u256 = 0;
     const len = @min(bytes.len, 32);
-    
+
     for (bytes[0..len]) |byte| {
         result = (result << 8) | @as(u256, byte);
     }
-    
+
     return result;
 }
 
@@ -230,10 +230,10 @@ pub inline fn bytesToU256(bytes: []const u8) u256 {
 /// @param output Output buffer (must be at least 32 bytes)
 pub inline fn u256ToBytes(value: u256, output: []u8) void {
     std.debug.assert(output.len >= 32);
-    
+
     var temp_value = value;
     var i: usize = 32;
-    
+
     while (i > 0) {
         i -= 1;
         output[i] = @as(u8, @intCast(temp_value & 0xFF));

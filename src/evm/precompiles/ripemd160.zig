@@ -97,10 +97,10 @@ fn ripemd160Hash(input: []const u8, output: []u8) void {
     // Hash directly into the right position in the output buffer (after padding)
     // RIPEMD160 produces 20 bytes, but Ethereum requires 32 bytes with left padding
     const hash = crypto.HashAlgorithms.RIPEMD160.hash_fixed(input);
-    
+
     // Zero out the padding area (first 12 bytes)
     @memset(output[0..12], 0);
-    
+
     // Copy the hash after the padding
     @memcpy(output[12..32], &hash);
 }

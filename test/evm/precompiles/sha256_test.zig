@@ -139,7 +139,7 @@ test "sha256 get output size" {
 
 test "precompile dispatcher sha256 integration" {
     if (comptime no_precompiles) return testing.skip("precompiles disabled");
-    
+
     const sha256_address: Address = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02 };
 
     // Check address detection

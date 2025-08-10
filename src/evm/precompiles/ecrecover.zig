@@ -130,10 +130,10 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
     }
 
     // Parse input components using named offsets for clarity
-    const hash = input[HASH_OFFSET..HASH_OFFSET + HASH_SIZE];
-    const v_bytes = input[V_OFFSET..V_OFFSET + V_SIZE];
-    const r_bytes = input[R_OFFSET..R_OFFSET + R_SIZE];
-    const s_bytes = input[S_OFFSET..S_OFFSET + S_SIZE];
+    const hash = input[HASH_OFFSET .. HASH_OFFSET + HASH_SIZE];
+    const v_bytes = input[V_OFFSET .. V_OFFSET + V_SIZE];
+    const r_bytes = input[R_OFFSET .. R_OFFSET + R_SIZE];
+    const s_bytes = input[S_OFFSET .. S_OFFSET + S_SIZE];
 
     // Convert byte arrays to u256 values
     const v = bytes_to_u256(v_bytes);
@@ -161,7 +161,7 @@ pub fn execute(input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput
 
     // Clear output buffer and write the recovered address (left-padded to 32 bytes)
     @memset(output[0..ECRECOVER_OUTPUT_SIZE], 0);
-    @memcpy(output[ADDRESS_OFFSET_IN_OUTPUT..ADDRESS_OFFSET_IN_OUTPUT + ETHEREUM_ADDRESS_SIZE], &recovered_address);
+    @memcpy(output[ADDRESS_OFFSET_IN_OUTPUT .. ADDRESS_OFFSET_IN_OUTPUT + ETHEREUM_ADDRESS_SIZE], &recovered_address);
 
     return PrecompileOutput.success_result(gas_cost, ECRECOVER_OUTPUT_SIZE);
 }

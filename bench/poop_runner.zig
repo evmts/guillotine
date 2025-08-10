@@ -45,7 +45,7 @@ pub fn main() !void {
     defer poop_args.deinit();
 
     try poop_args.append("poop");
-    
+
     // Add any additional poop options from command line
     for (args[1..]) |arg| {
         try poop_args.append(arg);
@@ -66,14 +66,13 @@ pub fn main() !void {
     }
     print("\n\n", .{});
 
-
     // Execute poop
     var child = std.process.Child.init(poop_args.items, allocator);
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
-    
+
     const result = try child.spawnAndWait();
-    
+
     // Exit with the same code as poop
     switch (result) {
         .Exited => |code| {
@@ -90,6 +89,6 @@ test "poop runner basic functionality" {
     const allocator = std.testing.allocator;
     const args = try process.argsAlloc(allocator);
     defer process.argsFree(allocator, args);
-    
+
     try std.testing.expect(args.len >= 1);
 }

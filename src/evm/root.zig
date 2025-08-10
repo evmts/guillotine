@@ -373,7 +373,7 @@ pub const Contract = struct {
             .is_static = false,
         };
     }
-    
+
     pub fn deinit(self: *Contract, allocator: std.mem.Allocator, result: ?*anyopaque) void {
         _ = self;
         _ = allocator;

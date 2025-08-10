@@ -62,7 +62,7 @@ pub fn init(allocator: std.mem.Allocator, context: Context) AccessList {
         .storage_slots = std.HashMap(AccessListStorageKey, void, AccessListStorageKeyContext, 80).init(allocator),
         .context = context,
     };
-    
+
     return access_list;
 }
 
@@ -77,7 +77,7 @@ pub fn to_owned(self: AccessList) AccessList {
     return AccessList{
         .allocator = self.allocator,
         .addresses = self.addresses,
-        .storage_slots = self.storage_slots, 
+        .storage_slots = self.storage_slots,
         .context = self.context,
     };
 }
@@ -146,7 +146,7 @@ pub fn init_transaction(self: *AccessList, to: ?primitives.Address.Address) std.
 
     // Pre-warm tx.origin
     try self.addresses.put(self.context.tx_origin, {});
-    
+
     // Pre-warm block.coinbase (EIP-2929 + EIP-3651)
     try self.addresses.put(self.context.block_coinbase, {});
 
@@ -318,13 +318,13 @@ test "access_list_benchmarks" {
     const Timer = std.time.Timer;
     var timer = try Timer.start();
     const testing_allocator = std.testing.allocator;
-    
+
     const context = Context.init();
     var access_list = AccessList.init(testing_allocator, context);
     defer access_list.deinit();
-    
+
     const iterations = 100000;
-    
+
     // Benchmark 1: Address access performance under high load
     timer.reset();
     var i: usize = 0;
@@ -335,7 +335,7 @@ test "access_list_benchmarks" {
         _ = try access_list.access_address(address);
     }
     const address_access_ns = timer.read();
-    
+
     // Benchmark 2: Storage slot access performance
     access_list.clear();
     timer.reset();
@@ -348,21 +348,21 @@ test "access_list_benchmarks" {
         _ = try access_list.access_storage_slot(address, slot);
     }
     const storage_access_ns = timer.read();
-    
+
     // Benchmark 3: Large access list insertion performance
     access_list.clear();
     const large_addresses = try testing_allocator.alloc(primitives.Address.Address, 10000);
     defer testing_allocator.free(large_addresses);
-    
+
     for (large_addresses, 0..) |*address, idx| {
         const temp = @as(u160, @intCast(idx));
         std.mem.writeInt(u160, address[0..20], temp, .big);
     }
-    
+
     timer.reset();
     try access_list.pre_warm_addresses(large_addresses);
     const large_prewarm_ns = timer.read();
-    
+
     // Benchmark 4: Hash collision handling efficiency
     access_list.clear();
     timer.reset();
@@ -377,7 +377,7 @@ test "access_list_benchmarks" {
         _ = try access_list.access_address(collision_address);
     }
     const collision_handling_ns = timer.read();
-    
+
     // Benchmark 5: Memory usage scaling test
     access_list.clear();
     var scaling_lists = std.ArrayList(AccessList).init(testing_allocator);
@@ -387,12 +387,12 @@ test "access_list_benchmarks" {
         }
         scaling_lists.deinit();
     }
-    
+
     timer.reset();
     i = 0;
     while (i < 100) : (i += 1) {
         var list = AccessList.init(testing_allocator, context);
-        
+
         // Fill each list with different sized data
         const fill_size = (i + 1) * 10;
         var j: usize = 0;
@@ -403,16 +403,16 @@ test "access_list_benchmarks" {
             _ = try list.access_address(address);
             _ = try list.access_storage_slot(address, @intCast(j));
         }
-        
+
         try scaling_lists.append(list);
     }
     const scaling_ns = timer.read();
-    
+
     // Benchmark 6: Random vs sequential access patterns
     access_list.clear();
     var rng = std.Random.DefaultPrng.init(12345);
     const random = rng.random();
-    
+
     // Sequential access pattern
     timer.reset();
     i = 0;
@@ -423,9 +423,9 @@ test "access_list_benchmarks" {
         _ = try access_list.access_address(address);
     }
     const sequential_ns = timer.read();
-    
+
     access_list.clear();
-    
+
     // Random access pattern
     timer.reset();
     i = 0;
@@ -436,7 +436,7 @@ test "access_list_benchmarks" {
         _ = try access_list.access_address(address);
     }
     const random_access_ns = timer.read();
-    
+
     // Print benchmark results for analysis
     std.log.debug("Access List Benchmarks:", .{});
     std.log.debug("  Address access ({} ops): {} ns", .{ iterations, address_access_ns });
@@ -446,12 +446,12 @@ test "access_list_benchmarks" {
     std.log.debug("  Memory scaling (100 lists): {} ns", .{scaling_ns});
     std.log.debug("  Sequential access (10k ops): {} ns", .{sequential_ns});
     std.log.debug("  Random access (10k ops): {} ns", .{random_access_ns});
-    
+
     // Performance analysis hints
     if (sequential_ns < random_access_ns) {
         std.log.debug("✓ Sequential access shows expected performance benefit", .{});
     }
-    
+
     const avg_address_access_ns = address_access_ns / iterations;
     const avg_storage_access_ns = storage_access_ns / iterations;
     std.log.debug("  Average address access: {} ns/op", .{avg_address_access_ns});
@@ -467,21 +467,21 @@ test "fuzz_access_list_large_scale_patterns" {
     const global = struct {
         fn testLargeScalePatterns(input: []const u8) anyerror!void {
             if (input.len < 16) return;
-            
+
             const allocator = std.testing.allocator;
             const context = Context.init();
             var access_list = AccessList.init(allocator, context);
             defer access_list.deinit();
-            
+
             // Test parameters derived from fuzz input
             const num_addresses = input[0] % 100 + 1; // 1-100 addresses
             const num_slots_per_address = input[1] % 50 + 1; // 1-50 slots per address
             const access_pattern = input[2] % 4; // 0=sequential, 1=random, 2=clustered, 3=mixed
-            
+
             // Generate addresses from fuzz input
             var addresses = std.ArrayList(primitives.Address.Address).init(allocator);
             defer addresses.deinit();
-            
+
             for (0..num_addresses) |i| {
                 var address: [20]u8 = undefined;
                 const base_idx = 3 + (i * 20) % (input.len - 3);
@@ -494,7 +494,7 @@ test "fuzz_access_list_large_scale_patterns" {
                 }
                 try addresses.append(address);
             }
-            
+
             // Test different access patterns
             switch (access_pattern) {
                 0 => {
@@ -502,7 +502,7 @@ test "fuzz_access_list_large_scale_patterns" {
                     for (addresses.items) |address| {
                         const cost = access_list.access_address(address) catch continue;
                         std.testing.expect(cost == COLD_ACCOUNT_ACCESS_COST or cost == WARM_ACCOUNT_ACCESS_COST) catch {};
-                        
+
                         // Access multiple storage slots sequentially
                         for (0..num_slots_per_address) |slot_idx| {
                             const slot = @as(u256, slot_idx);
@@ -521,10 +521,10 @@ test "fuzz_access_list_large_scale_patterns" {
                         var bytes: [4]u8 = [_]u8{0} ** 4;
                         @memcpy(bytes[0..slice.len], slice);
                         const slot_seed = std.mem.readInt(u32, &bytes, .little);
-                        
+
                         const address = addresses.items[addr_idx];
                         const slot = @as(u256, slot_seed) % 1000; // 0-999 range
-                        
+
                         _ = access_list.access_address(address) catch continue;
                         _ = access_list.access_storage_slot(address, slot) catch continue;
                     }
@@ -534,12 +534,12 @@ test "fuzz_access_list_large_scale_patterns" {
                     const cluster_size = @min(addresses.items.len / 4 + 1, addresses.items.len);
                     for (0..cluster_size) |cluster_idx| {
                         const address = addresses.items[cluster_idx];
-                        
+
                         // Multiple accesses to same address
                         for (0..5) |_| {
                             _ = access_list.access_address(address) catch continue;
                         }
-                        
+
                         // Multiple storage accesses
                         for (0..num_slots_per_address) |slot_idx| {
                             const slot = @as(u256, slot_idx * slot_idx); // Sparse pattern
@@ -551,12 +551,12 @@ test "fuzz_access_list_large_scale_patterns" {
                     // Mixed pattern combining all approaches
                     for (addresses.items, 0..) |address, i| {
                         _ = access_list.access_address(address) catch continue;
-                        
+
                         // Sequential slots
                         const slot_base = @as(u256, i * 10);
                         _ = access_list.access_storage_slot(address, slot_base) catch continue;
                         _ = access_list.access_storage_slot(address, slot_base + 1) catch continue;
-                        
+
                         // Random slot
                         const random_slot = @as(u256, input[(i * 3) % input.len]) * 1000;
                         _ = access_list.access_storage_slot(address, random_slot) catch continue;
@@ -564,7 +564,7 @@ test "fuzz_access_list_large_scale_patterns" {
                 },
                 else => unreachable,
             }
-            
+
             // Verify access list state integrity
             for (addresses.items) |address| {
                 if (access_list.is_address_warm(address)) {
@@ -582,38 +582,38 @@ test "fuzz_access_list_gas_optimization" {
     const global = struct {
         fn testGasOptimization(input: []const u8) anyerror!void {
             if (input.len < 24) return;
-            
+
             const allocator = std.testing.allocator;
             const context = Context.init();
             var access_list = AccessList.init(allocator, context);
             defer access_list.deinit();
-            
+
             // Test gas optimization scenarios
             const num_operations = input[0] % 50 + 10; // 10-59 operations
             var total_gas: u64 = 0;
             var cold_accesses: u32 = 0;
             var warm_accesses: u32 = 0;
-            
+
             for (0..num_operations) |i| {
                 const base_idx = 1 + (i * 24) % (input.len - 24);
                 if (base_idx + 24 > input.len) break;
-                
+
                 // Extract address and slot from fuzz input
                 var address: [20]u8 = undefined;
-                std.mem.copyForwards(u8, &address, input[base_idx..base_idx + 20]);
+                std.mem.copyForwards(u8, &address, input[base_idx .. base_idx + 20]);
                 var slot_bytes: [4]u8 = undefined;
-                @memcpy(&slot_bytes, input[base_idx + 20..base_idx + 24]);
+                @memcpy(&slot_bytes, input[base_idx + 20 .. base_idx + 24]);
                 const slot = std.mem.readInt(u32, &slot_bytes, .little);
-                
+
                 const operation_type = input[base_idx] % 3; // 0=address, 1=storage, 2=call_cost
-                
+
                 switch (operation_type) {
                     0 => {
                         // Address access
                         const was_warm = access_list.is_address_warm(address);
                         const cost = access_list.access_address(address) catch continue;
                         total_gas += cost;
-                        
+
                         if (was_warm) {
                             warm_accesses += 1;
                             std.testing.expect(cost == WARM_ACCOUNT_ACCESS_COST) catch {};
@@ -627,7 +627,7 @@ test "fuzz_access_list_gas_optimization" {
                         const was_warm = access_list.is_storage_slot_warm(address, @as(u256, slot));
                         const cost = access_list.access_storage_slot(address, @as(u256, slot)) catch continue;
                         total_gas += cost;
-                        
+
                         if (was_warm) {
                             warm_accesses += 1;
                             std.testing.expect(cost == WARM_SLOAD_COST) catch {};
@@ -641,7 +641,7 @@ test "fuzz_access_list_gas_optimization" {
                         const was_warm = access_list.is_address_warm(address);
                         const cost = access_list.get_call_cost(address) catch continue;
                         total_gas += cost;
-                        
+
                         if (was_warm) {
                             std.testing.expect(cost == 0) catch {};
                         } else {
@@ -651,7 +651,7 @@ test "fuzz_access_list_gas_optimization" {
                     else => unreachable,
                 }
             }
-            
+
             // Verify gas accounting makes sense
             std.testing.expect(total_gas > 0) catch {};
             std.testing.expect(cold_accesses + warm_accesses <= num_operations) catch {};
@@ -665,14 +665,14 @@ test "fuzz_access_list_memory_efficiency" {
     const global = struct {
         fn testMemoryEfficiency(input: []const u8) anyerror!void {
             if (input.len < 8) return;
-            
+
             const allocator = std.testing.allocator;
             const context = Context.init();
-            
+
             // Test memory efficiency with multiple access lists
             const num_lists = input[0] % 10 + 1; // 1-10 lists
             const operations_per_list = input[1] % 50 + 10; // 10-59 operations per list
-            
+
             var access_lists = std.ArrayList(AccessList).init(allocator);
             defer {
                 for (access_lists.items) |*list| {
@@ -680,15 +680,15 @@ test "fuzz_access_list_memory_efficiency" {
                 }
                 access_lists.deinit();
             }
-            
+
             // Create multiple access lists and test memory sharing
             for (0..num_lists) |list_idx| {
                 var access_list = AccessList.init(allocator, context);
-                
+
                 for (0..operations_per_list) |op_idx| {
                     const base_idx = 2 + ((list_idx * operations_per_list + op_idx) * 24) % (input.len - 2);
                     if (base_idx + 24 > input.len) break;
-                    
+
                     var address: [20]u8 = undefined;
                     for (0..20) |addr_byte| {
                         if (base_idx + addr_byte < input.len) {
@@ -697,32 +697,32 @@ test "fuzz_access_list_memory_efficiency" {
                             address[addr_byte] = @as(u8, @intCast((list_idx + op_idx + addr_byte) % 256));
                         }
                     }
-                    
+
                     const slot_seed = blk: {
                         if (base_idx + 20 + 4 <= input.len) {
                             var slot_bytes: [4]u8 = undefined;
-                            @memcpy(&slot_bytes, input[base_idx + 20..base_idx + 24]);
+                            @memcpy(&slot_bytes, input[base_idx + 20 .. base_idx + 24]);
                             break :blk std.mem.readInt(u32, &slot_bytes, .little);
                         } else {
                             break :blk @as(u32, @intCast(op_idx));
                         }
                     };
-                    
+
                     // Mix address and storage accesses
                     _ = access_list.access_address(address) catch continue;
                     _ = access_list.access_storage_slot(address, @as(u256, slot_seed)) catch continue;
                 }
-                
+
                 try access_lists.append(access_list);
             }
-            
+
             // Test clearing and reuse
             for (access_lists.items) |*list| {
                 const initial_warm_count = list.addresses.count();
                 list.clear();
                 std.testing.expect(list.addresses.count() == 0) catch {};
                 std.testing.expect(list.storage_slots.count() == 0) catch {};
-                
+
                 // Reuse should be efficient
                 if (initial_warm_count > 0) {
                     const test_address = primitives.Address.ZERO_ADDRESS;
@@ -740,17 +740,17 @@ test "fuzz_access_list_transaction_patterns" {
     const global = struct {
         fn testTransactionPatterns(input: []const u8) anyerror!void {
             if (input.len < 32) return;
-            
+
             const allocator = std.testing.allocator;
-            
+
             // Create transaction context from fuzz input
             var tx_origin: [20]u8 = undefined;
             var coinbase: [20]u8 = undefined;
             var to_address: [20]u8 = undefined;
-            
+
             std.mem.copyForwards(u8, &tx_origin, input[0..20]);
             std.mem.copyForwards(u8, &coinbase, input[20..40] ++ ([_]u8{0} ** (40 - @min(40, input.len)))[20..20]);
-            
+
             // Handle case where input is too short for full addresses
             if (input.len >= 60) {
                 std.mem.copyForwards(u8, &to_address, input[40..60]);
@@ -761,32 +761,26 @@ test "fuzz_access_list_transaction_patterns" {
                     to_address[i] = @as(u8, @intCast(i));
                 }
             }
-            
-            const context = Context.init_with_values(
-                tx_origin,
-                0, 0, 0,
-                coinbase,
-                0, 0, 1, 0,
-                &[_]u256{}, 0
-            );
-            
+
+            const context = Context.init_with_values(tx_origin, 0, 0, 0, coinbase, 0, 0, 1, 0, &[_]u256{}, 0);
+
             var access_list = AccessList.init(allocator, context);
             defer access_list.deinit();
-            
+
             // Test transaction initialization
             access_list.init_transaction(to_address) catch return;
-            
+
             // Verify pre-warmed addresses
             std.testing.expect(access_list.is_address_warm(tx_origin)) catch {};
             std.testing.expect(access_list.is_address_warm(coinbase)) catch {};
             std.testing.expect(access_list.is_address_warm(to_address)) catch {};
-            
+
             // Test EIP-2930 access list pre-warming
             const num_prewarm_addresses = @min(input[0] % 20, 10); // 0-10 addresses
-            
+
             var prewarm_addresses = std.ArrayList(primitives.Address.Address).init(allocator);
             defer prewarm_addresses.deinit();
-            
+
             for (0..num_prewarm_addresses) |i| {
                 var prewarm_addr: [20]u8 = undefined;
                 const base_idx = (i * 20) % input.len;
@@ -795,32 +789,32 @@ test "fuzz_access_list_transaction_patterns" {
                 }
                 try prewarm_addresses.append(prewarm_addr);
             }
-            
+
             if (prewarm_addresses.items.len > 0) {
                 access_list.pre_warm_addresses(prewarm_addresses.items) catch {};
-                
+
                 for (prewarm_addresses.items) |addr| {
                     std.testing.expect(access_list.is_address_warm(addr)) catch {};
                     const cost = access_list.access_address(addr) catch continue;
                     std.testing.expect(cost == WARM_ACCOUNT_ACCESS_COST) catch {};
                 }
             }
-            
+
             // Test storage slot pre-warming
             if (prewarm_addresses.items.len > 0) {
                 const storage_addr = prewarm_addresses.items[0];
                 var storage_slots = std.ArrayList(u256).init(allocator);
                 defer storage_slots.deinit();
-                
+
                 const num_slots = input[1] % 10; // 0-9 slots
                 for (0..num_slots) |i| {
                     const slot_val = @as(u256, input[(i * 4) % input.len]) * 100 + @as(u256, i);
                     try storage_slots.append(slot_val);
                 }
-                
+
                 if (storage_slots.items.len > 0) {
                     access_list.pre_warm_storage_slots(storage_addr, storage_slots.items) catch {};
-                    
+
                     for (storage_slots.items) |slot| {
                         std.testing.expect(access_list.is_storage_slot_warm(storage_addr, slot)) catch {};
                         const cost = access_list.access_storage_slot(storage_addr, slot) catch continue;
@@ -838,22 +832,22 @@ test "fuzz_access_list_collision_handling" {
     const global = struct {
         fn testCollisionHandling(input: []const u8) anyerror!void {
             if (input.len < 12) return;
-            
+
             const allocator = std.testing.allocator;
             const context = Context.init();
             var access_list = AccessList.init(allocator, context);
             defer access_list.deinit();
-            
+
             // Create addresses that might cause hash collisions
             const num_addresses = input[0] % 50 + 10; // 10-59 addresses
             const collision_pattern = input[1] % 4; // Different collision patterns
-            
+
             var addresses = std.ArrayList(primitives.Address.Address).init(allocator);
             defer addresses.deinit();
-            
+
             for (0..num_addresses) |i| {
                 var address: [20]u8 = undefined;
-                
+
                 switch (collision_pattern) {
                     0 => {
                         // Similar prefixes
@@ -893,30 +887,30 @@ test "fuzz_access_list_collision_handling" {
                     },
                     else => unreachable,
                 }
-                
+
                 try addresses.append(address);
             }
-            
+
             // Test that all addresses are handled correctly despite potential collisions
             for (addresses.items, 0..) |address, i| {
                 const cost1 = access_list.access_address(address) catch continue;
                 std.testing.expect(cost1 == COLD_ACCOUNT_ACCESS_COST) catch {};
-                
+
                 const cost2 = access_list.access_address(address) catch continue;
                 std.testing.expect(cost2 == WARM_ACCOUNT_ACCESS_COST) catch {};
-                
+
                 // Test storage slots with potential collisions too
                 const base_slot = @as(u256, i);
                 for (0..3) |slot_offset| {
                     const slot = base_slot + @as(u256, slot_offset);
                     const storage_cost1 = access_list.access_storage_slot(address, slot) catch continue;
                     std.testing.expect(storage_cost1 == COLD_SLOAD_COST) catch {};
-                    
+
                     const storage_cost2 = access_list.access_storage_slot(address, slot) catch continue;
                     std.testing.expect(storage_cost2 == WARM_SLOAD_COST) catch {};
                 }
             }
-            
+
             // Verify all addresses are properly tracked
             for (addresses.items) |address| {
                 std.testing.expect(access_list.is_address_warm(address)) catch {};

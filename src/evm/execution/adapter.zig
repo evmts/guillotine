@@ -12,7 +12,7 @@ pub fn call_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void,
 /// Adapter for op_returndatasize - push the size of return data to stack
 pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    
+
     if (frame.stack.size() >= 1024) {
         @branchHint(.cold);
         unreachable;
@@ -25,7 +25,7 @@ pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void 
 /// Adapter for op_returndatacopy - copy return data to memory
 pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    
+
     if (frame.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;

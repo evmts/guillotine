@@ -475,10 +475,7 @@ pub const Journal = struct {
             },
 
             .selfdestruct_marked => |sd| {
-                Log.debug("Journal.revert_entry: Reverting selfdestruct_marked addr={x}, beneficiary={x}", .{ 
-                    primitives.Address.to_u256(sd.address), 
-                    primitives.Address.to_u256(sd.beneficiary) 
-                });
+                Log.debug("Journal.revert_entry: Reverting selfdestruct_marked addr={x}, beneficiary={x}", .{ primitives.Address.to_u256(sd.address), primitives.Address.to_u256(sd.beneficiary) });
                 // Remove the selfdestruct marking if the state supports it
                 if (@hasDecl(@TypeOf(state), "unmark_selfdestruct")) {
                     _ = state.unmark_selfdestruct(sd.address);

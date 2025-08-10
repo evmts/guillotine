@@ -16,11 +16,11 @@ const cpu_features = @import("cpu_features.zig");
 pub const SHA256_Accel = struct {
     pub const DIGEST_SIZE = 32;
     pub const BLOCK_SIZE = 64;
-    
+
     /// Hash function selector based on CPU features
     pub fn hash(data: []const u8, output: *[DIGEST_SIZE]u8) void {
         const features = cpu_features.cpu_features;
-        
+
         if (features.has_sha and builtin.target.cpu.arch == .x86_64) {
             // Use x86-64 SHA extensions
             hash_sha_ni(data, output);
@@ -32,7 +32,7 @@ pub const SHA256_Accel = struct {
             hash_software_optimized(data, output);
         }
     }
-    
+
     /// x86-64 SHA-NI implementation (SHA extensions)
     fn hash_sha_ni(data: []const u8, output: *[DIGEST_SIZE]u8) void {
         // For now, fall back to standard implementation
@@ -41,7 +41,7 @@ pub const SHA256_Accel = struct {
         hasher.update(data);
         hasher.final(output);
     }
-    
+
     /// AVX2 SIMD implementation for parallel processing
     fn hash_avx2(data: []const u8, output: *[DIGEST_SIZE]u8) void {
         // Initialize state with SHA256 initial values
@@ -49,18 +49,18 @@ pub const SHA256_Accel = struct {
             0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
             0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
         };
-        
+
         // Process complete blocks using SIMD
         var i: usize = 0;
         while (i + BLOCK_SIZE <= data.len) : (i += BLOCK_SIZE) {
-            process_block_simd(&state, data[i..i + BLOCK_SIZE]);
+            process_block_simd(&state, data[i .. i + BLOCK_SIZE]);
         }
-        
+
         // Handle remaining data
         if (i < data.len) {
             var last_block: [BLOCK_SIZE]u8 = undefined;
-            @memcpy(last_block[0..data.len - i], data[i..]);
-            
+            @memcpy(last_block[0 .. data.len - i], data[i..]);
+
             // Padding
             last_block[data.len - i] = 0x80;
             if (data.len - i < 56) {
@@ -70,7 +70,7 @@ pub const SHA256_Accel = struct {
                 process_block_simd(&state, &last_block);
                 @memset(last_block[0..56], 0);
             }
-            
+
             // Length in bits (big-endian)
             const bit_len = data.len * 8;
             std.mem.writeInt(u64, last_block[56..64], bit_len, .big);
@@ -83,13 +83,13 @@ pub const SHA256_Accel = struct {
             std.mem.writeInt(u64, last_block[56..64], bit_len, .big);
             process_block_simd(&state, &last_block);
         }
-        
+
         // Write final state to output (big-endian)
         for (state, 0..) |s, idx| {
             std.mem.writeInt(u32, output[idx * 4 ..][0..4], s, .big);
         }
     }
-    
+
     /// Process a single block using SIMD operations
     fn process_block_simd(state: *[8]u32, block: *const [BLOCK_SIZE]u8) void {
         // SHA256 constants (first 32 bits of fractional parts of cube roots of first 64 primes)
@@ -111,38 +111,38 @@ pub const SHA256_Accel = struct {
             0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
             0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
         };
-        
+
         // Prepare message schedule using SIMD where possible
         var W: [64]u32 = undefined;
-        
+
         // First 16 words come directly from the block (big-endian)
         for (0..16) |j| {
             W[j] = std.mem.readInt(u32, block[j * 4 ..][0..4], .big);
         }
-        
+
         // Extend message schedule using SIMD operations
         var j: usize = 16;
         while (j < 64) : (j += 4) {
             // Process 4 words at a time using vectors
             const vec_size = 4;
             var w_vec: @Vector(vec_size, u32) = undefined;
-            
+
             inline for (0..vec_size) |k| {
                 if (j + k < 64) {
                     const w0 = W[j + k - 16];
                     const w1 = W[j + k - 15];
                     const w9 = W[j + k - 7];
                     const w14 = W[j + k - 2];
-                    
+
                     const s0 = rotr(w1, 7) ^ rotr(w1, 18) ^ (w1 >> 3);
                     const s1 = rotr(w14, 17) ^ rotr(w14, 19) ^ (w14 >> 10);
-                    
+
                     w_vec[k] = w0 +% s0 +% w9 +% s1;
                     W[j + k] = w_vec[k];
                 }
             }
         }
-        
+
         // Working variables
         var a = state[0];
         var b = state[1];
@@ -152,7 +152,7 @@ pub const SHA256_Accel = struct {
         var f = state[5];
         var g = state[6];
         var h = state[7];
-        
+
         // Main loop - process with optimized operations
         for (0..64) |round| {
             const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
@@ -161,7 +161,7 @@ pub const SHA256_Accel = struct {
             const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
             const maj = (a & b) ^ (a & c) ^ (b & c);
             const temp2 = s0 +% maj;
-            
+
             h = g;
             g = f;
             f = e;
@@ -171,7 +171,7 @@ pub const SHA256_Accel = struct {
             b = a;
             a = temp1 +% temp2;
         }
-        
+
         // Update state
         state[0] +%= a;
         state[1] +%= b;
@@ -182,7 +182,7 @@ pub const SHA256_Accel = struct {
         state[6] +%= g;
         state[7] +%= h;
     }
-    
+
     /// Optimized software implementation with unrolled loops
     fn hash_software_optimized(data: []const u8, output: *[DIGEST_SIZE]u8) void {
         // Use standard library implementation as baseline
@@ -191,7 +191,7 @@ pub const SHA256_Accel = struct {
         hasher.update(data);
         hasher.final(output);
     }
-    
+
     /// Right rotate helper
     inline fn rotr(x: u32, n: u5) u32 {
         return (x >> n) | (x << (32 - n));
@@ -231,7 +231,7 @@ test "SHA256 hardware acceleration" {
             },
         },
     };
-    
+
     for (test_vectors) |tv| {
         var output: [32]u8 = undefined;
         SHA256_Accel.hash(tv.input, &output);
@@ -242,9 +242,9 @@ test "SHA256 hardware acceleration" {
 test "SHA256 benchmark comparison" {
     const iterations = 1000;
     const test_data = "The quick brown fox jumps over the lazy dog" ** 100; // ~4.3KB
-    
+
     var timer = try std.time.Timer.start();
-    
+
     // Benchmark hardware-accelerated version
     timer.reset();
     var i: usize = 0;
@@ -253,7 +253,7 @@ test "SHA256 benchmark comparison" {
         SHA256_Accel.hash(test_data, &output);
     }
     const accel_time = timer.read();
-    
+
     // Benchmark standard library version
     timer.reset();
     i = 0;
@@ -264,12 +264,12 @@ test "SHA256 benchmark comparison" {
         hasher.final(&output);
     }
     const std_time = timer.read();
-    
+
     std.log.debug("SHA256 Benchmark ({} iterations, {} bytes):", .{ iterations, test_data.len });
     std.log.debug("  Hardware-accelerated: {} ns", .{accel_time});
     std.log.debug("  Standard library: {} ns", .{std_time});
     std.log.debug("  Speedup: {d:.2}x", .{@as(f64, @floatFromInt(std_time)) / @as(f64, @floatFromInt(accel_time))});
-    
+
     // Features detection
     const features = cpu_features.cpu_features;
     std.log.debug("  Using acceleration: SHA={}, AVX2={}", .{

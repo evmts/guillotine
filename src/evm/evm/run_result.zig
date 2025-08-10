@@ -189,7 +189,7 @@ test "init handles zero gas scenario" {
 test "init preserves all provided parameters" {
     const output_data = "return data";
     const result = init(3000, 800, Status.Success, null, output_data);
-    
+
     try testing.expectEqual(Status.Success, result.status);
     try testing.expectEqual(@as(?ExecutionError.Error, null), result.err);
     try testing.expectEqual(@as(u64, 800), result.gas_left);
@@ -199,7 +199,7 @@ test "init preserves all provided parameters" {
 
 test "init handles all Status variants correctly" {
     const statuses = [_]Status{ Status.Success, Status.Revert, Status.Invalid, Status.OutOfGas };
-    
+
     for (statuses) |status| {
         const result = init(1000, 500, status, null, null);
         try testing.expectEqual(status, result.status);
@@ -217,7 +217,7 @@ test "init handles various ExecutionError types" {
         ExecutionError.Error.OutOfGas,
         ExecutionError.Error.InvalidJump,
     };
-    
+
     for (errors) |error_type| {
         const result = init(1000, 400, Status.Invalid, error_type, null);
         try testing.expectEqual(Status.Invalid, result.status);
@@ -238,19 +238,19 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //     const global = struct {
 //         fn testGasBoundaryConditions(input: []const u8) anyerror!void {
 //             if (input.len < 10) return;
-//             
+//
 //             // Use fuzz input to generate gas values
 //             const initial_gas = std.mem.readInt(u64, input[0..8], .little);
-//             const gas_left = if (initial_gas > 0) 
-//                 (std.mem.readInt(u64, input[2..10], .little) % initial_gas) 
-//             else 
+//             const gas_left = if (initial_gas > 0)
+//                 (std.mem.readInt(u64, input[2..10], .little) % initial_gas)
+//             else
 //                 0;
 //             const gas_consumed = initial_gas - gas_left;
-//             
+//
 //             const status = status_variants[input[1] % status_variants.len];
-//             
+//
 //             const result = init(initial_gas, gas_left, status, null, null);
-//             
+//
 //             try testing.expectEqual(initial_gas, result.gas_left + result.gas_used);
 //             try testing.expectEqual(gas_left, result.gas_left);
 //             try testing.expectEqual(gas_consumed, result.gas_used);
@@ -264,28 +264,28 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //     const global = struct {
 //         const boundary_values = [_]u64{
 //             0, 1, 255, 256, 65535, 65536, 21000, 100000, 1000000, 10000000,
-//             std.math.maxInt(u32), std.math.maxInt(u32) + 1, 
+//             std.math.maxInt(u32), std.math.maxInt(u32) + 1,
 //             std.math.maxInt(u64) - 1, std.math.maxInt(u64),
 //         };
-//         
+//
 //         fn testGasLimitBoundary(input: []const u8) anyerror!void {
 //             if (input.len < 3) return;
-//             
+//
 //             const boundary_idx = input[0] % boundary_values.len;
 //             const initial_gas = boundary_values[boundary_idx];
-//             
+//
 //             const gas_consumption_percent = input[1] % 101; // 0-100
 //             const gas_consumed = if (initial_gas > 0) (initial_gas * gas_consumption_percent) / 100 else 0;
 //             const gas_left = initial_gas - gas_consumed;
-//             
+//
 //             const status = if (gas_consumed >= initial_gas) Status.OutOfGas else Status.Success;
-//             
+//
 //             const result = init(initial_gas, gas_left, status, null, null);
-//             
+//
 //             try testing.expect(result.gas_left <= initial_gas);
 //             try testing.expect(result.gas_used <= initial_gas);
 //             try testing.expect(result.gas_left + result.gas_used == initial_gas);
-//             
+//
 //             if (status == Status.OutOfGas) {
 //                 try testing.expect(result.gas_left == 0 or result.gas_used == initial_gas);
 //             }
@@ -298,23 +298,23 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //     const global = struct {
 //         fn testGasOverflow(input: []const u8) anyerror!void {
 //             if (input.len < 16) return;
-//             
+//
 //             const max_safe_gas = std.math.maxInt(u64) - 10000;
 //             const base_gas = std.mem.readInt(u64, input[0..8], .little);
 //             const initial_gas = max_safe_gas + (base_gas % 10000);
-//             
+//
 //             const gas_left_raw = std.mem.readInt(u64, input[8..16], .little);
 //             const gas_left = gas_left_raw % (initial_gas + 1);
 //             const expected_gas_used = initial_gas - gas_left;
-//             
+//
 //             const result = init(initial_gas, gas_left, Status.Success, null, null);
-//             
+//
 //             try testing.expectEqual(gas_left, result.gas_left);
 //             try testing.expectEqual(expected_gas_used, result.gas_used);
-//             
+//
 //             const overflow_test = result.gas_left +| result.gas_used;
 //             try testing.expectEqual(initial_gas, overflow_test);
-//             
+//
 //             try testing.expect(result.gas_left <= initial_gas);
 //             try testing.expect(result.gas_used <= initial_gas);
 //         }
@@ -338,26 +338,26 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //             }},
 //             .{ .status = Status.OutOfGas, .should_have_error = true, .valid_errors = &[_]ExecutionError.Error{ExecutionError.Error.OutOfGas} },
 //         };
-//         
+//
 //         fn testStatusConsistency(input: []const u8) anyerror!void {
 //             if (input.len < 16) return;
-//             
+//
 //             const test_case = test_cases[input[0] % test_cases.len];
-//             
+//
 //             const initial_gas = 1000 + (std.mem.readInt(u32, input[4..8], .little) % 999000);
 //             const gas_left = std.mem.readInt(u32, input[8..12], .little) % (initial_gas + 1);
-//             
+//
 //             const error_to_use = if (test_case.valid_errors.len > 0)
 //                 test_case.valid_errors[input[1] % test_case.valid_errors.len]
 //             else
 //                 null;
-//             
+//
 //             const result = init(initial_gas, gas_left, test_case.status, error_to_use, null);
-//             
+//
 //             try testing.expectEqual(test_case.status, result.status);
 //             try testing.expectEqual(gas_left, result.gas_left);
 //             try testing.expectEqual(initial_gas - gas_left, result.gas_used);
-//             
+//
 //             if (test_case.should_have_error and error_to_use != null) {
 //                 try testing.expect(result.err != null);
 //                 try testing.expectEqual(error_to_use.?, result.err.?);
@@ -376,23 +376,23 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //             "very long error message that exceeds typical buffer sizes and includes special characters !@#$%^&*()",
 //             "ABI encoded data with multiple parameters", "Short", "0x1234567890abcdef",
 //         };
-//         
+//
 //         fn testOutputVariations(input: []const u8) anyerror!void {
 //             if (input.len < 12) return;
-//             
+//
 //             const initial_gas = 21000 + (std.mem.readInt(u32, input[0..4], .little) % 9979000);
 //             const gas_consumed = std.mem.readInt(u32, input[4..8], .little) % (initial_gas + 1);
 //             const gas_left = initial_gas - gas_consumed;
-//             
+//
 //             const status = status_variants[input[8] % status_variants.len];
 //             const output = output_scenarios[input[9] % output_scenarios.len];
-//             
+//
 //             const result = init(initial_gas, gas_left, status, null, output);
-//             
+//
 //             try testing.expectEqual(status, result.status);
 //             try testing.expectEqual(gas_left, result.gas_left);
 //             try testing.expectEqual(gas_consumed, result.gas_used);
-//             
+//
 //             if (output) |expected_output| {
 //                 if (result.output) |actual_output| {
 //                     try testing.expectEqualStrings(expected_output, actual_output);
@@ -402,7 +402,7 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //             } else {
 //                 try testing.expect(result.output == null);
 //             }
-//             
+//
 //             try testing.expect(result.gas_left <= initial_gas);
 //             try testing.expect(result.gas_used <= initial_gas);
 //         }
@@ -414,25 +414,25 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //     const global = struct {
 //         fn testGasBoundaryProperties(input: []const u8) anyerror!void {
 //             if (input.len < 16) return;
-//             
+//
 //             const initial_gas = std.mem.readInt(u64, input[0..8], .little);
-//             const gas_left = if (initial_gas > 0) 
-//                 std.mem.readInt(u64, input[8..16], .little) % (initial_gas + 1) 
-//             else 
+//             const gas_left = if (initial_gas > 0)
+//                 std.mem.readInt(u64, input[8..16], .little) % (initial_gas + 1)
+//             else
 //                 0;
-//             
+//
 //             const status = status_variants[input[1] % status_variants.len];
-//             
+//
 //             const result = init(initial_gas, gas_left, status, null, null);
-//             
+//
 //             const gas_calculation_valid = result.gas_left + result.gas_used == initial_gas;
 //             const gas_left_valid = result.gas_left <= initial_gas;
 //             const gas_used_valid = result.gas_used <= initial_gas;
-//             
+//
 //             try testing.expect(gas_calculation_valid);
 //             try testing.expect(gas_left_valid);
 //             try testing.expect(gas_used_valid);
-//             
+//
 //             try testing.expectEqual(gas_left, result.gas_left);
 //             try testing.expectEqual(initial_gas - gas_left, result.gas_used);
 //             try testing.expectEqual(status, result.status);
@@ -452,13 +452,13 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //             .{ .name = "block gas limit scenarios", .initial_gas = 30000000 },
 //             .{ .name = "transaction gas limit scenarios", .initial_gas = 21000 },
 //         };
-//         
+//
 //         fn testExtremeScenarios(input: []const u8) anyerror!void {
 //             if (input.len < 16) return;
-//             
+//
 //             const scenario = extreme_scenarios[input[0] % extreme_scenarios.len];
 //             const initial_gas = scenario.initial_gas;
-//             
+//
 //             const gas_left = if (initial_gas > 0) {
 //                 const base_left = std.mem.readInt(u64, input[8..16], .little);
 //                 switch (input[0] % extreme_scenarios.len) {
@@ -467,19 +467,19 @@ const status_variants = [_]Status{ Status.Success, Status.Revert, Status.Invalid
 //                     else => base_left % (initial_gas + 1), // others: any valid value
 //                 }
 //             } else 0;
-//             
+//
 //             const status = status_variants[input[1] % status_variants.len];
-//             
+//
 //             const result = init(initial_gas, gas_left, status, null, null);
-//             
+//
 //             try testing.expectEqual(initial_gas, result.gas_left + result.gas_used);
 //             try testing.expectEqual(gas_left, result.gas_left);
 //             try testing.expectEqual(initial_gas - gas_left, result.gas_used);
 //             try testing.expectEqual(status, result.status);
-//             
+//
 //             try testing.expect(result.gas_left <= initial_gas);
 //             try testing.expect(result.gas_used <= initial_gas);
-//             
+//
 //             if (status == Status.OutOfGas and initial_gas > 10) {
 //                 try testing.expect(gas_left <= initial_gas / 10);
 //             }

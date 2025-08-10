@@ -702,13 +702,13 @@ pub fn clear_transient_storage(self: *EvmState) void {
 /// ```
 pub fn clear_logs(self: *EvmState) void {
     Log.debug("EvmState.clear_logs: Clearing {} logs", .{self.logs.items.len});
-    
+
     // Free allocated memory for each log
     for (self.logs.items) |log| {
         self.allocator.free(log.topics);
         self.allocator.free(log.data);
     }
-    
+
     // Clear the list while retaining capacity for future use
     self.logs.clearRetainingCapacity();
 }
@@ -1214,7 +1214,7 @@ test "EvmState fuzz: storage operations with random addresses and slots" {
 
         // Set storage
         try state.set_storage(addr, slot, value);
-        
+
         // Track expected value
         const key = StorageKey{ .address = addr, .slot = slot };
         try expected.put(key, value);
@@ -1231,9 +1231,9 @@ test "EvmState fuzz: storage operations with random addresses and slots" {
     }
 
     // Test edge values
-    const edge_addresses = [_]u160{0, 1, std.math.maxInt(u160) - 1, std.math.maxInt(u160)};
-    const edge_slots = [_]u256{0, 1, std.math.maxInt(u256) - 1, std.math.maxInt(u256)};
-    const edge_values = [_]u256{0, 1, std.math.maxInt(u256) - 1, std.math.maxInt(u256)};
+    const edge_addresses = [_]u160{ 0, 1, std.math.maxInt(u160) - 1, std.math.maxInt(u160) };
+    const edge_slots = [_]u256{ 0, 1, std.math.maxInt(u256) - 1, std.math.maxInt(u256) };
+    const edge_values = [_]u256{ 0, 1, std.math.maxInt(u256) - 1, std.math.maxInt(u256) };
 
     for (edge_addresses) |addr_val| {
         const addr = testAddress(addr_val);
@@ -1270,7 +1270,7 @@ test "EvmState fuzz: transient storage lifecycle with random data" {
         const value = random.int(u256);
 
         try state.set_transient_storage(addr, slot, value);
-        
+
         const key = StorageKey{ .address = addr, .slot = slot };
         try expected_transient.put(key, value);
     }
@@ -1298,7 +1298,7 @@ test "EvmState fuzz: transient storage lifecycle with random data" {
         const addr = testAddress(@intCast(i));
         const slot = @as(u256, i);
         const value = @as(u256, i * 1000);
-        
+
         try state.set_transient_storage(addr, slot, value);
         try testing.expectEqual(value, state.get_transient_storage(addr, slot));
     }
@@ -1350,7 +1350,7 @@ test "EvmState fuzz: log operations with random data sizes" {
 
         // Verify log was added
         try testing.expectEqual(initial_log_count + 1, state.logs.items.len);
-        
+
         const log = state.logs.items[state.logs.items.len - 1];
         try testing.expectEqual(addr, log.address);
         try testing.expectEqual(num_topics, log.topics.len);
@@ -1370,7 +1370,7 @@ test "EvmState fuzz: log operations with random data sizes" {
     const large_data = try allocator.alloc(u8, 100_000);
     defer allocator.free(large_data);
     random.bytes(large_data);
-    
+
     try state.emit_log(testAddress(0x1234), &[_]u256{}, large_data);
     try testing.expectEqual(@as(usize, 1), state.logs.items.len);
     try testing.expectEqual(@as(usize, 100_000), state.logs.items[0].data.len);
@@ -1393,12 +1393,12 @@ test "EvmState fuzz: account state consistency with random operations" {
     var i: usize = 0;
     while (i < 500) : (i += 1) {
         const addr = testAddress(random.int(u160));
-        
+
         // Random balance operations
         if (random.boolean()) {
             const balance = random.int(u256);
             try state.set_balance(addr, balance);
-            
+
             // Invariant: Balance should be retrievable
             try testing.expectEqual(balance, state.get_balance(addr));
         }
@@ -1406,7 +1406,7 @@ test "EvmState fuzz: account state consistency with random operations" {
         // Random nonce operations
         if (random.boolean()) {
             const current_nonce = state.get_nonce(addr);
-            
+
             if (random.boolean()) {
                 // Set specific nonce
                 const new_nonce = random.int(u64);
@@ -1417,7 +1417,7 @@ test "EvmState fuzz: account state consistency with random operations" {
                 const prev_nonce = try state.increment_nonce(addr);
                 try testing.expectEqual(current_nonce, prev_nonce);
                 try testing.expectEqual(current_nonce + 1, state.get_nonce(addr));
-                
+
                 // Invariant: Nonce monotonically increases
                 try testing.expect(state.get_nonce(addr) > prev_nonce);
             }
@@ -1429,9 +1429,9 @@ test "EvmState fuzz: account state consistency with random operations" {
             const code = try allocator.alloc(u8, code_size);
             defer allocator.free(code);
             random.bytes(code);
-            
+
             try state.set_code(addr, code);
-            
+
             // Invariant: Code should be retrievable
             const retrieved_code = state.get_code(addr);
             try testing.expectEqualSlices(u8, code, retrieved_code);
@@ -1509,15 +1509,15 @@ test "EvmState fuzz: memory pressure with many accounts" {
     var i: usize = 0;
     while (i < num_accounts) : (i += 1) {
         const addr = testAddress(@intCast(i));
-        
+
         // Set random balance
         const balance = random.int(u256);
         try state.set_balance(addr, balance);
-        
+
         // Set random nonce
         const nonce = random.int(u64);
         try state.set_nonce(addr, nonce);
-        
+
         // Set random code (10% chance)
         if (random.intRangeAtMost(u8, 0, 9) == 0) {
             const code_size = random.intRangeAtMost(usize, 1, 100);
@@ -1526,7 +1526,7 @@ test "EvmState fuzz: memory pressure with many accounts" {
             random.bytes(code);
             try state.set_code(addr, code);
         }
-        
+
         // Set random storage (5 slots per account)
         var j: usize = 0;
         while (j < 5) : (j += 1) {
@@ -1550,18 +1550,18 @@ test "EvmState fuzz: memory pressure with many accounts" {
     while (i < 100) : (i += 1) {
         const addr = testAddress(random.intRangeAtMost(u160, 0, num_accounts - 1));
         const num_topics = random.intRangeAtMost(usize, 0, 4);
-        
+
         var topics_buf: [4]u256 = undefined;
         var j: usize = 0;
         while (j < num_topics) : (j += 1) {
             topics_buf[j] = random.int(u256);
         }
-        
+
         const data_size = random.intRangeAtMost(usize, 0, 1000);
         const data = try allocator.alloc(u8, data_size);
         defer allocator.free(data);
         random.bytes(data);
-        
+
         try state.emit_log(addr, topics_buf[0..num_topics], data);
     }
 
@@ -1685,8 +1685,8 @@ test "EvmState fuzz: invariant testing - destroyed contracts cannot be modified"
         // Set initial state
         const initial_balance = random.int(u256);
         const initial_nonce = random.int(u64);
-        const initial_code = &[_]u8{0x60, 0x00};
-        
+        const initial_code = &[_]u8{ 0x60, 0x00 };
+
         try state.set_balance(contract, initial_balance);
         try state.set_nonce(contract, initial_nonce);
         try state.set_code(contract, initial_code);
@@ -1700,7 +1700,7 @@ test "EvmState fuzz: invariant testing - destroyed contracts cannot be modified"
         // Note: In this implementation, we can still modify destroyed contracts
         // This is because actual destruction happens at transaction end
         // The test verifies current behavior, not ideal behavior
-        
+
         // Modifications should still work (current behavior)
         const new_balance = random.int(u256);
         try state.set_balance(contract, new_balance);
@@ -1766,7 +1766,7 @@ test "EvmState fuzz: edge value testing with extreme values" {
     const max_data = try allocator.alloc(u8, 1024);
     defer allocator.free(max_data);
     @memset(max_data, 0xFF);
-    
+
     try state.emit_log(extreme_addresses[0], &max_topics, max_data);
     const log = state.logs.items[state.logs.items.len - 1];
     try testing.expectEqualSlices(u256, &max_topics, log.topics);
@@ -1802,7 +1802,7 @@ test "EvmState clear_logs properly frees memory" {
     try testing.expectEqual(@as(usize, 0), state.logs.items.len);
 
     // Emit more logs to ensure reusability
-    const topics = [_]u256{1, 2};
+    const topics = [_]u256{ 1, 2 };
     const data = &[_]u8{ 0xFF, 0xEE };
     try state.emit_log(addr, &topics, data);
     try testing.expectEqual(@as(usize, 1), state.logs.items.len);
@@ -1857,7 +1857,7 @@ test "EvmState clear_transaction_state clears all transaction data" {
     try state.set_transient_storage(addr2, 1, 300);
 
     // Emit logs
-    const topics = [_]u256{1, 2, 3};
+    const topics = [_]u256{ 1, 2, 3 };
     const data = &[_]u8{ 0xAA, 0xBB, 0xCC };
     try state.emit_log(addr1, &topics, data);
     try state.emit_log(addr2, topics[0..2], data);
@@ -1900,7 +1900,7 @@ test "EvmState memory leak prevention in transaction simulation" {
         const addr = testAddress(@as(u160, @intCast(tx_num)));
 
         // Each transaction does various operations
-        
+
         // Set some transient storage
         for (0..10) |slot| {
             try state.set_transient_storage(addr, slot, tx_num * 1000 + slot);

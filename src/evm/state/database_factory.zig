@@ -129,7 +129,6 @@ pub fn create_database(allocator: std.mem.Allocator, config: DatabaseConfig) !Da
 
             return memory_db.to_database_interface();
         },
-
     }
 }
 
@@ -165,19 +164,19 @@ pub fn destroy_database(allocator: std.mem.Allocator, database: DatabaseInterfac
                     allocator.destroy(memory_db);
                 },
 
-            // Future database type cleanup:
-            // .Fork => {
-            //     const fork_db: *ForkDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(fork_db);
-            // },
-            // .File => {
-            //     const file_db: *FileDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(file_db);
-            // },
-            // .Cached => {
-            //     const cached_db: *CachedDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
-            //     allocator.destroy(cached_db);
-            // },
+                // Future database type cleanup:
+                // .Fork => {
+                //     const fork_db: *ForkDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
+                //     allocator.destroy(fork_db);
+                // },
+                // .File => {
+                //     const file_db: *FileDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
+                //     allocator.destroy(file_db);
+                // },
+                // .Cached => {
+                //     const cached_db: *CachedDatabase = @ptrCast(@alignCast(metadata.allocation_ptr));
+                //     allocator.destroy(cached_db);
+                // },
             }
         }
     }
@@ -220,7 +219,6 @@ pub fn deinit_factory() void {
 pub fn create_memory_database(allocator: std.mem.Allocator) !DatabaseInterface {
     return create_database(allocator, DatabaseConfig{ .Memory = {} });
 }
-
 
 // Tests
 const testing = std.testing;

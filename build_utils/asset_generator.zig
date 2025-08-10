@@ -91,11 +91,11 @@ pub const GenerateAssetsStep = struct {
 
         while (try walker.next()) |entry| {
             if (entry.kind != .file) continue;
-            
+
             const web_path = try std.fmt.allocPrint(b.allocator, "/{s}", .{entry.path});
             const embed_path = try std.fmt.allocPrint(b.allocator, "dist/{s}", .{entry.path});
             const mime_type = getMimeType(entry.path);
-            
+
             try writer.print("    Self.init(\n", .{});
             try writer.print("        \"{s}\",\n", .{web_path});
             try writer.print("        @embedFile(\"{s}\"),\n", .{embed_path});

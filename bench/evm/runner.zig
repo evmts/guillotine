@@ -41,7 +41,7 @@ pub fn main() !void {
     // Read and decode contract code
     const contract_code_hex = try std.fs.cwd().readFileAlloc(allocator, args.contract_code_path, 1024 * 1024);
     defer allocator.free(contract_code_hex);
-    
+
     const contract_code = try hexDecode(allocator, std.mem.trim(u8, contract_code_hex, " \n\r\t"));
     defer allocator.free(contract_code);
 
@@ -54,11 +54,11 @@ pub fn main() !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    
+
     // Set up tracer based on disable_trace flag
     const stdout = std.io.getStdOut().writer();
     const tracer: ?std.io.AnyWriter = if (args.disable_trace) null else stdout.any();
-    
+
     var vm = try Evm.Evm.init(
         allocator,
         db_interface,
@@ -85,7 +85,7 @@ pub fn main() !void {
     var i: u8 = 0;
     while (i < args.num_runs) : (i += 1) {
         const timer = std.time.nanoTimestamp();
-        
+
         // Execute the contract call directly without error handling
         const call_params = CallParams{ .call = .{
             .caller = caller_address,
@@ -93,26 +93,26 @@ pub fn main() !void {
             .value = 0,
             .input = calldata,
             .gas = 1_000_000_000,
-        }};
+        } };
         call_result = vm.call(call_params) catch |err| {
             std.debug.print("Contract execution failed: {}\n", .{err});
             std.process.exit(1);
         };
-        
+
         const duration_ns = std.time.nanoTimestamp() - timer;
         const duration_ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
-        
+
         // Validate successful execution
         if (!call_result.success) {
             std.debug.print("Contract execution failed\n", .{});
             std.process.exit(1);
         }
-        
+
         // Free output if allocated
         if (call_result.output.len > 0) {
             allocator.free(call_result.output);
         }
-        
+
         // Output timing
         const duration_ms_rounded = @as(u64, @intFromFloat(@round(duration_ms)));
         if (duration_ms_rounded == 0) {
@@ -135,7 +135,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     var i: usize = 1;
     while (i < args.len) {
         const arg = args[i];
-        
+
         if (std.mem.eql(u8, arg, "--contract-code-path")) {
             i += 1;
             contract_code_path = try allocator.dupe(u8, args[i]);
@@ -182,12 +182,7 @@ fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
 }
 
 fn deployContract(vm: *Evm.Evm, allocator: std.mem.Allocator, caller: Address, bytecode: []const u8) !Address {
-    const create_result = try vm.create_contract(
-        caller,
-        0,
-        bytecode,
-        10_000_000
-    );
+    const create_result = try vm.create_contract(caller, 0, bytecode, 10_000_000);
     defer if (create_result.output) |output| allocator.free(output);
 
     return create_result.address;

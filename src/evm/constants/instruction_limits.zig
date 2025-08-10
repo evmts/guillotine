@@ -1,7 +1,7 @@
 const std = @import("std");
 
 /// Maximum number of instructions in the translated instruction stream.
-/// 
+///
 /// This limits the size of pre-allocated instruction arrays to avoid
 /// unbounded memory usage. The value is chosen to accommodate:
 /// - Maximum contract size (24KB) translates to roughly 24K instructions worst-case
@@ -18,10 +18,10 @@ test "instruction limits are reasonable" {
     // Verify MAX_INSTRUCTIONS can handle maximum contract size
     // Worst case: every byte is a separate instruction
     try std.testing.expect(MAX_INSTRUCTIONS >= MAX_CONTRACT_SIZE);
-    
+
     // Verify it leaves room for expansion (2x for block markers, etc)
     try std.testing.expect(MAX_INSTRUCTIONS >= MAX_CONTRACT_SIZE * 2);
-    
+
     // Verify memory usage is bounded
     const instruction_size = 24; // Approximate size of Instruction struct
     const max_memory = MAX_INSTRUCTIONS * instruction_size;

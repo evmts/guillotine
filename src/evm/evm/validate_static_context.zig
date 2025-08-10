@@ -8,7 +8,7 @@ pub const ValidateStaticContextError = error{WriteProtection};
 pub fn validate_static_context(comptime config: EvmConfig) type {
     return struct {
         pub fn validateStaticContextImpl(self: *const EvmModule.Evm(config)) ValidateStaticContextError!void {
-    if (self.read_only) return error.WriteProtection;
+            if (self.read_only) return error.WriteProtection;
         }
     };
 }

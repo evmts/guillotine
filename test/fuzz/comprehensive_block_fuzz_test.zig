@@ -14,18 +14,9 @@ fn create_evm_context_with_code(allocator: std.mem.Allocator, code: []const u8) 
     const config = evm.EvmConfig.init(.CANCUN);
     const EvmType = evm.Evm(config);
     var vm = try EvmType.init(allocator, db.to_database_interface(), null, 0, false, null);
-    
-    var contract = evm.Contract.init(
-        primitives.Address.ZERO,
-        primitives.Address.ZERO,
-        0,
-        1000000,
-        code,
-        [_]u8{0} ** 32,
-        &.{},
-        false
-    );
-    
+
+    var contract = evm.Contract.init(primitives.Address.ZERO, primitives.Address.ZERO, 0, 1000000, code, [_]u8{0} ** 32, &.{}, false);
+
     var builder = evm.Frame.builder(allocator);
     const frame = try builder
         .withVm(&vm)
@@ -33,7 +24,7 @@ fn create_evm_context_with_code(allocator: std.mem.Allocator, code: []const u8) 
         .withGas(1000000)
         .withCaller(primitives.Address.ZERO)
         .build();
-    
+
     return .{
         .db = db,
         .vm = vm,
@@ -52,7 +43,7 @@ fn deinit_evm_context(ctx: anytype, allocator: std.mem.Allocator) void {
 // Comprehensive BLOCKHASH operation fuzz testing
 test "fuzz_blockhash_operation_edge_cases" {
     const allocator = testing.allocator;
-    
+
     const blockhash_tests = [_]struct {
         current_block: u64,
         query_block: u256,
@@ -72,7 +63,7 @@ test "fuzz_blockhash_operation_edge_cases" {
             .expected_result = .zero,
             .description = "Genesis block current query",
         },
-        
+
         // Future block queries (should return zero)
         .{
             .current_block = 1000,
@@ -92,7 +83,7 @@ test "fuzz_blockhash_operation_edge_cases" {
             .expected_result = .zero,
             .description = "Maximum future block returns zero",
         },
-        
+
         // Genesis block queries (should return zero)
         .{
             .current_block = 1000,
@@ -100,7 +91,7 @@ test "fuzz_blockhash_operation_edge_cases" {
             .expected_result = .zero,
             .description = "Genesis block query returns zero",
         },
-        
+
         // Beyond 256 block limit (should return zero)
         .{
             .current_block = 1000,
@@ -120,7 +111,7 @@ test "fuzz_blockhash_operation_edge_cases" {
             .expected_result = .zero,
             .description = "Very old block returns zero",
         },
-        
+
         // Valid recent blocks (should return non-zero hash)
         .{
             .current_block = 1000,
@@ -146,7 +137,7 @@ test "fuzz_blockhash_operation_edge_cases" {
             .expected_result = .nonzero,
             .description = "At boundary of valid range returns hash",
         },
-        
+
         // Edge cases at boundaries
         .{
             .current_block = 256,
@@ -160,7 +151,7 @@ test "fuzz_blockhash_operation_edge_cases" {
             .expected_result = .zero,
             .description = "Genesis from block 1 returns zero",
         },
-        
+
         // Large block numbers
         .{
             .current_block = std.math.maxInt(u64),
@@ -181,26 +172,26 @@ test "fuzz_blockhash_operation_edge_cases" {
             .description = "Maximum block minus 257 returns zero",
         },
     };
-    
+
     for (blockhash_tests) |test_case| {
         const blockhash_code = [_]u8{0x40}; // BLOCKHASH
         var ctx = try create_evm_context_with_code(allocator, &blockhash_code);
         defer deinit_evm_context(ctx, allocator);
-        
+
         // Set block context
         ctx.vm.context.block_number = test_case.current_block;
-        
+
         // Setup stack for BLOCKHASH (block number)
         try ctx.frame.stack.append(test_case.query_block);
-        
+
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
-        
+
         const result = try ctx.vm.table.execute(0, interpreter, state, 0x40);
         _ = result;
-        
+
         const block_hash = try ctx.frame.stack.pop();
-        
+
         switch (test_case.expected_result) {
             .zero => {
                 try testing.expectEqual(@as(u256, 0), block_hash);
@@ -215,7 +206,7 @@ test "fuzz_blockhash_operation_edge_cases" {
 // Comprehensive block info operations fuzz testing
 test "fuzz_block_info_operations" {
     const allocator = testing.allocator;
-    
+
     const block_info_tests = [_]struct {
         opcode: u8,
         opcode_name: []const u8,
@@ -269,7 +260,7 @@ test "fuzz_block_info_operations" {
             .expected_value = 0xDEADBEEF,
             .description = "COINBASE custom address",
         },
-        
+
         // TIMESTAMP tests
         .{
             .opcode = 0x42,
@@ -310,7 +301,7 @@ test "fuzz_block_info_operations" {
             .expected_value = 1609459200,
             .description = "TIMESTAMP realistic value",
         },
-        
+
         // NUMBER tests
         .{
             .opcode = 0x43,
@@ -351,7 +342,7 @@ test "fuzz_block_info_operations" {
             .expected_value = 18000000,
             .description = "NUMBER realistic mainnet block",
         },
-        
+
         // DIFFICULTY/PREVRANDAO tests
         .{
             .opcode = 0x44,
@@ -392,7 +383,7 @@ test "fuzz_block_info_operations" {
             .expected_value = 0x1234567890ABCDEF,
             .description = "DIFFICULTY custom value",
         },
-        
+
         // GASLIMIT tests
         .{
             .opcode = 0x45,
@@ -433,7 +424,7 @@ test "fuzz_block_info_operations" {
             .expected_value = 30000000,
             .description = "GASLIMIT mainnet typical",
         },
-        
+
         // BASEFEE tests (EIP-1559)
         .{
             .opcode = 0x48,
@@ -474,7 +465,7 @@ test "fuzz_block_info_operations" {
             .expected_value = 15000000000,
             .description = "BASEFEE typical value",
         },
-        
+
         // BLOBBASEFEE tests (EIP-4844)
         .{
             .opcode = 0x4A,
@@ -516,12 +507,12 @@ test "fuzz_block_info_operations" {
             .description = "BLOBBASEFEE typical value",
         },
     };
-    
+
     for (block_info_tests) |test_case| {
         const opcode_bytes = [_]u8{test_case.opcode};
         var ctx = try create_evm_context_with_code(allocator, &opcode_bytes);
         defer deinit_evm_context(ctx, allocator);
-        
+
         // Set block context
         ctx.vm.context.block_number = test_case.block_number;
         ctx.vm.context.block_timestamp = test_case.block_timestamp;
@@ -530,13 +521,13 @@ test "fuzz_block_info_operations" {
         ctx.vm.context.block_gas_limit = test_case.block_gas_limit;
         ctx.vm.context.block_base_fee = test_case.block_base_fee;
         ctx.vm.context.blob_base_fee = test_case.blob_base_fee;
-        
+
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
-        
+
         const result = try ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
         _ = result;
-        
+
         const returned_value = try ctx.frame.stack.pop();
         try testing.expectEqual(test_case.expected_value, returned_value);
     }
@@ -545,7 +536,7 @@ test "fuzz_block_info_operations" {
 // Comprehensive BLOBHASH operation fuzz testing
 test "fuzz_blobhash_operation_edge_cases" {
     const allocator = testing.allocator;
-    
+
     const blobhash_tests = [_]struct {
         blob_hashes: []const u256,
         query_index: u256,
@@ -575,7 +566,7 @@ test "fuzz_blobhash_operation_edge_cases" {
             .expected_hash = 0,
             .description = "Empty blob hashes max index returns zero",
         },
-        
+
         // Single blob hash
         .{
             .blob_hashes = &[_]u256{0x1111111111111111111111111111111111111111111111111111111111111111},
@@ -591,7 +582,7 @@ test "fuzz_blobhash_operation_edge_cases" {
             .expected_hash = 0,
             .description = "Single blob hash out of bounds",
         },
-        
+
         // Multiple blob hashes
         .{
             .blob_hashes = &[_]u256{
@@ -637,7 +628,7 @@ test "fuzz_blobhash_operation_edge_cases" {
             .expected_hash = 0,
             .description = "Multiple blob hashes out of bounds",
         },
-        
+
         // Maximum blob hashes (6 per EIP-4844)
         .{
             .blob_hashes = &[_]u256{
@@ -667,7 +658,7 @@ test "fuzz_blobhash_operation_edge_cases" {
             .expected_hash = 0,
             .description = "Maximum blob hashes out of bounds",
         },
-        
+
         // Edge cases with special values
         .{
             .blob_hashes = &[_]u256{0x0000000000000000000000000000000000000000000000000000000000000000},
@@ -683,7 +674,7 @@ test "fuzz_blobhash_operation_edge_cases" {
             .expected_hash = std.math.maxInt(u256),
             .description = "Maximum blob hash",
         },
-        
+
         // Large index edge cases
         .{
             .blob_hashes = &[_]u256{0x1111111111111111111111111111111111111111111111111111111111111111},
@@ -700,26 +691,26 @@ test "fuzz_blobhash_operation_edge_cases" {
             .description = "Maximum index out of bounds",
         },
     };
-    
+
     for (blobhash_tests) |test_case| {
         const blobhash_code = [_]u8{0x49}; // BLOBHASH
         var ctx = try create_evm_context_with_code(allocator, &blobhash_code);
         defer deinit_evm_context(ctx, allocator);
-        
+
         // Set blob hashes in context
         ctx.vm.context.blob_hashes = test_case.blob_hashes;
-        
+
         // Setup stack for BLOBHASH (index)
         try ctx.frame.stack.append(test_case.query_index);
-        
+
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
-        
+
         const result = try ctx.vm.table.execute(0, interpreter, state, 0x49);
         _ = result;
-        
+
         const returned_hash = try ctx.frame.stack.pop();
-        
+
         switch (test_case.expected_result) {
             .zero => {
                 try testing.expectEqual(@as(u256, 0), returned_hash);
@@ -734,20 +725,20 @@ test "fuzz_blobhash_operation_edge_cases" {
 // Random block context operations stress testing
 test "fuzz_block_operations_random_stress" {
     const allocator = testing.allocator;
-    
+
     var prng = std.Random.DefaultPrng.init(0xB10C);
     const random = prng.random();
-    
+
     // Test many random combinations of block operations
     for (0..100) |_| {
         const operations = [_]u8{ 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x48, 0x49, 0x4A };
         const op_index = random.intRangeAtMost(usize, 0, operations.len - 1);
         const opcode = operations[op_index];
-        
+
         const opcode_bytes = [_]u8{opcode};
         var ctx = try create_evm_context_with_code(allocator, &opcode_bytes);
         defer deinit_evm_context(ctx, allocator);
-        
+
         // Set random block context values
         ctx.vm.context.block_number = random.int(u64);
         ctx.vm.context.block_timestamp = random.int(u64);
@@ -756,7 +747,7 @@ test "fuzz_block_operations_random_stress" {
         ctx.vm.context.block_gas_limit = random.int(u64);
         ctx.vm.context.block_base_fee = random.int(u256);
         ctx.vm.context.blob_base_fee = random.int(u256);
-        
+
         // Generate random blob hashes
         const num_blob_hashes = random.intRangeAtMost(usize, 0, 6);
         const blob_hashes = try allocator.alloc(u256, num_blob_hashes);
@@ -765,7 +756,7 @@ test "fuzz_block_operations_random_stress" {
             hash.* = random.int(u256);
         }
         ctx.vm.context.blob_hashes = blob_hashes;
-        
+
         // For BLOCKHASH and BLOBHASH, we need to push an argument
         if (opcode == 0x40) { // BLOCKHASH
             const query_block = random.int(u256);
@@ -774,17 +765,17 @@ test "fuzz_block_operations_random_stress" {
             const query_index = random.intRangeAtMost(u256, 0, 10);
             try ctx.frame.stack.append(query_index);
         }
-        
+
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
-        
+
         const result = try ctx.vm.table.execute(0, interpreter, state, opcode);
         _ = result;
-        
+
         // All operations should return a valid u256 value
         const returned_value = try ctx.frame.stack.pop();
         try testing.expect(@TypeOf(returned_value) == u256);
-        
+
         // Validate operation-specific invariants
         switch (opcode) {
             0x40 => { // BLOCKHASH
@@ -823,7 +814,7 @@ test "fuzz_block_operations_random_stress" {
 // Block context consistency testing
 test "fuzz_block_context_consistency" {
     const allocator = testing.allocator;
-    
+
     // Test that multiple calls to the same operation return consistent results
     const consistency_tests = [_]struct {
         opcode: u8,
@@ -838,12 +829,12 @@ test "fuzz_block_context_consistency" {
         .{ .opcode = 0x48, .requires_argument = false, .description = "BASEFEE consistency" },
         .{ .opcode = 0x4A, .requires_argument = false, .description = "BLOBBASEFEE consistency" },
     };
-    
+
     for (consistency_tests) |test_case| {
         const opcode_bytes = [_]u8{test_case.opcode};
         var ctx = try create_evm_context_with_code(allocator, &opcode_bytes);
         defer deinit_evm_context(ctx, allocator);
-        
+
         // Set consistent block context
         ctx.vm.context.block_number = 12345678;
         ctx.vm.context.block_timestamp = 1700000000;
@@ -852,20 +843,20 @@ test "fuzz_block_context_consistency" {
         ctx.vm.context.block_gas_limit = 30000000;
         ctx.vm.context.block_base_fee = 15000000000;
         ctx.vm.context.blob_base_fee = 1000000000;
-        
+
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
-        
+
         // First call
         const result1 = try ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
         _ = result1;
         const value1 = try ctx.frame.stack.pop();
-        
+
         // Second call
         const result2 = try ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
         _ = result2;
         const value2 = try ctx.frame.stack.pop();
-        
+
         // Values should be consistent
         try testing.expectEqual(value1, value2);
     }
@@ -874,7 +865,7 @@ test "fuzz_block_context_consistency" {
 // Gas consumption testing for block operations
 test "fuzz_block_operations_gas_consumption" {
     const allocator = testing.allocator;
-    
+
     const gas_tests = [_]struct {
         opcode: u8,
         initial_gas: u64,
@@ -893,14 +884,14 @@ test "fuzz_block_operations_gas_consumption" {
         .{ .opcode = 0x49, .initial_gas = 50, .description = "BLOBHASH with low gas" },
         .{ .opcode = 0x4A, .initial_gas = 1000000, .description = "BLOBBASEFEE with high gas" },
     };
-    
+
     for (gas_tests) |test_case| {
         const opcode_bytes = [_]u8{test_case.opcode};
         var ctx = try create_evm_context_with_code(allocator, &opcode_bytes);
         defer deinit_evm_context(ctx, allocator);
-        
+
         ctx.frame.gas_remaining = test_case.initial_gas;
-        
+
         // Set reasonable block context
         ctx.vm.context.block_number = 1000;
         ctx.vm.context.block_timestamp = 1234567890;
@@ -910,27 +901,27 @@ test "fuzz_block_operations_gas_consumption" {
         ctx.vm.context.block_base_fee = 1000000000;
         ctx.vm.context.blob_base_fee = 1;
         ctx.vm.context.blob_hashes = &[_]u256{0x1111111111111111111111111111111111111111111111111111111111111111};
-        
+
         // Setup stack arguments for operations that need them
         if (test_case.opcode == 0x40) { // BLOCKHASH
             try ctx.frame.stack.append(999); // Valid block number
         } else if (test_case.opcode == 0x49) { // BLOBHASH
             try ctx.frame.stack.append(0); // Valid index
         }
-        
+
         const gas_before = ctx.frame.gas_remaining;
-        
+
         const interpreter: *evm.Operation.Interpreter = @ptrCast(&ctx.vm);
         const state: *evm.Operation.State = @ptrCast(&ctx.frame);
-        
+
         const result = ctx.vm.table.execute(0, interpreter, state, test_case.opcode);
-        
+
         if (result) |_| {
             // Success - verify gas consumption
             const gas_used = gas_before - ctx.frame.gas_remaining;
             try testing.expect(gas_used > 0); // All operations should consume some gas
             try testing.expect(gas_used <= gas_before); // Can't use more than available
-            
+
             // Verify operation completed successfully
             const returned_value = try ctx.frame.stack.pop();
             try testing.expect(@TypeOf(returned_value) == u256);

@@ -72,7 +72,7 @@ test "LT opcode 5 < 10 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -166,7 +166,7 @@ test "GT opcode 10 > 5 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -260,7 +260,7 @@ test "EQ opcode 42 == 42 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -354,7 +354,7 @@ test "SLT opcode signed -1 < 1 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -448,7 +448,7 @@ test "SGT opcode signed 1 > -1 = 1" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -537,7 +537,7 @@ test "ISZERO opcode 0 == 0 ? 1 : 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
@@ -626,7 +626,7 @@ test "ISZERO opcode 42 == 0 ? 1 : 0" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 1000000,
-    }};
+    } };
 
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);

@@ -15,7 +15,7 @@ pub const DebugState = struct {
     memory_size: usize,
     has_error: bool,
     error_name: ?[]const u8,
-    
+
     pub fn capture(
         pc: usize,
         opcode: u8,
@@ -226,7 +226,7 @@ pub fn formatBytesHex(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
 pub fn serializeStack(allocator: std.mem.Allocator, stack: *const Stack) ![][]const u8 {
     var stack_array = std.ArrayList([]const u8).init(allocator);
     defer stack_array.deinit();
-    
+
     // Get stack items (top to bottom for debugging visibility)
     var i: usize = 0;
     while (i < stack.size) {
@@ -236,7 +236,7 @@ pub fn serializeStack(allocator: std.mem.Allocator, stack: *const Stack) ![][]co
         try stack_array.append(hex_str);
         i += 1;
     }
-    
+
     return try stack_array.toOwnedSlice();
 }
 
@@ -246,7 +246,7 @@ pub fn serializeMemory(allocator: std.mem.Allocator, memory: *const Memory) ![]u
     if (memory_size == 0) {
         return try allocator.dupe(u8, "0x");
     }
-    
+
     // Read memory contents
     const memory_read = @import("evm").memory.read;
     const memory_data = try memory_read.get_slice(memory, 0, memory_size);
@@ -257,13 +257,13 @@ pub fn serializeMemory(allocator: std.mem.Allocator, memory: *const Memory) ![]u
 pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
     var empty_stack = std.ArrayList([]const u8).init(allocator);
     defer empty_stack.deinit();
-    
+
     var empty_storage = std.ArrayList(StorageEntry).init(allocator);
     defer empty_storage.deinit();
-    
+
     var empty_logs = std.ArrayList([]const u8).init(allocator);
     defer empty_logs.deinit();
-    
+
     return EvmStateJson{
         .pc = 0,
         .opcode = try allocator.dupe(u8, "-"),
@@ -280,41 +280,41 @@ pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
 /// Free allocated memory from EvmStateJson
 pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void {
     allocator.free(state.opcode);
-    
+
     for (state.stack) |stack_item| {
         allocator.free(stack_item);
     }
     allocator.free(state.stack);
-    
+
     allocator.free(state.memory);
-    
+
     // Free storage entries
     for (state.storage) |entry| {
         allocator.free(entry.key);
         allocator.free(entry.value);
     }
     allocator.free(state.storage);
-    
+
     for (state.logs) |log_item| {
         allocator.free(log_item);
     }
     allocator.free(state.logs);
-    
+
     allocator.free(state.returnData);
 }
 
 test "DebugState.capture works correctly" {
     const testing = std.testing;
     // const Evm = @import("evm");
-    
+
     // Create minimal stack and memory for testing
     var stack = Stack{};
     try stack.append(42);
     try stack.append(100);
-    
+
     var memory = try Memory.init_default(testing.allocator);
     defer memory.deinit();
-    
+
     const debug_state = DebugState.capture(
         10, // pc
         0x01, // ADD opcode
@@ -325,7 +325,7 @@ test "DebugState.capture works correctly" {
         &memory,
         null, // no error
     );
-    
+
     try testing.expectEqual(@as(usize, 10), debug_state.pc);
     try testing.expectEqual(@as(u8, 0x01), debug_state.opcode);
     try testing.expectEqualStrings("ADD", debug_state.opcode_name);
@@ -339,7 +339,7 @@ test "DebugState.capture works correctly" {
 
 test "opcodeToString returns correct names" {
     const testing = std.testing;
-    
+
     try testing.expectEqualStrings("STOP", opcodeToString(0x00));
     try testing.expectEqualStrings("ADD", opcodeToString(0x01));
     try testing.expectEqualStrings("PUSH1", opcodeToString(0x60));
@@ -349,15 +349,15 @@ test "opcodeToString returns correct names" {
 
 test "formatU256Hex works correctly" {
     const testing = std.testing;
-    
+
     const hex1 = try formatU256Hex(testing.allocator, 0);
     defer testing.allocator.free(hex1);
     try testing.expectEqualStrings("0x0", hex1);
-    
+
     const hex2 = try formatU256Hex(testing.allocator, 255);
     defer testing.allocator.free(hex2);
     try testing.expectEqualStrings("0xff", hex2);
-    
+
     const hex3 = try formatU256Hex(testing.allocator, 42);
     defer testing.allocator.free(hex3);
     try testing.expectEqualStrings("0x2a", hex3);
@@ -365,19 +365,19 @@ test "formatU256Hex works correctly" {
 
 test "formatBytesHex works correctly" {
     const testing = std.testing;
-    
+
     const hex1 = try formatBytesHex(testing.allocator, &[_]u8{});
     defer testing.allocator.free(hex1);
     try testing.expectEqualStrings("0x", hex1);
-    
-    const hex2 = try formatBytesHex(testing.allocator, &[_]u8{0x12, 0x34, 0xab});
+
+    const hex2 = try formatBytesHex(testing.allocator, &[_]u8{ 0x12, 0x34, 0xab });
     defer testing.allocator.free(hex2);
     try testing.expectEqualStrings("0x1234ab", hex2);
 }
 
 test "serializeStack works correctly" {
     const testing = std.testing;
-    
+
     // Test empty stack
     var empty_stack = Stack{};
     const empty_result = try serializeStack(testing.allocator, &empty_stack);
@@ -386,46 +386,46 @@ test "serializeStack works correctly" {
         testing.allocator.free(empty_result);
     }
     try testing.expectEqual(@as(usize, 0), empty_result.len);
-    
+
     // Test stack with values
     var stack = Stack{};
     try stack.append(42);
     try stack.append(255);
     try stack.append(1000);
-    
+
     const result = try serializeStack(testing.allocator, &stack);
     defer {
         for (result) |item| testing.allocator.free(item);
         testing.allocator.free(result);
     }
-    
+
     try testing.expectEqual(@as(usize, 3), result.len);
     // Stack should be serialized top-first
     try testing.expectEqualStrings("0x3e8", result[0]); // 1000
-    try testing.expectEqualStrings("0xff", result[1]);  // 255  
-    try testing.expectEqualStrings("0x2a", result[2]);  // 42
+    try testing.expectEqualStrings("0xff", result[1]); // 255
+    try testing.expectEqualStrings("0x2a", result[2]); // 42
 }
 
 test "serializeMemory works correctly" {
     const testing = std.testing;
     // const Evm = @import("evm");
-    
+
     // Test empty memory
     var empty_memory = try Memory.init_default(testing.allocator);
     defer empty_memory.deinit();
-    
+
     const empty_result = try serializeMemory(testing.allocator, &empty_memory);
     defer testing.allocator.free(empty_result);
     try testing.expectEqualStrings("0x", empty_result);
-    
+
     // Test memory with data
     var memory = try Memory.init_default(testing.allocator);
     defer memory.deinit();
-    
-    const test_data = [_]u8{0x12, 0x34, 0x56, 0x78};
+
+    const test_data = [_]u8{ 0x12, 0x34, 0x56, 0x78 };
     const memory_write = @import("evm").memory.write;
     try memory_write.set_data_bounded(&memory, 0, &test_data, 0, test_data.len);
-    
+
     const result = try serializeMemory(testing.allocator, &memory);
     defer testing.allocator.free(result);
     try testing.expectEqualStrings("0x12345678", result);
@@ -433,10 +433,10 @@ test "serializeMemory works correctly" {
 
 test "createEmptyEvmStateJson works correctly" {
     const testing = std.testing;
-    
+
     const empty_state = try createEmptyEvmStateJson(testing.allocator);
     defer freeEvmStateJson(testing.allocator, empty_state);
-    
+
     try testing.expectEqual(@as(usize, 0), empty_state.pc);
     try testing.expectEqualStrings("-", empty_state.opcode);
     try testing.expectEqual(@as(u64, 0), empty_state.gasLeft);

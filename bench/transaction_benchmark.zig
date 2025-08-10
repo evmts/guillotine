@@ -98,7 +98,7 @@ pub fn transaction_validation_benchmark(allocator: std.mem.Allocator) !void {
     std.log.info("=== Transaction Validation Benchmark ===", .{});
 
     const iterations = 10000;
-    
+
     const test_scenarios = [_]struct {
         name: []const u8,
         tx_type: u8,

@@ -15,12 +15,12 @@ pub inline fn context_size(self: *const Memory) usize {
 /// This is crucial for EVM gas calculation.
 pub inline fn ensure_context_capacity(self: *Memory, min_context_size: usize) MemoryError!u64 {
     const required_total_len = self.my_checkpoint + min_context_size;
-    
+
     // Fast path: if buffer is already large enough, return immediately
     if (self.shared_buffer_ref.items.len >= required_total_len) {
         return 0;
     }
-    
+
     // Slow path: delegate to the noinline version
     return self.ensure_context_capacity_slow(min_context_size);
 }

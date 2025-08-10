@@ -5,13 +5,12 @@ const primitives = root.primitives;
 const Allocator = std.mem.Allocator;
 
 /// Access List Benchmarks (EIP-2929 & EIP-2930)
-/// 
+///
 /// Measures performance of:
-/// - Address warming/cooling operations  
+/// - Address warming/cooling operations
 /// - Storage slot access tracking
 /// - Access list initialization
 /// - Gas cost calculations
-
 pub fn access_list_address_benchmark(allocator: Allocator) void {
     access_list_address_benchmark_impl(allocator) catch |err| {
         std.log.err("Access list address benchmark failed: {}", .{err});
@@ -74,7 +73,7 @@ fn access_list_storage_benchmark_impl(allocator: Allocator) !void {
 
     // Generate test address and storage slots
     const contract_addr = primitives.Address.from_u256(0x5555);
-    
+
     var storage_slots: [500]primitives.U256 = undefined;
     for (0..500) |i| {
         storage_slots[i] = @as(u256, i * 7919); // Use prime number for distribution
@@ -120,10 +119,10 @@ fn access_list_initialization_benchmark_impl(allocator: Allocator) !void {
     // Add multiple addresses with storage slots
     for (0..50) |i| {
         const addr = primitives.Address.from_u256(@as(u256, 0x10000 + i));
-        
+
         var storage_keys = std.ArrayList(primitives.U256).init(allocator);
         defer storage_keys.deinit();
-        
+
         // Add multiple storage keys per address
         for (0..20) |j| {
             try storage_keys.append(@as(u256, i * 1000 + j));
@@ -143,7 +142,7 @@ fn access_list_initialization_benchmark_impl(allocator: Allocator) !void {
         // Pre-warm from transaction access list
         for (tx_access_list.items) |entry| {
             try access_list.pre_warm_address(entry.address);
-            
+
             for (entry.storage_keys) |key| {
                 try access_list.pre_warm_storage_slot(entry.address, key);
             }
@@ -185,7 +184,7 @@ fn access_list_mixed_operations_benchmark_impl(allocator: Allocator) !void {
     for (0..1000) |_| {
         const addr = addresses[random.uintLessThan(usize, addresses.len)];
         const slot = random.int(u256);
-        
+
         // Random operation type
         switch (random.uintLessThan(u8, 4)) {
             0 => {
@@ -204,7 +203,7 @@ fn access_list_mixed_operations_benchmark_impl(allocator: Allocator) !void {
                 std.mem.doNotOptimizeAway(is_warm);
             },
             3 => {
-                // Check storage warming  
+                // Check storage warming
                 const is_warm = access_list.is_storage_slot_warm(addr, slot);
                 std.mem.doNotOptimizeAway(is_warm);
             },
@@ -247,7 +246,7 @@ fn access_list_call_cost_benchmark_impl(allocator: Allocator) !void {
         _ = try access_list.access_address(addr);
     }
 
-    // Benchmark call cost calculation for warm addresses  
+    // Benchmark call cost calculation for warm addresses
     for (test_addresses) |addr| {
         const cost = try access_list.get_call_cost(addr, 1000000, 0);
         std.mem.doNotOptimizeAway(cost);
@@ -281,15 +280,15 @@ fn access_list_large_scale_benchmark_impl(allocator: Allocator) !void {
     for (0..5000) |i| {
         const addr = primitives.Address.from_u256(@as(u256, 0x100000 + (i / 10))); // 500 unique addresses
         const slot = @as(u256, i * 97); // Use prime for better distribution
-        
+
         // Access address
         const addr_cost = try access_list.access_address(addr);
         std.mem.doNotOptimizeAway(addr_cost);
-        
+
         // Access storage slot
         const storage_cost = try access_list.access_storage_slot(addr, slot);
         std.mem.doNotOptimizeAway(storage_cost);
-        
+
         // Periodic warming checks
         if (i % 100 == 0) {
             const addr_warm = access_list.is_address_warm(addr);
@@ -302,7 +301,7 @@ fn access_list_large_scale_benchmark_impl(allocator: Allocator) !void {
 
 test "access list benchmarks compile and basic execution" {
     const allocator = std.testing.allocator;
-    
+
     // Basic compilation and execution test
     access_list_address_benchmark(allocator);
     access_list_storage_benchmark(allocator);

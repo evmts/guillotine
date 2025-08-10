@@ -155,7 +155,7 @@ pub fn calculate_max_stack(pop_count: u32, push_count: u32) u32 {
 /// Validates stack requirements at compile time when inputs/outputs are known constants.
 ///
 /// This function performs compile-time validation of EVM stack operation constraints
-/// and runtime validation of dynamic stack size. When the pop and push counts are 
+/// and runtime validation of dynamic stack size. When the pop and push counts are
 /// compile-time constants, it validates EVM invariants at build time, catching
 /// impossible operations before deployment.
 ///
@@ -171,7 +171,7 @@ pub fn calculate_max_stack(pop_count: u32, push_count: u32) u32 {
 /// - Stack overflow: Ensures operation won't exceed stack capacity
 ///
 /// @param comptime inputs Number of stack items consumed (compile-time constant)
-/// @param comptime outputs Number of stack items produced (compile-time constant)  
+/// @param comptime outputs Number of stack items produced (compile-time constant)
 /// @param stack_size Current stack size (runtime value)
 /// @return ExecutionError if validation fails
 ///
@@ -186,7 +186,7 @@ pub fn calculate_max_stack(pop_count: u32, push_count: u32) u32 {
 /// // Binary operations (pop 2, push 1)
 /// try validateStackRequirements(2, 1, frame.stack.size());
 ///
-/// // Push operations (pop 0, push 1) 
+/// // Push operations (pop 0, push 1)
 /// try validateStackRequirements(0, 1, frame.stack.size());
 ///
 /// // DUP operations (pop 0, push 1)
@@ -195,45 +195,31 @@ pub fn calculate_max_stack(pop_count: u32, push_count: u32) u32 {
 /// // Ternary operations (pop 3, push 1)
 /// try validateStackRequirements(3, 1, frame.stack.size());
 /// ```
-pub fn validateStackRequirements(
-    comptime inputs: u8,
-    comptime outputs: u8, 
-    stack_size: usize
-) ExecutionError.Error!void {
+pub fn validateStackRequirements(comptime inputs: u8, comptime outputs: u8, stack_size: usize) ExecutionError.Error!void {
     // Compile-time validation of EVM constraints
     comptime {
         // EVM constraint: operations can increase stack by at most 1
         if (outputs > inputs + 1) {
-            @compileError(std.fmt.comptimePrint(
-                "Invalid EVM operation: outputs ({}) > inputs ({}) + 1. " ++
-                "EVM operations can increase stack by at most 1 item.", 
-                .{outputs, inputs}
-            ));
+            @compileError(std.fmt.comptimePrint("Invalid EVM operation: outputs ({}) > inputs ({}) + 1. " ++
+                "EVM operations can increase stack by at most 1 item.", .{ outputs, inputs }));
         }
-        
+
         // Practical limits for EVM opcodes
         if (inputs > 16) {
-            @compileError(std.fmt.comptimePrint(
-                "Invalid EVM operation: inputs ({}) > 16. " ++
-                "No EVM opcode consumes more than 16 stack items.",
-                .{inputs}
-            ));
+            @compileError(std.fmt.comptimePrint("Invalid EVM operation: inputs ({}) > 16. " ++
+                "No EVM opcode consumes more than 16 stack items.", .{inputs}));
         }
-        
+
         if (outputs > 16) {
-            @compileError(std.fmt.comptimePrint(
-                "Invalid EVM operation: outputs ({}) > 16. " ++
-                "No EVM opcode produces more than 16 stack items.",
-                .{outputs}
-            ));
+            @compileError(std.fmt.comptimePrint("Invalid EVM operation: outputs ({}) > 16. " ++
+                "No EVM opcode produces more than 16 stack items.", .{outputs}));
         }
     }
-    
+
     // Runtime validation of actual stack state
     Log.debug("StackValidation.validateStackRequirements: Comptime validation passed, " ++
-        "validating runtime stack_size={}, inputs={}, outputs={}", 
-        .{ stack_size, inputs, outputs });
-    
+        "validating runtime stack_size={}, inputs={}, outputs={}", .{ stack_size, inputs, outputs });
+
     // Check stack underflow
     if (stack_size < inputs) {
         @branchHint(.cold);
@@ -241,10 +227,10 @@ pub fn validateStackRequirements(
             "size={} < inputs={}", .{ stack_size, inputs });
         return ExecutionError.Error.StackUnderflow;
     }
-    
+
     // Calculate new stack size after operation
     const new_size = stack_size - inputs + outputs;
-    
+
     // Check stack overflow
     if (new_size > DEFAULT_STACK_CAPACITY) {
         @branchHint(.cold);
@@ -252,7 +238,7 @@ pub fn validateStackRequirements(
             "new_size={} > capacity={}", .{ new_size, DEFAULT_STACK_CAPACITY });
         return ExecutionError.Error.StackOverflow;
     }
-    
+
     Log.debug("StackValidation.validateStackRequirements: Runtime validation passed, " ++
         "new_size={}", .{new_size});
 }
@@ -371,27 +357,27 @@ test "ValidationPatterns" {
 test "validateStackRequirements comptime validation" {
     var stack = try Stack.init(std.testing.allocator);
     defer stack.deinit();
-    
+
     // Test valid binary operation (pop 2, push 1)
     try stack.append(10);
     try stack.append(20);
     try validateStackRequirements(2, 1, stack.size());
-    
-    // Test valid push operation (pop 0, push 1)  
+
+    // Test valid push operation (pop 0, push 1)
     try validateStackRequirements(0, 1, stack.size());
-    
+
     // Test valid unary operation (pop 1, push 1)
     try validateStackRequirements(1, 1, stack.size());
-    
+
     // Test valid ternary operation (pop 3, push 1) - need more stack items
     try stack.append(30);
     try validateStackRequirements(3, 1, stack.size());
-    
+
     // Test stack underflow - clear stack and add only 1 element
     stack.clear();
     try stack.append(42);
     try testing.expectError(ExecutionError.Error.StackUnderflow, validateStackRequirements(2, 1, stack.size()));
-    
+
     // Test stack overflow - fill stack to capacity
     stack.clear();
     var i: usize = 0;
@@ -399,7 +385,7 @@ test "validateStackRequirements comptime validation" {
         try stack.append(@intCast(i));
     }
     try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 1, stack.size()));
-    
+
     // Test near-overflow case - fill stack to capacity-1
     stack.clear();
     var k: usize = 0;

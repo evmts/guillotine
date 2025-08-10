@@ -17,9 +17,9 @@ pub const CodeAnalysisBenchmarks = struct {
     medium_bytecode: []const u8,
     large_bytecode: []const u8,
     jumpdest_heavy_bytecode: []const u8,
-    
+
     const Self = @This();
-    
+
     pub fn init(allocator: Allocator) !Self {
         // Small contract (< 1KB)
         const small = [_]u8{
@@ -32,7 +32,7 @@ pub const CodeAnalysisBenchmarks = struct {
             0x3e, 0x14, 0x61, 0x00, 0x86, 0x57, 0x5b, 0x60,
             0x00, 0x80, 0xfd, 0x5b, 0x34, 0x80, 0x15, 0x61,
         };
-        
+
         // Medium contract (~5KB) - simulate complex DeFi contract
         const medium = try allocator.alloc(u8, 5000);
         for (medium, 0..) |*byte, idx| {
@@ -47,7 +47,7 @@ pub const CodeAnalysisBenchmarks = struct {
                 byte.* = @as(u8, @intCast(idx % 256));
             }
         }
-        
+
         // Large contract (~20KB) - simulate very complex contract
         const large = try allocator.alloc(u8, 20000);
         for (large, 0..) |*byte, idx| {
@@ -61,7 +61,7 @@ pub const CodeAnalysisBenchmarks = struct {
                 byte.* = @as(u8, @intCast(idx % 256));
             }
         }
-        
+
         // JUMPDEST-heavy contract for worst-case analysis
         const jumpdest_heavy = try allocator.alloc(u8, 2000);
         for (jumpdest_heavy, 0..) |*byte, idx| {
@@ -73,7 +73,7 @@ pub const CodeAnalysisBenchmarks = struct {
                 byte.* = 0x01; // ADD
             }
         }
-        
+
         return Self{
             .allocator = allocator,
             .small_bytecode = try allocator.dupe(u8, &small),
@@ -82,67 +82,67 @@ pub const CodeAnalysisBenchmarks = struct {
             .jumpdest_heavy_bytecode = jumpdest_heavy,
         };
     }
-    
+
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.small_bytecode);
         self.allocator.free(self.medium_bytecode);
         self.allocator.free(self.large_bytecode);
         self.allocator.free(self.jumpdest_heavy_bytecode);
     }
-    
+
     /// Benchmark small contract analysis
     pub fn analyzeSmallContract(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.small_bytecode);
         defer analysis.deinit(self.allocator);
     }
-    
+
     /// Benchmark medium contract analysis
     pub fn analyzeMediumContract(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.medium_bytecode);
         defer analysis.deinit(self.allocator);
     }
-    
+
     /// Benchmark large contract analysis
     pub fn analyzeLargeContract(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.large_bytecode);
         defer analysis.deinit(self.allocator);
     }
-    
+
     /// Benchmark JUMPDEST-heavy contract analysis
     pub fn analyzeJumpdestHeavyContract(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.jumpdest_heavy_bytecode);
         defer analysis.deinit(self.allocator);
     }
-    
+
     /// Benchmark JUMPDEST validation on small contract
     pub fn validateJumpdestsSmall(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.small_bytecode);
         defer analysis.deinit(self.allocator);
-        
+
         // Test multiple JUMPDEST validations
         var i: usize = 0;
         while (i < self.small_bytecode.len) : (i += 1) {
             _ = analysis.isValidJumpdest(i);
         }
     }
-    
+
     /// Benchmark JUMPDEST validation on large contract
     pub fn validateJumpdestsLarge(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.large_bytecode);
         defer analysis.deinit(self.allocator);
-        
+
         // Test validation at various positions
         var i: usize = 0;
         while (i < 1000) : (i += 20) { // Sample positions
             _ = analysis.isValidJumpdest(i);
         }
     }
-    
+
     /// Benchmark bitvec operations for code analysis
     pub fn bitvecOperations(self: *Self) !void {
         var bitvec = try BitVec.init(self.allocator, self.medium_bytecode.len);
         defer bitvec.deinit(self.allocator);
-        
+
         // Set bits for valid code positions
         var i: usize = 0;
         while (i < self.medium_bytecode.len) : (i += 1) {
@@ -150,20 +150,20 @@ pub const CodeAnalysisBenchmarks = struct {
                 try bitvec.set(i);
             }
         }
-        
+
         // Query bits
         i = 0;
         while (i < self.medium_bytecode.len) : (i += 10) {
             _ = try bitvec.is_set(i);
         }
     }
-    
+
     /// Benchmark code bitmap creation
     pub fn createCodeBitmap(self: *Self) !void {
         const bitmap = try BitVec.code_bitmap(self.allocator, self.medium_bytecode);
         defer bitmap.deinit(self.allocator);
     }
-    
+
     /// Benchmark repeated analysis (testing cache efficiency)
     pub fn repeatedAnalysis(self: *Self) !void {
         // Analyze the same bytecode multiple times
@@ -173,34 +173,34 @@ pub const CodeAnalysisBenchmarks = struct {
             defer analysis.deinit(self.allocator);
         }
     }
-    
+
     /// Benchmark worst-case JUMPDEST scenario
     pub fn worstCaseJumpdests(self: *Self) !void {
         const analysis = try CodeAnalysis.analyze(self.allocator, self.jumpdest_heavy_bytecode);
         defer analysis.deinit(self.allocator);
-        
+
         // Validate every position (worst case)
         var i: usize = 0;
         while (i < self.jumpdest_heavy_bytecode.len) : (i += 1) {
             _ = analysis.isValidJumpdest(i);
         }
     }
-    
+
     /// Benchmark analysis memory usage patterns
     pub fn analysisMemoryPattern(self: *Self) !void {
         var analyses: [5]CodeAnalysis = undefined;
-        
+
         // Create multiple analyses
         var i: usize = 0;
         while (i < analyses.len) : (i += 1) {
             analyses[i] = try CodeAnalysis.analyze(self.allocator, self.medium_bytecode);
         }
-        
+
         // Use them
         for (&analyses) |*analysis| {
             _ = analysis.isValidJumpdest(100);
         }
-        
+
         // Cleanup
         for (&analyses) |*analysis| {
             analysis.deinit(self.allocator);
@@ -212,12 +212,12 @@ pub const CodeAnalysisBenchmarks = struct {
 pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
     var suite = BenchmarkSuite.init(allocator);
     defer suite.deinit();
-    
+
     var benchmarks = try CodeAnalysisBenchmarks.init(allocator);
     defer benchmarks.deinit();
-    
+
     std.debug.print("\n=== Code Analysis Benchmarks ===\n", .{});
-    
+
     // Basic analysis benchmarks
     try suite.benchmark(BenchmarkConfig{
         .name = "analyze_small_contract",
@@ -229,7 +229,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.analyzeSmallContract();
         }
     }{ .bench = &benchmarks });
-    
+
     try suite.benchmark(BenchmarkConfig{
         .name = "analyze_medium_contract",
         .iterations = 200,
@@ -240,7 +240,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.analyzeMediumContract();
         }
     }{ .bench = &benchmarks });
-    
+
     try suite.benchmark(BenchmarkConfig{
         .name = "analyze_large_contract",
         .iterations = 50,
@@ -251,7 +251,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.analyzeLargeContract();
         }
     }{ .bench = &benchmarks });
-    
+
     // JUMPDEST validation benchmarks
     try suite.benchmark(BenchmarkConfig{
         .name = "validate_jumpdests_small",
@@ -263,7 +263,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.validateJumpdestsSmall();
         }
     }{ .bench = &benchmarks });
-    
+
     try suite.benchmark(BenchmarkConfig{
         .name = "validate_jumpdests_large",
         .iterations = 100,
@@ -274,7 +274,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.validateJumpdestsLarge();
         }
     }{ .bench = &benchmarks });
-    
+
     // BitVec operations benchmarks
     try suite.benchmark(BenchmarkConfig{
         .name = "bitvec_operations",
@@ -286,7 +286,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.bitvecOperations();
         }
     }{ .bench = &benchmarks });
-    
+
     try suite.benchmark(BenchmarkConfig{
         .name = "create_code_bitmap",
         .iterations = 200,
@@ -297,7 +297,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.createCodeBitmap();
         }
     }{ .bench = &benchmarks });
-    
+
     // Cache and memory pattern benchmarks
     try suite.benchmark(BenchmarkConfig{
         .name = "repeated_analysis",
@@ -309,7 +309,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.repeatedAnalysis();
         }
     }{ .bench = &benchmarks });
-    
+
     try suite.benchmark(BenchmarkConfig{
         .name = "worst_case_jumpdests",
         .iterations = 50,
@@ -320,7 +320,7 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.worstCaseJumpdests();
         }
     }{ .bench = &benchmarks });
-    
+
     try suite.benchmark(BenchmarkConfig{
         .name = "analysis_memory_pattern",
         .iterations = 100,
@@ -331,6 +331,6 @@ pub fn runCodeAnalysisBenchmarks(allocator: Allocator) !void {
             try self.bench.analysisMemoryPattern();
         }
     }{ .bench = &benchmarks });
-    
+
     std.debug.print("=== Code Analysis Benchmarks Complete ===\n\n", .{});
 }
