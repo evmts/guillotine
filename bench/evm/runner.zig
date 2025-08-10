@@ -41,7 +41,7 @@ pub fn main() !void {
     // Read and decode contract code
     const contract_code_hex = try std.fs.cwd().readFileAlloc(allocator, args.contract_code_path, 1024 * 1024);
     defer allocator.free(contract_code_hex);
-    
+
     const contract_code_hex_trimmed = std.mem.trim(u8, contract_code_hex, " \n\r\t");
     const decoded = try hexDecode(allocator, contract_code_hex_trimmed);
     defer allocator.free(decoded);
@@ -56,11 +56,11 @@ pub fn main() !void {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    
+
     // Set up tracer based on disable_trace flag
     const stdout = std.io.getStdOut().writer();
     const tracer: ?std.io.AnyWriter = if (args.disable_trace) null else stdout.any();
-    
+
     var vm = try Evm.Evm.init(
         allocator,
         db_interface,
@@ -81,7 +81,7 @@ pub fn main() !void {
     const contract_address = try deployContract(&vm, allocator, caller_address, contract_code);
     // Sanity: ensure code is present
     const deployed_code = vm.state.get_code(contract_address);
-    std.debug.print("[runner] deployed code len={} at {any}\n", .{deployed_code.len, contract_address});
+    std.debug.print("[runner] deployed code len={} at {any}\n", .{ deployed_code.len, contract_address });
 
     // Pre-allocate call result to avoid allocations in loop
     var call_result: Evm.CallResult = undefined;
@@ -90,7 +90,7 @@ pub fn main() !void {
     var i: u8 = 0;
     while (i < args.num_runs) : (i += 1) {
         const timer = std.time.nanoTimestamp();
-        
+
         // Execute the contract call directly without error handling
         const call_params = CallParams{ .call = .{
             .caller = caller_address,
@@ -98,18 +98,18 @@ pub fn main() !void {
             .value = 0,
             .input = calldata,
             .gas = 1_000_000_000,
-        }};
+        } };
         call_result = vm.call(call_params) catch |err| {
             std.debug.print("Contract execution failed: {}\n", .{err});
             std.process.exit(1);
         };
         if (!call_result.success) {
-            std.debug.print("[runner] call failed; gas_left={}, output_len={}\n", .{call_result.gas_left, if (call_result.output) |o| o.len else 0});
+            std.debug.print("[runner] call failed; gas_left={}, output_len={}\n", .{ call_result.gas_left, if (call_result.output) |o| o.len else 0 });
         }
-        
+
         const duration_ns = std.time.nanoTimestamp() - timer;
         const duration_ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
-        
+
         // Validate successful execution
         if (!call_result.success) {
             if (call_result.output) |out| {
@@ -119,12 +119,12 @@ pub fn main() !void {
             }
             std.process.exit(1);
         }
-        
+
         // Free output if allocated
         if (call_result.output.len > 0) {
             allocator.free(call_result.output);
         }
-        
+
         // Output timing
         const duration_ms_rounded = @as(u64, @intFromFloat(@round(duration_ms)));
         if (duration_ms_rounded == 0) {
@@ -147,7 +147,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     var i: usize = 1;
     while (i < args.len) {
         const arg = args[i];
-        
+
         if (std.mem.eql(u8, arg, "--contract-code-path")) {
             i += 1;
             contract_code_path = try allocator.dupe(u8, args[i]);
@@ -194,7 +194,7 @@ fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
 }
 
 fn extractRuntime(bytecode: []const u8) []const u8 {
-    // Try to split on 0xfe (INVALID) which often separates init/runtime
+    // 1) Preferred: split on 0xFE (INVALID) if present
     var i: isize = @intCast(bytecode.len);
     while (i > 0) : (i -= 1) {
         const idx: usize = @intCast(i - 1);
@@ -203,21 +203,41 @@ fn extractRuntime(bytecode: []const u8) []const u8 {
             return &[_]u8{};
         }
     }
+
+    // 2) Heuristic: detect common initcode prologue and extract runtime
+    // Pattern: PUSH2 <len> (0x61) DUP1 (0x80) PUSH2 <off> (0x61) PUSH1 0 (0x60 0x00)
+    //          CODECOPY (0x39) PUSH1 0 (0x60 0x00) RETURN (0xF3) <runtime bytes>
+    if (bytecode.len >= 12 and
+        bytecode[0] == 0x61 and // PUSH2 <len>
+        bytecode[3] == 0x80 and // DUP1
+        bytecode[4] == 0x61 and // PUSH2 <off>
+        bytecode[7] == 0x60 and bytecode[8] == 0x00 and // PUSH1 0
+        bytecode[9] == 0x39 and // CODECOPY
+        bytecode[10] == 0x60 and bytecode[11] == 0x00 // PUSH1 0
+    ) {
+        // RETURN is expected to follow soon after
+        var ret_idx: usize = 12;
+        while (ret_idx < bytecode.len and ret_idx < 32) : (ret_idx += 1) {
+            if (bytecode[ret_idx] == 0xF3) break;
+        }
+        if (ret_idx < bytecode.len and bytecode[ret_idx] == 0xF3) {
+            // Extract length from first PUSH2
+            const len: usize = (@as(usize, bytecode[1]) << 8) | @as(usize, bytecode[2]);
+            const start: usize = ret_idx + 1;
+            if (start < bytecode.len) {
+                const end = @min(bytecode.len, start + len);
+                return bytecode[start..end];
+            }
+        }
+    }
+
+    // 3) Fallback: return original (assume already runtime)
     return bytecode;
 }
 
 fn deployContract(vm: *Evm.Evm, allocator: std.mem.Allocator, caller: Address, bytecode: []const u8) !Address {
     // Attempt 1: Treat input as initcode and use create_contract
-    const create_result = vm.create_contract(
-        caller,
-        0,
-        bytecode,
-        50_000_000,
-    ) catch |err| blk: {
-        std.debug.print("[deployContract] create_contract error: {}\n", .{err});
-        break :blk null;
-    };
-    if (create_result) |res| {
+    if (try vm.create_contract(caller, 0, bytecode, 50_000_000)) |res| {
         if (res.success) {
             if (res.output) |out| allocator.free(out);
             return res.address;
@@ -230,9 +250,10 @@ fn deployContract(vm: *Evm.Evm, allocator: std.mem.Allocator, caller: Address, b
         }
     }
 
-    // Attempt 2: Treat input as runtime bytecode and set directly
+    // Attempt 2: Extract runtime and set directly
+    const runtime = extractRuntime(bytecode);
     const address: Address = [_]u8{0x22} ** 20;
-    try vm.state.set_code(address, bytecode);
-    std.debug.print("[deployContract] Fallback: set runtime code at deterministic address {any}\n", .{address});
+    try vm.state.set_code(address, runtime);
+    std.debug.print("[deployContract] Fallback: set runtime code at deterministic address {any}, len={}\n", .{ address, runtime.len });
     return address;
 }

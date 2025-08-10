@@ -1039,6 +1039,38 @@ pub fn build(b: *std.Build) void {
     differential_test.root_module.stack_check = false;
     differential_test.root_module.addImport("primitives", primitives_mod);
     differential_test.root_module.addImport("evm", evm_mod);
+    // Provide REVM wrapper to differential tests
+    differential_test.root_module.addImport("revm", revm_mod);
+
+    // Link REVM Rust library for differential tests if available
+    if (revm_lib) |revm_library| {
+        differential_test.linkLibrary(revm_library);
+        differential_test.addIncludePath(b.path("src/revm_wrapper"));
+        differential_test.linkLibC();
+
+        // Link the compiled Rust dynamic library (needed on macOS for c++/Security deps)
+        const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
+        else
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
+        differential_test.addObjectFile(b.path(revm_dylib_path));
+
+        // Platform-specific system libs/frameworks for REVM
+        if (target.result.os.tag == .linux) {
+            differential_test.linkSystemLibrary("m");
+            differential_test.linkSystemLibrary("pthread");
+            differential_test.linkSystemLibrary("dl");
+        } else if (target.result.os.tag == .macos) {
+            differential_test.linkSystemLibrary("c++");
+            differential_test.linkFramework("Security");
+            differential_test.linkFramework("SystemConfiguration");
+            differential_test.linkFramework("CoreFoundation");
+        }
+
+        // Ensure Rust library is built before running tests
+        differential_test.step.dependOn(&revm_library.step);
+    }
 
     const run_differential_test = b.addRunArtifact(differential_test);
     const differential_test_step = b.step("test-differential", "Run differential tests");
@@ -1061,6 +1093,43 @@ pub fn build(b: *std.Build) void {
     const run_all_tests_package = b.addRunArtifact(all_tests_package);
     const all_tests_package_step = b.step("test-all-comprehensive", "Run ALL tests via package system");
     all_tests_package_step.dependOn(&run_all_tests_package.step);
+
+    // Add benchmark fixture tests
+    const thousand_hashes_test = b.addTest(.{
+        .name = "thousand-hashes-test",
+        .root_source_file = b.path("test/1000_hashes.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    thousand_hashes_test.root_module.addImport("evm", evm_mod);
+    thousand_hashes_test.root_module.addImport("primitives", primitives_mod);
+    const run_thousand_hashes_test = b.addRunArtifact(thousand_hashes_test);
+    const thousand_hashes_test_step = b.step("test-thousand-hashes", "Run thousand hashes benchmark test");
+    thousand_hashes_test_step.dependOn(&run_thousand_hashes_test.step);
+
+    const snailtracer_test = b.addTest(.{
+        .name = "snailtracer-test",
+        .root_source_file = b.path("test/snailtracer_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    snailtracer_test.root_module.addImport("evm", evm_mod);
+    snailtracer_test.root_module.addImport("primitives", primitives_mod);
+    const run_snailtracer_test = b.addRunArtifact(snailtracer_test);
+    const snailtracer_test_step = b.step("test-snailtracer", "Run snailtracer benchmark test");
+    snailtracer_test_step.dependOn(&run_snailtracer_test.step);
+
+    const erc20_bench_test = b.addTest(.{
+        .name = "erc20-bench-test",
+        .root_source_file = b.path("test/erc20_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    erc20_bench_test.root_module.addImport("evm", evm_mod);
+    erc20_bench_test.root_module.addImport("primitives", primitives_mod);
+    const run_erc20_bench_test = b.addRunArtifact(erc20_bench_test);
+    const erc20_bench_test_step = b.step("test-erc20-bench", "Run ERC20 benchmark test");
+    erc20_bench_test_step.dependOn(&run_erc20_bench_test.step);
 
     // Add Gas Accounting tests
     const gas_test = b.addTest(.{
@@ -1655,6 +1724,45 @@ pub fn build(b: *std.Build) void {
     erc20_deployment_test.root_module.addImport("primitives", primitives_mod);
     const run_erc20_deployment_test = b.addRunArtifact(erc20_deployment_test);
     test_step.dependOn(&run_erc20_deployment_test.step);
+
+    // Add benchmark tests to main test step
+    test_step.dependOn(&run_thousand_hashes_test.step);
+    test_step.dependOn(&run_snailtracer_test.step);
+    test_step.dependOn(&run_erc20_bench_test.step);
+
+    // Add orchestrator tests
+    const orchestrator_test = b.addTest(.{
+        .name = "orchestrator-test",
+        .root_source_file = b.path("bench/official/src/Orchestrator.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    orchestrator_test.root_module.addImport("clap", clap_dep.module("clap"));
+    const run_orchestrator_test = b.addRunArtifact(orchestrator_test);
+    test_step.dependOn(&run_orchestrator_test.step);
+
+    // Add main orchestrator tests
+    const orchestrator_main_test = b.addTest(.{
+        .name = "orchestrator-main-test",
+        .root_source_file = b.path("bench/official/src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    orchestrator_main_test.root_module.addImport("clap", clap_dep.module("clap"));
+    const run_orchestrator_main_test = b.addRunArtifact(orchestrator_main_test);
+    test_step.dependOn(&run_orchestrator_main_test.step);
+
+    // Add EVM runner tests
+    const evm_runner_test = b.addTest(.{
+        .name = "evm-runner-test",
+        .root_source_file = b.path("bench/official/evms/zig/src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evm_runner_test.root_module.addImport("evm", evm_mod);
+    evm_runner_test.root_module.addImport("primitives", primitives_mod);
+    const run_evm_runner_test = b.addRunArtifact(evm_runner_test);
+    test_step.dependOn(&run_evm_runner_test.step);
 
     // Add ERC20 mint debug test
     const erc20_mint_debug_test = b.addTest(.{
