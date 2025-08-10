@@ -41,10 +41,9 @@ test "trace ERC20 full deployment and call" {
     var deploy_trace_buffer = std.ArrayList(u8).init(allocator);
     defer deploy_trace_buffer.deinit();
     
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    _ = builder.withTracer(deploy_trace_buffer.writer().any());
-    
-    var vm = try builder.build();
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, deploy_trace_buffer.writer().any());
     defer vm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -87,10 +86,7 @@ test "trace ERC20 full deployment and call" {
     var call_trace_buffer = std.ArrayList(u8).init(allocator);
     defer call_trace_buffer.deinit();
     
-    var builder2 = Evm.EvmBuilder.init(allocator, db_interface);
-    _ = builder2.withTracer(call_trace_buffer.writer().any());
-    
-    var vm2 = try builder2.build();
+    var vm2 = try EvmType.init(allocator, db_interface, null, 0, false, call_trace_buffer.writer().any());
     defer vm2.deinit();
     
     // Call the mint function

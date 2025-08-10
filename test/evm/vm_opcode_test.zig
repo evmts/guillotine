@@ -30,7 +30,9 @@ fn create_test_evm(allocator: std.mem.Allocator) !struct { evm: *Evm.Evm, memory
     const memory_db = try allocator.create(MemoryDatabase);
     memory_db.* = MemoryDatabase.init(allocator);
     const db_interface = memory_db.to_database_interface();
-    const vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    const vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     evm.* = vm;
 
     // Set up basic context

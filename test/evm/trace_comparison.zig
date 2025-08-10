@@ -19,10 +19,9 @@ pub fn compareTraces(allocator: std.mem.Allocator, bytecode: []const u8, gas_lim
         defer memory_db.deinit();
         
         const db_interface = memory_db.to_database_interface();
-        var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-        _ = builder.withTracer(zig_trace.writer().any());
-        
-        var vm = try builder.build();
+        const config = evm.EvmConfig.init(.CANCUN);
+        const EvmType = evm.Evm(config);
+        var vm = try EvmType.init(allocator, db_interface, null, 0, false, zig_trace.writer().any());
         defer vm.deinit();
         
         const caller = Address.from_u256(0x1000000000000000000000000000000000000001);

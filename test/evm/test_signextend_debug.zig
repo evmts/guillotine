@@ -13,8 +13,9 @@ test "SIGNEXTEND direct test" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    var evm = try builder.build();
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
     
     // Create contract and frame

@@ -44,7 +44,9 @@ test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" 
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = comptime Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
     // Deploy the contract by setting the deployment bytecode directly

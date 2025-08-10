@@ -12,7 +12,9 @@ test "complex Solidity constructor returns full runtime code" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
     const deployer = primitives.Address.from_u256(0x1111);
@@ -79,7 +81,9 @@ test "gas metering for KECCAK256 operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1111);

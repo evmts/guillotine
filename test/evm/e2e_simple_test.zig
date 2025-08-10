@@ -46,7 +46,9 @@ test "E2E: Basic EVM operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    evm_instance.* = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    evm_instance.* = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm_instance.deinit();
 
     // Set up deployer account with ETH
@@ -141,7 +143,9 @@ test "E2E: Arithmetic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    evm_instance.* = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    evm_instance.* = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm_instance.deinit();
 
     // Create a contract at the specified address
@@ -227,7 +231,9 @@ test "E2E: Memory operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    evm_instance.* = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    evm_instance.* = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm_instance.deinit();
 
     // Create a contract at the specified address
@@ -312,7 +318,9 @@ test "E2E: Storage operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    evm_instance.* = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    evm_instance.* = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm_instance.deinit();
 
     // Create a contract at the specified address
@@ -383,7 +391,9 @@ test "E2E: Stack operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    evm_instance.* = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    evm_instance.* = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm_instance.deinit();
 
     // Create a contract at the specified address
@@ -468,7 +478,9 @@ test "E2E: Gas consumption patterns" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    evm_instance.* = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    evm_instance.* = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm_instance.deinit();
 
     // Create a contract at the specified address

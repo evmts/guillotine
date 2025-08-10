@@ -27,7 +27,9 @@ test "E2E: Dynamic arrays - push, pop, and indexing" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Simplified array simulation - just test storage operations
@@ -126,7 +128,9 @@ test "E2E: Mappings - various key types and nested access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Simplified mapping test - just use hash-based storage
@@ -214,7 +218,9 @@ test "E2E: Struct simulation - packed and unpacked storage" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Simulate struct { uint128 a; uint128 b; } packed into one storage slot
@@ -301,7 +307,9 @@ test "E2E: String/Bytes operations - encoding and manipulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Test bytes manipulation and hashing
@@ -371,7 +379,9 @@ test "E2E: Nested structures - arrays of mappings simulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Simplified nested structure simulation - avoid complex memory operations
@@ -451,7 +461,9 @@ test "E2E: Storage patterns - efficiency and gas optimization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Compare gas costs of memory vs storage operations

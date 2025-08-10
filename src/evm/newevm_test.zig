@@ -19,8 +19,11 @@ test "EVM can be initialized successfully" {
     const db_interface = memory_db.to_database_interface();
 
     // Initialize EVM with defaults
-    var vm = try evm.Evm.init(allocator, db_interface, null, // table
-        null, // chain_rules
+    const config = comptime evm.EvmConfig.init(.CANCUN);
+    const EvmType = evm.configureEvm(config);
+    var vm = try EvmType.init(
+        allocator,
+        db_interface,
         null, // context
         0, // depth
         false, // read_only

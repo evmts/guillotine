@@ -15,7 +15,9 @@ test "JUMPI should take jump when condition is non-zero" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = comptime Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -72,7 +74,9 @@ test "JUMPI should NOT jump when condition is zero" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const config = comptime Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const caller = Address.from_u256(0x1000000000000000000000000000000000000001);

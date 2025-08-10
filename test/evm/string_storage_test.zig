@@ -58,8 +58,9 @@ test "minimal string storage in constructor" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    var vm = try builder.build();
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
     const caller = Address.from_u256(0x1234567890123456789012345678901234567890);
@@ -174,8 +175,9 @@ test "complex string storage like ERC20" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    var vm = try builder.build();
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
     const caller = Address.from_u256(0x1234567890123456789012345678901234567890);
@@ -215,8 +217,9 @@ test "reproduce array bounds panic 0x41" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    var vm = try builder.build();
+    const config = Evm.EvmConfig.init(.CANCUN);
+    const EvmType = Evm.Evm(config);
+    var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
     const caller = Address.from_u256(0x1234567890123456789012345678901234567890);
