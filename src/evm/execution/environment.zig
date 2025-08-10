@@ -259,6 +259,14 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
 
     // Copy from current contract bytecode (from analysis)
     const code = frame.analysis.code;
+    const Log = @import("../log.zig");
+    Log.debug("CODECOPY: mem_offset={}, code_offset={}, size={}, code.len={}", .{ mem_offset_usize, code_offset_usize, size_usize, code.len });
+    if (code.len > 0 and size_usize > 0) {
+        const copy_size = @min(size_usize, if (code_offset_usize < code.len) code.len - code_offset_usize else 0);
+        if (copy_size > 0) {
+            Log.debug("CODECOPY: First few bytes of code: {x}", .{std.fmt.fmtSliceHexLower(code[0..@min(8, code.len)])});
+        }
+    }
     try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
 /// RETURNDATALOAD opcode (0xF7): Loads a 32-byte word from return data
