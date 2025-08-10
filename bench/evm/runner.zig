@@ -22,7 +22,7 @@ const CALLER_ADDRESS_U256: u256 = 0x1000000000000000000000000000000000000001;
 
 // Override log level to suppress debug output for clean benchmark results
 pub const std_options: std.Options = .{
-    .log_level = .err, // Only show errors
+    .log_level = .debug,
 };
 
 pub fn main() !void {
@@ -42,8 +42,10 @@ pub fn main() !void {
     const contract_code_hex = try std.fs.cwd().readFileAlloc(allocator, args.contract_code_path, 1024 * 1024);
     defer allocator.free(contract_code_hex);
     
-    const contract_code = try hexDecode(allocator, std.mem.trim(u8, contract_code_hex, " \n\r\t"));
-    defer allocator.free(contract_code);
+    const contract_code_hex_trimmed = std.mem.trim(u8, contract_code_hex, " \n\r\t");
+    const decoded = try hexDecode(allocator, contract_code_hex_trimmed);
+    defer allocator.free(decoded);
+    const contract_code = extractRuntime(decoded);
 
     // Decode calldata
     const calldata = try hexDecode(allocator, args.calldata);
@@ -77,6 +79,9 @@ pub fn main() !void {
 
     // Deploy the contract once
     const contract_address = try deployContract(&vm, allocator, caller_address, contract_code);
+    // Sanity: ensure code is present
+    const deployed_code = vm.state.get_code(contract_address);
+    std.debug.print("[runner] deployed code len={} at {any}\n", .{deployed_code.len, contract_address});
 
     // Pre-allocate call result to avoid allocations in loop
     var call_result: Evm.CallResult = undefined;
@@ -98,13 +103,20 @@ pub fn main() !void {
             std.debug.print("Contract execution failed: {}\n", .{err});
             std.process.exit(1);
         };
+        if (!call_result.success) {
+            std.debug.print("[runner] call failed; gas_left={}, output_len={}\n", .{call_result.gas_left, if (call_result.output) |o| o.len else 0});
+        }
         
         const duration_ns = std.time.nanoTimestamp() - timer;
         const duration_ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
         
         // Validate successful execution
         if (!call_result.success) {
-            std.debug.print("Contract execution failed\n", .{});
+            if (call_result.output) |out| {
+                std.debug.print("Contract failed; revert/output hex: 0x{X}\n", .{std.fmt.fmtSliceHexLower(out)});
+            } else {
+                std.debug.print("Contract failed with no output data\n", .{});
+            }
             std.process.exit(1);
         }
         
@@ -181,14 +193,46 @@ fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
     return result;
 }
 
+fn extractRuntime(bytecode: []const u8) []const u8 {
+    // Try to split on 0xfe (INVALID) which often separates init/runtime
+    var i: isize = @intCast(bytecode.len);
+    while (i > 0) : (i -= 1) {
+        const idx: usize = @intCast(i - 1);
+        if (bytecode[idx] == 0xfe) {
+            if (idx + 1 < bytecode.len) return bytecode[idx + 1 ..];
+            return &[_]u8{};
+        }
+    }
+    return bytecode;
+}
+
 fn deployContract(vm: *Evm.Evm, allocator: std.mem.Allocator, caller: Address, bytecode: []const u8) !Address {
-    const create_result = try vm.create_contract(
+    // Attempt 1: Treat input as initcode and use create_contract
+    const create_result = vm.create_contract(
         caller,
         0,
         bytecode,
-        10_000_000
-    );
-    defer if (create_result.output) |output| allocator.free(output);
+        50_000_000,
+    ) catch |err| blk: {
+        std.debug.print("[deployContract] create_contract error: {}\n", .{err});
+        break :blk null;
+    };
+    if (create_result) |res| {
+        if (res.success) {
+            if (res.output) |out| allocator.free(out);
+            return res.address;
+        }
+        if (res.output) |out| {
+            std.debug.print("[deployContract] create_contract failed; revert/output hex: 0x{X}\n", .{std.fmt.fmtSliceHexLower(out)});
+            allocator.free(out);
+        } else {
+            std.debug.print("[deployContract] create_contract failed with no output\n", .{});
+        }
+    }
 
-    return create_result.address;
+    // Attempt 2: Treat input as runtime bytecode and set directly
+    const address: Address = [_]u8{0x22} ** 20;
+    try vm.state.set_code(address, bytecode);
+    std.debug.print("[deployContract] Fallback: set runtime code at deterministic address {any}\n", .{address});
+    return address;
 }

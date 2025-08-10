@@ -12,7 +12,7 @@ const CALLER_ADDRESS = "0x1000000000000000000000000000000000000001";
 // Updated to new API - migration in progress, tests not run yet
 
 pub const std_options: std.Options = .{
-    .log_level = .err,
+    .log_level = .debug,
 };
 
 pub fn main() !void {
@@ -118,7 +118,7 @@ pub fn main() !void {
         null, // context
         0, // depth
         false, // read_only
-        null, // tracer
+        null, // tracer (set to stdout.any() to enable JSON tracing)
     );
     defer vm.deinit();
 
@@ -126,6 +126,8 @@ pub fn main() !void {
     try vm.state.set_balance(caller_address, std.math.maxInt(u256));
 
     const contract_address = try deployContract(allocator, &vm, caller_address, contract_code);
+    const deployed = vm.state.get_code(contract_address);
+    std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{deployed.len, contract_address});
 
     // Run benchmarks
     var run: u8 = 0;
@@ -145,7 +147,11 @@ pub fn main() !void {
         };
 
         if (!result.success) {
-            std.debug.print("Contract execution failed\n", .{});
+            if (result.output) |out| {
+                std.debug.print("Contract execution failed; revert/output hex: 0x{X}\n", .{std.fmt.fmtSliceHexLower(out)});
+            } else {
+                std.debug.print("Contract execution failed with no output data\n", .{});
+            }
             std.process.exit(1);
         }
 
@@ -157,16 +163,28 @@ pub fn main() !void {
 }
 
 fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
-    _ = allocator;
-    _ = caller;
+    // Attempt 1: Treat input as initcode and use create_contract
+    const create_result = vm.create_contract(caller, 0, bytecode, 50_000_000) catch |err| blk: {
+        std.debug.print("[zig-runner] create_contract error: {}\n", .{err});
+        break :blk null;
+    };
+    if (create_result) |res| {
+        if (res.success) {
+            if (res.output) |out| allocator.free(out);
+            return res.address;
+        }
+        if (res.output) |out| {
+            std.debug.print("[zig-runner] create_contract failed; revert/output hex: 0x{X}\n", .{std.fmt.fmtSliceHexLower(out)});
+            allocator.free(out);
+        } else {
+            std.debug.print("[zig-runner] create_contract failed with no output\n", .{});
+        }
+    }
 
-    // For benchmarking, we'll directly set the code at a known address
-    // This avoids issues with CREATE not being fully implemented
+    // Attempt 2: Treat input as runtime bytecode and set directly
     const contract_addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
-    
-    // Store the bytecode directly in the state
     try vm.state.set_code(contract_addr, bytecode);
-    
+    std.debug.print("[zig-runner] Fallback: set runtime code at deterministic address {any}\n", .{contract_addr});
     return contract_addr;
 }
 

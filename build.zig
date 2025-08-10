@@ -427,7 +427,7 @@ fn setupDebugExecutables_new(b: *std.Build, mods: modules.Modules, rust_libs: ru
     geth_runner_build.setCwd(b.path("bench/official/evms/geth"));
 
     // Build evmone runner using CMake
-    const evmone_cmake_configure = b.addSystemCommand(&[_][]const u8{ "cmake", "-S", "bench/official/evms/evmone", "-B", "bench/official/evms/evmone/build", "-DCMAKE_BUILD_TYPE=Release" });
+    const evmone_cmake_configure = b.addSystemCommand(&[_][]const u8{ "cmake", "-S", "bench/official/evms/evmone", "-B", "bench/official/evms/evmone/build", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" });
     evmone_cmake_configure.setCwd(b.path(""));
 
     const evmone_cmake_build = b.addSystemCommand(&[_][]const u8{ "cmake", "--build", "bench/official/evms/evmone/build", "--parallel" });

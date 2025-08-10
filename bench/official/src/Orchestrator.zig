@@ -230,6 +230,7 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
             "--runs", num_runs_str,
             "--warmup", "3",
             "--shell=none",
+            "--show-output",
             "--export-json", "-",  // Export to stdout
             hyperfine_cmd,
         },
