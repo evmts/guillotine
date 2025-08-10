@@ -416,7 +416,7 @@ test "C interface compilation" {
 }
 
 // Re-export modules
-pub const Evm = evm_root.Evm;
+pub const configureEvm = evm_root.configureEvm;
 pub const EvmConfig = evm_root.EvmConfig;
 pub const Primitives = primitives;
 pub const Provider = provider;
