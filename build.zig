@@ -1039,7 +1039,6 @@ pub fn build(b: *std.Build) void {
     differential_test.root_module.stack_check = false;
     differential_test.root_module.addImport("primitives", primitives_mod);
     differential_test.root_module.addImport("evm", evm_mod);
-    // Provide REVM wrapper to differential tests
     differential_test.root_module.addImport("revm", revm_mod);
 
     // Link REVM Rust library for differential tests if available
