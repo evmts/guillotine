@@ -13,7 +13,7 @@ pub fn call_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void,
 pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     
-    if (frame.stack.size() >= Stack.CAPACITY) {
+    if (frame.stack.size() >= 1024) {
         @branchHint(.cold);
         unreachable;
     }

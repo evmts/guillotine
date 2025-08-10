@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 const Operation = @import("opcodes/operation.zig");
 const primitives = @import("primitives");
@@ -376,7 +375,6 @@ pub fn adjust_gas_refund(self: *Self, delta: i64) void {
 pub fn add_gas_refund(self: *Self, amount: u64) void {
     self.adjust_gas_refund(@as(i64, @intCast(amount)));
 }
-}
 
 /// Apply gas refunds at transaction end with EIP-3529 cap.
 /// Maximum refund is gas_used / 5 as per London hardfork.
@@ -634,6 +632,8 @@ pub fn interpret_block_write(self: *Self, contract: *const anyopaque, input: []c
         .success = true,
     };
 }
+    }; // End of struct
+} // End of configureEvm
 
 pub const ConsumeGasError = ExecutionError.Error;
 
@@ -652,7 +652,7 @@ test "Evm.init default configuration" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -671,7 +671,7 @@ test "Evm.init with custom opcode metadata and chain rules" {
     // Using EvmConfig instead of separate table and rules
 
     const test_config = EvmConfig.init(.BERLIN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -689,7 +689,7 @@ test "Evm.init with hardfork" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.LONDON);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -707,7 +707,7 @@ test "Evm.deinit proper cleanup" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
 
     evm.deinit();
@@ -721,7 +721,7 @@ test "Evm.init state initialization" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -738,7 +738,7 @@ test "Evm.init access list initialization" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -755,7 +755,7 @@ test "Evm.init context initialization" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -777,7 +777,7 @@ test "Evm multiple VM instances" {
     const db_interface2 = memory_db2.to_database_interface();
 
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm1 = try EvmType.init(allocator, db_interface1, null, 0, false, null);
     defer evm1.deinit();
     var evm2 = try EvmType.init(allocator, db_interface2, null, 0, false, null);
@@ -802,7 +802,7 @@ test "Evm initialization with different hardforks" {
 
     for (hardforks) |hardfork| {
         const test_config = EvmConfig.init(hardfork);
-        const EvmType = Evm(test_config);
+        const EvmType = configureEvm(test_config);
         var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
@@ -820,7 +820,7 @@ test "Evm initialization memory invariants" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -837,7 +837,7 @@ test "Evm depth tracking" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -858,7 +858,7 @@ test "Evm read-only flag" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -879,7 +879,7 @@ test "Evm return data management" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -902,7 +902,7 @@ test "Evm state access" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -922,7 +922,7 @@ test "Evm access list operations" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -942,7 +942,7 @@ test "Evm opcode metadata access" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -959,7 +959,7 @@ test "Evm chain rules access" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -979,7 +979,7 @@ test "Evm reinitialization behavior" {
     const db_interface = memory_db.to_database_interface();
 
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     evm.depth = 5;
     evm.read_only = true;
@@ -1002,7 +1002,7 @@ test "Evm edge case: maximum depth" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1027,7 +1027,7 @@ test "Evm fuzz: initialization with random hardforks" {
     while (i < 50) : (i += 1) {
         const hardfork = hardforks[random.intRangeAtMost(usize, 0, hardforks.len - 1)];
         const test_config = EvmConfig.init(hardfork);
-        const EvmType = Evm(test_config);
+        const EvmType = configureEvm(test_config);
         var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
@@ -1045,7 +1045,7 @@ test "Evm fuzz: random depth and read_only values" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1073,7 +1073,7 @@ test "Evm integration: multiple state operations" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1101,7 +1101,7 @@ test "Evm integration: state and context interaction" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1125,7 +1125,7 @@ test "Evm invariant: all fields properly initialized after init" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1158,7 +1158,7 @@ test "Evm memory leak detection" {
 
         const db_interface = memory_db.to_database_interface();
         const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
@@ -1179,7 +1179,7 @@ test "Evm edge case: empty return data" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1197,7 +1197,7 @@ test "Evm resource exhaustion simulation" {
 
     const db_interface = memory_db.to_database_interface();
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1215,7 +1215,7 @@ test "Evm.init creates EVM with custom settings" {
     // Using EvmConfig instead of separate table and rules
 
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 42, true, null);
     defer evm.deinit();
 
@@ -1234,7 +1234,7 @@ test "Evm.init uses defaults for null parameters" {
     const db_interface = memory_db.to_database_interface();
 
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1253,7 +1253,7 @@ test "Evm builder pattern: step by step configuration" {
     const db_interface = memory_db.to_database_interface();
 
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1278,7 +1278,7 @@ test "Evm init vs init comparison" {
     const db_interface = memory_db.to_database_interface();
 
     const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm1 = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm1.deinit();
 
@@ -1300,7 +1300,7 @@ test "Evm child instance creation pattern" {
     const db_interface = memory_db.to_database_interface();
 
     const test_config = EvmConfig.init(.CANCUN);
-    const TestEvm = Evm(test_config);
+    const TestEvm = configureEvm(test_config);
     var parent_evm = try TestEvm.init(allocator, db_interface, null, 0, false, null);
     defer parent_evm.deinit();
 
@@ -1326,7 +1326,7 @@ test "Evm initialization with different hardforks using builder" {
 
     for (hardforks) |hardfork| {
         const test_config = EvmConfig.init(hardfork);
-        const EvmType = Evm(test_config);
+        const EvmType = configureEvm(test_config);
 
         var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
@@ -1346,7 +1346,7 @@ test "Evm builder pattern memory management" {
         const db_interface = memory_db.to_database_interface();
 
         const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         evm.depth = @intCast(i);
         evm.read_only = (i % 2 == 0);
@@ -1418,7 +1418,7 @@ test "fuzz_evm_depth_management" {
             const db_interface = memory_db.to_database_interface();
 
             const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
@@ -1463,7 +1463,7 @@ test "fuzz_evm_state_consistency" {
             const initial_read_only = (input[2] % 2) == 1;
 
             const test_config = EvmConfig.init(.CANCUN);
-            const EvmType = Evm(test_config);
+            const EvmType = configureEvm(test_config);
             var evm = try EvmType.init(allocator, db_interface, null, initial_depth, initial_read_only, null);
             defer evm.deinit();
 
@@ -1516,7 +1516,7 @@ test "fuzz_evm_frame_pool_management" {
             const db_interface = memory_db.to_database_interface();
 
             const test_config = EvmConfig.init(.CANCUN);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
@@ -1635,7 +1635,7 @@ test "gas refund accumulation" {
     const db_interface = db.to_database_interface();
 
     const test_config = EvmConfig.init(.LONDON);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
@@ -1663,7 +1663,7 @@ test "gas refund application with EIP-3529 cap" {
     // Test London hardfork (gas_used / 5 cap)
     {
         const test_config = EvmConfig.init(.LONDON);
-        const EvmType = Evm(test_config);
+        const EvmType = configureEvm(test_config);
         var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
@@ -1682,7 +1682,7 @@ test "gas refund application with EIP-3529 cap" {
     // Test pre-London hardfork (gas_used / 2 cap)
     {
         const test_config = EvmConfig.init(.BERLIN);
-        const EvmType = Evm(test_config);
+        const EvmType = configureEvm(test_config);
         var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
@@ -1706,7 +1706,7 @@ test "gas refund reset" {
     const db_interface = db.to_database_interface();
 
     const test_config = EvmConfig.init(.LONDON);
-    const EvmType = Evm(test_config);
+    const EvmType = configureEvm(test_config);
     var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
