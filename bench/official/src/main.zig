@@ -20,6 +20,7 @@ pub fn main() !void {
         \\--compare                  Compare all available EVM implementations
         \\--all                      Include all test cases (by default only working benchmarks are included)
         \\--next                     Use block-based execution for Zig EVM (new optimized interpreter)
+        \\--show-output              Show output from hyperfine
         \\
     );
 
@@ -55,6 +56,7 @@ pub fn main() !void {
     const compare_mode = res.args.compare != 0;
     const include_all_cases = res.args.all != 0;
     const use_next = res.args.next != 0;
+    const show_output = res.args.@"show-output" != 0;
 
     if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
@@ -66,7 +68,7 @@ pub fn main() !void {
         for (evms) |evm| {
             std.debug.print("\n=== Running benchmarks for {s} ===\n", .{evm});
 
-            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next);
+            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, show_output);
             defer orchestrator.deinit();
 
             try orchestrator.discoverTestCases();
@@ -100,7 +102,7 @@ pub fn main() !void {
         }
     } else {
         // Single EVM mode
-        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next);
+        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, show_output);
         defer orchestrator.deinit();
 
         // Discover test cases
@@ -379,4 +381,72 @@ fn printHelp() !void {
         \\  orchestrator --compare --js-runs 1  Compare EVMs with only 1 run for JavaScript
         \\
     , .{});
+}
+
+test "formatTimeWithUnit selects appropriate unit" {
+    // Test microseconds
+    const micro_time = formatTimeWithUnit(0.5);
+    try std.testing.expectEqual(TimeUnit.microseconds, micro_time.unit);
+    try std.testing.expectApproxEqRel(@as(f64, 500.0), micro_time.value, 0.001);
+    
+    // Test milliseconds  
+    const milli_time = formatTimeWithUnit(50.0);
+    try std.testing.expectEqual(TimeUnit.milliseconds, milli_time.unit);
+    try std.testing.expectApproxEqRel(@as(f64, 50.0), milli_time.value, 0.001);
+    
+    // Test seconds
+    const seconds_time = formatTimeWithUnit(2500.0);
+    try std.testing.expectEqual(TimeUnit.seconds, seconds_time.unit);
+    try std.testing.expectApproxEqRel(@as(f64, 2.5), seconds_time.value, 0.001);
+}
+
+test "selectOptimalUnit returns correct unit and value" {
+    // Test edge cases
+    const edge_micro = selectOptimalUnit(0.999);
+    try std.testing.expectEqual(TimeUnit.microseconds, edge_micro.unit);
+    try std.testing.expectApproxEqRel(@as(f64, 999.0), edge_micro.value, 0.001);
+    
+    const edge_milli = selectOptimalUnit(999.999);
+    try std.testing.expectEqual(TimeUnit.milliseconds, edge_milli.unit);
+    try std.testing.expectApproxEqRel(@as(f64, 999.999), edge_milli.value, 0.001);
+    
+    const edge_seconds = selectOptimalUnit(1000.0);
+    try std.testing.expectEqual(TimeUnit.seconds, edge_seconds.unit);
+    try std.testing.expectApproxEqRel(@as(f64, 1.0), edge_seconds.value, 0.001);
+}
+
+test "FormattedTime.format outputs correct string" {
+    const allocator = std.testing.allocator;
+    
+    // Test microseconds formatting
+    const micro_time = FormattedTime{ .value = 123.45, .unit = .microseconds };
+    var micro_buf = std.ArrayList(u8).init(allocator);
+    defer micro_buf.deinit();
+    try micro_time.format("", .{}, micro_buf.writer());
+    try std.testing.expectEqualStrings("123.45 μs", micro_buf.items);
+    
+    // Test milliseconds formatting
+    const milli_time = FormattedTime{ .value = 87.50, .unit = .milliseconds };
+    var milli_buf = std.ArrayList(u8).init(allocator);
+    defer milli_buf.deinit();
+    try milli_time.format("", .{}, milli_buf.writer());
+    try std.testing.expectEqualStrings("87.50 ms", milli_buf.items);
+    
+    // Test seconds formatting
+    const seconds_time = FormattedTime{ .value = 3.14, .unit = .seconds };
+    var seconds_buf = std.ArrayList(u8).init(allocator);
+    defer seconds_buf.deinit();
+    try seconds_time.format("", .{}, seconds_buf.writer());
+    try std.testing.expectEqualStrings("3.14 s", seconds_buf.items);
+}
+
+test "TimeUnit enum has correct values" {
+    const micro = TimeUnit.microseconds;
+    const milli = TimeUnit.milliseconds;
+    const secs = TimeUnit.seconds;
+    
+    // Test enum values exist and are distinct
+    try std.testing.expect(micro != milli);
+    try std.testing.expect(milli != secs);
+    try std.testing.expect(micro != secs);
 }

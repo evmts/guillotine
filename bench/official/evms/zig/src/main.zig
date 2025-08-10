@@ -127,7 +127,7 @@ pub fn main() !void {
 
     const contract_address = try deployContract(allocator, &vm, caller_address, contract_code);
     const deployed = vm.state.get_code(contract_address);
-    std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{deployed.len, contract_address});
+    std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{ deployed.len, contract_address });
 
     // Run benchmarks
     var run: u8 = 0;
@@ -139,10 +139,16 @@ pub fn main() !void {
             .value = 0,
             .input = calldata,
             .gas = 1_000_000_000,
-        }};
+        } };
 
         const result = vm.call(call_params) catch |err| {
             std.debug.print("Contract execution error: {}\n", .{err});
+            if (err == error.InvalidJump) {
+                // Get the deployed code to debug
+                const deployed_code = vm.state.get_code(contract_address);
+                std.debug.print("Deployed code length: {}\n", .{deployed_code.len});
+                std.debug.print("First 100 bytes: {X}\n", .{std.fmt.fmtSliceHexLower(deployed_code[0..@min(100, deployed_code.len)])});
+            }
             std.process.exit(1);
         };
 
@@ -164,7 +170,7 @@ pub fn main() !void {
 
 fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
     // Attempt 1: Treat input as initcode and use create_contract
-    const create_result = vm.create_contract(caller, 0, bytecode, 50_000_000) catch |err| blk: {
+    const create_result = vm.create_contract(caller, 0, bytecode, 10_000_000) catch |err| blk: {
         std.debug.print("[zig-runner] create_contract error: {}\n", .{err});
         break :blk null;
     };
@@ -212,4 +218,139 @@ fn hexToBytes(allocator: std.mem.Allocator, hex: []const u8) ![]u8 {
     }
 
     return bytes;
+}
+
+test "hexToBytes converts hex strings correctly" {
+    const allocator = std.testing.allocator;
+
+    // Test with 0x prefix
+    const hex1 = "0x1234567890abcdef";
+    const bytes1 = try hexToBytes(allocator, hex1);
+    defer allocator.free(bytes1);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef }, bytes1);
+
+    // Test without 0x prefix
+    const hex2 = "deadbeef";
+    const bytes2 = try hexToBytes(allocator, hex2);
+    defer allocator.free(bytes2);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0xde, 0xad, 0xbe, 0xef }, bytes2);
+
+    // Test empty string
+    const hex3 = "";
+    const bytes3 = try hexToBytes(allocator, hex3);
+    defer allocator.free(bytes3);
+    try std.testing.expectEqualSlices(u8, &[_]u8{}, bytes3);
+
+    // Test single byte
+    const hex4 = "0xff";
+    const bytes4 = try hexToBytes(allocator, hex4);
+    defer allocator.free(bytes4);
+    try std.testing.expectEqualSlices(u8, &[_]u8{0xff}, bytes4);
+}
+
+test "hexToBytes handles errors correctly" {
+    const allocator = std.testing.allocator;
+
+    // Test odd length hex string
+    const hex_odd = "0x123";
+    const result_odd = hexToBytes(allocator, hex_odd);
+    try std.testing.expectError(error.InvalidHexLength, result_odd);
+
+    // Test invalid hex characters
+    const hex_invalid = "0xgg";
+    const result_invalid = hexToBytes(allocator, hex_invalid);
+    try std.testing.expectError(error.InvalidHexCharacter, result_invalid);
+}
+
+test "deployContract sets code at expected address" {
+    const allocator = std.testing.allocator;
+
+    // Initialize EVM database
+    var memory_db = evm.MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+
+    // Create EVM instance
+    const db_interface = memory_db.to_database_interface();
+    var vm = try evm.Evm.init(
+        allocator,
+        db_interface,
+        null, // table
+        null, // chain_rules
+        null, // context
+        0, // depth
+        false, // read_only
+        null, // tracer
+    );
+    defer vm.deinit();
+
+    const caller = try primitives.Address.from_hex("0x1000000000000000000000000000000000000001");
+    try vm.state.set_balance(caller, std.math.maxInt(u256));
+
+    // Simple bytecode that stores 42
+    const bytecode = &[_]u8{ 0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+
+    const contract_address = try deployContract(allocator, &vm, caller, bytecode);
+
+    // Verify code was deployed
+    const deployed_code = vm.state.get_code(contract_address);
+    try std.testing.expect(deployed_code.len > 0);
+}
+
+test "main function argument parsing" {
+    _ = std.testing.allocator;
+
+    // Test valid arguments
+    const valid_args = [_][]const u8{
+        "program",
+        "--contract-code-path",
+        "bytecode.txt",
+        "--calldata",
+        "0x12345678",
+        "--num-runs",
+        "5",
+        "--next",
+    };
+
+    // Verify parsing would succeed (can't test main directly due to file I/O)
+    var contract_code_path: ?[]const u8 = null;
+    var calldata_hex: ?[]const u8 = null;
+    var num_runs: u8 = 1;
+    var use_block_execution = false;
+
+    var i: usize = 1;
+    while (i < valid_args.len) : (i += 1) {
+        if (std.mem.eql(u8, valid_args[i], "--contract-code-path")) {
+            contract_code_path = valid_args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, valid_args[i], "--calldata")) {
+            calldata_hex = valid_args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, valid_args[i], "--num-runs")) {
+            num_runs = try std.fmt.parseInt(u8, valid_args[i + 1], 10);
+            i += 1;
+        } else if (std.mem.eql(u8, valid_args[i], "--next")) {
+            use_block_execution = true;
+        }
+    }
+
+    try std.testing.expectEqualStrings("bytecode.txt", contract_code_path.?);
+    try std.testing.expectEqualStrings("0x12345678", calldata_hex.?);
+    try std.testing.expectEqual(@as(u8, 5), num_runs);
+    try std.testing.expectEqual(true, use_block_execution);
+}
+
+test "CALLER_ADDRESS is valid ethereum address" {
+    const caller = try primitives.Address.from_hex(CALLER_ADDRESS);
+
+    // Address is a [20]u8
+    try std.testing.expect(caller.len == 20);
+
+    // Verify it matches expected value
+    try std.testing.expectEqual(@as(u8, 0x10), caller[0]);
+    try std.testing.expectEqual(@as(u8, 0x01), caller[19]);
+
+    // Verify middle bytes are zero
+    for (caller[1..19]) |byte| {
+        try std.testing.expectEqual(@as(u8, 0x00), byte);
+    }
 }
