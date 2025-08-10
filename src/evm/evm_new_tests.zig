@@ -57,7 +57,7 @@ test "Evm.init with custom hardfork configuration" {
     const hardforks = [_]Hardfork{ .FRONTIER, .BERLIN, .LONDON, .SHANGHAI, .CANCUN };
 
     for (hardforks) |hardfork| {
-        const jump_table = OpcodeMetadata.init(hardfork);
+        const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
         const chain_rules = Frame.chainRulesForHardfork(hardfork);
 
         var evm = try Evm.Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);

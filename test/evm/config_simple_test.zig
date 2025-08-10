@@ -38,12 +38,10 @@ test "EvmConfig predefined configurations" {
 }
 
 test "EvmConfig compile-time validation" {
-    // This should compile successfully
-    const valid_config = EvmConfig.init(.CANCUN);
-    comptime valid_config.validate();
-    
+    // validate() and calculateInitialSize() require comptime-known self
+    comptime EvmConfig.init(.CANCUN).validate();
     // Test that calculateInitialSize works
-    const initial_size = comptime valid_config.calculateInitialSize();
+    const initial_size = comptime EvmConfig.init(.CANCUN).calculateInitialSize();
     try testing.expect(initial_size > 0);
 }
 

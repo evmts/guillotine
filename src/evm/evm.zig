@@ -603,7 +603,7 @@ test "Evm.init with hardfork" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    const jump_table = OpcodeMetadata.init(Hardfork.LONDON);
+    const jump_table = OpcodeMetadata.init_from_hardfork(Hardfork.LONDON);
     const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(Hardfork.LONDON);
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
@@ -706,7 +706,7 @@ test "Evm initialization with different hardforks" {
     const hardforks = [_]Hardfork{ .FRONTIER, .HOMESTEAD, .BYZANTIUM, .CONSTANTINOPLE, .ISTANBUL, .BERLIN, .LONDON, .MERGE };
 
     for (hardforks) |hardfork| {
-        const jump_table = OpcodeMetadata.init(hardfork);
+        const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
         const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
         var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
         defer evm.deinit();
@@ -907,7 +907,7 @@ test "Evm fuzz: initialization with random hardforks" {
     var i: usize = 0;
     while (i < 50) : (i += 1) {
         const hardfork = hardforks[random.intRangeAtMost(usize, 0, hardforks.len - 1)];
-        const jump_table = OpcodeMetadata.init(hardfork);
+        const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
         const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
         var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
         defer evm.deinit();
@@ -1232,7 +1232,7 @@ test "fuzz_evm_initialization_states" {
             const hardfork = hardforks[hardfork_idx];
 
             // Test initialization with various state combinations
-            const jump_table = OpcodeMetadata.init(hardfork);
+            const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
             const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
             var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();
@@ -1420,7 +1420,7 @@ test "fuzz_evm_hardfork_configurations" {
             const hardfork_idx = input[0] % hardforks.len;
             const hardfork = hardforks[hardfork_idx];
 
-            const jump_table = OpcodeMetadata.init(hardfork);
+            const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
             const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
             var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
             defer evm.deinit();

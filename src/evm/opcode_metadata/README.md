@@ -134,11 +134,11 @@ Operation = struct {
 
 ### Basic Execution
 ```zig
-const table = try OpcodeMetadata.init(allocator, .LONDON);
-defer table.deinit();
+const table = OpcodeMetadata.init_from_hardfork(.LONDON);
 
 const opcode = 0x01; // ADD
-const result = try table.execute(opcode, interpreter, state, pc);
+const op = table.get_operation(opcode);
+// Then use op.execute(...) with your interpreter/state as appropriate
 ```
 
 ### Creating Custom Tables

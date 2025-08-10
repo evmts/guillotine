@@ -20,7 +20,7 @@ test {
 }
 
 test "OpcodeMetadata basic operations" {
-    const jt = OpcodeMetadata.initFromHardfork(.FRONTIER);
+    const jt = OpcodeMetadata.init_from_hardfork(.FRONTIER);
 
     // Test a couple of operations
     const stop_op = jt.get_operation(0x00);
@@ -71,7 +71,7 @@ test "OpcodeMetadata gas constants" {
 
 test "OpcodeMetadata basic initialization" {
     // Test minimal opcode metadata functionality without VM
-    const jt = OpcodeMetadata.initFromHardfork(.FRONTIER);
+    const jt = OpcodeMetadata.init_from_hardfork(.FRONTIER);
 
     // Verify the opcode metadata was created
     try std.testing.expectEqual(@as(usize, 256), jt.execute_funcs.len);
@@ -129,9 +129,9 @@ test "Manual VM.init reproduction" {
 
 test "OpcodeMetadata Constantinople opcodes" {
     // Test that Constantinople opcodes are properly configured
-    const jt_frontier = OpcodeMetadata.initFromHardfork(.FRONTIER);
-    const jt_byzantium = OpcodeMetadata.initFromHardfork(.BYZANTIUM);
-    const jt_constantinople = OpcodeMetadata.initFromHardfork(.CONSTANTINOPLE);
+    const jt_frontier = OpcodeMetadata.init_from_hardfork(.FRONTIER);
+    const jt_byzantium = OpcodeMetadata.init_from_hardfork(.BYZANTIUM);
+    const jt_constantinople = OpcodeMetadata.init_from_hardfork(.CONSTANTINOPLE);
 
     // Constantinople opcodes should not be in Frontier
     try std.testing.expect(jt_frontier.get_operation(0xf5).undefined); // CREATE2
@@ -171,9 +171,9 @@ test "OpcodeMetadata Constantinople opcodes" {
 
 test "OpcodeMetadata Istanbul opcodes" {
     // Test that Istanbul opcodes are properly configured
-    const jt_constantinople = OpcodeMetadata.initFromHardfork(.CONSTANTINOPLE);
-    const jt_istanbul = OpcodeMetadata.initFromHardfork(.ISTANBUL);
-    const jt_london = OpcodeMetadata.initFromHardfork(.LONDON);
+    const jt_constantinople = OpcodeMetadata.init_from_hardfork(.CONSTANTINOPLE);
+    const jt_istanbul = OpcodeMetadata.init_from_hardfork(.ISTANBUL);
+    const jt_london = OpcodeMetadata.init_from_hardfork(.LONDON);
 
     // Istanbul opcodes should not be in Constantinople
     try std.testing.expect(jt_constantinople.get_operation(0x46).undefined); // CHAINID
@@ -205,9 +205,9 @@ test "OpcodeMetadata Istanbul opcodes" {
 
 test "OpcodeMetadata Shanghai opcodes" {
     // Test that Shanghai opcodes are properly configured
-    const jt_london = OpcodeMetadata.initFromHardfork(.LONDON);
-    const jt_merge = OpcodeMetadata.initFromHardfork(.MERGE);
-    const jt_shanghai = OpcodeMetadata.initFromHardfork(.SHANGHAI);
+    const jt_london = OpcodeMetadata.init_from_hardfork(.LONDON);
+    const jt_merge = OpcodeMetadata.init_from_hardfork(.MERGE);
+    const jt_shanghai = OpcodeMetadata.init_from_hardfork(.SHANGHAI);
 
     // PUSH0 should not be in London/Merge
     try std.testing.expect(jt_london.get_operation(0x5f).undefined); // PUSH0
@@ -225,8 +225,8 @@ test "OpcodeMetadata Shanghai opcodes" {
 
 test "OpcodeMetadata Cancun opcodes" {
     // Test that Cancun opcodes are properly configured
-    const jt_shanghai = OpcodeMetadata.initFromHardfork(.SHANGHAI);
-    const jt_cancun = OpcodeMetadata.initFromHardfork(.CANCUN);
+    const jt_shanghai = OpcodeMetadata.init_from_hardfork(.SHANGHAI);
+    const jt_cancun = OpcodeMetadata.init_from_hardfork(.CANCUN);
 
     // Cancun opcodes should not be in Shanghai
     try std.testing.expect(jt_shanghai.get_operation(0x49).undefined); // BLOBHASH
@@ -267,7 +267,7 @@ test "OpcodeMetadata Cancun opcodes" {
 test "OpcodeMetadata @constCast memory safety issue reproduction" {
     // This test verifies that our safe hardfork-specific operation variants work correctly
     // Previously this would segfault in CI due to @constCast modifying read-only memory
-    const jt = OpcodeMetadata.initFromHardfork(.TANGERINE_WHISTLE);
+    const jt = OpcodeMetadata.init_from_hardfork(.TANGERINE_WHISTLE);
 
     // This should work without @constCast modifications
     const balance_op = jt.get_operation(0x31); // BALANCE

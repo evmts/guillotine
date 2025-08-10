@@ -4,14 +4,13 @@ const Opcode = @import("../opcodes/opcode.zig");
 const operation_module = @import("../opcodes/operation.zig");
 const Operation = operation_module.Operation;
 const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
-const GasFunc = operation_module.GasFunc;
-const MemorySizeFunc = operation_module.MemorySizeFunc;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const ExecutionContext = @import("../frame.zig").Frame;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
+const GasConstants = primitives.GasConstants;
 
 // Export inline hot ops optimization
 pub const execute_with_inline_hot_ops = @import("inline_hot_ops.zig").execute_with_inline_hot_ops;
@@ -66,8 +65,6 @@ min_stack: [256]u32 align(CACHE_LINE_SIZE),
 max_stack: [256]u32 align(CACHE_LINE_SIZE),
 
 /// Cold path arrays - rarely accessed
-dynamic_gas: [256]?GasFunc align(CACHE_LINE_SIZE),
-memory_size: [256]?MemorySizeFunc align(CACHE_LINE_SIZE),
 undefined_flags: [256]bool align(CACHE_LINE_SIZE),
 
 /// CANCUN opcode metadata, pre-generated at compile time.
@@ -93,8 +90,6 @@ pub fn init() OpcodeMetadata {
         .constant_gas = [_]u64{0} ** 256,
         .min_stack = [_]u32{0} ** 256,
         .max_stack = [_]u32{Stack.CAPACITY} ** 256,
-        .dynamic_gas = [_]?GasFunc{null} ** 256,
-        .memory_size = [_]?MemorySizeFunc{null} ** 256,
         .undefined_flags = [_]bool{true} ** 256,
     };
 }
@@ -105,8 +100,6 @@ pub const OperationView = struct {
     constant_gas: u64,
     min_stack: u32,
     max_stack: u32,
-    dynamic_gas: ?GasFunc,
-    memory_size: ?MemorySizeFunc,
     undefined: bool,
 };
 
@@ -129,8 +122,6 @@ pub inline fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationVi
         .constant_gas = self.constant_gas[opcode],
         .min_stack = self.min_stack[opcode],
         .max_stack = self.max_stack[opcode],
-        .dynamic_gas = self.dynamic_gas[opcode],
-        .memory_size = self.memory_size[opcode],
         .undefined = self.undefined_flags[opcode],
     };
 }
@@ -151,17 +142,7 @@ pub inline fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationVi
 ///
 /// @param self The opcode metadata to validate
 pub fn validate(self: *OpcodeMetadata) void {
-    for (0..256) |i| {
-        // Check for invalid operation configuration (error path)
-        if (self.memory_size[i] != null and self.dynamic_gas[i] == null) {
-            @branchHint(.cold);
-            // Log error instead of panicking
-            Log.debug("Warning: Operation 0x{x} has memory size but no dynamic gas calculation", .{i});
-            // Mark as undefined to prevent issues
-            self.undefined_flags[i] = true;
-            self.execute_funcs[i] = operation_module.NULL_OPERATION.execute;
-        }
-    }
+    _ = self; // No-op validation for now (dynamic gas/memory removed from metadata)
 }
 
 pub fn copy(self: *const OpcodeMetadata, allocator: std.mem.Allocator) !OpcodeMetadata {
@@ -171,8 +152,6 @@ pub fn copy(self: *const OpcodeMetadata, allocator: std.mem.Allocator) !OpcodeMe
         .constant_gas = self.constant_gas,
         .min_stack = self.min_stack,
         .max_stack = self.max_stack,
-        .dynamic_gas = self.dynamic_gas,
-        .memory_size = self.memory_size,
         .undefined_flags = self.undefined_flags,
     };
 }
@@ -219,8 +198,6 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = op.constant_gas;
             jt.min_stack[idx] = op.min_stack;
             jt.max_stack[idx] = op.max_stack;
-            jt.dynamic_gas[idx] = op.dynamic_gas;
-            jt.memory_size[idx] = op.memory_size;
             jt.undefined_flags[idx] = op.undefined;
         }
     }
@@ -400,6 +377,123 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
 
 /// Alias for backward compatibility with camelCase naming
 pub const initFromHardfork = init_from_hardfork;
+pub const initFromEipFlags = init_from_eip_flags;
+
+// -----------------------------------------------------------------------------
+// EIP flags integration: build metadata from feature flags
+// -----------------------------------------------------------------------------
+const eip_flags_mod = @import("../config/eip_flags.zig");
+const EipFlags = eip_flags_mod.EipFlags;
+
+/// Build opcode metadata from EIP flags
+pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
+    @setEvalBranchQuota(10000);
+    var metadata = OpcodeMetadata.init();
+
+    // Use existing ALL_OPERATIONS from operation_config.zig
+    // use file-scope operation_config import
+    inline for (operation_config.ALL_OPERATIONS) |spec| {
+        const op_hardfork = spec.variant orelse Hardfork.FRONTIER;
+
+        // Check if operation should be included based on EIP flags
+        const include_op = switch (spec.opcode) {
+            0x3d => flags.eip211_returndatasize, // RETURNDATASIZE
+            0x3e => flags.eip211_returndatacopy, // RETURNDATACOPY
+            0xfa => flags.eip214_staticcall,     // STATICCALL
+            0xf5 => flags.eip1014_create2,       // CREATE2
+            0x3f => flags.eip1052_extcodehash,   // EXTCODEHASH
+            0x46 => flags.eip1344_chainid,       // CHAINID
+            0x48 => flags.eip3198_basefee,       // BASEFEE
+            0x5c => flags.eip1153_transient_storage, // TLOAD
+            0x5d => flags.eip1153_transient_storage, // TSTORE
+            0x5e => flags.eip5656_mcopy,         // MCOPY
+            0x49 => flags.eip4844_blob_tx,       // BLOBHASH
+            0x4a => flags.eip7516_blobbasefee,   // BLOBBASEFEE
+            0x5f => flags.eip3855_push0,         // PUSH0
+            else => true,
+        };
+
+        if (include_op and @intFromEnum(op_hardfork) <= @intFromEnum(Hardfork.CANCUN)) {
+            const op = operation_config.generate_operation(spec);
+            metadata.execute_funcs[spec.opcode] = op.execute;
+            metadata.constant_gas[spec.opcode] = op.constant_gas;
+            metadata.min_stack[spec.opcode] = op.min_stack;
+            metadata.max_stack[spec.opcode] = op.max_stack;
+            metadata.undefined_flags[spec.opcode] = false;
+        }
+    }
+
+    // PUSH0
+    if (flags.eip3855_push0) {
+        metadata.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+        metadata.constant_gas[0x5f] = GasConstants.GasQuickStep;
+        metadata.min_stack[0x5f] = 0;
+        metadata.max_stack[0x5f] = Stack.CAPACITY - 1;
+        metadata.undefined_flags[0x5f] = false;
+    }
+
+    // PUSH1..PUSH32 metadata entries
+    comptime var i: u8 = 0;
+    i = 0;
+    while (i < 32) : (i += 1) {
+        const opcode = 0x60 + i;
+        metadata.execute_funcs[opcode] = execution.null_opcode.op_invalid;
+        metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
+        metadata.min_stack[opcode] = 0;
+        metadata.max_stack[opcode] = Stack.CAPACITY - 1;
+        metadata.undefined_flags[opcode] = false;
+    }
+
+    // DUP1..DUP16
+    const dup_functions = [_]ExecutionFunc{
+        execution.stack.op_dup1, execution.stack.op_dup2, execution.stack.op_dup3, execution.stack.op_dup4,
+        execution.stack.op_dup5, execution.stack.op_dup6, execution.stack.op_dup7, execution.stack.op_dup8,
+        execution.stack.op_dup9, execution.stack.op_dup10, execution.stack.op_dup11, execution.stack.op_dup12,
+        execution.stack.op_dup13, execution.stack.op_dup14, execution.stack.op_dup15, execution.stack.op_dup16,
+    };
+    i = 0;
+    while (i < 16) : (i += 1) {
+        const opcode = 0x80 + i;
+        metadata.execute_funcs[opcode] = dup_functions[i];
+        metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
+        metadata.min_stack[opcode] = @intCast(i + 1);
+        metadata.max_stack[opcode] = Stack.CAPACITY - 1;
+        metadata.undefined_flags[opcode] = false;
+    }
+
+    // SWAP1..SWAP16
+    const swap_functions = [_]ExecutionFunc{
+        execution.stack.op_swap1, execution.stack.op_swap2, execution.stack.op_swap3, execution.stack.op_swap4,
+        execution.stack.op_swap5, execution.stack.op_swap6, execution.stack.op_swap7, execution.stack.op_swap8,
+        execution.stack.op_swap9, execution.stack.op_swap10, execution.stack.op_swap11, execution.stack.op_swap12,
+        execution.stack.op_swap13, execution.stack.op_swap14, execution.stack.op_swap15, execution.stack.op_swap16,
+    };
+    i = 0;
+    while (i < 16) : (i += 1) {
+        const opcode = 0x90 + i;
+        metadata.execute_funcs[opcode] = swap_functions[i];
+        metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
+        metadata.min_stack[opcode] = @intCast(i + 2);
+        metadata.max_stack[opcode] = Stack.CAPACITY;
+        metadata.undefined_flags[opcode] = false;
+    }
+
+    // LOG0..LOG4
+    const log_functions = [_]ExecutionFunc{
+        execution.log.log_0, execution.log.log_1, execution.log.log_2, execution.log.log_3, execution.log.log_4,
+    };
+    i = 0;
+    while (i <= 4) : (i += 1) {
+        const opcode = 0xa0 + i;
+        metadata.execute_funcs[opcode] = log_functions[i];
+        metadata.constant_gas[opcode] = GasConstants.LogGas + i * GasConstants.LogTopicGas;
+        metadata.min_stack[opcode] = @intCast(2 + i);
+        metadata.max_stack[opcode] = Stack.CAPACITY;
+        metadata.undefined_flags[opcode] = false;
+    }
+
+    return metadata;
+}
 
 test "jump_table_benchmarks" {
     const Timer = std.time.Timer;

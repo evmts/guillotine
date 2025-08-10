@@ -5,8 +5,6 @@ const Stack = @import("stack/stack.zig");
 const operation_config = @import("opcode_metadata/operation_config.zig");
 const operation_module = @import("opcodes/operation.zig");
 const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
-const GasFunc = operation_module.GasFunc;
-const MemorySizeFunc = operation_module.MemorySizeFunc;
 const primitives = @import("primitives");
 const GasConstants = primitives.GasConstants;
 const execution = @import("execution/package.zig");
@@ -52,13 +50,13 @@ pub const EvmConfig = struct {
     eip_overrides: ?EipOverrides = null,
     
     // Opcode metadata
-    opcodes: OpcodeMetadata,
+    opcodes: @import("opcode_metadata/opcode_metadata.zig").OpcodeMetadata,
     
     /// Initialize config for specific hardfork
     pub fn init(comptime hardfork: Hardfork) EvmConfig {
         return EvmConfig{
             .hardfork = hardfork,
-            .opcodes = OpcodeMetadata.initFromHardfork(hardfork),
+            .opcodes = @import("opcode_metadata/opcode_metadata.zig").OpcodeMetadata.init_from_hardfork(hardfork),
         };
     }
     
@@ -67,11 +65,15 @@ pub const EvmConfig = struct {
         return EvmConfig{
             .hardfork = hardfork,
             .eip_overrides = eip_overrides,
-            .opcodes = OpcodeMetadata.initFromConfig(EvmConfig{
-                .hardfork = hardfork,
-                .eip_overrides = eip_overrides,
-                .opcodes = undefined, // Will be set by initFromConfig
-            }),
+            .opcodes = blk: {
+                const tmp = EvmConfig{
+                    .hardfork = hardfork,
+                    .eip_overrides = eip_overrides,
+                    .opcodes = undefined,
+                };
+                const flags = tmp.getEipFlags();
+                break :blk @import("opcode_metadata/opcode_metadata.zig").OpcodeMetadata.init_from_eip_flags(flags);
+            },
         };
     }
     
@@ -86,7 +88,7 @@ pub const EvmConfig = struct {
     ) EvmConfig {
         return EvmConfig{
             .hardfork = hardfork,
-            .opcodes = OpcodeMetadata.initFromHardfork(hardfork),
+            .opcodes = @import("opcode_metadata/opcode_metadata.zig").OpcodeMetadata.init_from_hardfork(hardfork),
             .optional_balance_check = features.optional_balance_check,
             .optional_nonce_check = features.optional_nonce_check,
             .optional_base_fee = features.optional_base_fee,
@@ -209,223 +211,7 @@ pub const GasOperation = enum {
 /// Most modern x86/ARM processors use 64-byte cache lines.
 const CACHE_LINE_SIZE = 64;
 
-/// Opcode metadata for EVM execution
-/// Contains execution functions, gas costs, and stack requirements for each opcode
-pub const OpcodeMetadata = struct {
-    // Hot path arrays - accessed every opcode execution
-    execute_funcs: [256]ExecutionFunc align(CACHE_LINE_SIZE),    // 2KB, hot path
-    constant_gas: [256]u64 align(CACHE_LINE_SIZE),               // 2KB, hot path
-    
-    // Validation arrays - accessed for stack checks
-    min_stack: [256]u32 align(CACHE_LINE_SIZE),                  // 1KB, validation
-    max_stack: [256]u32 align(CACHE_LINE_SIZE),                  // 1KB, validation
-    
-    // Cold path arrays - rarely accessed
-    dynamic_gas: [256]?GasFunc align(CACHE_LINE_SIZE),           // 2KB, rare
-    memory_size: [256]?MemorySizeFunc align(CACHE_LINE_SIZE),    // 2KB, rare  
-    undefined_flags: [256]bool align(CACHE_LINE_SIZE),           // 256 bytes, rare
-    
-    /// Build opcode metadata from configuration
-    pub fn initFromConfig(comptime config: EvmConfig) OpcodeMetadata {
-        const eip_flags_value = config.getEipFlags();
-        return initFromEipFlags(eip_flags_value);
-    }
-    
-    /// Build opcode metadata from hardfork using existing OpSpec system
-    pub fn initFromHardfork(comptime hardfork: Hardfork) OpcodeMetadata {
-        const flags = eip_flags.deriveEipFlagsFromHardfork(hardfork);
-        return initFromEipFlags(flags);
-    }
-    
-    /// Build opcode metadata from EIP flags
-    pub fn initFromEipFlags(comptime flags: EipFlags) OpcodeMetadata {
-        @setEvalBranchQuota(10000);
-        var metadata = OpcodeMetadata.init();
-        
-        // Use existing ALL_OPERATIONS from operation_config.zig
-        inline for (operation_config.ALL_OPERATIONS) |spec| {
-            const op_hardfork = spec.variant orelse Hardfork.FRONTIER;
-            
-            // Check if operation should be included based on EIP flags
-            const include_op = switch (spec.opcode) {
-                0x3d => flags.eip211_returndatasize, // RETURNDATASIZE
-                0x3e => flags.eip211_returndatacopy, // RETURNDATACOPY
-                0xfa => flags.eip214_staticcall, // STATICCALL
-                0xf5 => flags.eip1014_create2, // CREATE2
-                0x3f => flags.eip1052_extcodehash, // EXTCODEHASH
-                0x46 => flags.eip1344_chainid, // CHAINID
-                0x48 => flags.eip3198_basefee, // BASEFEE
-                0x5c => flags.eip1153_transient_storage, // TLOAD
-                0x5d => flags.eip1153_transient_storage, // TSTORE
-                0x5e => flags.eip5656_mcopy, // MCOPY
-                0x4a => flags.eip7516_blobbasefee, // BLOBBASEFEE
-                else => true, // Default: check hardfork
-            };
-            
-            // Only include operations valid for this hardfork and enabled by EIPs
-            if (include_op and @intFromEnum(op_hardfork) <= @intFromEnum(Hardfork.CANCUN)) {
-                const op = operation_config.generate_operation(spec);
-                metadata.execute_funcs[spec.opcode] = op.execute;
-                metadata.constant_gas[spec.opcode] = op.constant_gas;
-                metadata.min_stack[spec.opcode] = op.min_stack;
-                metadata.max_stack[spec.opcode] = op.max_stack;
-                metadata.undefined_flags[spec.opcode] = false;
-                
-                // Handle dynamic gas if present
-                if (op.dynamic_gas) |dyn_gas| {
-                    metadata.dynamic_gas[spec.opcode] = dyn_gas;
-                }
-                
-                // Handle memory size if present
-                if (op.memory_size) |mem_size| {
-                    metadata.memory_size[spec.opcode] = mem_size;
-                }
-            }
-        }
-        
-        // Generate PUSH/DUP/SWAP/LOG operations
-        comptime var i: u8 = 0;
-        
-        // PUSH0 - EIP-3855
-        if (flags.eip3855_push0) {
-            metadata.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
-            metadata.constant_gas[0x5f] = GasConstants.GasQuickStep;
-            metadata.min_stack[0x5f] = 0;
-            metadata.max_stack[0x5f] = Stack.CAPACITY - 1;
-            metadata.undefined_flags[0x5f] = false;
-        }
-        
-        // PUSH1 through PUSH32
-        // Note: PUSH operations are executed inline by the interpreter using
-        // pre-decoded push_value from analysis. We still set metadata here
-        // so stack validation and block gas accounting have correct values.
-        i = 0;
-        while (i < 32) : (i += 1) {
-            const opcode = 0x60 + i;
-            metadata.execute_funcs[opcode] = execution.null_opcode.op_invalid;
-            metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
-            metadata.min_stack[opcode] = 0;
-            metadata.max_stack[opcode] = Stack.CAPACITY - 1;
-            metadata.undefined_flags[opcode] = false;
-        }
-        
-        // DUP1 through DUP16
-        const dup_functions = [_]ExecutionFunc{
-            execution.stack.op_dup1,
-            execution.stack.op_dup2,
-            execution.stack.op_dup3,
-            execution.stack.op_dup4,
-            execution.stack.op_dup5,
-            execution.stack.op_dup6,
-            execution.stack.op_dup7,
-            execution.stack.op_dup8,
-            execution.stack.op_dup9,
-            execution.stack.op_dup10,
-            execution.stack.op_dup11,
-            execution.stack.op_dup12,
-            execution.stack.op_dup13,
-            execution.stack.op_dup14,
-            execution.stack.op_dup15,
-            execution.stack.op_dup16,
-        };
-        i = 0;
-        while (i < 16) : (i += 1) {
-            const opcode = 0x80 + i;
-            metadata.execute_funcs[opcode] = dup_functions[i];
-            metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
-            metadata.min_stack[opcode] = @intCast(i + 1);
-            metadata.max_stack[opcode] = Stack.CAPACITY - 1;
-            metadata.undefined_flags[opcode] = false;
-        }
-        
-        // SWAP1 through SWAP16
-        const swap_functions = [_]ExecutionFunc{
-            execution.stack.op_swap1,
-            execution.stack.op_swap2,
-            execution.stack.op_swap3,
-            execution.stack.op_swap4,
-            execution.stack.op_swap5,
-            execution.stack.op_swap6,
-            execution.stack.op_swap7,
-            execution.stack.op_swap8,
-            execution.stack.op_swap9,
-            execution.stack.op_swap10,
-            execution.stack.op_swap11,
-            execution.stack.op_swap12,
-            execution.stack.op_swap13,
-            execution.stack.op_swap14,
-            execution.stack.op_swap15,
-            execution.stack.op_swap16,
-        };
-        i = 0;
-        while (i < 16) : (i += 1) {
-            const opcode = 0x90 + i;
-            metadata.execute_funcs[opcode] = swap_functions[i];
-            metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
-            metadata.min_stack[opcode] = @intCast(i + 2);
-            metadata.max_stack[opcode] = Stack.CAPACITY;
-            metadata.undefined_flags[opcode] = false;
-        }
-        
-        // LOG0 through LOG4
-        const log_functions = [_]ExecutionFunc{
-            execution.log.log_0,
-            execution.log.log_1,
-            execution.log.log_2,
-            execution.log.log_3,
-            execution.log.log_4,
-        };
-        i = 0;
-        while (i <= 4) : (i += 1) {
-            const opcode = 0xa0 + i;
-            metadata.execute_funcs[opcode] = log_functions[i];
-            metadata.constant_gas[opcode] = GasConstants.LogGas + i * GasConstants.LogTopicGas;
-            metadata.min_stack[opcode] = @intCast(2 + i);
-            metadata.max_stack[opcode] = Stack.CAPACITY;
-            metadata.undefined_flags[opcode] = false;
-        }
-        
-        return metadata;
-    }
-    
-    /// Create an empty metadata table with all entries set to defaults
-    pub fn init() OpcodeMetadata {
-        const undefined_execute = operation_module.NULL_OPERATION.execute;
-        return OpcodeMetadata{
-            .execute_funcs = [_]ExecutionFunc{undefined_execute} ** 256,
-            .constant_gas = [_]u64{0} ** 256,
-            .min_stack = [_]u32{0} ** 256,
-            .max_stack = [_]u32{Stack.CAPACITY} ** 256,
-            .dynamic_gas = [_]?GasFunc{null} ** 256,
-            .memory_size = [_]?MemorySizeFunc{null} ** 256,
-            .undefined_flags = [_]bool{true} ** 256,
-        };
-    }
-    
-    /// Get operation metadata for opcode (maintains compatibility)
-    pub inline fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationView {
-        return OperationView{
-            .execute = self.execute_funcs[opcode],
-            .constant_gas = self.constant_gas[opcode],
-            .min_stack = self.min_stack[opcode],
-            .max_stack = self.max_stack[opcode],
-            .undefined = self.undefined_flags[opcode],
-            .dynamic_gas = self.dynamic_gas[opcode],
-            .memory_size = self.memory_size[opcode],
-        };
-    }
-};
-
-/// View of operation metadata for compatibility with existing code
-pub const OperationView = struct {
-    execute: ExecutionFunc,
-    constant_gas: u64,
-    min_stack: u32,
-    max_stack: u32,
-    undefined: bool,
-    dynamic_gas: ?GasFunc,
-    memory_size: ?MemorySizeFunc,
-};
+    // Remove the local OpcodeMetadata definition; use the canonical one from opcode_metadata module
 
 test "EvmConfig validation" {
     const testing = std.testing;
