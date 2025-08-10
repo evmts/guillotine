@@ -38,7 +38,9 @@
 //! const evm = @import("evm");
 //!
 //! // Create a VM instance
-//! var vm = try evm.Evm.init(allocator, config);
+//! const config = EvmConfig.DEFAULT;
+//! const EvmType = evm.configureEvm(config);
+//! var vm = try EvmType.init(allocator, db_interface, null, 0, false, null);
 //! defer vm.deinit();
 //!
 //! // Execute bytecode

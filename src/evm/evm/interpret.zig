@@ -251,7 +251,7 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     const db_interface = memory_db.to_database_interface();
 
     const DefaultConfig = EvmConfig.init(.CANCUN);
-    const DefaultEvm = EvmModule.Evm(DefaultConfig);
+    const DefaultEvm = EvmModule.configureEvm(DefaultConfig);
     var vm = try DefaultEvm.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
@@ -317,7 +317,7 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     const DefaultConfig = EvmConfig.init(.CANCUN);
-    const DefaultEvm = EvmModule.Evm(DefaultConfig);
+    const DefaultEvm = EvmModule.configureEvm(DefaultConfig);
     var vm = try DefaultEvm.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
@@ -384,7 +384,7 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     const DefaultConfig = EvmConfig.init(.CANCUN);
-    const DefaultEvm = EvmModule.Evm(DefaultConfig);
+    const DefaultEvm = EvmModule.configureEvm(DefaultConfig);
     var vm = try DefaultEvm.init(allocator, db_interface, null, 0, false, null);
     defer vm.deinit();
 
