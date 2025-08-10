@@ -1,3 +1,13 @@
+//! EIP-7702 bytecode format for EOA delegation
+//!
+//! This module implements the bytecode format introduced by EIP-7702, which allows
+//! Externally Owned Accounts (EOAs) to delegate their code execution to smart contracts.
+//!
+//! ## Key Features
+//! - Enables account abstraction without contract deployment
+//! - Allows EOAs to execute complex logic through delegation
+//! - Maintains compatibility with existing infrastructure
+
 const primitives = @import("primitives");
 
 /// Magic bytes that identify EIP-7702 delegated code
