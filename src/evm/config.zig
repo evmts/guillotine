@@ -25,10 +25,13 @@ pub const ChainBehavior = overrides.ChainBehavior;
 pub const EvmConfig = struct {
     // Execution limits
     max_call_depth: u11 = 1024,
+    max_stack_depth: usize = 1024,  // EVM stack depth limit
     max_stack_buffer_size: usize = 43008,
     stack_allocation_threshold: usize = 12800,
     max_input_size: u18 = 128 * 1024,
     max_iterations: usize = 10_000_000,
+    max_frame_size: usize = 1024,  // Maximum frame struct size in bytes
+    analysis_cache_size: usize = 128,  // LRU cache size for code analysis
     
     // Memory configuration  
     memory_limit: u64 = 32 * 1024 * 1024, // 32MB
