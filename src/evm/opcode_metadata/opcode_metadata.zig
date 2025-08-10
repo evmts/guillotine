@@ -209,7 +209,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
             jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
             jt.min_stack[0x5f] = 0;
-            jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+            jt.max_stack[0x5f] = 1024 - 1;
             jt.undefined_flags[0x5f] = false;
         } else {
             // Before Shanghai, PUSH0 is undefined
@@ -220,7 +220,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
-        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.max_stack[0x60] = 1024 - 1;
         jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH32
@@ -232,7 +232,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = execution.null_opcode.op_invalid; // unreachable at runtime
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = 0;
-            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.max_stack[idx] = 1024 - 1;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -241,7 +241,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
             jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
             jt.min_stack[0x5f] = 0;
-            jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+            jt.max_stack[0x5f] = 1024 - 1;
             jt.undefined_flags[0x5f] = false;
         } else {
             // Before Shanghai, PUSH0 is undefined
@@ -252,7 +252,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
-        jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.max_stack[0x60] = 1024 - 1;
         jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH32 inline execution; provide metadata only
@@ -261,7 +261,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[opcode_idx] = execution.null_opcode.op_invalid; // unreachable
             jt.constant_gas[opcode_idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[opcode_idx] = 0;
-            jt.max_stack[opcode_idx] = Stack.CAPACITY - 1;
+            jt.max_stack[opcode_idx] = 1024 - 1;
             jt.undefined_flags[opcode_idx] = false;
         }
     }
@@ -281,7 +281,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = dup_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n);
-            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.max_stack[idx] = 1024 - 1;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -298,7 +298,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = dup_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n);
-            jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.max_stack[idx] = 1024 - 1;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -318,7 +318,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = swap_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n + 1);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = 1024;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -335,7 +335,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = swap_functions[n - 1];
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n + 1);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = 1024;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -352,7 +352,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = log_functions[n];
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = 1024;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -366,7 +366,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.execute_funcs[idx] = log_functions[n];
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
-            jt.max_stack[idx] = Stack.CAPACITY;
+            jt.max_stack[idx] = 1024;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -428,7 +428,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
         metadata.constant_gas[0x5f] = GasConstants.GasQuickStep;
         metadata.min_stack[0x5f] = 0;
-        metadata.max_stack[0x5f] = Stack.CAPACITY - 1;
+        metadata.max_stack[0x5f] = 1024 - 1;
         metadata.undefined_flags[0x5f] = false;
     }
 
@@ -440,7 +440,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.execute_funcs[opcode] = execution.null_opcode.op_invalid;
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = 0;
-        metadata.max_stack[opcode] = Stack.CAPACITY - 1;
+        metadata.max_stack[opcode] = 1024 - 1;
         metadata.undefined_flags[opcode] = false;
     }
 
@@ -457,7 +457,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.execute_funcs[opcode] = dup_functions[i];
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = @intCast(i + 1);
-        metadata.max_stack[opcode] = Stack.CAPACITY - 1;
+        metadata.max_stack[opcode] = 1024 - 1;
         metadata.undefined_flags[opcode] = false;
     }
 
@@ -474,7 +474,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.execute_funcs[opcode] = swap_functions[i];
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = @intCast(i + 2);
-        metadata.max_stack[opcode] = Stack.CAPACITY;
+        metadata.max_stack[opcode] = 1024;
         metadata.undefined_flags[opcode] = false;
     }
 
@@ -488,7 +488,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.execute_funcs[opcode] = log_functions[i];
         metadata.constant_gas[opcode] = GasConstants.LogGas + i * GasConstants.LogTopicGas;
         metadata.min_stack[opcode] = @intCast(2 + i);
-        metadata.max_stack[opcode] = Stack.CAPACITY;
+        metadata.max_stack[opcode] = 1024;
         metadata.undefined_flags[opcode] = false;
     }
 

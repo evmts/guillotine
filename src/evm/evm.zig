@@ -30,7 +30,8 @@ pub const CallResult = @import("evm/call_result.zig").CallResult;
 pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
-const AnalysisCache = @import("analysis_cache.zig");
+const builtin = @import("builtin");
+const analysis_cache_module = @import("analysis_cache.zig");
 const EvmConfig = @import("config.zig").EvmConfig;
 
 /// Virtual Machine for executing Ethereum bytecode.
@@ -1370,8 +1371,8 @@ test "fuzz_evm_initialization_states" {
             const hardfork = hardforks[hardfork_idx];
 
             // Test initialization with various state combinations
-            const test_config = EvmConfig.init(hardfork);
-            const EvmType = Evm(test_config);
+            const hardfork_config = EvmConfig.init(hardfork);
+            const EvmType = configureEvm(hardfork_config);
             var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
@@ -1564,15 +1565,15 @@ test "fuzz_evm_hardfork_configurations" {
             const hardfork_idx = input[0] % hardforks.len;
             const hardfork = hardforks[hardfork_idx];
 
-            const test_config = EvmConfig.init(hardfork);
-            const EvmType = Evm(test_config);
+            const hardfork_config = EvmConfig.init(hardfork);
+            const EvmType = configureEvm(hardfork_config);
             var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
             // Verify EVM was configured for the specified hardfork
             // In generic Evm, hardfork is compile-time determined
-            const chain_rules = ChainRules.for_hardfork(test_config.hardfork);
-            try testing.expect(test_config.hardfork == hardfork);
+            const chain_rules = ChainRules.for_hardfork(hardfork_config.hardfork);
+            try testing.expect(hardfork_config.hardfork == hardfork);
 
             // Test state modifications with hardfork context
             if (input.len >= 8) {
