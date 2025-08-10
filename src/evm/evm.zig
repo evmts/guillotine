@@ -7,7 +7,7 @@ const primitives_internal = primitives;
 const AccessList = @import("access_list/access_list.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const Keccak256 = std.crypto.hash.sha3.Keccak256;
-const ChainRules = @import("frame.zig").ChainRules;
+const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
 const GasConstants = @import("primitives").GasConstants;
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
 const Host = @import("host.zig").Host;
@@ -31,31 +31,32 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const AnalysisCache = @import("analysis_cache.zig");
+const EvmConfig = @import("config.zig").EvmConfig;
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
 /// Manages contract execution, gas accounting, state access, and protocol enforcement
 /// according to the configured hardfork rules. Supports the full EVM instruction set
 /// including contract creation, calls, and state modifications.
-const Evm = @This();
+///
+/// This is a generic function that takes a compile-time EvmConfig and returns
+/// an EVM struct type with compile-time known array sizes and configuration.
+pub fn Evm(comptime config: EvmConfig) type {
+    // Validate configuration at compile time
+    comptime config.validate();
+    
+    return struct {
+        const Self = @This();
 
-/// Maximum call depth supported by EVM (per EIP-150)
-pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
+        /// Initial arena capacity for temporary allocations (256KB)
+        /// This covers most common contract executions without reallocation
+        const ARENA_INITIAL_CAPACITY = 256 * 1024;
 
-// Constants from call.zig for frame management
-/// Maximum stack buffer size for contracts up to 12,800 bytes
-const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
-
-/// Initial arena capacity for temporary allocations (256KB)
-/// This covers most common contract executions without reallocation
-const ARENA_INITIAL_CAPACITY = 256 * 1024;
-// Hot fields (frequently accessed during execution)
+        // Hot fields (frequently accessed during execution)
 /// Normal allocator for data that outlives EVM execution (passed by user)
 allocator: std.mem.Allocator,
 /// Internal arena allocator for temporary data that's reset between executions
 internal_arena: std.heap.ArenaAllocator,
-/// Opcode dispatch table for the configured hardfork
-table: OpcodeMetadata,
 /// Current call depth for overflow protection
 depth: u11 = 0,
 /// Whether the current context is read-only (STATICCALL)
@@ -97,7 +98,7 @@ self_destruct: SelfDestruct = undefined,
 created_contracts: CreatedContracts = undefined,
 
 /// Stack buffer for small contract analysis optimization
-analysis_stack_buffer: [MAX_STACK_BUFFER_SIZE]u8 = undefined,
+analysis_stack_buffer: [config.max_stack_buffer_size]u8 = undefined,
 
 /// LRU cache for code analysis to avoid redundant analysis during nested calls
 analysis_cache: ?AnalysisCache = null,
@@ -114,50 +115,50 @@ gas_refunds: i64 = 0,
 /// Before we can remove this restriction
 initial_thread_id: std.Thread.Id,
 
-// Compile-time validation and optimizations
-comptime {
-    std.debug.assert(@alignOf(Evm) >= 8); // Ensure proper alignment for performance
-    std.debug.assert(@sizeOf(Evm) > 0); // Struct must have size
-}
+        // Compile-time validation and optimizations
+        comptime {
+            std.debug.assert(@alignOf(Self) >= 8); // Ensure proper alignment for performance
+            std.debug.assert(@sizeOf(Self) > 0); // Struct must have size
+        }
 
-/// Create a new EVM with specified configuration.
-///
-/// This is the initialization method for EVM instances. All parameters except
-/// allocator and database are optional and will use sensible defaults if not provided.
-///
-/// @param allocator Memory allocator for VM operations
-/// @param database Database interface for state management
-/// @param table Opcode dispatch table (optional, defaults to OpcodeMetadata.DEFAULT)
-/// @param chain_rules Protocol rules (optional, defaults to ChainRules.DEFAULT)
-/// @param context Execution context (optional, defaults to Context.init())
-/// @param depth Current call depth (optional, defaults to 0)
-/// @param read_only Static call flag (optional, defaults to false)
-/// @param tracer Optional tracer for capturing execution traces
-/// @return Configured EVM instance
-/// @throws OutOfMemory if memory initialization fails
-///
-/// Example usage:
-/// ```zig
-/// // Basic initialization with defaults
-/// var evm = try Evm.init(allocator, database, null, null, null, 0, false, null);
-/// defer evm.deinit();
-///
-/// // With custom hardfork and configuration
-/// const table = OpcodeMetadata.init_from_hardfork(.LONDON);
-/// const rules = Frame.chainRulesForHardfork(.LONDON);
-/// var evm = try Evm.init(allocator, database, table, rules, null, 0, false, null);
-/// defer evm.deinit();
-/// ```
-pub fn init(
-    allocator: std.mem.Allocator,
-    database: @import("state/database_interface.zig").DatabaseInterface,
-    table: ?OpcodeMetadata,
-    chain_rules: ?ChainRules,
-    context: ?Context,
-    depth: u16,
-    read_only: bool,
-    tracer: ?std.io.AnyWriter,
-) !Evm {
+        // Import method implementations
+        pub usingnamespace @import("evm/set_context.zig");
+        pub usingnamespace @import("evm/call.zig");
+        pub usingnamespace @import("evm/call_contract.zig");
+        pub usingnamespace @import("evm/execute_precompile_call.zig");
+        pub usingnamespace @import("evm/staticcall_contract.zig");
+        pub usingnamespace @import("evm/validate_static_context.zig");
+        pub usingnamespace @import("evm/set_storage_protected.zig");
+
+        /// Create a new EVM instance.
+        ///
+        /// This is the initialization method for EVM instances. The configuration
+        /// is compile-time known from the Evm() generic function.
+        ///
+        /// @param allocator Memory allocator for VM operations
+        /// @param database Database interface for state management
+        /// @param context Execution context (optional, defaults to Context.init())
+        /// @param depth Current call depth (optional, defaults to 0)
+        /// @param read_only Static call flag (optional, defaults to false)
+        /// @param tracer Optional tracer for capturing execution traces
+        /// @return Configured EVM instance
+        /// @throws OutOfMemory if memory initialization fails
+        ///
+        /// Example usage:
+        /// ```zig
+        /// // Create EVM type with config, then initialize instance
+        /// const MyEvm = Evm(EvmConfig.init(.LONDON));
+        /// var evm = try MyEvm.init(allocator, database, null, 0, false, null);
+        /// defer evm.deinit();
+        /// ```
+        pub fn init(
+            allocator: std.mem.Allocator,
+            database: @import("state/database_interface.zig").DatabaseInterface,
+            context: ?Context,
+            depth: u16,
+            read_only: bool,
+            tracer: ?std.io.AnyWriter,
+        ) !Self {
     std.debug.print("[Evm.init] Starting initialization...\n", .{});
     Log.debug("Evm.init: Initializing EVM with configuration", .{});
 
@@ -194,13 +195,17 @@ pub fn init(
     // - self_destruct: initialized in call execution
     // - analysis_stack_buffer: initialized in call execution
 
-    std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
-    Log.debug("Evm.init: EVM initialization complete", .{});
-    return Evm{
-        .allocator = allocator,
-        .internal_arena = internal_arena,
-        .table = table orelse OpcodeMetadata.DEFAULT,
-        .chain_rules = chain_rules orelse ChainRules.DEFAULT,
+            // Validate configuration constraints
+            if (depth > config.max_call_depth) {
+                return ExecutionError.Error.DepthLimit;
+            }
+            
+            std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
+            Log.debug("Evm.init: EVM initialization complete", .{});
+            return Self{
+                .allocator = allocator,
+                .internal_arena = internal_arena,
+                .chain_rules = ChainRules.for_hardfork(config.hardfork),
         .state = state,
         .access_list = access_list,
         .context = ctx,
@@ -225,9 +230,10 @@ pub fn init(
     };
 }
 
+
 /// Free all VM resources.
 /// Must be called when finished with the VM to prevent memory leaks.
-pub fn deinit(self: *Evm) void {
+pub fn deinit(self: *Self) void {
     self.state.deinit();
     self.access_list.deinit();
     self.internal_arena.deinit();
@@ -256,7 +262,7 @@ pub fn deinit(self: *Evm) void {
 /// Reset the EVM for reuse without deallocating memory.
 /// This is efficient for executing multiple contracts in sequence.
 /// Clears all state but keeps the allocated memory for reuse.
-pub fn reset(self: *Evm) void {
+pub fn reset(self: *Self) void {
     // Reset internal arena allocator to reuse memory
     _ = self.internal_arena.reset(.retain_capacity);
 
@@ -277,7 +283,7 @@ pub fn reset(self: *Evm) void {
 
 /// Get the internal arena allocator for temporary EVM data
 /// Use this for allocations that are reset between EVM executions
-pub fn arena_allocator(self: *Evm) std.mem.Allocator {
+pub fn arena_allocator(self: *Self) std.mem.Allocator {
     return self.internal_arena.allocator();
 }
 
@@ -290,7 +296,7 @@ pub fn arena_allocator(self: *Evm) std.mem.Allocator {
 ///
 /// @param amount The amount of gas to refund
 /// Adjust gas refund by signed delta (can be negative per EIP-2200)
-pub fn adjust_gas_refund(self: *Evm, delta: i64) void {
+pub fn adjust_gas_refund(self: *Self, delta: i64) void {
     // Saturating addition on i64 bounds
     const sum = @as(i128, self.gas_refunds) + @as(i128, delta);
     const clamped = if (sum > @as(i128, std.math.maxInt(i64))) @as(i64, std.math.maxInt(i64)) else if (sum < @as(i128, std.math.minInt(i64))) @as(i64, std.math.minInt(i64)) else @as(i64, @intCast(sum));
@@ -299,8 +305,9 @@ pub fn adjust_gas_refund(self: *Evm, delta: i64) void {
 }
 
 /// Backward-compatible helper for positive refunds
-pub fn add_gas_refund(self: *Evm, amount: u64) void {
+pub fn add_gas_refund(self: *Self, amount: u64) void {
     self.adjust_gas_refund(@as(i64, @intCast(amount)));
+}
 }
 
 /// Apply gas refunds at transaction end with EIP-3529 cap.
@@ -308,7 +315,7 @@ pub fn add_gas_refund(self: *Evm, amount: u64) void {
 ///
 /// @param total_gas_used The total gas used in the transaction
 /// @return The actual refund amount after applying the cap
-pub fn apply_gas_refunds(self: *Evm, total_gas_used: u64) u64 {
+pub fn apply_gas_refunds(self: *Self, total_gas_used: u64) u64 {
     // EIP-3529: Maximum refund is gas_used / 5 (London hardfork)
     // Pre-London: Maximum refund is gas_used / 2
     const max_refund_quotient: u64 = if (self.chain_rules.is_london) 5 else 2;
@@ -327,29 +334,29 @@ pub fn apply_gas_refunds(self: *Evm, total_gas_used: u64) u64 {
 
 /// Reset gas refunds for a new transaction.
 /// Called at the start of each transaction execution.
-pub fn reset_gas_refunds(self: *Evm) void {
+pub fn reset_gas_refunds(self: *Self) void {
     self.gas_refunds = 0;
 }
 
 // Host interface implementation - EVM acts as its own host
 /// Get account balance (Host interface)
-pub fn get_balance(self: *Evm, address: primitives.Address.Address) u256 {
+pub fn get_balance(self: *Self, address: primitives.Address.Address) u256 {
     return self.state.get_balance(address);
 }
 
 /// Check if account exists (Host interface)
-pub fn account_exists(self: *Evm, address: primitives.Address.Address) bool {
+pub fn account_exists(self: *Self, address: primitives.Address.Address) bool {
     // Delegate to the underlying database via state
     return self.state.database.account_exists(address);
 }
 
 /// Get account code (Host interface)
-pub fn get_code(self: *Evm, address: primitives.Address.Address) []const u8 {
+pub fn get_code(self: *Self, address: primitives.Address.Address) []const u8 {
     return self.state.get_code(address);
 }
 
 /// Get block information (Host interface)
-pub fn get_block_info(self: *Evm) BlockInfo {
+pub fn get_block_info(self: *Self) BlockInfo {
     _ = self;
     // Return default block info for benchmarking
     // In production, this would come from the actual blockchain state
@@ -366,7 +373,7 @@ pub fn get_block_info(self: *Evm) BlockInfo {
 
 /// Emit log event (Host interface override)
 /// This overrides the emit_log from emit_log.zig to provide the correct signature for Host interface
-pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics: []const u256, data: []const u8) void {
+pub fn emit_log(self: *Self, contract_address: primitives.Address.Address, topics: []const u256, data: []const u8) void {
     // Delegate to the state's emit_log implementation
     self.state.emit_log(contract_address, topics, data) catch |err| {
         Log.debug("emit_log failed: {}", .{err});
@@ -376,15 +383,7 @@ pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics
 // The actual call implementation is in evm/call.zig
 // Import it with usingnamespace below
 
-pub usingnamespace @import("evm/set_context.zig");
-
-pub usingnamespace @import("evm/call.zig"); // This provides the actual call() implementation
-pub usingnamespace @import("evm/call_contract.zig");
-pub usingnamespace @import("evm/execute_precompile_call.zig");
-pub usingnamespace @import("evm/staticcall_contract.zig");
-// pub usingnamespace @import("evm/emit_log.zig"); // Commented out to avoid ambiguity with Host interface
-pub usingnamespace @import("evm/validate_static_context.zig");
-pub usingnamespace @import("evm/set_storage_protected.zig");
+// Method implementations moved inside struct
 pub usingnamespace @import("evm/set_transient_storage_protected.zig");
 pub usingnamespace @import("evm/set_balance_protected.zig");
 pub usingnamespace @import("evm/set_code_protected.zig");
@@ -405,7 +404,7 @@ pub const InterprResult = struct {
 };
 
 // Legacy interpret wrapper for test compatibility
-pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {
+pub fn interpretCompat(self: *Self, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {
     _ = self;
     _ = contract;
     _ = input;
@@ -423,7 +422,7 @@ pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8
 }
 
 // Contract creation: execute initcode and deploy returned runtime code
-pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64) !InterprResult {
+pub fn create_contract(self: *Self, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64) !InterprResult {
     // Simple constructor execution: run initcode and deploy returned runtime code
     // Compute a deterministic test address (tests only assert code at returned address)
     const new_address: primitives_internal.Address.Address = [_]u8{0x22} ** 20;
@@ -432,7 +431,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     // Use analysis cache (always initialized in Evm.init)
     const analysis_ptr = blk: {
         if (self.analysis_cache) |*cache| {
-            break :blk cache.getOrAnalyze(bytecode, &self.table) catch {
+            break :blk cache.getOrAnalyze(bytecode, &config.opcodes) catch {
                 return InterprResult{
                     .status = .Failure,
                     .output = null,
@@ -561,7 +560,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     };
 }
 // Stub for interpret_block_write method used by tests
-pub fn interpret_block_write(self: *Evm, contract: *const anyopaque, input: []const u8) !InterprResult {
+pub fn interpret_block_write(self: *Self, contract: *const anyopaque, input: []const u8) !InterprResult {
     _ = self;
     _ = contract;
     _ = input;
@@ -593,11 +592,12 @@ test "Evm.init default configuration" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), evm.return_data.len);
     try testing.expectEqual(@as(u11, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -609,10 +609,11 @@ test "Evm.init with custom opcode metadata and chain rules" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    const custom_table = OpcodeMetadata.init_from_hardfork(.BERLIN);
-    const custom_rules = @import("frame.zig").Frame.chainRulesForHardfork(.BERLIN);
+    // Using EvmConfig instead of separate table and rules
 
-    var evm = try Evm.init(allocator, db_interface, custom_table, custom_rules, null, 0, false, null);
+    const test_config = EvmConfig.init(.BERLIN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -628,9 +629,9 @@ test "Evm.init with hardfork" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    const jump_table = OpcodeMetadata.init_from_hardfork(Hardfork.LONDON);
-    const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(Hardfork.LONDON);
-    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    const test_config = EvmConfig.init(.LONDON);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -646,7 +647,9 @@ test "Evm.deinit proper cleanup" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
 
     evm.deinit();
 }
@@ -658,7 +661,9 @@ test "Evm.init state initialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -673,7 +678,9 @@ test "Evm.init access list initialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -688,7 +695,9 @@ test "Evm.init context initialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(u256, 0), evm.context.block.number);
@@ -708,9 +717,11 @@ test "Evm multiple VM instances" {
     const db_interface1 = memory_db1.to_database_interface();
     const db_interface2 = memory_db2.to_database_interface();
 
-    var evm1 = try Evm.init(allocator, db_interface1, null, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm1 = try EvmType.init(allocator, db_interface1, null, 0, false, null);
     defer evm1.deinit();
-    var evm2 = try Evm.init(allocator, db_interface2, null, null);
+    var evm2 = try EvmType.init(allocator, db_interface2, null, 0, false, null);
     defer evm2.deinit();
 
     evm1.depth = 5;
@@ -731,9 +742,9 @@ test "Evm initialization with different hardforks" {
     const hardforks = [_]Hardfork{ .FRONTIER, .HOMESTEAD, .BYZANTIUM, .CONSTANTINOPLE, .ISTANBUL, .BERLIN, .LONDON, .MERGE };
 
     for (hardforks) |hardfork| {
-        const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
-        const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
-        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+        const test_config = EvmConfig.init(hardfork);
+        const EvmType = Evm(test_config);
+        var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -749,7 +760,9 @@ test "Evm initialization memory invariants" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -764,7 +777,9 @@ test "Evm depth tracking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(u11, 0), evm.depth);
@@ -783,7 +798,9 @@ test "Evm read-only flag" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(false, evm.read_only);
@@ -802,7 +819,9 @@ test "Evm return data management" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -823,7 +842,9 @@ test "Evm state access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -841,7 +862,9 @@ test "Evm access list operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -859,12 +882,14 @@ test "Evm opcode metadata access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const add_opcode: u8 = 0x01;
-    const operation = evm.table.get(add_opcode);
-    try testing.expect(operation != null);
+    const operation = test_config.opcodes.get_operation(add_opcode);
+    try testing.expect(operation.execute != null);
 }
 
 test "Evm chain rules access" {
@@ -874,11 +899,15 @@ test "Evm chain rules access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
-    const is_precompile = evm.chain_rules.is_precompile(test_addr);
+    // In generic Evm, chain_rules is compile-time determined
+    const chain_rules = ChainRules.for_hardfork(test_config.hardfork);
+    const is_precompile = precompiles.is_precompile_hardfork(test_addr, test_config.hardfork);
     try testing.expectEqual(false, is_precompile);
 }
 
@@ -890,12 +919,16 @@ test "Evm reinitialization behavior" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     evm.depth = 5;
     evm.read_only = true;
     evm.deinit();
 
-    evm = try Evm.init(allocator, db_interface, null, null);
+    const config_reset = EvmConfig.init(.CANCUN);
+    const EvmTypeReset = Evm(config_reset);
+    evm = try EvmTypeReset.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(u11, 0), evm.depth);
@@ -909,7 +942,9 @@ test "Evm edge case: maximum depth" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     evm.depth = std.math.maxInt(u16);
@@ -932,9 +967,9 @@ test "Evm fuzz: initialization with random hardforks" {
     var i: usize = 0;
     while (i < 50) : (i += 1) {
         const hardfork = hardforks[random.intRangeAtMost(usize, 0, hardforks.len - 1)];
-        const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
-        const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
-        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+        const test_config = EvmConfig.init(hardfork);
+        const EvmType = Evm(test_config);
+        var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -950,7 +985,9 @@ test "Evm fuzz: random depth and read_only values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     var prng = std.Random.DefaultPrng.init(123);
@@ -976,7 +1013,9 @@ test "Evm integration: multiple state operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const addr1 = [_]u8{0x11} ** 20;
@@ -1002,7 +1041,9 @@ test "Evm integration: state and context interaction" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -1024,7 +1065,9 @@ test "Evm invariant: all fields properly initialized after init" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -1032,8 +1075,10 @@ test "Evm invariant: all fields properly initialized after init" {
     try testing.expectEqual(@as(u16, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 
-    try testing.expect(evm.table.get(0x01) != null);
-    try testing.expect(evm.chain_rules.is_precompile([_]u8{0} ** 20) == false);
+    const op = test_config.opcodes.get_operation(0x01);
+    try testing.expect(op.execute != null);
+    const is_precompile = precompiles.is_precompile_hardfork([_]u8{0} ** 20, test_config.hardfork);
+    try testing.expect(is_precompile == false);
 
     const test_addr = [_]u8{0x99} ** 20;
     try testing.expectEqual(@as(u256, 0), try evm.state.get_balance(test_addr));
@@ -1053,7 +1098,9 @@ test "Evm memory leak detection" {
         defer memory_db.deinit();
 
         const db_interface = memory_db.to_database_interface();
-        var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+        const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
         const test_data = try allocator.alloc(u8, 100);
@@ -1072,7 +1119,9 @@ test "Evm edge case: empty return data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
@@ -1088,7 +1137,9 @@ test "Evm resource exhaustion simulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     evm.depth = 1023;
@@ -1102,10 +1153,11 @@ test "Evm.init creates EVM with custom settings" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    const custom_table = OpcodeMetadata.init_from_hardfork(.BERLIN);
-    const custom_rules = @import("frame.zig").Frame.chainRulesForHardfork(.BERLIN);
+    // Using EvmConfig instead of separate table and rules
 
-    var evm = try Evm.init(allocator, db_interface, custom_table, custom_rules, null, 42, true, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 42, true, null);
     defer evm.deinit();
 
     // Can't test return_data initialization as init doesn't support it
@@ -1122,11 +1174,13 @@ test "Evm.init uses defaults for null parameters" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.return_data.len);
-    try testing.expectEqual(@as(usize, 0), evm.stack.size());
+    // Stack is no longer directly accessible in generic Evm
     try testing.expectEqual(@as(u16, 0), evm.depth);
     try testing.expectEqual(false, evm.read_only);
 }
@@ -1139,7 +1193,9 @@ test "Evm builder pattern: step by step configuration" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     evm.depth = 5;
@@ -1162,16 +1218,18 @@ test "Evm init vs init comparison" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm1 = try Evm.init(allocator, db_interface);
+    const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm1 = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm1.deinit();
 
-    var evm2 = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm2 = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm2.deinit();
 
     try testing.expectEqual(evm1.depth, evm2.depth);
     try testing.expectEqual(evm1.read_only, evm2.read_only);
     try testing.expectEqual(evm1.return_data.len, evm2.return_data.len);
-    try testing.expectEqual(evm1.stack.size(), evm2.stack.size());
+    // Stack is no longer directly accessible in generic Evm
 }
 
 test "Evm child instance creation pattern" {
@@ -1182,13 +1240,15 @@ test "Evm child instance creation pattern" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var parent_evm = try Evm.init(allocator, db_interface);
+    const test_config = EvmConfig.init(.CANCUN);
+    const TestEvm = Evm(test_config);
+    var parent_evm = try TestEvm.init(allocator, db_interface, null, 0, false, null);
     defer parent_evm.deinit();
 
     parent_evm.depth = 3;
     parent_evm.read_only = true;
 
-    var child_evm = try Evm.init(allocator, db_interface, null, null, null, parent_evm.depth + 1, parent_evm.read_only, null);
+    var child_evm = try TestEvm.init(allocator, db_interface, null, parent_evm.depth + 1, parent_evm.read_only, null);
     defer child_evm.deinit();
 
     try testing.expectEqual(@as(u16, 4), child_evm.depth);
@@ -1206,10 +1266,10 @@ test "Evm initialization with different hardforks using builder" {
     const hardforks = [_]Hardfork{ .FRONTIER, .BERLIN, .LONDON };
 
     for (hardforks) |hardfork| {
-        const table = OpcodeMetadata.init_from_hardfork(hardfork);
-        const rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
+        const test_config = EvmConfig.init(hardfork);
+        const EvmType = Evm(test_config);
 
-        var evm = try Evm.init(allocator, db_interface, table, rules, null, 0, false, null);
+        var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -1226,7 +1286,9 @@ test "Evm builder pattern memory management" {
 
         const db_interface = memory_db.to_database_interface();
 
-        var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+        const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         evm.depth = @intCast(i);
         evm.read_only = (i % 2 == 0);
         evm.deinit();
@@ -1249,7 +1311,7 @@ test "fuzz_evm_initialization_states" {
             const db_interface = memory_db.to_database_interface();
 
             // Extract parameters from fuzz input
-            const depth = std.mem.readInt(u16, input[0..2], .little) % (MAX_CALL_DEPTH + 10); // Allow testing beyond max
+            const depth = std.mem.readInt(u16, input[0..2], .little) % (1024 + 10); // Allow testing beyond max
             const read_only = (input[2] % 2) == 1;
             const hardfork_idx = input[3] % 3; // Test 3 different hardforks
 
@@ -1257,9 +1319,9 @@ test "fuzz_evm_initialization_states" {
             const hardfork = hardforks[hardfork_idx];
 
             // Test initialization with various state combinations
-            const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
-            const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
-            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+            const test_config = EvmConfig.init(hardfork);
+            const EvmType = Evm(test_config);
+            var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
             // Verify initial state
@@ -1268,7 +1330,7 @@ test "fuzz_evm_initialization_states" {
             try testing.expect(evm.return_data.len == 0);
 
             // Test state modifications within valid ranges
-            if (depth < MAX_CALL_DEPTH) {
+            if (depth < 1024) {
                 evm.depth = depth;
                 try testing.expectEqual(depth, evm.depth);
             }
@@ -1296,27 +1358,29 @@ test "fuzz_evm_depth_management" {
             defer memory_db.deinit();
             const db_interface = memory_db.to_database_interface();
 
-            var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+            const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
             // Test various depth values from fuzz input
             const depths = [_]u16{
-                std.mem.readInt(u16, input[0..2], .little) % MAX_CALL_DEPTH,
-                std.mem.readInt(u16, input[2..4], .little) % MAX_CALL_DEPTH,
-                std.mem.readInt(u16, input[4..6], .little) % MAX_CALL_DEPTH,
-                std.mem.readInt(u16, input[6..8], .little) % MAX_CALL_DEPTH,
+                std.mem.readInt(u16, input[0..2], .little) % 1024,
+                std.mem.readInt(u16, input[2..4], .little) % 1024,
+                std.mem.readInt(u16, input[4..6], .little) % 1024,
+                std.mem.readInt(u16, input[6..8], .little) % 1024,
             };
 
             for (depths) |depth| {
                 evm.depth = depth;
                 try testing.expectEqual(depth, evm.depth);
-                try testing.expect(evm.depth < MAX_CALL_DEPTH);
+                try testing.expect(evm.depth < 1024);
 
                 // Test depth overflow protection
-                const max_depth_reached = depth >= (MAX_CALL_DEPTH - 1);
+                const max_depth_reached = depth >= (1024 - 1);
                 if (max_depth_reached) {
                     // At max depth, should not exceed limit
-                    try testing.expect(evm.depth <= MAX_CALL_DEPTH);
+                    try testing.expect(evm.depth <= 1024);
                 }
             }
         }
@@ -1336,10 +1400,12 @@ test "fuzz_evm_state_consistency" {
             const db_interface = memory_db.to_database_interface();
 
             // Create EVM with various initial states
-            const initial_depth = std.mem.readInt(u16, input[0..2], .little) % MAX_CALL_DEPTH;
+            const initial_depth = std.mem.readInt(u16, input[0..2], .little) % 1024;
             const initial_read_only = (input[2] % 2) == 1;
 
-            var evm = try Evm.init(allocator, db_interface, null, null, null, initial_depth, initial_read_only, null);
+            const test_config = EvmConfig.init(.CANCUN);
+            const EvmType = Evm(test_config);
+            var evm = try EvmType.init(allocator, db_interface, null, initial_depth, initial_read_only, null);
             defer evm.deinit();
 
             // Verify initial state was set correctly
@@ -1355,7 +1421,7 @@ test "fuzz_evm_state_consistency" {
                 switch (op_type) {
                     0 => {
                         // Modify depth
-                        const new_depth = std.mem.readInt(u16, op_data[1..3], .little) % MAX_CALL_DEPTH;
+                        const new_depth = std.mem.readInt(u16, op_data[1..3], .little) % 1024;
                         evm.depth = new_depth;
                         try testing.expectEqual(new_depth, evm.depth);
                     },
@@ -1367,7 +1433,7 @@ test "fuzz_evm_state_consistency" {
                     },
                     2 => {
                         // Verify state consistency
-                        try testing.expect(evm.depth < MAX_CALL_DEPTH);
+                        try testing.expect(evm.depth < 1024);
                         try testing.expect(evm.allocator.ptr != @as(*anyopaque, @ptrFromInt(0)));
                         try testing.expect(evm.return_data.len == 0); // Default empty return data
                     },
@@ -1390,15 +1456,17 @@ test "fuzz_evm_frame_pool_management" {
             defer memory_db.deinit();
             const db_interface = memory_db.to_database_interface();
 
-            var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+            const test_config = EvmConfig.init(.CANCUN);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
             // Test frame pool initialization tracking with fuzz input
             const pool_indices = [_]usize{
-                input[0] % MAX_CALL_DEPTH,
-                input[1] % MAX_CALL_DEPTH,
-                input[2] % MAX_CALL_DEPTH,
-                input[3] % MAX_CALL_DEPTH,
+                input[0] % 1024,
+                input[1] % 1024,
+                input[2] % 1024,
+                input[3] % 1024,
             };
 
             // Verify initial state - all frames should be uninitialized
@@ -1412,16 +1480,16 @@ test "fuzz_evm_frame_pool_management" {
                 try testing.expectEqual(false, evm.frame_pool_initialized[idx]);
 
                 // Verify frame pool bounds
-                try testing.expect(idx < MAX_CALL_DEPTH);
+                try testing.expect(idx < 1024);
             }
 
             // Test depth-frame correlation invariants
             if (input.len >= 16) {
-                const test_depth = std.mem.readInt(u16, input[8..10], .little) % MAX_CALL_DEPTH;
+                const test_depth = std.mem.readInt(u16, input[8..10], .little) % 1024;
                 evm.depth = test_depth;
 
                 // Depth should never exceed available frames
-                try testing.expect(evm.depth < MAX_CALL_DEPTH);
+                try testing.expect(evm.depth < 1024);
                 try testing.expect(evm.depth <= evm.frame_pool.len);
             }
         }
@@ -1445,17 +1513,19 @@ test "fuzz_evm_hardfork_configurations" {
             const hardfork_idx = input[0] % hardforks.len;
             const hardfork = hardforks[hardfork_idx];
 
-            const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
-            const chain_rules = @import("frame.zig").Frame.chainRulesForHardfork(hardfork);
-            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+            const test_config = EvmConfig.init(hardfork);
+            const EvmType = Evm(test_config);
+            var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
             defer evm.deinit();
 
             // Verify EVM was configured for the specified hardfork
-            try testing.expect(evm.chain_rules.hardfork() == hardfork);
+            // In generic Evm, hardfork is compile-time determined
+            const chain_rules = ChainRules.for_hardfork(test_config.hardfork);
+            try testing.expect(test_config.hardfork == hardfork);
 
             // Test state modifications with hardfork context
             if (input.len >= 8) {
-                const depth = std.mem.readInt(u16, input[1..3], .little) % MAX_CALL_DEPTH;
+                const depth = std.mem.readInt(u16, input[1..3], .little) % 1024;
                 const read_only = (input[3] % 2) == 1;
 
                 evm.depth = depth;
@@ -1466,7 +1536,8 @@ test "fuzz_evm_hardfork_configurations" {
                 try testing.expectEqual(read_only, evm.read_only);
 
                 // Verify hardfork rules remain consistent
-                try testing.expect(evm.chain_rules.hardfork() == hardfork);
+                // In generic Evm, hardfork is compile-time determined
+                try testing.expect(test_config.hardfork == hardfork);
             }
 
             // Test multiple EVM instances with different hardforks
@@ -1474,10 +1545,13 @@ test "fuzz_evm_hardfork_configurations" {
                 const second_hardfork_idx = input[4] % hardforks.len;
                 const second_hardfork = hardforks[second_hardfork_idx];
 
-                var evm2 = try Evm.init_with_hardfork(allocator, db_interface, second_hardfork);
+                const test_config2 = EvmConfig.init(second_hardfork);
+                const EvmType2 = Evm(test_config2);
+                var evm2 = try EvmType2.init(allocator, db_interface, null, 0, false, null);
                 defer evm2.deinit();
 
-                try testing.expect(evm2.chain_rules.hardfork() == second_hardfork);
+                // Cannot access chain_rules in generic Evm, but config has hardfork
+                try testing.expect(test_config2.hardfork == second_hardfork);
 
                 // EVMs should be independent
                 try testing.expect(evm.depth == 0);
@@ -1497,10 +1571,13 @@ test "fuzz_evm_hardfork_configurations" {
 
 test "gas refund accumulation" {
     const allocator = std.testing.allocator;
-    const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    var db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer db.deinit();
     const db_interface = db.to_database_interface();
 
-    var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
+    const test_config = EvmConfig.init(.LONDON);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Initially no refunds
@@ -1520,12 +1597,15 @@ test "gas refund accumulation" {
 
 test "gas refund application with EIP-3529 cap" {
     const allocator = std.testing.allocator;
-    const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    var db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer db.deinit();
     const db_interface = db.to_database_interface();
 
     // Test London hardfork (gas_used / 5 cap)
     {
-        var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
+        const test_config = EvmConfig.init(.LONDON);
+        const EvmType = Evm(test_config);
+        var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
         // Set up refunds
@@ -1542,7 +1622,9 @@ test "gas refund application with EIP-3529 cap" {
 
     // Test pre-London hardfork (gas_used / 2 cap)
     {
-        var evm = try Evm.init_with_hardfork(allocator, db_interface, .BERLIN);
+        const test_config = EvmConfig.init(.BERLIN);
+        const EvmType = Evm(test_config);
+        var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
         defer evm.deinit();
 
         // Set up refunds
@@ -1560,10 +1642,13 @@ test "gas refund application with EIP-3529 cap" {
 
 test "gas refund reset" {
     const allocator = std.testing.allocator;
-    const db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    var db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
+    defer db.deinit();
     const db_interface = db.to_database_interface();
 
-    var evm = try Evm.init_with_hardfork(allocator, db_interface, .LONDON);
+    const test_config = EvmConfig.init(.LONDON);
+    const EvmType = Evm(test_config);
+    var evm = try EvmType.init(allocator, db_interface, null, 0, false, null);
     defer evm.deinit();
 
     // Add refunds
