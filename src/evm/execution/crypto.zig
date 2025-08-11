@@ -88,13 +88,13 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.OutOfOffset;
     }
 
+    // Charge gas and ensure memory is available
+    try frame.memory.charge_and_ensure(frame, @as(u64, end));
+
     // Dynamic gas cost for hashing
     const word_size = (size_usize + 31) / 32;
     const gas_cost = 6 * word_size;
     try frame.consume_gas(gas_cost);
-
-    // Ensure memory is available
-    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
 
     // Get data and hash using optimized stack buffer approach
     const data = try frame.memory.get_slice(offset_usize, size_usize);

@@ -45,14 +45,9 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
     const offset_usize = @as(usize, @intCast(offset));
     const new_size = offset_usize + 32;
 
-    // Calculate memory expansion gas cost
-    const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
-
-    // Ensure memory is available - expand to word boundary to match gas calculation
+    // Charge gas and ensure memory is available - expand to word boundary
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(aligned_size)));
 
     // Read 32 bytes from memory
     const value = try frame.memory.get_u256(offset_usize);
@@ -86,14 +81,9 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
     const offset_usize = @as(usize, @intCast(offset));
     const new_size = offset_usize + 32; // MSTORE writes 32 bytes
 
-    // Calculate memory expansion gas cost
-    const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
-
-    // Ensure memory is available - expand to word boundary to match gas calculation
+    // Charge gas and ensure memory is available - expand to word boundary
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(aligned_size)));
 
     // Write 32 bytes to memory (big-endian)
     var bytes: [32]u8 = undefined;
@@ -126,14 +116,9 @@ pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
     const offset_usize = @as(usize, @intCast(offset));
     const new_size = offset_usize + 1;
 
-    // Calculate memory expansion gas cost
-    const new_size_u64 = @as(u64, @intCast(new_size));
-    const gas_cost = frame.memory.get_expansion_cost(new_size_u64);
-    try frame.consume_gas(gas_cost);
-
-    // Ensure memory is available - expand to word boundary to match gas calculation
+    // Charge gas and ensure memory is available - expand to word boundary
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(aligned_size)));
 
     // Write single byte to memory
     const byte_value = @as(u8, @truncate(value));
@@ -194,17 +179,15 @@ pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
     const src_usize = @as(usize, @intCast(src));
     const length_usize = @as(usize, @intCast(length));
 
-    // Calculate memory expansion gas cost
+    // Calculate max memory address needed
     const max_addr = @max(dest_usize + length_usize, src_usize + length_usize);
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(max_addr)));
-    try frame.consume_gas(memory_gas);
+    
+    // Charge gas and ensure memory is available
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(max_addr)));
 
     // Dynamic gas for copy operation
     const word_size = (length_usize + 31) / 32;
     try frame.consume_gas(GasConstants.CopyGas * word_size);
-
-    // Ensure memory is available for both source and destination
-    _ = try frame.memory.ensure_context_capacity(max_addr);
 
     // Copy with overlap handling
     // Get memory slice and handle overlapping copy

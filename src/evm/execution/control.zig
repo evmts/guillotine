@@ -104,10 +104,7 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
         // Calculate memory expansion gas cost
         const end = offset_usize + size_usize;
         if (end > offset_usize) { // Check for overflow
-            const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(end)));
-            try frame.consume_gas(memory_gas);
-
-            _ = try frame.memory.ensure_context_capacity(end);
+            try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(end)));
         }
 
         // Get data from memory
@@ -163,10 +160,7 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
         // Calculate memory expansion gas cost
         const end = offset_usize + size_usize;
         if (end > offset_usize) { // Check for overflow
-            const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(end)));
-            try frame.consume_gas(memory_gas);
-
-            _ = try frame.memory.ensure_context_capacity(end);
+            try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(end)));
         }
 
         // Get data from memory

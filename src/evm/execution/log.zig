@@ -57,25 +57,13 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
             // Note: Base LOG gas (375) and topic gas (375 * N) are handled by jump table as constant_gas
             // We only need to handle dynamic costs: memory expansion and data bytes
 
-            // 1. Calculate memory expansion gas cost
+            // 1. Charge gas and ensure memory is available
             const new_size = offset_usize + size_usize;
-            const memory_gas = context.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-
-            // Memory expansion gas calculated
-
-            try context.consume_gas(memory_gas);
+            try context.memory.charge_and_ensure(context, @as(u64, @intCast(new_size)));
 
             // 2. Dynamic gas for data
             const byte_cost = GasConstants.LogDataGas * size_usize;
-
-            // Calculate dynamic gas for data
-
             try context.consume_gas(byte_cost);
-
-            // Gas consumed successfully
-
-            // Ensure memory is available
-            _ = try context.memory.ensure_context_capacity(offset_usize + size_usize);
 
             // Get log data
             const data = try context.memory.get_slice(offset_usize, size_usize);
@@ -144,18 +132,13 @@ fn log_impl(num_topics: u8, context: *Frame) ExecutionError.Error!void {
         return;
     }
 
-    // 1. Calculate memory expansion gas cost
+    // 1. Charge gas and ensure memory is available
     const new_size = offset_usize + size_usize;
-    const memory_gas = context.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-
-    try context.consume_gas(memory_gas);
+    try context.memory.charge_and_ensure(context, @as(u64, @intCast(new_size)));
 
     // 2. Dynamic gas for data
     const byte_cost = GasConstants.LogDataGas * size_usize;
     try context.consume_gas(byte_cost);
-
-    // Ensure memory is available
-    _ = try context.memory.ensure_context_capacity(offset_usize + size_usize);
 
     // Get log data
     const data = try context.memory.get_slice(offset_usize, size_usize);

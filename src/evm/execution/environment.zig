@@ -159,10 +159,9 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
-    // Calculate memory expansion gas cost
+    // Charge gas and ensure memory is available
     const new_size = mem_offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    try frame.consume_gas(memory_gas);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(new_size)));
 
     // Dynamic gas for copy operation
     const word_size = (size_usize + 31) / 32;
@@ -345,10 +344,9 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const code_offset_usize = @as(usize, @intCast(code_offset));
     const size_usize = @as(usize, @intCast(size));
 
-    // Calculate memory expansion gas cost
+    // Charge gas and ensure memory is available
     const new_size = mem_offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    try frame.consume_gas(memory_gas);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(new_size)));
 
     // Dynamic gas for copy operation (VERYLOW * word_count)
     const word_size = (size_usize + 31) / 32;

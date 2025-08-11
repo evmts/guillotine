@@ -195,12 +195,9 @@ fn get_call_args(frame: *Frame, args_offset: u256, args_size: u256) ExecutionErr
     const args_offset_usize = @as(usize, @intCast(args_offset));
     const args_size_usize = @as(usize, @intCast(args_size));
 
-    // Calculate and charge memory expansion gas cost
+    // Charge gas and ensure memory capacity for arguments
     const new_size = args_offset_usize + args_size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    try frame.consume_gas(memory_gas);
-
-    _ = try frame.memory.ensure_context_capacity(new_size);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(new_size)));
     return try frame.memory.get_slice(args_offset_usize, args_size_usize);
 }
 
@@ -214,12 +211,9 @@ fn ensure_return_memory(frame: *Frame, ret_offset: u256, ret_size: u256) Executi
     const ret_offset_usize = @as(usize, @intCast(ret_offset));
     const ret_size_usize = @as(usize, @intCast(ret_size));
 
-    // Calculate and charge memory expansion gas cost
+    // Charge gas and ensure memory capacity for return data
     const new_size = ret_offset_usize + ret_size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    try frame.consume_gas(memory_gas);
-
-    _ = try frame.memory.ensure_context_capacity(new_size);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(new_size)));
 }
 
 /// Handle address conversion and EIP-2929 access cost
@@ -343,13 +337,9 @@ fn get_initcode_from_memory(frame: Frame, vm: *Vm, offset: u256, size: u256) Exe
     try check_offset_bounds(offset);
     const offset_usize = @as(usize, @intCast(offset));
 
-    // Calculate memory expansion gas cost
+    // Charge gas and ensure memory is available
     const new_size = offset_usize + size_usize;
-    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
-    try frame.consume_gas(memory_gas);
-
-    // Ensure memory is available and get the slice
-    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
+    try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(new_size)));
     return try frame.memory.get_slice(offset_usize, size_usize);
 }
 
