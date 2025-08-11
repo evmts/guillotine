@@ -126,10 +126,18 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
+    // First check if account exists
+    const account_info = try frame.state.get_account(address);
+    if (account_info == null) {
+        // Non-existent account - return zero
+        try frame.stack.append(0);
+        return;
+    }
+
     // Get code from state database and compute hash
     const code = try frame.state.get_code_by_address(address);
     
-    // Always compute keccak256 hash of the code (even for empty code)
+    // Compute keccak256 hash of the code (even for empty code)
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
 
