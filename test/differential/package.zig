@@ -7,6 +7,7 @@ pub const comparison_differential_test = @import("comparison_differential_test.z
 pub const control_differential_test = @import("control_differential_test.zig");
 pub const crypto_differential_test = @import("crypto_differential_test.zig");
 pub const environment_differential_test = @import("environment_differential_test.zig");
+pub const external_differential_test = @import("external_differential_test.zig");
 pub const logging_differential_test = @import("logging_differential_test.zig");
 pub const memory_differential_test = @import("memory_differential_test.zig");
 pub const precompile_differential_test = @import("precompile_differential_test.zig");
@@ -22,6 +23,7 @@ test {
     _ = control_differential_test;
     _ = crypto_differential_test;
     _ = environment_differential_test;
+    _ = external_differential_test;
     _ = logging_differential_test;
     _ = memory_differential_test;
     _ = precompile_differential_test;

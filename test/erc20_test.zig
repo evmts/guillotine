@@ -45,12 +45,13 @@ fn readCaseFileRuntime(allocator: std.mem.Allocator, case_name: []const u8, file
 }
 
 fn deploy(vm: *evm.Evm, allocator: std.mem.Allocator, caller: primitives.Address.Address, bytecode: []const u8) !primitives.Address.Address {
-    _ = allocator;
-    _ = caller;
-    // Bench bytecode files are runtime code. Deploy directly without running constructors.
-    const addr = primitives.Address.from_u256(0x2222222222222222222222222222222222222222);
-    try vm.state.set_code(addr, bytecode);
-    return addr;
+    // Bench bytecode is initcode for ERC20 cases; deploy via CREATE so constructor runs and returns runtime
+    const create_result = try vm.create_contract(caller, 0, bytecode, 10_000_000);
+    if (create_result.output) |out| {
+        defer allocator.free(out);
+    }
+    if (!create_result.success) return error.DeploymentFailed;
+    return create_result.address;
 }
 
 test "erc20 transfer benchmark executes successfully" {
@@ -288,4 +289,60 @@ test "erc20 deployment validates bytecode size" {
         try std.testing.expect(bytecode.len > 100); // At least 100 bytes
         try std.testing.expect(bytecode.len < 50_000); // Less than 50KB
     }
+}
+
+test "erc20 allowance starts at zero for fresh keys" {
+    const allocator = std.testing.allocator;
+
+    // Load ERC20 runtime and deploy via CREATE
+    const bytecode_hex = try readCaseFileRuntime(allocator, "erc20-transfer", "bytecode.txt");
+    defer allocator.free(bytecode_hex);
+    const bytecode = try hexDecode(allocator, bytecode_hex);
+    defer allocator.free(bytecode);
+
+    // Set up VM
+    var memory_db = evm.MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer vm.deinit();
+
+    const deployer = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
+    const caller = primitives.Address.from_u256(0x2000000000000000000000000000000000000002);
+    try vm.state.set_balance(deployer, std.math.maxInt(u256));
+
+    const contract_address = try deploy(&vm, allocator, deployer, bytecode);
+
+    // Build calldata for allowance(address,address)
+    var calldata: [4 + 32 + 32]u8 = undefined;
+    // selector dd62ed3e
+    calldata[0] = 0xdd;
+    calldata[1] = 0x62;
+    calldata[2] = 0xed;
+    calldata[3] = 0x3e;
+    // owner = deployer (left-padded to 32 bytes)
+    @memset(calldata[4..36], 0);
+    @memcpy(calldata[36 - 20 .. 36], &deployer);
+    // spender = caller
+    @memset(calldata[36..68], 0);
+    @memcpy(calldata[68 - 20 .. 68], &caller);
+
+    const initial_gas: u64 = 1_000_000_000;
+    const params = evm.CallParams{ .call = .{
+        .caller = caller,
+        .to = contract_address,
+        .value = 0,
+        .input = &calldata,
+        .gas = initial_gas,
+    } };
+    const call_result = try vm.call(params);
+    try std.testing.expect(call_result.success);
+    try std.testing.expect(call_result.output != null);
+    const out = call_result.output.?;
+    defer allocator.free(out);
+    try std.testing.expect(out.len >= 32);
+    // Expect zero allowance
+    var zero_word: [32]u8 = .{0} ** 32;
+    try std.testing.expectEqualSlices(u8, zero_word[0..], out[out.len - 32 ..]);
 }
