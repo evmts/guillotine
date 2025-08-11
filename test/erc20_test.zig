@@ -81,18 +81,26 @@ test "erc20 transfer benchmark executes successfully" {
 
     // Deploy and call
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
+    const initial_gas: u64 = 100_000_000;
     const params = evm.CallParams{ .call = .{
         .caller = caller,
         .to = contract_address,
         .value = 0,
         .input = calldata,
-        .gas = 1_000_000_000,
+        .gas = initial_gas,
     } };
     const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
+    const gas_used = initial_gas - call_result.gas_left;
+    try std.testing.expect(gas_used > 0);
+    // transfer(address,uint256) should return 32-byte true
     if (call_result.output) |output| {
-        if (output.len > 0) allocator.free(output);
+        defer allocator.free(output);
+        try std.testing.expect(output.len >= 32);
+        try std.testing.expect(output[output.len - 1] == 1);
+    } else {
+        return error.MissingReturnData;
     }
 }
 
@@ -124,18 +132,26 @@ test "erc20 mint benchmark executes successfully" {
 
     // Deploy and call
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
+    const initial_gas: u64 = 100_000_000;
     const params = evm.CallParams{ .call = .{
         .caller = caller,
         .to = contract_address,
         .value = 0,
         .input = calldata,
-        .gas = 1_000_000_000,
+        .gas = initial_gas,
     } };
     const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
+    const gas_used = initial_gas - call_result.gas_left;
+    try std.testing.expect(gas_used > 0);
+    // Many mint implementations return bool; accept either true or empty (if non-standard)
     if (call_result.output) |output| {
-        if (output.len > 0) allocator.free(output);
+        defer allocator.free(output);
+        if (output.len > 0) {
+            try std.testing.expect(output.len >= 32);
+            try std.testing.expect(output[output.len - 1] == 1);
+        }
     }
 }
 
@@ -167,18 +183,26 @@ test "erc20 approval-transfer benchmark executes successfully" {
 
     // Deploy and call
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
+    const initial_gas: u64 = 100_000_000;
     const params = evm.CallParams{ .call = .{
         .caller = caller,
         .to = contract_address,
         .value = 0,
         .input = calldata,
-        .gas = 1_000_000_000,
+        .gas = initial_gas,
     } };
     const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
+    const gas_used = initial_gas - call_result.gas_left;
+    try std.testing.expect(gas_used > 0);
+    // approve->transfer flow should return bool true on the last call
     if (call_result.output) |output| {
-        if (output.len > 0) allocator.free(output);
+        defer allocator.free(output);
+        try std.testing.expect(output.len >= 32);
+        try std.testing.expect(output[output.len - 1] == 1);
+    } else {
+        return error.MissingReturnData;
     }
 }
 
@@ -238,7 +262,7 @@ test "erc20 benchmark gas usage patterns" {
         try std.testing.expect(gas_used >= test_case.expected_min_gas);
 
         if (call_result.output) |output| {
-            if (output.len > 0) allocator.free(output);
+            defer allocator.free(output);
         }
     }
 }

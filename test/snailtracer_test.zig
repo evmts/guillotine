@@ -68,16 +68,19 @@ test "snailtracer benchmark executes successfully" {
 
     // Deploy and call
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
+    const initial_gas: u64 = 100_000_000;
     const params = evm.CallParams{ .call = .{
         .caller = caller,
         .to = contract_address,
         .value = 0,
         .input = calldata,
-        .gas = 1_000_000_000,
+        .gas = initial_gas,
     } };
     const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
+    const gas_used = initial_gas - call_result.gas_left;
+    try std.testing.expect(gas_used > 0);
     if (call_result.output) |output| {
         if (output.len > 0) allocator.free(output);
     }
@@ -121,7 +124,7 @@ test "snailtracer benchmark high gas consumption" {
     const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
-    
+
     // Snailtracer is computationally intensive - should use significant gas
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 1_000_000); // Should use at least 1M gas
@@ -168,7 +171,7 @@ test "snailtracer produces expected output format" {
     const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
-    
+
     // Snailtracer should produce output
     if (call_result.output) |output| {
         try std.testing.expect(output.len > 0);
@@ -215,17 +218,15 @@ test "snailtracer deployment gas requirements" {
     // Track deployment gas
     const initial_gas: u64 = 10_000_000;
     const create_result = try vm.create_contract(caller, 0, bytecode, initial_gas);
-    
+
     if (create_result.output) |out| {
         defer allocator.free(out);
     }
-    
+
     try std.testing.expect(create_result.success);
-    
+
     // Verify deployment consumed reasonable gas
     const gas_used = initial_gas - create_result.gas_left;
     try std.testing.expect(gas_used > 50_000); // Deployment should use significant gas
     try std.testing.expect(gas_used < initial_gas); // But not all of it
 }
-
-
