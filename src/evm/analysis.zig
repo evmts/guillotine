@@ -438,6 +438,24 @@ const CodeGenResult = struct {
 fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const OpcodeMetadata, jumpdest_bitmap: *const DynamicBitSet) !CodeGenResult {
     Log.debug("[analysis] Converting {} bytes of code to instructions", .{code.len});
 
+    // Debug statistics for fusion rates and analysis cost
+    var stats = if (builtin.mode == .Debug) struct {
+        push_add_fusions: u32 = 0,
+        push_sub_fusions: u32 = 0,
+        push_mul_fusions: u32 = 0,
+        push_div_fusions: u32 = 0,
+        keccak_optimizations: u32 = 0,
+        inline_opcodes: u32 = 0,
+        total_opcodes: u32 = 0,
+        total_blocks: u32 = 0,
+        eliminated_opcodes: u32 = 0,
+        start_time: i64 = 0, // Will be set at runtime
+    }{} else undefined;
+
+    if (builtin.mode == .Debug) {
+        stats.start_time = std.time.milliTimestamp();
+    }
+
     // MEMORY ALLOCATION: Instructions array
     // Expected size: MAX_INSTRUCTIONS * sizeof(Instruction) ≈ 3-5MB max
     // Lifetime: Per analysis (cached or per-call)
@@ -496,6 +514,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     };
     var block = BlockAnalysis.init(instruction_count);
     instruction_count += 1;
+    if (builtin.mode == .Debug) stats.total_blocks += 1;
 
     while (pc < code.len) {
         if (instruction_count >= instruction_limits.MAX_INSTRUCTIONS) {
@@ -503,6 +522,8 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         }
 
         const opcode_byte = code[pc];
+        if (builtin.mode == .Debug) stats.total_opcodes += 1;
+        
         const opcode = std.meta.intToEnum(Opcode.Enum, opcode_byte) catch {
             // Invalid opcode - accumulate in block and create instruction
             const operation = jump_table.get_operation(opcode_byte);
@@ -534,6 +555,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 };
                 block = BlockAnalysis.init(instruction_count);
                 instruction_count += 1;
+                if (builtin.mode == .Debug) stats.total_blocks += 1;
 
                 // Add the JUMPDEST instruction to the new block
                 const operation = jump_table.get_operation(opcode_byte);
@@ -594,6 +616,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 };
                 block = BlockAnalysis.init(instruction_count);
                 instruction_count += 1;
+                if (builtin.mode == .Debug) stats.total_blocks += 1;
             },
 
             .JUMPI => {
@@ -620,6 +643,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 };
                 block = BlockAnalysis.init(instruction_count);
                 instruction_count += 1;
+                if (builtin.mode == .Debug) stats.total_blocks += 1;
             },
 
             // PUSH operations - handled inline by interpreter
@@ -682,6 +706,95 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 };
                 Log.debug("[analysis] PUSH at pc={} size={} value={x}", .{ original_pc, push_size, value });
                 instruction_count += 1;
+
+                // Pattern detection for PUSH + arithmetic fusion
+                if (pc < code.len) {
+                    const next_op = code[pc];
+                    const synthetic = @import("execution/synthetic.zig");
+                    
+                    switch (next_op) {
+                        0x01 => { // ADD
+                            if (value == 0) {
+                                // PUSH 0 + ADD = NOP, remove the PUSH we just added
+                                instruction_count -= 1;
+                                pc += 1;
+                                if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                continue;
+                            }
+                            // Replace PUSH with fused PUSH+ADD
+                            instructions[instruction_count - 1] = Instruction{
+                                .opcode_fn = synthetic.op_push_add_fusion,
+                                .arg = .{ .push_add_fusion = value },
+                            };
+                            block.gas_cost += 3; // ADD gas
+                            block.updateStackTracking(0x01, 1); // ADD with 1 input (other is immediate)
+                            pc += 1; // Skip ADD
+                            if (builtin.mode == .Debug) stats.push_add_fusions += 1;
+                            Log.debug("[analysis] Fused PUSH+ADD at pc={}", .{original_pc});
+                            continue;
+                        },
+                        0x03 => { // SUB
+                            // Replace PUSH with fused PUSH+SUB
+                            instructions[instruction_count - 1] = Instruction{
+                                .opcode_fn = synthetic.op_push_sub_fusion,
+                                .arg = .{ .push_sub_fusion = value },
+                            };
+                            block.gas_cost += 3; // SUB gas
+                            block.updateStackTracking(0x03, 1);
+                            pc += 1; // Skip SUB
+                            if (builtin.mode == .Debug) stats.push_sub_fusions += 1;
+                            Log.debug("[analysis] Fused PUSH+SUB at pc={}", .{original_pc});
+                            continue;
+                        },
+                        0x02 => { // MUL
+                            if (value == 1) {
+                                // PUSH 1 + MUL = NOP, remove the PUSH
+                                instruction_count -= 1;
+                                pc += 1;
+                                if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                continue;
+                            }
+                            if (value == 0) {
+                                // PUSH 0 + MUL = PUSH 0, keep PUSH but skip MUL
+                                pc += 1;
+                                if (builtin.mode == .Debug) stats.eliminated_opcodes += 1;
+                                continue;
+                            }
+                            // Replace PUSH with fused PUSH+MUL
+                            instructions[instruction_count - 1] = Instruction{
+                                .opcode_fn = synthetic.op_push_mul_fusion,
+                                .arg = .{ .push_mul_fusion = value },
+                            };
+                            block.gas_cost += 5; // MUL gas
+                            block.updateStackTracking(0x02, 1);
+                            pc += 1; // Skip MUL
+                            if (builtin.mode == .Debug) stats.push_mul_fusions += 1;
+                            Log.debug("[analysis] Fused PUSH+MUL at pc={}", .{original_pc});
+                            continue;
+                        },
+                        0x04 => { // DIV
+                            if (value == 1) {
+                                // PUSH 1 + DIV = NOP, remove the PUSH
+                                instruction_count -= 1;
+                                pc += 1;
+                                if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                continue;
+                            }
+                            // Replace PUSH with fused PUSH+DIV
+                            instructions[instruction_count - 1] = Instruction{
+                                .opcode_fn = synthetic.op_push_div_fusion,
+                                .arg = .{ .push_div_fusion = value },
+                            };
+                            block.gas_cost += 5; // DIV gas
+                            block.updateStackTracking(0x04, 1);
+                            pc += 1; // Skip DIV
+                            if (builtin.mode == .Debug) stats.push_div_fusions += 1;
+                            Log.debug("[analysis] Fused PUSH+DIV at pc={}", .{original_pc});
+                            continue;
+                        },
+                        else => {},
+                    }
+                }
             },
 
             // PC opcode - needs special handling to store the PC value
@@ -720,6 +833,95 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                         },
                     },
                 };
+                instruction_count += 1;
+                pc += 1;
+            },
+
+            // SHA3/KECCAK256 - check for precomputation opportunity
+            .KECCAK256 => {
+                const operation = jump_table.get_operation(opcode_byte);
+                const synthetic = @import("execution/synthetic.zig");
+                
+                // Record PC to instruction mapping
+                pc_to_instruction[pc] = @intCast(instruction_count);
+                
+                // Check if previous two instructions were PUSH (offset and size)
+                if (instruction_count >= 2 and 
+                    instructions[instruction_count - 1].arg == .push_value and
+                    instructions[instruction_count - 2].arg == .push_value) {
+                    
+                    const size = instructions[instruction_count - 1].arg.push_value;
+                    if (size <= std.math.maxInt(u64)) {
+                        const size_u64 = @as(u64, @intCast(size));
+                        const word_count = (size_u64 + 31) / 32;
+                        const gas_cost = 30 + (6 * word_count); // Base + dynamic
+                        
+                        // Replace the size PUSH with synthetic KECCAK
+                        instructions[instruction_count - 1] = Instruction{
+                            .opcode_fn = synthetic.op_keccak256_immediate_size,
+                            .arg = .{ .keccak_immediate_size = .{
+                                .size = size_u64,
+                                .word_count = word_count,
+                                .gas_cost = gas_cost,
+                            } },
+                        };
+                        block.updateStackTracking(opcode_byte, operation.min_stack);
+                        pc += 1;
+                        if (builtin.mode == .Debug) stats.keccak_optimizations += 1;
+                        Log.debug("[analysis] KECCAK256 with immediate size={} at pc={}", .{size_u64, pc-1});
+                        continue;
+                    }
+                }
+                
+                // Fall through to regular handling
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = operation.execute,
+                    .arg = .none,
+                };
+                instruction_count += 1;
+                pc += 1;
+            },
+            
+            // ISZERO - use inline version for hot path
+            .ISZERO => {
+                const operation = jump_table.get_operation(opcode_byte);
+                const synthetic = @import("execution/synthetic.zig");
+                
+                // Record PC to instruction mapping
+                pc_to_instruction[pc] = @intCast(instruction_count);
+                
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
+                
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = synthetic.op_iszero_inline,
+                    .arg = .none,
+                };
+                if (builtin.mode == .Debug) stats.inline_opcodes += 1;
+                Log.debug("[analysis] Using inline ISZERO at pc={}", .{pc});
+                instruction_count += 1;
+                pc += 1;
+            },
+            
+            // EQ - use inline version for hot path
+            .EQ => {
+                const operation = jump_table.get_operation(opcode_byte);
+                const synthetic = @import("execution/synthetic.zig");
+                
+                // Record PC to instruction mapping
+                pc_to_instruction[pc] = @intCast(instruction_count);
+                
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
+                
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = synthetic.op_eq_inline,
+                    .arg = .none,
+                };
+                if (builtin.mode == .Debug) stats.inline_opcodes += 1;
+                Log.debug("[analysis] Using inline EQ at pc={}", .{pc});
                 instruction_count += 1;
                 pc += 1;
             },
@@ -842,6 +1044,39 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         const idx = pc_to_instruction[map_pc];
         if (idx != std.math.maxInt(u16) and idx < instruction_count) {
             inst_to_pc[idx] = @intCast(map_pc);
+        }
+    }
+
+    // Output analysis statistics in debug builds
+    if (builtin.mode == .Debug) {
+        const elapsed_ms = std.time.milliTimestamp() - stats.start_time;
+        const total_fusions = stats.push_add_fusions + stats.push_sub_fusions + 
+                            stats.push_mul_fusions + stats.push_div_fusions;
+        const total_optimizations = total_fusions + stats.keccak_optimizations + stats.inline_opcodes;
+        
+        Log.debug("[analysis] Code analysis complete for {} bytes in {}ms", .{ code.len, elapsed_ms });
+        Log.debug("[analysis] Statistics:", .{});
+        Log.debug("[analysis]   Total opcodes analyzed: {}", .{stats.total_opcodes});
+        Log.debug("[analysis]   Total blocks created: {}", .{stats.total_blocks});
+        Log.debug("[analysis]   Instructions generated: {}", .{instruction_count});
+        Log.debug("[analysis]   Opcodes eliminated: {}", .{stats.eliminated_opcodes});
+        Log.debug("[analysis] Fusion optimizations:", .{});
+        Log.debug("[analysis]   PUSH+ADD fusions: {}", .{stats.push_add_fusions});
+        Log.debug("[analysis]   PUSH+SUB fusions: {}", .{stats.push_sub_fusions});
+        Log.debug("[analysis]   PUSH+MUL fusions: {}", .{stats.push_mul_fusions});
+        Log.debug("[analysis]   PUSH+DIV fusions: {}", .{stats.push_div_fusions});
+        Log.debug("[analysis]   Total arithmetic fusions: {}", .{total_fusions});
+        Log.debug("[analysis] Other optimizations:", .{});
+        Log.debug("[analysis]   KECCAK256 immediate size: {}", .{stats.keccak_optimizations});
+        Log.debug("[analysis]   Inline opcodes (ISZERO/EQ): {}", .{stats.inline_opcodes});
+        Log.debug("[analysis]   Total optimizations: {}", .{total_optimizations});
+        
+        if (stats.total_opcodes > 0) {
+            const fusion_rate = (total_fusions * 100) / stats.total_opcodes;
+            const optimization_rate = (total_optimizations * 100) / stats.total_opcodes;
+            Log.debug("[analysis] Optimization rates:", .{});
+            Log.debug("[analysis]   Arithmetic fusion rate: {}%", .{fusion_rate});
+            Log.debug("[analysis]   Total optimization rate: {}%", .{optimization_rate});
         }
     }
 
@@ -1051,6 +1286,69 @@ test "conditional jump (JUMPI) target resolution" {
 
     try std.testing.expect(jumpi_found);
     try std.testing.expect(jumpi_target_valid);
+}
+
+test "fusion and optimization statistics" {
+    const allocator = std.testing.allocator;
+    std.testing.log_level = .debug;
+
+    // Bytecode with various optimization opportunities:
+    const code = &[_]u8{
+        // PUSH+ADD fusion (5 + 3)
+        0x60, 0x05,  // PUSH1 0x05
+        0x60, 0x03,  // PUSH1 0x03  
+        0x01,        // ADD
+        
+        // PUSH+MUL fusion (2 * 3)
+        0x60, 0x02,  // PUSH1 0x02
+        0x60, 0x03,  // PUSH1 0x03
+        0x02,        // MUL
+        
+        // PUSH+DIV fusion (10 / 2)
+        0x60, 0x0A,  // PUSH1 0x0A (10)
+        0x60, 0x02,  // PUSH1 0x02
+        0x04,        // DIV
+        
+        // PUSH+SUB fusion (8 - 3)
+        0x60, 0x08,  // PUSH1 0x08
+        0x60, 0x03,  // PUSH1 0x03
+        0x03,        // SUB
+        
+        // KECCAK256 with immediate size
+        0x60, 0x00,  // PUSH1 0x00 (offset)
+        0x60, 0x20,  // PUSH1 0x20 (size = 32 bytes)
+        0x20,        // KECCAK256
+        
+        // Inline ISZERO
+        0x60, 0x01,  // PUSH1 0x01
+        0x15,        // ISZERO
+        
+        // Inline EQ
+        0x60, 0x02,  // PUSH1 0x02
+        0x60, 0x02,  // PUSH1 0x02
+        0x14,        // EQ
+        
+        // PUSH 0 + ADD (should be eliminated)
+        0x60, 0x00,  // PUSH1 0x00
+        0x01,        // ADD
+        
+        // PUSH 1 + MUL (should be eliminated)
+        0x60, 0x01,  // PUSH1 0x01
+        0x02,        // MUL
+        
+        // PUSH 1 + DIV (should be eliminated)
+        0x60, 0x01,  // PUSH1 0x01
+        0x04,        // DIV
+        
+        0x00,        // STOP
+    };
+    
+    const table = OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+    defer analysis.deinit();
+    
+    // Just verify it works - the stats will be printed in debug mode
+    try std.testing.expect(analysis.instructions.len > 0);
 }
 
 test "invalid jump target handling" {
