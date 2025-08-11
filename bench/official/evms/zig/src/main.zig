@@ -161,6 +161,68 @@ pub fn main() !void {
             std.process.exit(1);
         }
 
+        // Sanity: ensure we actually consumed gas
+        const gas_used: u64 = 1_000_000_000 - result.gas_left;
+        if (gas_used == 0) {
+            std.debug.print("Sanity check failed: gas_used == 0 (likely no execution)\n", .{});
+            std.process.exit(1);
+        }
+
+        // Sanity: lightly validate outputs by selector when available
+        const selector: u32 = if (calldata.len >= 4) std.mem.readInt(u32, calldata[0..4], .big) else 0;
+        switch (selector) {
+            // transfer(address,uint256)
+            0xa9059cbb => {
+                if (result.output) |out| {
+                    if (!(out.len >= 32 and out[out.len - 1] == 1)) {
+                        std.debug.print("Unexpected transfer() return payload (not 32-byte true)\n", .{});
+                        std.process.exit(1);
+                    }
+                } else {
+                    std.debug.print("transfer() returned no data\n", .{});
+                    std.process.exit(1);
+                }
+            },
+            // approve(address,uint256)
+            0x095ea7b3 => {
+                if (result.output) |out| {
+                    if (!(out.len >= 32 and out[out.len - 1] == 1)) {
+                        std.debug.print("Unexpected approve() return payload (not 32-byte true)\n", .{});
+                        std.process.exit(1);
+                    }
+                } else {
+                    std.debug.print("approve() returned no data\n", .{});
+                    std.process.exit(1);
+                }
+            },
+            // mint(address,uint256) (OpenZeppelin style returns bool)
+            0x40c10f19 => {
+                if (result.output) |out| {
+                    if (!(out.len >= 32 and out[out.len - 1] == 1)) {
+                        std.debug.print("Unexpected mint() return payload (not 32-byte true)\n", .{});
+                        std.process.exit(1);
+                    }
+                }
+            },
+            // TenThousandHashes.Benchmark() selector
+            0x30627b7c => {
+                if (result.output) |out| {
+                    if (out.len != 0) {
+                        std.debug.print("Unexpected output for Benchmark(): len={} (expected 0)\n", .{out.len});
+                        std.process.exit(1);
+                    }
+                }
+                // Also require non-trivial gas use
+                if (gas_used < 1000) {
+                    std.debug.print("Benchmark() gas_used too small: {}\n", .{gas_used});
+                    std.process.exit(1);
+                }
+            },
+            else => {
+                // No-op for other selectors
+            },
+        }
+
         // Note: output ownership is transferred to us, free if present
         if (result.output) |output| {
             allocator.free(output);
