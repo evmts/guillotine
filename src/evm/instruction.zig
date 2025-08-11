@@ -48,5 +48,21 @@ pub const Instruction = struct {
         block_info: BlockInfo,
         dynamic_gas: DynamicGas,
         pc_value: u16,  // For PC opcode - stores the program counter value
+        
+        // Synthetic operation variants for pattern fusion
+        push_add_fusion: u256,      // immediate for PUSH+ADD
+        push_sub_fusion: u256,      // immediate for PUSH+SUB
+        push_mul_fusion: u256,      // immediate for PUSH+MUL
+        push_div_fusion: u256,      // immediate for PUSH+DIV
+        push_push_result: u256,     // precomputed PUSH+PUSH+op result
+        keccak_precomputed: struct {
+            word_count: u64,
+            gas_cost: u64,
+        },
+        keccak_immediate_size: struct {
+            size: u64,
+            word_count: u64,
+            gas_cost: u64,
+        },
     },
 };
