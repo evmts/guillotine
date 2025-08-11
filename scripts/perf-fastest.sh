@@ -38,18 +38,11 @@ if command -v git >/dev/null 2>&1 && git -C "${ROOT_DIR}" rev-parse --is-inside-
   log "git: branch=${GIT_BRANCH} commit=${GIT_COMMIT} dirty=$([[ -n "${GIT_STATUS}" ]] && echo yes || echo no)"
 fi
 
-# Path casing check for orchestrator hardcoded paths
-EXPECTED_CAP_PATH="/Users/williamcory/Guillotine"
-if [[ ! -d "${EXPECTED_CAP_PATH}" ]]; then
-  log "WARNING: Expected path used by orchestrator not found: ${EXPECTED_CAP_PATH} (possible case-sensitivity mismatch)"
-  log "         Actual ROOT_DIR: ${ROOT_DIR}"
-fi
-
-# Preflight: check known runner locations used by orchestrator
-REVM_RUNNER="${EXPECTED_CAP_PATH}/bench/official/evms/revm/target/release/revm-runner"
-GETH_RUNNER="${EXPECTED_CAP_PATH}/bench/official/evms/geth/runner"
-EVMONE_RUNNER="${EXPECTED_CAP_PATH}/bench/official/evms/evmone/build/evmone-runner"
-ETHJS_RUNNER="${EXPECTED_CAP_PATH}/bench/official/evms/ethereumjs/runner.js"
+# Preflight: check known runner locations used by orchestrator (relative to repo root)
+REVM_RUNNER="${ROOT_DIR}/bench/official/evms/revm/target/release/revm-runner"
+GETH_RUNNER="${ROOT_DIR}/bench/official/evms/geth/runner"
+EVMONE_RUNNER="${ROOT_DIR}/bench/official/evms/evmone/build/evmone-runner"
+ETHJS_RUNNER="${ROOT_DIR}/bench/official/evms/ethereumjs/runner.js"
 ZIG_RUNNER="${ROOT_DIR}/zig-out/bin/evm-runner"
 
 for path in \
@@ -97,5 +90,5 @@ else
 fi
 
 log "Opening results in browser..."
-npx -y markserv "${RESULTS_MD}"
+npx -y markserv "./bench/official/results.md"
 
