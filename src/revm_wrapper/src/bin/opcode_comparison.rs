@@ -1,12 +1,10 @@
 use revm::{
     db::{CacheDB, EmptyDB},
     primitives::{
-        Address, Bytes, ExecutionResult, TransactTo, U256, B256,
-        Env, TxEnv, BlockEnv, CfgEnv, Output, TxKind,
+        Address, Bytes, ExecutionResult, U256, B256,
+        Output, TxKind,
     },
     Evm,
-    inspector_handle_register,
-    inspectors::TracerEip3155,
 };
 use std::fs;
 use std::io::Write;
