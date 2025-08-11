@@ -42,9 +42,11 @@ owns_buffer: bool,
 cached_expansion: struct {
     /// Last calculated memory size in bytes
     last_size: u64,
+    /// Last calculated memory size in words (cached to avoid division)
+    last_words: u64,
     /// Gas cost for the last calculated size
     last_cost: u64,
-} = .{ .last_size = 0, .last_cost = 0 },
+} = .{ .last_size = 0, .last_words = 0, .last_cost = 0 },
 
 /// Initializes the root Memory context that owns the shared buffer.
 /// This is the safe API that eliminates the undefined pointer footgun.
@@ -53,47 +55,13 @@ pub fn init(
     initial_capacity: usize,
     memory_limit: u64,
 ) !Memory {
-    Log.debug("Memory.init: Starting, initial_capacity={}, memory_limit={}", .{ initial_capacity, memory_limit });
-
-    Log.debug("Memory.init: About to create shared_buffer", .{});
-    // MEMORY ALLOCATION: ArrayList structure for shared buffer
-    // Expected size: sizeof(ArrayList) ≈ 24 bytes
-    // Lifetime: Per root Memory instance
-    // Frequency: Once per frame
     const shared_buffer = try allocator.create(std.ArrayList(u8));
     errdefer allocator.destroy(shared_buffer);
-    Log.debug("Memory.init: Created shared_buffer ptr={*}", .{shared_buffer});
-
-    Log.debug("Memory.init: Initializing ArrayList", .{});
+    
     shared_buffer.* = std.ArrayList(u8).init(allocator);
     errdefer shared_buffer.deinit();
-
-    Log.debug("Memory.init: About to ensureTotalCapacity({})", .{initial_capacity});
-    // MEMORY ALLOCATION: Shared buffer data
-    // Expected initial size: initial_capacity (typically 4KB)
-    // Lifetime: Per root Memory instance
-    // Frequency: Once per frame (shared among child memories)
-    // Growth: Doubles when capacity exceeded, up to memory_limit
+    
     try shared_buffer.ensureTotalCapacity(initial_capacity);
-    Log.debug("Memory.init: ensureTotalCapacity complete", .{});
-
-    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        // Verify initial allocation is reasonable
-        std.debug.assert(shared_buffer.capacity >= initial_capacity);
-        // Note: We allow initial_capacity > memory_limit for test compatibility
-        // The memory_limit will be enforced on actual memory operations
-
-        // Default initial capacity should be 4KB
-        if (initial_capacity == INITIAL_CAPACITY) {
-            std.debug.assert(INITIAL_CAPACITY == 4096); // 4KB default
-        }
-        // Default memory limit should be 32MB
-        if (memory_limit == DEFAULT_MEMORY_LIMIT) {
-            std.debug.assert(DEFAULT_MEMORY_LIMIT == 32 * 1024 * 1024); // 32MB default
-        }
-    }
-
-    Log.debug("Memory.init: Returning Memory struct", .{});
     return Memory{
         .my_checkpoint = 0,
         .memory_limit = memory_limit,
@@ -116,10 +84,7 @@ pub fn init_child_memory(self: *Memory, checkpoint: usize) !Memory {
 }
 
 pub fn init_default(allocator: std.mem.Allocator) !Memory {
-    Log.debug("Memory.init_default: Called with allocator={*}", .{allocator.ptr});
-    const result = try init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
-    Log.debug("Memory.init_default: Returning", .{});
-    return result;
+    return try init(allocator, INITIAL_CAPACITY, DEFAULT_MEMORY_LIMIT);
 }
 
 /// Deinitializes the Memory. Only root Memory instances clean up the shared buffer.
@@ -159,7 +124,7 @@ pub fn clear(self: *Memory) void {
     }
 
     // Reset cached expansion calculations
-    self.cached_expansion = .{ .last_size = 0, .last_cost = 0 };
+    self.cached_expansion = .{ .last_size = 0, .last_words = 0, .last_cost = 0 };
 }
 
 // Read operations
@@ -234,9 +199,10 @@ pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
     const new_cost = calculate_memory_total_cost(new_size);
     const current_cost = if (current_size == 0) 0 else calculate_memory_total_cost(current_size);
     const expansion_cost = new_cost - current_cost;
-
-    // Update cache
+    
+    // Update cache with both size and word count
     self.cached_expansion.last_size = new_size;
+    self.cached_expansion.last_words = new_words;
     self.cached_expansion.last_cost = new_cost;
 
     return expansion_cost;
@@ -246,6 +212,23 @@ pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
 inline fn calculate_memory_total_cost(size_bytes: u64) u64 {
     const words = (size_bytes + 31) / 32;
     return 3 * words + (words * words) / 512;
+}
+
+/// Unified helper to charge gas and ensure memory capacity in one operation.
+/// This reduces branches and improves performance for memory operations.
+/// 
+/// Returns error if out of gas or memory limit exceeded.
+pub inline fn charge_and_ensure(self: *Memory, frame: anytype, new_size: u64) !void {
+    // Calculate gas cost for expansion
+    const gas_cost = self.get_expansion_cost(new_size);
+    
+    // Charge gas if expansion is needed
+    if (gas_cost > 0) {
+        try frame.consume_gas(gas_cost);
+    }
+    
+    // Ensure memory capacity
+    _ = try self.ensure_context_capacity(@intCast(new_size));
 }
 
 // Import fuzz tests to ensure they are compiled and run
@@ -404,4 +387,184 @@ test "memory expansion gas cost performance benchmark" {
 
         std.debug.print("Pure calculation performance: {} ns total, {} ns avg per operation\n", .{ calc_duration, @divTrunc(calc_duration, iterations) });
     }
+}
+
+test "memory expansion word count caching" {
+    const allocator = std.testing.allocator;
+    var memory = try Memory.init_default(allocator);
+    defer memory.deinit();
+    
+    // Initial state verification
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_expansion.last_words);
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_expansion.last_cost);
+    
+    // First expansion to 8192 bytes (256 words)
+    const size1: u64 = 8192;
+    const cost1 = memory.get_expansion_cost(size1);
+    
+    // Verify cache was updated with word count
+    try std.testing.expectEqual(size1, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 256), memory.cached_expansion.last_words);
+    try std.testing.expectEqual(@as(u64, 3 * 256 + (256 * 256) / 512), memory.cached_expansion.last_cost);
+    try std.testing.expectEqual(cost1, memory.cached_expansion.last_cost);
+    
+    // Second call with same size should use cache
+    const cost2 = memory.get_expansion_cost(size1);
+    try std.testing.expectEqual(@as(u64, 0), cost2);
+    
+    // Verify cache values remain unchanged
+    try std.testing.expectEqual(size1, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 256), memory.cached_expansion.last_words);
+}
+
+test "memory expansion word count caching with sequential expansions" {
+    const allocator = std.testing.allocator;
+    var memory = try Memory.init_default(allocator);
+    defer memory.deinit();
+    
+    // Expand to 4096 bytes (128 words)
+    const size1: u64 = 4096;
+    _ = memory.get_expansion_cost(size1);
+    
+    // Verify initial cache state
+    try std.testing.expectEqual(size1, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 128), memory.cached_expansion.last_words);
+    
+    // Expand to 8192 bytes (256 words) - should update cache
+    const size2: u64 = 8192;
+    _ = memory.get_expansion_cost(size2);
+    
+    // Verify cache was updated with new word count
+    try std.testing.expectEqual(size2, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 256), memory.cached_expansion.last_words);
+    
+    // Expand to 16384 bytes (512 words) - should update cache again
+    const size3: u64 = 16384;
+    _ = memory.get_expansion_cost(size3);
+    
+    // Verify cache was updated with new word count
+    try std.testing.expectEqual(size3, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 512), memory.cached_expansion.last_words);
+}
+
+test "memory expansion word count cache reset on clear" {
+    const allocator = std.testing.allocator;
+    var memory = try Memory.init_default(allocator);
+    defer memory.deinit();
+    
+    // Perform expansion to populate cache
+    const test_size: u64 = 8192;
+    _ = memory.get_expansion_cost(test_size);
+    
+    // Verify cache is populated
+    try std.testing.expectEqual(test_size, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 256), memory.cached_expansion.last_words);
+    try std.testing.expect(memory.cached_expansion.last_cost > 0);
+    
+    // Clear memory
+    memory.clear();
+    
+    // Verify cache was reset
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_expansion.last_words);
+    try std.testing.expectEqual(@as(u64, 0), memory.cached_expansion.last_cost);
+}
+
+test "charge_and_ensure helper basic functionality" {
+    const allocator = std.testing.allocator;
+    var memory = try Memory.init_default(allocator);
+    defer memory.deinit();
+    
+    // Mock frame structure for testing
+    const MockFrame = struct {
+        gas_remaining: u64,
+        memory: *Memory,
+        
+        pub fn consume_gas(self: *@This(), amount: u64) !void {
+            if (self.gas_remaining < amount) return error.OutOfGas;
+            self.gas_remaining -= amount;
+        }
+    };
+    
+    var frame = MockFrame{
+        .gas_remaining = 10000,
+        .memory = &memory,
+    };
+    
+    // Test 1: Small memory access within lookup table
+    try memory.charge_and_ensure(&frame, 64);
+    try std.testing.expectEqual(@as(u64, 10000 - 6), frame.gas_remaining); // 2 words * 3 gas
+    try std.testing.expectEqual(@as(usize, 64), memory.context_size());
+    
+    // Test 2: Expansion to larger size
+    try memory.charge_and_ensure(&frame, 256);
+    const expected_gas = 3 * 8 + (8 * 8) / 512 - (3 * 2 + (2 * 2) / 512);
+    try std.testing.expectEqual(@as(u64, 10000 - 6 - expected_gas), frame.gas_remaining);
+    try std.testing.expectEqual(@as(usize, 256), memory.context_size());
+    
+    // Test 3: No expansion needed (same size)
+    const gas_before = frame.gas_remaining;
+    try memory.charge_and_ensure(&frame, 256);
+    try std.testing.expectEqual(gas_before, frame.gas_remaining); // No gas consumed
+    try std.testing.expectEqual(@as(usize, 256), memory.context_size());
+}
+
+test "charge_and_ensure helper out of gas" {
+    const allocator = std.testing.allocator;
+    var memory = try Memory.init_default(allocator);
+    defer memory.deinit();
+    
+    const MockFrame = struct {
+        gas_remaining: u64,
+        memory: *Memory,
+        
+        pub fn consume_gas(self: *@This(), amount: u64) !void {
+            if (self.gas_remaining < amount) return error.OutOfGas;
+            self.gas_remaining -= amount;
+        }
+    };
+    
+    var frame = MockFrame{
+        .gas_remaining = 5, // Not enough gas for expansion
+        .memory = &memory,
+    };
+    
+    // Should fail with OutOfGas error
+    try std.testing.expectError(error.OutOfGas, memory.charge_and_ensure(&frame, 64));
+    try std.testing.expectEqual(@as(u64, 5), frame.gas_remaining); // Gas unchanged
+    try std.testing.expectEqual(@as(usize, 0), memory.context_size()); // Memory unchanged
+}
+
+test "charge_and_ensure helper large expansion" {
+    const allocator = std.testing.allocator;
+    var memory = try Memory.init_default(allocator);
+    defer memory.deinit();
+    
+    const MockFrame = struct {
+        gas_remaining: u64,
+        memory: *Memory,
+        
+        pub fn consume_gas(self: *@This(), amount: u64) !void {
+            if (self.gas_remaining < amount) return error.OutOfGas;
+            self.gas_remaining -= amount;
+        }
+    };
+    
+    var frame = MockFrame{
+        .gas_remaining = 1_000_000, // Plenty of gas
+        .memory = &memory,
+    };
+    
+    // Large expansion beyond lookup table
+    const large_size: u64 = 8192; // 256 words
+    try memory.charge_and_ensure(&frame, large_size);
+    
+    const expected_gas = 3 * 256 + (256 * 256) / 512;
+    try std.testing.expectEqual(@as(u64, 1_000_000 - expected_gas), frame.gas_remaining);
+    try std.testing.expectEqual(@as(usize, 8192), memory.context_size());
+    
+    // Verify cache was populated
+    try std.testing.expectEqual(large_size, memory.cached_expansion.last_size);
+    try std.testing.expectEqual(@as(u64, 256), memory.cached_expansion.last_words);
 }
