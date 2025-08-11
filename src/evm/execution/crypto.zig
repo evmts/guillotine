@@ -57,17 +57,7 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
 
     if (size == 0) {
         @branchHint(.unlikely);
-        // Even with size 0, we need to validate the offset is reasonable
-        if (offset > 0) {
-            // Check if offset is beyond reasonable memory limits
-            const offset_usize = @as(usize, @intCast(offset));
-            const memory_limits = @import("../constants/memory_limits.zig");
-            if (offset_usize > memory_limits.MAX_MEMORY_SIZE) {
-                @branchHint(.unlikely);
-                return ExecutionError.Error.OutOfOffset;
-            }
-        }
-        // Hash of empty data = keccak256("")
+        // Hash of empty data = keccak256("") independent of offset
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
         frame.stack.append_unsafe(empty_hash);
         return;

@@ -1,3 +1,39 @@
+//! EVM Configuration Module
+//!
+//! This module provides centralized configuration for the EVM runtime with compile-time
+//! optimization and zero runtime overhead. It exports configuration types and helpers
+//! for different execution contexts.
+//!
+//! ## Usage Patterns
+//!
+//! ### Testing
+//! Use `EvmConfig.TESTING` for unit tests - disables balance/nonce checks and base fee
+//! validation to simplify test setup:
+//! ```zig
+//! const config = EvmConfig.TESTING;
+//! var vm = try Vm.init(allocator, db, config);
+//! ```
+//!
+//! ### Performance
+//! Use `EvmConfig.PERFORMANCE` for production/benchmarking - disables debug features
+//! like stack clearing for maximum throughput:
+//! ```zig
+//! const config = EvmConfig.PERFORMANCE;
+//! ```
+//!
+//! ### Debugging
+//! Use `EvmConfig.DEBUG` for development - enables all safety checks and validation:
+//! ```zig
+//! const config = EvmConfig.DEBUG;
+//! ```
+//!
+//! ### Custom Configuration
+//! Create custom configs for specific hardforks or L2s:
+//! ```zig
+//! const custom = EvmConfig.init(.SHANGHAI);
+//! const optimism = EvmConfig.OPTIMISM; // Pre-configured L2
+//! ```
+
 const std = @import("std");
 const builtin = @import("builtin");
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;

@@ -34,6 +34,9 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     const Log = @import("../log.zig");
     Log.debug("[call] Starting call execution", .{});
 
+    // Create snapshot for nested calls early to ensure proper revert on any error
+    const snapshot_id = if (self.current_frame_depth > 0) self.journal.create_snapshot() else 0;
+    
     // Extract call info from params - for now just handle the .call case
     // TODO: Handle other call types properly
     // Extract call information based on the call type
@@ -83,12 +86,27 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         .is_static = call_is_static,
     };
 
-    // Input validation
-    if (call_info.input.len > MAX_INPUT_SIZE) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
-    if (call_info.code_size > MAX_CODE_SIZE) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
-    if (call_info.code_size != call_info.code.len) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
-    if (call_info.gas == 0) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
-    if (call_info.code_size > 0 and call_info.code.len == 0) return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    // Input validation - revert snapshot on errors for nested calls
+    if (call_info.input.len > MAX_INPUT_SIZE) {
+        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    }
+    if (call_info.code_size > MAX_CODE_SIZE) {
+        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    }
+    if (call_info.code_size != call_info.code.len) {
+        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    }
+    if (call_info.gas == 0) {
+        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    }
+    if (call_info.code_size > 0 and call_info.code.len == 0) {
+        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    }
 
     Log.debug("[call] Code size: {}, code_len: {}", .{ call_info.code_size, call_info.code.len });
 
@@ -98,6 +116,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         Log.debug("[call] Using analysis cache for code analysis", .{});
         break :blk cache.getOrAnalyze(call_info.code[0..call_info.code_size], &self.table) catch |err| {
             Log.err("[call] Cached code analysis failed: {}", .{err});
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
     } else blk: {
@@ -105,11 +124,13 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         // Fallback to direct analysis if no cache
         var analysis_val = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
             Log.err("[call] Code analysis failed: {}", .{err});
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         // Heap-allocate CodeAnalysis when not using cache to ensure valid lifetime
         const analysis_heap = self.allocator.create(CodeAnalysis) catch {
             analysis_val.deinit();
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         analysis_heap.* = analysis_val;
@@ -122,6 +143,18 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     const analysis = analysis_ptr.*;
 
     Log.debug("[call] Code analysis complete: {} instructions", .{analysis.instructions.len});
+    
+    // Prewarm addresses after analysis but before frame allocation
+    // EIP-2929: Warm the target contract address and caller for gas optimization
+    // This reduces gas costs for common access patterns
+    if (self.chain_rules.is_berlin) {
+        // Warm the target contract address and caller
+        const addresses_to_warm = [_]primitives.Address.Address{ call_info.address, call_caller };
+        self.access_list.pre_warm_addresses(&addresses_to_warm) catch |err| {
+            Log.debug("[call] Failed to warm addresses: {}", .{err});
+            // Non-fatal, continue execution
+        };
+    }
 
     // Handle frame allocation based on call depth
     if (self.current_frame_depth == 0) {
@@ -202,6 +235,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         // Check call depth limit
         if (new_depth >= MAX_CALL_DEPTH) {
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
@@ -210,11 +244,15 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             if (new_depth >= frames.len) {
                 // Need to grow the frame stack
                 const new_capacity = @min(frames.len * 2, MAX_CALL_DEPTH);
-                const new_frames = try self.allocator.realloc(frames, new_capacity);
+                const new_frames = self.allocator.realloc(frames, new_capacity) catch {
+                    if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+                    return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+                };
                 self.frame_stack = new_frames;
             }
         } else {
             // Should not happen, but handle gracefully
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
@@ -223,7 +261,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         // Initialize the new frame
         const parent_frame = &self.frame_stack.?[self.current_frame_depth];
-        self.frame_stack.?[new_depth] = try Frame.init(
+        self.frame_stack.?[new_depth] = Frame.init(
             call_info.gas, // gas_remaining
             call_info.is_static or parent_frame.is_static(), // inherit static context
             @intCast(new_depth), // call_depth
@@ -234,7 +272,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             &self.access_list,
             &self.journal,
             &host,
-            self.journal.create_snapshot(), // new snapshot for revertibility
+            snapshot_id, // use pre-created snapshot
             self.state.database,
             ChainRules{},
             &self.self_destruct,
@@ -244,10 +282,15 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             null, // next_frame
             false, // is_create_call
             false, // is_delegate_call
-        );
+        ) catch {
+            // Frame initialization failed, revert snapshot
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
+        };
         self.frame_stack.?[new_depth].code = call_info.code;
 
-        // Update tracking        self.current_frame_depth = new_depth;
+        // Update tracking
+        self.current_frame_depth = new_depth;
         if (new_depth > self.max_allocated_depth) {
             self.max_allocated_depth = new_depth;
         }
@@ -264,10 +307,17 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
         const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_info.input, call_info.gas, call_info.is_static) catch |err| {
+            // Revert snapshot on precompile failure for nested calls
+            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return switch (err) {
                 else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
             };
         };
+        
+        // For nested calls, check if precompile failed and revert if needed
+        if (self.current_frame_depth > 0 and !precompile_result.success) {
+            self.journal.revert_to_snapshot(snapshot_id);
+        }
 
         return precompile_result;
     }
@@ -281,6 +331,17 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         Log.debug("[call] Interpret ended with error: {}", .{err});
         exec_err = err;
     };
+    
+    // Handle snapshot revert for failed nested calls
+    if (self.current_frame_depth > 0 and exec_err != null) {
+        const should_revert = switch (exec_err.?) {
+            ExecutionError.Error.STOP => false,
+            else => true,
+        };
+        if (should_revert) {
+            self.journal.revert_to_snapshot(snapshot_id);
+        }
+    }
 
     // Copy output before frame cleanup
     var output: []const u8 = &.{};
@@ -321,4 +382,228 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         .gas_left = gas_remaining,
         .output = output,
     };
+}
+
+test "nested call snapshot revert on input validation failure" {
+    const allocator = std.testing.allocator;
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    
+    // Setup database and EVM
+    var memory_db = try MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    const jump_table = OpcodeMetadata.DEFAULT;
+    const chain_rules = ChainRules{ .is_berlin = true };
+    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    defer evm.deinit();
+    
+    // Setup a contract with simple code
+    const code = [_]u8{0x00}; // STOP
+    const addr = primitives.Address.ZERO_ADDRESS;
+    try memory_db.set_code(addr, &code);
+    
+    // Simulate being in a nested call
+    evm.current_frame_depth = 1;
+    
+    // Create an oversized input that should fail validation
+    const oversized_input = try allocator.alloc(u8, MAX_INPUT_SIZE + 1);
+    defer allocator.free(oversized_input);
+    @memset(oversized_input, 0xAA);
+    
+    // Take initial snapshot count
+    const initial_snapshot_count = evm.journal.next_snapshot_id;
+    
+    // Make nested call with oversized input
+    const nested_call = CallParams{ .call = .{
+        .to = addr,
+        .caller = addr,
+        .input = oversized_input,
+        .value = 0,
+        .gas = 50000,
+    }};
+    
+    const result = try evm.call(nested_call);
+    
+    // Verify call failed
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u64, 0), result.gas_left);
+    
+    // Verify snapshot was created and reverted (next_snapshot_id should be unchanged)
+    try std.testing.expectEqual(initial_snapshot_count, evm.journal.next_snapshot_id);
+}
+
+test "nested call snapshot revert on code analysis failure" {
+    const allocator = std.testing.allocator;
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    
+    // Setup database and EVM
+    var memory_db = try MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    const jump_table = OpcodeMetadata.DEFAULT;
+    const chain_rules = ChainRules{ .is_berlin = true };
+    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    defer evm.deinit();
+    
+    // Setup a contract with oversized code
+    const oversized_code = try allocator.alloc(u8, MAX_CODE_SIZE + 1);
+    defer allocator.free(oversized_code);
+    @memset(oversized_code, 0x00);
+    
+    const addr = primitives.Address.ZERO_ADDRESS;
+    try memory_db.set_code(addr, oversized_code);
+    
+    evm.current_frame_depth = 1; // Simulate being in a nested call
+    
+    // Take initial snapshot count
+    const initial_snapshot_count = evm.journal.next_snapshot_id;
+    
+    // Make nested call that should fail due to code size
+    const nested_call = CallParams{ .call = .{
+        .to = addr,
+        .caller = addr,
+        .input = &.{},
+        .value = 0,
+        .gas = 50000,
+    }};
+    
+    const result = try evm.call(nested_call);
+    
+    // Verify call failed
+    try std.testing.expect(!result.success);
+    
+    // Verify snapshot was properly handled
+    try std.testing.expectEqual(initial_snapshot_count, evm.journal.next_snapshot_id);
+}
+
+test "nested call snapshot revert on max depth exceeded" {
+    const allocator = std.testing.allocator;
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    
+    // Setup database and EVM
+    var memory_db = try MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    const jump_table = OpcodeMetadata.DEFAULT;
+    const chain_rules = ChainRules{ .is_berlin = true };
+    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    defer evm.deinit();
+    
+    // Setup a simple contract
+    const code = [_]u8{0x00}; // STOP
+    const addr = primitives.Address.ZERO_ADDRESS;
+    try memory_db.set_code(addr, &code);
+    
+    // Set depth to just below max
+    evm.current_frame_depth = MAX_CALL_DEPTH - 1;
+    
+    // Allocate frame stack
+    evm.frame_stack = try allocator.alloc(Frame, MAX_CALL_DEPTH);
+    defer allocator.free(evm.frame_stack.?);
+    
+    // Take initial snapshot count
+    const initial_snapshot_count = evm.journal.next_snapshot_id;
+    
+    // Make nested call that should fail due to depth limit
+    const nested_call = CallParams{ .call = .{
+        .to = addr,
+        .caller = addr,
+        .input = &.{},
+        .value = 0,
+        .gas = 50000,
+    }};
+    
+    const result = try evm.call(nested_call);
+    
+    // Verify call failed
+    try std.testing.expect(!result.success);
+    
+    // Verify snapshot was properly handled
+    try std.testing.expectEqual(initial_snapshot_count, evm.journal.next_snapshot_id);
+}
+
+test "address prewarming for Berlin hardfork" {
+    const allocator = std.testing.allocator;
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    
+    // Setup database and EVM with Berlin rules
+    var memory_db = try MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    const jump_table = OpcodeMetadata.DEFAULT;
+    const chain_rules = ChainRules{ .is_berlin = true };
+    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    defer evm.deinit();
+    
+    // Setup contracts
+    const code = [_]u8{0x00}; // STOP
+    const contract_addr = [_]u8{0x11} ** 20;
+    const caller_addr = [_]u8{0x22} ** 20;
+    try memory_db.set_code(contract_addr, &code);
+    
+    // Clear access list to ensure clean state
+    evm.access_list.clear();
+    
+    // Make call
+    const call_params = CallParams{ .call = .{
+        .to = contract_addr,
+        .caller = caller_addr,
+        .input = &.{},
+        .value = 0,
+        .gas = 100000,
+    }};
+    
+    _ = try evm.call(call_params);
+    
+    // Verify both addresses were warmed
+    try std.testing.expect(evm.access_list.is_address_warm(contract_addr));
+    try std.testing.expect(evm.access_list.is_address_warm(caller_addr));
+}
+
+test "no address prewarming for pre-Berlin hardfork" {
+    const allocator = std.testing.allocator;
+    const MemoryDatabase = @import("../state/memory_database.zig");
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    
+    // Setup database and EVM without Berlin rules
+    var memory_db = try MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    const db_interface = memory_db.to_database_interface();
+    const jump_table = OpcodeMetadata.DEFAULT;
+    const chain_rules = ChainRules{ .is_berlin = false };
+    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    defer evm.deinit();
+    
+    // Setup contracts
+    const code = [_]u8{0x00}; // STOP
+    const contract_addr = [_]u8{0x11} ** 20;
+    const caller_addr = [_]u8{0x22} ** 20;
+    try memory_db.set_code(contract_addr, &code);
+    
+    // Clear access list to ensure clean state
+    evm.access_list.clear();
+    
+    // Make call
+    const call_params = CallParams{ .call = .{
+        .to = contract_addr,
+        .caller = caller_addr,
+        .input = &.{},
+        .value = 0,
+        .gas = 100000,
+    }};
+    
+    _ = try evm.call(call_params);
+    
+    // Verify addresses were NOT warmed (pre-Berlin behavior)
+    try std.testing.expect(!evm.access_list.is_address_warm(contract_addr));
+    try std.testing.expect(!evm.access_list.is_address_warm(caller_addr));
 }

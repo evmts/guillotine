@@ -128,19 +128,14 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
 
     // Get code from state database and compute hash
     const code = try frame.state.get_code_by_address(address);
-    if (code.len == 0) {
-        @branchHint(.unlikely);
-        // Empty account - return zero
-        try frame.stack.append(0);
-    } else {
-        // Compute keccak256 hash of the code
-        var hash: [32]u8 = undefined;
-        std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
+    
+    // Always compute keccak256 hash of the code (even for empty code)
+    var hash: [32]u8 = undefined;
+    std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
 
-        // Convert hash to u256 using std.mem for efficiency
-        const hash_u256 = std.mem.readInt(u256, &hash, .big);
-        try frame.stack.append(hash_u256);
-    }
+    // Convert hash to u256 using std.mem for efficiency
+    const hash_u256 = std.mem.readInt(u256, &hash, .big);
+    try frame.stack.append(hash_u256);
 }
 
 pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
@@ -188,7 +183,9 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     }
     var buf: [32]u8 = [_]u8{0} ** 32;
     const available = @min(@as(usize, 32), calldata.len - offset_usize);
-    // Copy contiguous bytes starting at offset into the start of the buffer
+    // EVM returns a 32-byte big-endian word. The first byte of calldata at
+    // the given offset becomes the most-significant byte of the word. Copy
+    // into the start of the buffer and zero-pad the remainder.
     @memcpy(buf[0..available], calldata[offset_usize .. offset_usize + available]);
     const word = std.mem.readInt(u256, &buf, .big);
     try frame.stack.append(word);

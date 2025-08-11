@@ -1130,6 +1130,8 @@ pub fn build(b: *std.Build) void {
     const erc20_bench_test_step = b.step("test-erc20-bench", "Run ERC20 benchmark test");
     erc20_bench_test_step.dependOn(&run_erc20_bench_test.step);
 
+    // (removed temporary minimal dynamic JUMP reproduction target)
+
     // Add Gas Accounting tests
     const gas_test = b.addTest(.{
         .name = "gas-test",
