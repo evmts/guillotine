@@ -1784,6 +1784,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // b.step("test-constructor-revert", "Run constructor REVERT test").dependOn(&constructor_revert_test.step);
+
     constructor_revert_test.root_module.addImport("primitives", primitives_mod);
     constructor_revert_test.root_module.addImport("evm", evm_mod);
     constructor_revert_test.root_module.addImport("Address", primitives_mod);
