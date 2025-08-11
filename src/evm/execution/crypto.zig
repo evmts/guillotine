@@ -2,6 +2,7 @@ const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
 const primitives = @import("primitives");
+const Log = @import("../log.zig");
 
 // Imports for tests
 const Vm = @import("../evm.zig");
@@ -45,9 +46,18 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
+    // Debug: show what's on stack before popping
+    if (frame.stack.size() >= 2) {
+        const top = frame.stack.data[frame.stack.size() - 1];
+        const second = frame.stack.data[frame.stack.size() - 2];
+        Log.debug("KECCAK256 stack before pop: top={}, second={}", .{ top, second });
+    }
+
     // EVM stack order: [..., offset, size] with size on top
     const size = frame.stack.pop_unsafe();
     const offset = frame.stack.pop_unsafe();
+
+    Log.debug("KECCAK256 opcode: offset={}, size={} (stack_size={})", .{ offset, size, frame.stack.size() });
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -90,11 +100,16 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
     // Get data and hash using optimized stack buffer approach
     const data = try frame.memory.get_slice(offset_usize, size_usize);
 
+    // Debug logging
+    Log.debug("KECCAK256: offset={}, size={}, data={x}", .{ offset_usize, size_usize, std.fmt.fmtSliceHexLower(data) });
+
     // Calculate keccak256 hash using optimized tiered stack buffers
     const hash = hash_with_stack_buffer(data);
 
     // Convert hash to u256 using std.mem for efficiency
     const result = std.mem.readInt(u256, &hash, .big);
+
+    Log.debug("KECCAK256: hash result={x:0>64}", .{result});
 
     frame.stack.append_unsafe(result);
 }

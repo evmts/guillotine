@@ -242,7 +242,7 @@ pub const Frame = struct {
             .block_gas_limit = block_info.gas_limit,
             .block_coinbase = block_info.coinbase,
             .block_base_fee = block_info.base_fee,
-            .block_blob_base_fee = if (chain_rules.is_cancun) block_info.base_fee else null, // TODO: Add blob_base_fee to BlockInfo
+            .block_blob_base_fee = if (chain_rules.is_cancun) 0 else null, // TODO: Add blob_base_fee to BlockInfo - for now return 0 as REVM likely does
 
             // Storage cluster
             .contract_address = contract_address,

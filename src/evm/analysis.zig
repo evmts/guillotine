@@ -435,22 +435,24 @@ const CodeGenResult = struct {
     inst_to_pc: []u16,
 };
 
+const Stats = struct {
+    push_add_fusions: u32 = 0,
+    push_sub_fusions: u32 = 0,
+    push_mul_fusions: u32 = 0,
+    push_div_fusions: u32 = 0,
+    keccak_optimizations: u32 = 0,
+    inline_opcodes: u32 = 0,
+    total_opcodes: u32 = 0,
+    total_blocks: u32 = 0,
+    eliminated_opcodes: u32 = 0,
+    start_time: i64 = 0, // Will be set at runtime
+};
+
 fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table: *const OpcodeMetadata, jumpdest_bitmap: *const DynamicBitSet) !CodeGenResult {
     Log.debug("[analysis] Converting {} bytes of code to instructions", .{code.len});
 
     // Debug statistics for fusion rates and analysis cost
-    var stats = if (builtin.mode == .Debug) struct {
-        push_add_fusions: u32 = 0,
-        push_sub_fusions: u32 = 0,
-        push_mul_fusions: u32 = 0,
-        push_div_fusions: u32 = 0,
-        keccak_optimizations: u32 = 0,
-        inline_opcodes: u32 = 0,
-        total_opcodes: u32 = 0,
-        total_blocks: u32 = 0,
-        eliminated_opcodes: u32 = 0,
-        start_time: i64 = 0, // Will be set at runtime
-    }{} else undefined;
+    var stats = Stats{};
 
     if (builtin.mode == .Debug) {
         stats.start_time = std.time.milliTimestamp();
@@ -523,7 +525,12 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
         const opcode_byte = code[pc];
         if (builtin.mode == .Debug) stats.total_opcodes += 1;
-        
+
+        // Debug logging for specific PC range
+        if (pc >= 38 and pc <= 42) {
+            Log.debug("[analysis] Processing byte 0x{x:0>2} at pc={}", .{ opcode_byte, pc });
+        }
+
         const opcode = std.meta.intToEnum(Opcode.Enum, opcode_byte) catch {
             // Invalid opcode - accumulate in block and create instruction
             const operation = jump_table.get_operation(opcode_byte);
@@ -704,14 +711,14 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     .opcode_fn = UnreachableHandler,
                     .arg = .{ .push_value = value },
                 };
-                Log.debug("[analysis] PUSH at pc={} size={} value={x}", .{ original_pc, push_size, value });
+                Log.debug("[analysis] PUSH at pc={} size={} value={x}, instruction_count={}", .{ original_pc, push_size, value, instruction_count });
                 instruction_count += 1;
 
                 // Pattern detection for PUSH + arithmetic fusion
                 if (pc < code.len) {
                     const next_op = code[pc];
                     const synthetic = @import("execution/synthetic.zig");
-                    
+
                     switch (next_op) {
                         0x01 => { // ADD
                             if (value == 0) {
@@ -837,43 +844,13 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc += 1;
             },
 
-            // SHA3/KECCAK256 - check for precomputation opportunity
+            // SHA3/KECCAK256 - for now just use regular handling
             .KECCAK256 => {
                 const operation = jump_table.get_operation(opcode_byte);
-                const synthetic = @import("execution/synthetic.zig");
                 
                 // Record PC to instruction mapping
                 pc_to_instruction[pc] = @intCast(instruction_count);
                 
-                // Check if previous two instructions were PUSH (offset and size)
-                if (instruction_count >= 2 and 
-                    instructions[instruction_count - 1].arg == .push_value and
-                    instructions[instruction_count - 2].arg == .push_value) {
-                    
-                    const size = instructions[instruction_count - 1].arg.push_value;
-                    if (size <= std.math.maxInt(u64)) {
-                        const size_u64 = @as(u64, @intCast(size));
-                        const word_count = (size_u64 + 31) / 32;
-                        const gas_cost = 30 + (6 * word_count); // Base + dynamic
-                        
-                        // Replace the size PUSH with synthetic KECCAK
-                        instructions[instruction_count - 1] = Instruction{
-                            .opcode_fn = synthetic.op_keccak256_immediate_size,
-                            .arg = .{ .keccak_immediate_size = .{
-                                .size = size_u64,
-                                .word_count = word_count,
-                                .gas_cost = gas_cost,
-                            } },
-                        };
-                        block.updateStackTracking(opcode_byte, operation.min_stack);
-                        pc += 1;
-                        if (builtin.mode == .Debug) stats.keccak_optimizations += 1;
-                        Log.debug("[analysis] KECCAK256 with immediate size={} at pc={}", .{size_u64, pc-1});
-                        continue;
-                    }
-                }
-                
-                // Fall through to regular handling
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
                 instructions[instruction_count] = Instruction{
@@ -883,18 +860,18 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 instruction_count += 1;
                 pc += 1;
             },
-            
+
             // ISZERO - use inline version for hot path
             .ISZERO => {
                 const operation = jump_table.get_operation(opcode_byte);
                 const synthetic = @import("execution/synthetic.zig");
-                
+
                 // Record PC to instruction mapping
                 pc_to_instruction[pc] = @intCast(instruction_count);
-                
+
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                
+
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = synthetic.op_iszero_inline,
                     .arg = .none,
@@ -904,18 +881,18 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 instruction_count += 1;
                 pc += 1;
             },
-            
+
             // EQ - use inline version for hot path
             .EQ => {
                 const operation = jump_table.get_operation(opcode_byte);
                 const synthetic = @import("execution/synthetic.zig");
-                
+
                 // Record PC to instruction mapping
                 pc_to_instruction[pc] = @intCast(instruction_count);
-                
+
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                
+
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = synthetic.op_eq_inline,
                     .arg = .none,
@@ -1050,10 +1027,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     // Output analysis statistics in debug builds
     if (builtin.mode == .Debug) {
         const elapsed_ms = std.time.milliTimestamp() - stats.start_time;
-        const total_fusions = stats.push_add_fusions + stats.push_sub_fusions + 
-                            stats.push_mul_fusions + stats.push_div_fusions;
+        const total_fusions = stats.push_add_fusions + stats.push_sub_fusions +
+            stats.push_mul_fusions + stats.push_div_fusions;
         const total_optimizations = total_fusions + stats.keccak_optimizations + stats.inline_opcodes;
-        
+
         Log.debug("[analysis] Code analysis complete for {} bytes in {}ms", .{ code.len, elapsed_ms });
         Log.debug("[analysis] Statistics:", .{});
         Log.debug("[analysis]   Total opcodes analyzed: {}", .{stats.total_opcodes});
@@ -1070,7 +1047,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         Log.debug("[analysis]   KECCAK256 immediate size: {}", .{stats.keccak_optimizations});
         Log.debug("[analysis]   Inline opcodes (ISZERO/EQ): {}", .{stats.inline_opcodes});
         Log.debug("[analysis]   Total optimizations: {}", .{total_optimizations});
-        
+
         if (stats.total_opcodes > 0) {
             const fusion_rate = (total_fusions * 100) / stats.total_opcodes;
             const optimization_rate = (total_optimizations * 100) / stats.total_opcodes;
@@ -1295,58 +1272,57 @@ test "fusion and optimization statistics" {
     // Bytecode with various optimization opportunities:
     const code = &[_]u8{
         // PUSH+ADD fusion (5 + 3)
-        0x60, 0x05,  // PUSH1 0x05
-        0x60, 0x03,  // PUSH1 0x03  
-        0x01,        // ADD
-        
+        0x60, 0x05, // PUSH1 0x05
+        0x60, 0x03, // PUSH1 0x03
+        0x01, // ADD
+
         // PUSH+MUL fusion (2 * 3)
-        0x60, 0x02,  // PUSH1 0x02
-        0x60, 0x03,  // PUSH1 0x03
-        0x02,        // MUL
-        
+        0x60, 0x02, // PUSH1 0x02
+        0x60, 0x03, // PUSH1 0x03
+        0x02, // MUL
+
         // PUSH+DIV fusion (10 / 2)
-        0x60, 0x0A,  // PUSH1 0x0A (10)
-        0x60, 0x02,  // PUSH1 0x02
-        0x04,        // DIV
-        
+        0x60, 0x0A, // PUSH1 0x0A (10)
+        0x60, 0x02, // PUSH1 0x02
+        0x04, // DIV
+
         // PUSH+SUB fusion (8 - 3)
-        0x60, 0x08,  // PUSH1 0x08
-        0x60, 0x03,  // PUSH1 0x03
-        0x03,        // SUB
-        
+        0x60, 0x08, // PUSH1 0x08
+        0x60, 0x03, // PUSH1 0x03
+        0x03, // SUB
+
         // KECCAK256 with immediate size
-        0x60, 0x00,  // PUSH1 0x00 (offset)
-        0x60, 0x20,  // PUSH1 0x20 (size = 32 bytes)
-        0x20,        // KECCAK256
-        
+        0x60, 0x00, // PUSH1 0x00 (offset)
+        0x60, 0x20, // PUSH1 0x20 (size = 32 bytes)
+        0x20, // KECCAK256
+
         // Inline ISZERO
-        0x60, 0x01,  // PUSH1 0x01
-        0x15,        // ISZERO
-        
+        0x60, 0x01, // PUSH1 0x01
+        0x15, // ISZERO
+
         // Inline EQ
-        0x60, 0x02,  // PUSH1 0x02
-        0x60, 0x02,  // PUSH1 0x02
-        0x14,        // EQ
-        
+        0x60, 0x02, // PUSH1 0x02
+        0x60, 0x02, // PUSH1 0x02
+        0x14, // EQ
+
         // PUSH 0 + ADD (should be eliminated)
-        0x60, 0x00,  // PUSH1 0x00
-        0x01,        // ADD
-        
+        0x60, 0x00, // PUSH1 0x00
+        0x01, // ADD
+
         // PUSH 1 + MUL (should be eliminated)
-        0x60, 0x01,  // PUSH1 0x01
-        0x02,        // MUL
-        
+        0x60, 0x01, // PUSH1 0x01
+        0x02, // MUL
+
         // PUSH 1 + DIV (should be eliminated)
-        0x60, 0x01,  // PUSH1 0x01
-        0x04,        // DIV
-        
-        0x00,        // STOP
+        0x60, 0x01, // PUSH1 0x01
+        0x04, // DIV
+        0x00, // STOP
     };
-    
+
     const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
-    
+
     // Just verify it works - the stats will be printed in debug mode
     try std.testing.expect(analysis.instructions.len > 0);
 }

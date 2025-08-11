@@ -35,6 +35,7 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
 
     // Read 32 bytes from memory
     const value = try frame.memory.get_u256(offset_usize);
+    Log.debug("MLOAD: offset={} -> value={x:0>64}", .{ offset_usize, value });
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
     frame.stack.set_top_unsafe(value);
@@ -73,6 +74,10 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
     // Write 32 bytes to memory (big-endian)
     var bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &bytes, value, .big);
+
+    // Debug logging
+    Log.debug("MSTORE: offset={}, value={x:0>64}, first_few_bytes={x}", .{ offset_usize, value, std.fmt.fmtSliceHexLower(bytes[0..@min(16, bytes.len)]) });
+
     try frame.memory.set_data(offset_usize, &bytes);
 }
 

@@ -338,6 +338,9 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
                     const data = try frame.memory.get_slice(offset_usize, size_usize);
                     
+                    // Debug logging
+                    Log.debug("[interpret] KECCAK256 immediate: offset={}, size={}, data={x}", .{ offset_usize, size_usize, std.fmt.fmtSliceHexLower(data[0..@min(16, data.len)]) });
+                    
                     // For small known sizes, we could use stack buffers
                     var hash: [32]u8 = undefined;
                     if (params.size <= 64) {
@@ -350,11 +353,16 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     }
                     
                     const result = std.mem.readInt(u256, &hash, .big);
+                    Log.debug("[interpret] KECCAK256 immediate result: {x:0>64}", .{result});
                     frame.stack.append_unsafe(result);
                 }
             },
             .none => {
                 @branchHint(.likely);
+                // Debug logging for all instructions
+                const pc_val = if (current_index < frame.analysis.inst_to_pc.len) frame.analysis.inst_to_pc[current_index] else std.math.maxInt(u16);
+                const opcode_at_pc = if (pc_val != std.math.maxInt(u16) and pc_val < frame.analysis.code_len) frame.analysis.code[pc_val] else 0xFF;
+                Log.debug("[interpret] Executing instruction at index {} (pc={}, opcode=0x{x})", .{ current_index, pc_val, opcode_at_pc });
                 // Handle dynamic JUMP/JUMPI at runtime if needed
                 const jt = frame.analysis.inst_jump_type[current_index];
                 switch (jt) {

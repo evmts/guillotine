@@ -5,6 +5,7 @@ const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
+const Log = std.log.scoped(.default);
 
 pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
@@ -80,11 +81,8 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const code_offset = try frame.stack.pop();
     const mem_offset = try frame.stack.pop();
     const address_u256 = try frame.stack.pop();
-
-    if (size == 0) {
-        @branchHint(.unlikely);
-        return;
-    }
+    
+    Log.debug("EXTCODECOPY: address={x}, mem_offset={}, code_offset={}, size={}", .{address_u256, mem_offset, code_offset, size});
 
     if (mem_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize) or code_offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
@@ -99,6 +97,11 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     // EIP-2929: Check if address is cold and consume appropriate gas
     const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
+
+    if (size == 0) {
+        @branchHint(.unlikely);
+        return;
+    }
 
     // Calculate memory expansion gas cost
     const new_size = mem_offset_usize + size_usize;
@@ -126,18 +129,23 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     const access_cost = try frame.access_address(address);
     try frame.consume_gas(access_cost);
 
-    // First check if account exists
-    const account_info = try frame.state.get_account(address);
-    if (account_info == null) {
-        // Non-existent account - return zero
+    // Get code from state database and compute hash
+    const exists = frame.state.account_exists(address);
+    if (!exists) {
+        // Non-existent account per EIP-1052 returns 0
         try frame.stack.append(0);
         return;
     }
 
-    // Get code from state database and compute hash
     const code = try frame.state.get_code_by_address(address);
-    
-    // Compute keccak256 hash of the code (even for empty code)
+    if (code.len == 0) {
+        // Existing account with empty code returns keccak256("") constant
+        const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+        try frame.stack.append(empty_hash_u256);
+        return;
+    }
+
+    // Compute keccak256 hash of the code
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
 
@@ -191,9 +199,7 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     }
     var buf: [32]u8 = [_]u8{0} ** 32;
     const available = @min(@as(usize, 32), calldata.len - offset_usize);
-    // EVM returns a 32-byte big-endian word. The first byte of calldata at
-    // the given offset becomes the most-significant byte of the word. Copy
-    // into the start of the buffer and zero-pad the remainder.
+    // Copy contiguous bytes starting at offset into the start of the buffer
     @memcpy(buf[0..available], calldata[offset_usize .. offset_usize + available]);
     const word = std.mem.readInt(u256, &buf, .big);
     try frame.stack.append(word);
