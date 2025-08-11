@@ -8,8 +8,8 @@
 
 ### Opportunities
 
-1) SSTORE parity (cross‑file, but critical for system flows)
-- Implement full SSTORE semantics (EIP‑2200/3529) to ensure correct gas/refund behavior across CREATE/CALL flows.
+1) SSTORE integration (cross‑file, system flows)
+- With SSTORE semantics implemented in storage, audit CREATE/CALL flows to ensure journal/refund unwinding is correct across nested frames and reverts.
 
 2) Pre‑validation in analysis
 - Precompute args_end/ret_end (when operands are known) and attach to instructions to avoid repeated u256→usize casts/additions.
@@ -27,7 +27,7 @@
 
 ### Action items
 
-- [ ] Implement SSTORE semantics (gas/refund) across the codebase.
+- [ ] Audit refund/journaling interactions across CALL/CREATE and REVERT.
 - [ ] Pre‑validate and embed args/ret sizes for decode‑time known cases.
 - [ ] Add CALL/CREATE microbench suite.
 
@@ -35,5 +35,4 @@
 
 - evmone: Moves more work to decode time; our proposals close that gap. Behavioral parity on CALL/CREATE flows expected when SSTORE is implemented.
 - revm: Excellent storage semantics and journaling; once we match SSTORE/refunds, throughput on call‑heavy paths should be competitive.
-
 

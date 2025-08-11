@@ -1,21 +1,49 @@
 ## Review: execution/comparison.zig (LT/GT/SLT/SGT/EQ/ISZERO)
 
-### High-signal findings
+### Critical correctness issues
 
-- Straightforward stack patterns and wrapping semantics. Signed comparisons should use correct bitcasts to i256 for SLT/SGT.
+- Operand order is reversed in `LT/GT/SLT/SGT`. EVM requires `a ? b` with `a = second_from_top`, `b = top`; handlers currently compare `top ? second_from_top`.
+
+### High-signal findings (after fix)
+
+- Stack handling is lean (pop then set_top). Signed ops correctly bitcast to `i256`.
+- `EQ` and `ISZERO` use correct operands.
+
+### Required fixes (proposed)
+
+- Use uniform extraction: `const b = stack.pop_unsafe(); const a = stack.peek_unsafe().*;` then compare `a` vs `b`.
+
+Pseudocode:
+```
+// LT
+const b = stack.pop_unsafe();
+const a = stack.peek_unsafe().*;
+stack.set_top_unsafe(@intFromBool(a < b));
+
+// SLT
+const bi = @as(i256, @bitCast(b));
+const ai = @as(i256, @bitCast(a));
+stack.set_top_unsafe(@intFromBool(ai < bi));
+```
+
+### Tests to add/adjust
+
+- Visible-order checks: `(5 < 10)=1`, `(10 < 5)=0`, `(5 > 10)=0`, `(10 > 5)=1`.
+- Signed boundaries: `(-1 < 0)=1`, `(-2^255 < 0)=1`, `(0 < -2^255)=0`.
 
 ### Opportunities
 
-- Consider inlining ISZERO in hot‑ops set; EQ/ISZERO are common.
-- Add randomized property tests that compare signed vs unsigned paths around boundaries (0, 1, max, 2^255−1, 2^255) to harden signed behavior.
+- Consider inlining `ISZERO` (and possibly `EQ`) in hot-op set.
+- Add property tests comparing unsigned vs signed near boundaries.
+- ✅ Pattern fusion: DUP1 + PUSH 0 + EQ → ISZERO (IMPLEMENTED in synthetic.zig)
 
 ### Action items
 
-- [ ] Inline ISZERO (if not already) and consider EQ inlining if traces warrant.
-- [ ] Add edge‑focused fuzz tests for signed comparisons.
+- [ ] Correct operand order in `LT/GT/SLT/SGT` and update tests.
+- [ ] Evaluate inlining for `ISZERO` and `EQ` with profiling.
+- [x] Add DUP1 + PUSH 0 + EQ → ISZERO fusion (COMPLETED in synthetic.zig)
 
 ### Comparison to evmone/revm
 
-- All implementations are near‑identical; minor wins come from inlining and eliminating extra stack traffic.
-
+- After fixing operand order, parity expected; minor wins via inlining and reducing stack traffic.
 

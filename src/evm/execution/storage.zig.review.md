@@ -2,29 +2,39 @@
 
 ### High-signal findings
 
-- TLOAD/TSTORE (transient storage) should be cheap and always warm; confirm current implementation routes through the transient map with constant costs.
-- SLOAD likely integrates EIP‑2929 warm/cold pricing via access list—ensure this is consistent across all call contexts.
+- ✅ SSTORE fully implements EIP-2200/3529 semantics via `storage_costs.calculateSstoreCost` with complete (original, current, new) tracking
+- ✅ Cold/warm access costs properly implemented per EIP-2929
+- ✅ Refund calculations with proper delta handling (positive/negative)
+- ✅ SLOAD applies warm/cold pricing correctly
+- ✅ TLOAD/TSTORE transient storage implemented with constant costs
+- ✅ Comprehensive storage cost pre-computation table for O(1) lookups
 
-### Critical gap: SSTORE semantics
+### Implementation details verified
 
-- Implement EIP‑2200/3529 in full:
-  - Distinguish (original, current, new) value transitions.
-  - Warm vs cold cost (EIP‑2929).
-  - Net‑new vs reset‑to‑zero, and refund calculations (bounded, with EIP‑3529 adjustments).
-  - Journal previous values for precise revert behavior and refund unwinding.
+- `calculateSstoreCost()` in storage_costs.zig handles all hardfork variations
+- Proper original/current/new value tracking for gas calculation
+- Istanbul sentry gas check (2300) prevents reentrancy
+- Cold slot tracking with access list integration
+- Refund delta application with bounds checking
+
+### Remaining gaps
+
+- Journal/revert paths: ensure refund adjustments integrate correctly with nested calls
+- Add explicit fork gating for EIP-1153 (transient storage) in handlers
 
 ### Tests
 
-- Add a comprehensive transition matrix and refund accounting tests; parity with official vectors.
-- Randomized sequences mixing SLOAD/SSTORE/TLOAD/TSTORE to assert invariants and refunds remain within bounds.
+- Add comprehensive transition matrix tests for all SSTORE state transitions
+- Add refund accounting tests comparing against official test vectors
+- Test journaling/revert behavior with nested calls
 
 ### Action items
 
-- [ ] Complete SSTORE gas/refund implementation and tests.
-- [ ] Ensure SLOAD warm/cold cost paths are uniform and measured.
+- [ ] Add SSTORE transition matrix tests covering all state changes
+- [ ] Add fork gating for TLOAD/TSTORE (EIP-1153/Cancun)
+- [ ] Verify journal integration for refund tracking
 
 ### Comparison to evmone/revm
 
-- Both have mature SSTORE semantics. Achieving feature parity is essential for correctness and for matching storage‑heavy workload performance.
-
+- Semantics are in place; remaining work is validation breadth (tests) and journaling correctness under reverts.
 
