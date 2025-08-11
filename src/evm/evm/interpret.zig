@@ -198,7 +198,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                         Log.debug("[interpret] Dynamic JUMP mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
                         Log.debug("[interpret] Dynamic JUMP resolved to instruction index {} for dest {}", .{ idx, dest });
                         current_index = idx;
-                        break; // proceed to next loop iteration
+                        continue; // proceed to next loop iteration of the while-loop
                     },
                     .jumpi => {
                         // Backtrace before conditional jump as well
@@ -234,7 +234,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                             Log.debug("[interpret] Dynamic JUMPI condition false, fallthrough", .{});
                             current_index += 1;
                         }
-                        break; // handled
+                        continue; // handled; proceed to next while-loop iteration
                     },
                     .other => {
                         // Most opcodes now have .none - no individual gas/stack validation needed
@@ -516,4 +516,93 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
 
     const result = interpret(&vm, &frame);
     try std.testing.expectError(ExecutionError.Error.StackOverflow, result);
+}
+
+test "dynamic jump returns 32-byte true" {
+    const allocator = std.testing.allocator;
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    const Analysis = @import("../analysis.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    const AccessList = @import("../access_list/access_list.zig").AccessList;
+    const CallJournal = @import("../call_frame_stack.zig").CallJournal;
+    const Host = @import("../host.zig").Host;
+    const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
+    const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+    const Address = @import("primitives").Address.Address;
+
+    // Bytecode:
+    // 00: PUSH1 0x05
+    // 02: JUMP              -> to 0x05
+    // 03: STOP              (not executed)
+    // 04: PUSH1 0x00        (padding)
+    // 05: JUMPDEST
+    // 06: PUSH1 0x01        (value true)
+    // 08: PUSH1 0x1f        (offset 31)
+    // 0a: MSTORE            (store true at [31..63])
+    // 0b: PUSH1 0x20        (size 32)
+    // 0d: PUSH1 0x00        (offset 0)
+    // 0f: RETURN
+    const code = &[_]u8{
+        0x60, 0x05, // PUSH1 0x05
+        0x56, // JUMP
+        0x00, // STOP
+        0x60, 0x00, // PUSH1 0x00 (padding)
+        0x5B, // JUMPDEST @ 0x05
+        0x60, 0x01, // PUSH1 0x01
+        0x60, 0x1F, // PUSH1 0x1f
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 0x20
+        0x60, 0x00, // PUSH1 0x00
+        0xF3, // RETURN
+    };
+
+    var analysis = try Analysis.from_code(allocator, code, &OpcodeMetadata.DEFAULT);
+    defer analysis.deinit();
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer vm.deinit();
+
+    var access_list = AccessList.init(allocator, @import("../access_list/context.zig").Context.init());
+    defer access_list.deinit();
+    var journal = CallJournal.init(allocator);
+    defer journal.deinit();
+    var self_destruct = SelfDestruct.init(allocator);
+    defer self_destruct.deinit();
+    var created_contracts = CreatedContracts.init(allocator);
+    defer created_contracts.deinit();
+
+    var host_impl = vm; // Evm implements Host
+    var host = Host.init(&host_impl);
+
+    var frame = try Frame.init(
+        1_000_000,
+        false,
+        0,
+        Address.ZERO,
+        Address.ZERO,
+        0,
+        &analysis,
+        &access_list,
+        &journal,
+        &host,
+        0,
+        db_interface,
+        Frame.ChainRules.DEFAULT,
+        &self_destruct,
+        &created_contracts,
+        &[_]u8{},
+        allocator,
+        null,
+        false,
+        false,
+    );
+    defer frame.deinit();
+
+    try interpret(&vm, &frame);
+    try std.testing.expect(frame.output.len == 32);
+    try std.testing.expect(frame.output[31] == 1);
 }
