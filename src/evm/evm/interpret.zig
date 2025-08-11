@@ -9,6 +9,113 @@ const builtin = @import("builtin");
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 
+// Private inline functions for jump handling
+inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
+    const dest = frame.stack.pop_unsafe();
+    Log.debug("[interpret] JUMP requested to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
+    if (!frame.valid_jumpdest(dest)) {
+        Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+        return ExecutionError.Error.InvalidJump;
+    }
+    Log.debug("[interpret] JUMP valid destination: dest={} -> jumping", .{dest});
+    const dest_usize: usize = @intCast(dest);
+    const idx = frame.analysis.pc_to_block_start[dest_usize];
+    if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
+        Log.debug("[interpret] JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+        return ExecutionError.Error.InvalidJump;
+    }
+    current_index.* = idx;
+}
+
+inline fn handle_jumpi(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
+    const pops = frame.stack.pop2_unsafe();
+    // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
+    const dest = pops.b;
+    const condition = pops.a;
+    Log.debug("[interpret] JUMPI requested to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index.*, self.depth, frame.gas_remaining });
+    if (condition != 0) {
+        if (!frame.valid_jumpdest(dest)) {
+            Log.debug("[interpret] JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+            return ExecutionError.Error.InvalidJump;
+        }
+        Log.debug("[interpret] JUMPI condition true, jumping to dest {}", .{dest});
+        const dest_usize: usize = @intCast(dest);
+        const idx = frame.analysis.pc_to_block_start[dest_usize];
+        if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
+            Log.debug("[interpret] JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+            return ExecutionError.Error.InvalidJump;
+        }
+        current_index.* = idx;
+    } else {
+        Log.debug("[interpret] JUMPI condition false, fallthrough to next instruction", .{});
+        current_index.* += 1;
+    }
+}
+
+inline fn handle_dynamic_jump(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
+    // Backtrace last few original PCs/opcodes to understand control flow
+    var bt: usize = 1;
+    while (bt <= 4 and current_index.* >= bt) : (bt += 1) {
+        const iprev = current_index.* - bt;
+        const pcprev16 = frame.analysis.inst_to_pc[iprev];
+        if (pcprev16 == std.math.maxInt(u16)) break;
+        const pcprev: usize = pcprev16;
+        const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
+        Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
+    }
+    const dest = frame.stack.pop_unsafe();
+    Log.debug("[interpret] Dynamic JUMP to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
+    if (!frame.valid_jumpdest(dest)) {
+        Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+        return ExecutionError.Error.InvalidJump;
+    }
+    const dest_usize: usize = @intCast(dest);
+    const idx = frame.analysis.pc_to_block_start[dest_usize];
+    if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
+        Log.debug("[interpret] Dynamic JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+        return ExecutionError.Error.InvalidJump;
+    }
+    Log.debug("[interpret] Dynamic JUMP mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
+    Log.debug("[interpret] Dynamic JUMP resolved to instruction index {} for dest {}", .{ idx, dest });
+    current_index.* = idx;
+}
+
+inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
+    // Backtrace before conditional jump as well
+    var bt: usize = 1;
+    while (bt <= 4 and current_index.* >= bt) : (bt += 1) {
+        const iprev = current_index.* - bt;
+        const pcprev16 = frame.analysis.inst_to_pc[iprev];
+        if (pcprev16 == std.math.maxInt(u16)) break;
+        const pcprev: usize = pcprev16;
+        const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
+        Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
+    }
+    const pops = frame.stack.pop2_unsafe();
+    // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
+    const dest = pops.b;
+    const condition = pops.a;
+    Log.debug("[interpret] Dynamic JUMPI to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index.*, self.depth, frame.gas_remaining });
+    if (condition != 0) {
+        if (!frame.valid_jumpdest(dest)) {
+            Log.debug("[interpret] Dynamic JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+            return ExecutionError.Error.InvalidJump;
+        }
+        const dest_usize: usize = @intCast(dest);
+        const idx = frame.analysis.pc_to_block_start[dest_usize];
+        if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
+            Log.debug("[interpret] Dynamic JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+            return ExecutionError.Error.InvalidJump;
+        }
+        Log.debug("[interpret] Dynamic JUMPI mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
+        Log.debug("[interpret] Dynamic JUMPI condition true, jumping to instruction index {} for dest {}", .{ idx, dest });
+        current_index.* = idx;
+    } else {
+        Log.debug("[interpret] Dynamic JUMPI condition false, fallthrough", .{});
+        current_index.* += 1;
+    }
+}
+
 /// Execute contract bytecode using block-based execution.
 ///
 /// This version translates bytecode to an instruction stream before execution,
@@ -105,46 +212,8 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // 3. Handle normal jump
             .jump_target => |jump_target| {
                 switch (jump_target.jump_type) {
-                    .jump => {
-                        const dest = frame.stack.pop_unsafe();
-                        Log.debug("[interpret] JUMP requested to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index, self.depth, frame.gas_remaining });
-                        if (!frame.valid_jumpdest(dest)) {
-                            Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
-                            return ExecutionError.Error.InvalidJump;
-                        }
-                        Log.debug("[interpret] JUMP valid destination: dest={} -> jumping", .{dest});
-                        const dest_usize: usize = @intCast(dest);
-                        const idx = frame.analysis.pc_to_block_start[dest_usize];
-                        if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
-                            Log.debug("[interpret] JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, instructions.len });
-                            return ExecutionError.Error.InvalidJump;
-                        }
-                        current_index = idx;
-                    },
-                    .jumpi => {
-                        const pops = frame.stack.pop2_unsafe();
-                        // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
-                        const dest = pops.b;
-                        const condition = pops.a;
-                        Log.debug("[interpret] JUMPI requested to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index, self.depth, frame.gas_remaining });
-                        if (condition != 0) {
-                            if (!frame.valid_jumpdest(dest)) {
-                                Log.debug("[interpret] JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
-                                return ExecutionError.Error.InvalidJump;
-                            }
-                            Log.debug("[interpret] JUMPI condition true, jumping to dest {}", .{dest});
-                            const dest_usize2: usize = @intCast(dest);
-                            const idx2 = frame.analysis.pc_to_block_start[dest_usize2];
-                            if (idx2 == std.math.maxInt(u16) or idx2 >= instructions.len) {
-                                Log.debug("[interpret] JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx2, instructions.len });
-                                return ExecutionError.Error.InvalidJump;
-                            }
-                            current_index = idx2;
-                        } else {
-                            Log.debug("[interpret] JUMPI condition false, fallthrough to next instruction", .{});
-                            current_index += 1;
-                        }
-                    },
+                    .jump => try handle_jump(self, frame, &current_index),
+                    .jumpi => try handle_jumpi(self, frame, &current_index),
                     .other => {
                         Log.debug("[interpret] Jump target type .other redirecting flow (inst_idx from {} to target)", .{current_index});
                         // Fallback: advance to next instruction if mapping is not applicable
@@ -167,73 +236,134 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 current_index += 1;
                 try frame.stack.append(@as(u256, pc));
             },
+            // Synthetic operations - fused instruction patterns
+            .push_add_fusion => |immediate| {
+                current_index += 1;
+                const a = frame.stack.peek_unsafe().*;
+                const result = a +% immediate;
+                frame.stack.set_top_unsafe(result);
+            },
+            .push_sub_fusion => |immediate| {
+                current_index += 1;
+                const a = frame.stack.peek_unsafe().*;
+                const result = a -% immediate;
+                frame.stack.set_top_unsafe(result);
+            },
+            .push_mul_fusion => |immediate| {
+                current_index += 1;
+                const a = frame.stack.peek_unsafe().*;
+                const U256 = @import("primitives").Uint(256, 4);
+                const a_u256 = U256.from_u256_unsafe(a);
+                const b_u256 = U256.from_u256_unsafe(immediate);
+                const product_u256 = a_u256.wrapping_mul(b_u256);
+                const result = product_u256.to_u256_unsafe();
+                frame.stack.set_top_unsafe(result);
+            },
+            .push_div_fusion => |immediate| {
+                current_index += 1;
+                const a = frame.stack.peek_unsafe().*;
+                const result = if (immediate == 0) 0 else a / immediate;
+                frame.stack.set_top_unsafe(result);
+            },
+            .push_push_result => |result| {
+                current_index += 1;
+                // Directly push the precomputed result
+                try frame.stack.append(result);
+            },
+            .keccak_precomputed => |params| {
+                current_index += 1;
+                // Consume precomputed gas cost
+                if (frame.gas_remaining < params.gas_cost) {
+                    @branchHint(.cold);
+                    frame.gas_remaining = 0;
+                    return ExecutionError.Error.OutOfGas;
+                }
+                frame.gas_remaining -= params.gas_cost;
+                
+                const size = frame.stack.pop_unsafe();
+                const offset = frame.stack.pop_unsafe();
+                
+                // Bounds checking
+                if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+                    @branchHint(.unlikely);
+                    return ExecutionError.Error.OutOfOffset;
+                }
+                
+                const offset_usize = @as(usize, @intCast(offset));
+                const size_usize = @as(usize, @intCast(size));
+                
+                if (size == 0) {
+                    @branchHint(.unlikely);
+                    // Hash of empty data = keccak256("")
+                    const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+                    frame.stack.append_unsafe(empty_hash);
+                } else {
+                    // Memory expansion already handled, just get the data
+                    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
+                    const data = try frame.memory.get_slice(offset_usize, size_usize);
+                    
+                    // Hash using Keccak256
+                    var hash: [32]u8 = undefined;
+                    std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
+                    
+                    const result = std.mem.readInt(u256, &hash, .big);
+                    frame.stack.append_unsafe(result);
+                }
+            },
+            .keccak_immediate_size => |params| {
+                current_index += 1;
+                // Consume precomputed gas cost
+                if (frame.gas_remaining < params.gas_cost) {
+                    @branchHint(.cold);
+                    frame.gas_remaining = 0;
+                    return ExecutionError.Error.OutOfGas;
+                }
+                frame.gas_remaining -= params.gas_cost;
+                
+                const offset = frame.stack.pop_unsafe();
+                
+                if (offset > std.math.maxInt(usize)) {
+                    @branchHint(.unlikely);
+                    return ExecutionError.Error.OutOfOffset;
+                }
+                
+                const offset_usize = @as(usize, @intCast(offset));
+                const size_usize = @as(usize, @intCast(params.size));
+                
+                if (params.size == 0) {
+                    @branchHint(.unlikely);
+                    const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+                    frame.stack.append_unsafe(empty_hash);
+                } else {
+                    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
+                    const data = try frame.memory.get_slice(offset_usize, size_usize);
+                    
+                    // For small known sizes, we could use stack buffers
+                    var hash: [32]u8 = undefined;
+                    if (params.size <= 64) {
+                        @branchHint(.likely);
+                        var buffer: [64]u8 = undefined;
+                        @memcpy(buffer[0..size_usize], data);
+                        std.crypto.hash.sha3.Keccak256.hash(buffer[0..size_usize], &hash, .{});
+                    } else {
+                        std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
+                    }
+                    
+                    const result = std.mem.readInt(u256, &hash, .big);
+                    frame.stack.append_unsafe(result);
+                }
+            },
             .none => {
                 @branchHint(.likely);
                 // Handle dynamic JUMP/JUMPI at runtime if needed
                 const jt = frame.analysis.inst_jump_type[current_index];
                 switch (jt) {
                     .jump => {
-                        // Backtrace last few original PCs/opcodes to understand control flow
-                        var bt: usize = 1;
-                        while (bt <= 4 and current_index >= bt) : (bt += 1) {
-                            const iprev = current_index - bt;
-                            const pcprev16 = frame.analysis.inst_to_pc[iprev];
-                            if (pcprev16 == std.math.maxInt(u16)) break;
-                            const pcprev: usize = pcprev16;
-                            const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
-                            Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
-                        }
-                        const dest = frame.stack.pop_unsafe();
-                        Log.debug("[interpret] Dynamic JUMP to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index, self.depth, frame.gas_remaining });
-                        if (!frame.valid_jumpdest(dest)) {
-                            Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
-                            return ExecutionError.Error.InvalidJump;
-                        }
-                        const dest_usize: usize = @intCast(dest);
-                        const idx = frame.analysis.pc_to_block_start[dest_usize];
-                        if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
-                            Log.debug("[interpret] Dynamic JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, instructions.len });
-                            return ExecutionError.Error.InvalidJump;
-                        }
-                        Log.debug("[interpret] Dynamic JUMP mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
-                        Log.debug("[interpret] Dynamic JUMP resolved to instruction index {} for dest {}", .{ idx, dest });
-                        current_index = idx;
+                        try handle_dynamic_jump(self, frame, &current_index);
                         continue; // proceed to next loop iteration of the while-loop
                     },
                     .jumpi => {
-                        // Backtrace before conditional jump as well
-                        var bt2: usize = 1;
-                        while (bt2 <= 4 and current_index >= bt2) : (bt2 += 1) {
-                            const iprev = current_index - bt2;
-                            const pcprev16 = frame.analysis.inst_to_pc[iprev];
-                            if (pcprev16 == std.math.maxInt(u16)) break;
-                            const pcprev: usize = pcprev16;
-                            const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
-                            Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt2, iprev, pcprev, opprev });
-                        }
-                        const pops = frame.stack.pop2_unsafe();
-                        // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
-                        const dest = pops.b;
-                        const condition = pops.a;
-                        Log.debug("[interpret] Dynamic JUMPI to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index, self.depth, frame.gas_remaining });
-                        if (condition != 0) {
-                            if (!frame.valid_jumpdest(dest)) {
-                                Log.debug("[interpret] Dynamic JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
-                                return ExecutionError.Error.InvalidJump;
-                            }
-                            const dest_usize: usize = @intCast(dest);
-                            const idx = frame.analysis.pc_to_block_start[dest_usize];
-                            if (idx == std.math.maxInt(u16) or idx >= instructions.len) {
-                                Log.debug("[interpret] Dynamic JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, instructions.len });
-                                return ExecutionError.Error.InvalidJump;
-                            }
-                            Log.debug("[interpret] Dynamic JUMPI mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
-                            Log.debug("[interpret] Dynamic JUMPI condition true, jumping to instruction index {} for dest {}", .{ idx, dest });
-                            current_index = idx;
-                        } else {
-                            Log.debug("[interpret] Dynamic JUMPI condition false, fallthrough", .{});
-                            current_index += 1;
-                        }
+                        try handle_dynamic_jumpi(self, frame, &current_index);
                         continue; // handled; proceed to next while-loop iteration
                     },
                     .other => {
