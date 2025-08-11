@@ -8,10 +8,12 @@ const builtin = @import("builtin");
 /// Provides debug, error, and warning logging with EVM-specific prefixing.
 /// Debug logs are optimized away in release builds for performance.
 /// Debug log for development and troubleshooting
-/// Optimized away in release builds for performance
+/// Compile-time no-op in ReleaseFast/ReleaseSmall for performance
 pub fn debug(comptime format: []const u8, args: anytype) void {
-    if (builtin.target.cpu.arch != .wasm32 or builtin.target.os.tag != .freestanding) {
-        std.log.debug("[EVM] " ++ format, args);
+    if (comptime (builtin.mode == .Debug or builtin.mode == .ReleaseSafe)) {
+        if (builtin.target.cpu.arch != .wasm32 or builtin.target.os.tag != .freestanding) {
+            std.log.debug("[EVM] " ++ format, args);
+        }
     }
 }
 
