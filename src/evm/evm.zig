@@ -455,11 +455,28 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         }
     };
 
+    // Pre-charge CREATE base and initcode costs to align with opcode path
+    const GasC = @import("primitives").GasConstants;
+    const word_count: u64 = GasC.wordCount(bytecode.len);
+    const precharge: u64 = GasC.CreateGas + (word_count * GasC.InitcodeWordGas) + (@as(u64, @intCast(bytecode.len)) * GasC.CreateDataGas);
+    if (gas <= precharge) {
+        // Not enough gas to even pay creation overhead
+        return InterprResult{
+            .status = .OutOfGas,
+            .output = null,
+            .gas_left = 0,
+            .gas_used = 0,
+            .address = new_address,
+            .success = false,
+        };
+    }
+    const frame_gas: u64 = gas - precharge;
+
     // Prepare a standalone frame for constructor execution
     var host = @import("host.zig").Host.init(self);
     const snapshot_id: u32 = self.journal.create_snapshot();
     var frame = try Frame.init(
-        gas,
+        frame_gas,
         false, // not static
         @intCast(self.depth),
         new_address, // contract address being created
@@ -549,6 +566,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     } else {
         std.debug.print("[create_contract] Success STOP, empty runtime code\n", .{});
     }
+    // Add back the unspent frame gas to the caller, but exclude the precharged overhead
     const gas_left = frame.gas_remaining;
     frame.deinit();
     return InterprResult{
