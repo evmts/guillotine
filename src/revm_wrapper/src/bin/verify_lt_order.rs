@@ -93,7 +93,7 @@ fn main() {
     let result1 = test_lt(U256::from(5), U256::from(10), "5 < 10 = 1 OR 10 < 5 = 0");
     
     // Test 2: 10 < 5
-    let result2 = test_lt(U256::from(10), U256::from(5), "10 < 5 = 0 OR 5 < 10 = 1");
+    test_lt(U256::from(10), U256::from(5), "10 < 5 = 0 OR 5 < 10 = 1");
     
     println!("\nConclusion:");
     if result1 == U256::from(1) {

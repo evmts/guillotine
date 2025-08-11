@@ -1,12 +1,11 @@
 use revm::{
     primitives::{
-        hex, Address, Bytes, ExecutionResult, Output, TransactTo, TxKind, B256, U256,
+        hex, Address, ExecutionResult, Output, TxKind, B256, U256,
     },
     InMemoryDB, Evm,
 };
 use revm::inspectors::TracerEip3155;
 use std::fs;
-use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read ERC20 bytecode

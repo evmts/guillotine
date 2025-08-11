@@ -6,8 +6,6 @@ use revm::{
     },
     Evm,
 };
-use std::fs;
-use std::io::Write;
 
 fn main() {
     println!("=== Running Opcode Comparison Tests ===\n");

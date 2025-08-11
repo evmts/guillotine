@@ -9,7 +9,6 @@ use revm::{
     inspectors::TracerEip3155,
 };
 use std::fs;
-use std::io::Write;
 
 fn main() {
     // Read the ERC20 bytecode

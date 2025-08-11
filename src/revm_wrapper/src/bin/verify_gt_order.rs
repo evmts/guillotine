@@ -93,12 +93,12 @@ fn main() {
     let result1 = test_gt(U256::from(10), U256::from(5), "10 > 5 = 1 OR 5 > 10 = 0");
     
     // Test 2: 5 > 10
-    let result2 = test_gt(U256::from(5), U256::from(10), "5 > 10 = 0 OR 10 > 5 = 1");
+    test_gt(U256::from(5), U256::from(10), "5 > 10 = 0 OR 10 > 5 = 1");
     
     // Test 3: The specific values from the failing test
     let a = U256::from_str_radix("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff01", 16).unwrap();
     let b = U256::from_str_radix("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16).unwrap();
-    let result3 = test_gt(a, b, "0xff...01 > 0xff...ff = 0 OR 0xff...ff > 0xff...01 = 1");
+    test_gt(a, b, "0xff...01 > 0xff...ff = 0 OR 0xff...ff > 0xff...01 = 1");
     
     println!("\nConclusion:");
     if result1 == U256::from(1) {

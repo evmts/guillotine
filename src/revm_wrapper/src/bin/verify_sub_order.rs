@@ -100,10 +100,10 @@ fn main() {
     let result1 = test_sub(100, 58, "100 - 58 = 42");
     
     // Test 2: 50 - 30 = 20 (if second - top) OR 30 - 50 = -20 (if top - second)  
-    let result2 = test_sub(50, 30, "50 - 30 = 20");
+    test_sub(50, 30, "50 - 30 = 20");
     
     // Test 3: 10 - 20 (to see underflow behavior)
-    let result3 = test_sub(10, 20, "10 - 20 = -10");
+    test_sub(10, 20, "10 - 20 = -10");
     
     println!("\nConclusion:");
     if result1 == U256::from(42) {
