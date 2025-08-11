@@ -196,10 +196,11 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // Stack (top -> bottom): size, data_offset, mem_offset
-    const size = try frame.stack.pop();
-    const data_offset = try frame.stack.pop();
+    // Stack (top -> bottom): mem_offset, data_offset, size
+    // EVM pops top-first
     const mem_offset = try frame.stack.pop();
+    const data_offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -227,12 +228,11 @@ pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // Pop memory offset, code offset, and size
-    // Stack (top -> bottom): size, code_offset, mem_offset
-    // EVM pops top-first, so variables should be assigned in reverse use order
-    const size = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
+    // Stack (top -> bottom): mem_offset, code_offset, size
+    // EVM pops top-first
     const mem_offset = try frame.stack.pop();
+    const code_offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
 
     if (size == 0) {
         @branchHint(.unlikely);
