@@ -133,9 +133,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         self.chain_rules, // chain rules
         null, // self_destruct (not supported in this context)
         input, // input data
-        self.allocator, // allocator
-        false, // is_create_call
-        false, // is_delegate_call
+        self.allocator // allocator
     ) catch |err| {
         Log.debug("VM.call_contract: Frame creation failed with error: {}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };

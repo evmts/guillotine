@@ -205,8 +205,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             &self.self_destruct,
             call_info.input, // input
             self.allocator, // use general allocator for frame-owned allocations
-            false, // is_create_call
-            false, // is_delegate_call
         );
         self.frame_stack.?[0].code = call_info.code;
         // Frame resources will be released after execution completes
@@ -260,8 +258,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             &self.self_destruct,
             call_info.input, // input
             self.allocator, // use general allocator for frame-owned allocations
-            false, // is_create_call
-            false, // is_delegate_call
         ) catch {
             // Frame initialization failed, revert snapshot
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);

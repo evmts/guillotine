@@ -12,16 +12,17 @@ const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 // Private inline functions for jump handling
 inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
     const dest = try frame.stack.pop();
+    const analysis = frame.analysis;
     Log.debug("[interpret] JUMP requested to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
     if (!frame.valid_jumpdest(dest)) {
-        Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+        Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, analysis.code_len });
         return ExecutionError.Error.InvalidJump;
     }
     Log.debug("[interpret] JUMP valid destination: dest={} -> jumping", .{dest});
     const dest_usize: usize = @intCast(dest);
-    const idx = frame.analysis.pc_to_block_start[dest_usize];
-    if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
-        Log.debug("[interpret] JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+    const idx = analysis.pc_to_block_start[dest_usize];
+    if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
+        Log.debug("[interpret] JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
         return ExecutionError.Error.InvalidJump;
     }
     current_index.* = idx;
@@ -29,13 +30,14 @@ inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) Executio
 
 inline fn handle_jumpi(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
     const pops = try frame.stack.pop2();
+    const analysis = frame.analysis;
     // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
     const dest = pops.b;
     const condition = pops.a;
     Log.debug("[interpret] JUMPI requested to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index.*, self.depth, frame.gas_remaining });
     if (condition != 0) {
         if (!frame.valid_jumpdest(dest)) {
-            Log.debug("[interpret] JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+            Log.debug("[interpret] JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, analysis.code_len });
             return ExecutionError.Error.InvalidJump;
         }
         Log.debug("[interpret] JUMPI condition true, jumping to dest {}", .{dest});

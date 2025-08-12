@@ -102,8 +102,6 @@ pub const Frame = struct {
     // COLD - Validation flags and rarely accessed data
     hardfork: Hardfork, // 1 byte - hardfork validation
     // All EIP validation now done at compile-time via jump tables
-    is_create: bool, // 1 byte - CREATE/CREATE2 context
-    is_delegate: bool, // 1 byte - DELEGATECALL context
 
     // Cold data - accessed infrequently
     input: []const u8, // 16 bytes - only CALLDATALOAD/SIZE/COPY
@@ -129,8 +127,6 @@ pub const Frame = struct {
         self_destruct: ?*SelfDestruct,
         input: []const u8,
         allocator: std.mem.Allocator,
-        is_create_call: bool,
-        is_delegate_call: bool,
     ) !Frame {
         // Determine hardfork from chain rules
         const hardfork = blk: {
@@ -202,8 +198,6 @@ pub const Frame = struct {
             .hardfork = hardfork,
 
             // All EIP validation done at compile time
-            .is_create = is_create_call,
-            .is_delegate = is_delegate_call,
 
             .self_destruct = self_destruct,
             .allocator = allocator,

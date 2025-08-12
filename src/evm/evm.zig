@@ -545,9 +545,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         ChainRules.DEFAULT,
         &self.self_destruct,
         &[_]u8{}, // constructor input (none for tests)
-        self.allocator,
-        true, // is_create_call
-        false, // is_delegate_call
+        self.allocator
     );
 
     var exec_err: ?ExecutionError.Error = null;
