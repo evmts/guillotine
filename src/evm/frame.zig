@@ -25,57 +25,8 @@ const SAFE_JUMP_VALIDATION = builtin.mode != .ReleaseFast and builtin.mode != .R
 pub const AccessError = error{OutOfMemory};
 pub const StateError = error{OutOfMemory};
 
-/// Combined chain rules (hardforks + EIPs) for configuration input.
-/// Used to create the optimized Flags packed struct.
-/// NOTE: Only includes EIPs that need runtime checks during opcode execution.
-/// EIPs for transaction validation, gas pricing, bytecode analysis, and pre-execution setup are handled elsewhere.
-pub const ChainRules = struct {
-    // Core hardfork markers (used for getHardfork() only)
-    is_homestead: bool = true,
-    is_byzantium: bool = true,
-    is_constantinople: bool = true,
-    is_petersburg: bool = true,
-    is_istanbul: bool = true,
-    is_berlin: bool = true,
-    is_london: bool = true,
-    is_merge: bool = true,
-    is_shanghai: bool = true,
-    is_cancun: bool = true,
-    is_prague: bool = false,
-
-    // All EIP checks are now done at compile-time through specialized jump tables
-    // No runtime EIP flags needed
-
-    /// Default chain rules for the latest hardfork (CANCUN).
-    pub const DEFAULT = ChainRules{};
-};
-
-/// Packed flags struct - optimized for actual runtime usage
-/// Only contains flags that are checked during opcode execution
-pub const Flags = packed struct {
-    // Hot execution state - accessed every opcode
-    depth: u10, // 10 bits (0-1023) - call stack depth
-    is_static: bool, // 1 bit - static call restriction (checked by SSTORE, TSTORE, etc.)
-
-    // EIP flags checked during execution (very few!)
-    is_eip1153: bool, // 1 bit - Transient storage (TLOAD/TSTORE validation)
-
-    // Hardfork markers (only for getHardfork() method)
-    is_prague: bool, // 1 bit
-    is_cancun: bool, // 1 bit
-    is_shanghai: bool, // 1 bit
-    is_merge: bool, // 1 bit
-    is_london: bool, // 1 bit
-    is_berlin: bool, // 1 bit
-    is_istanbul: bool, // 1 bit
-    is_petersburg: bool, // 1 bit
-    is_constantinople: bool, // 1 bit
-    is_byzantium: bool, // 1 bit
-    is_homestead: bool, // 1 bit
-
-    // Reserved for future expansion - remaining bits
-    _reserved: u41 = 0, // Ensures exactly 64 bits total (11 + 1 + 1 + 10 + 1 + 41 = 64)
-};
+// Import ChainRules from the hardforks module where it's properly maintained
+pub const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
 
 /// Frame represents the entire execution state of the EVM as it executes opcodes
 /// Layout optimized for actual opcode access patterns and cache performance
@@ -129,21 +80,7 @@ pub const Frame = struct {
         allocator: std.mem.Allocator,
     ) !Frame {
         // Determine hardfork from chain rules
-        const hardfork = blk: {
-            // Note: PRAGUE not yet defined in hardfork.zig, defaulting to CANCUN for now
-            if (chain_rules.is_prague) break :blk Hardfork.CANCUN;
-            if (chain_rules.is_cancun) break :blk Hardfork.CANCUN;
-            if (chain_rules.is_shanghai) break :blk Hardfork.SHANGHAI;
-            if (chain_rules.is_merge) break :blk Hardfork.MERGE;
-            if (chain_rules.is_london) break :blk Hardfork.LONDON;
-            if (chain_rules.is_berlin) break :blk Hardfork.BERLIN;
-            if (chain_rules.is_istanbul) break :blk Hardfork.ISTANBUL;
-            if (chain_rules.is_petersburg) break :blk Hardfork.PETERSBURG;
-            if (chain_rules.is_constantinople) break :blk Hardfork.CONSTANTINOPLE;
-            if (chain_rules.is_byzantium) break :blk Hardfork.BYZANTIUM;
-            if (chain_rules.is_homestead) break :blk Hardfork.HOMESTEAD;
-            break :blk Hardfork.FRONTIER;
-        };
+        const hardfork = chain_rules.getHardfork();
 
         return Frame{
             .gas_remaining = gas_remaining,
@@ -343,41 +280,9 @@ pub const Frame = struct {
         self.is_static = static;
     }
 
-    /// ChainRules helper methods - moved from ChainRules struct for better data locality
-    /// Mapping of chain rule fields to the hardfork in which they were introduced.
-    const HardforkRule = struct {
-        field_name: []const u8,
-        introduced_in: Hardfork,
-    };
-
-    const HARDFORK_RULES = [_]HardforkRule{
-        .{ .field_name = "is_homestead", .introduced_in = .HOMESTEAD },
-        .{ .field_name = "is_byzantium", .introduced_in = .BYZANTIUM },
-        .{ .field_name = "is_constantinople", .introduced_in = .CONSTANTINOPLE },
-        .{ .field_name = "is_petersburg", .introduced_in = .PETERSBURG },
-        .{ .field_name = "is_istanbul", .introduced_in = .ISTANBUL },
-        .{ .field_name = "is_berlin", .introduced_in = .BERLIN },
-        .{ .field_name = "is_london", .introduced_in = .LONDON },
-        .{ .field_name = "is_merge", .introduced_in = .MERGE },
-        .{ .field_name = "is_shanghai", .introduced_in = .SHANGHAI },
-        .{ .field_name = "is_cancun", .introduced_in = .CANCUN },
-    };
-
     /// Create ChainRules for a specific hardfork
     pub fn chainRulesForHardfork(hardfork: Hardfork) ChainRules {
-        var rules = ChainRules{}; // All fields default to true
-
-        // Disable features that were introduced after the target hardfork
-        inline for (HARDFORK_RULES) |rule| {
-            if (@intFromEnum(hardfork) < @intFromEnum(rule.introduced_in)) {
-                @branchHint(.cold);
-                @field(rules, rule.field_name) = false;
-            } else {
-                @branchHint(.likely);
-            }
-        }
-
-        return rules;
+        return ChainRules.for_hardfork(hardfork);
     }
 
     /// Get the hardfork for this frame
@@ -449,9 +354,6 @@ const TestHelpers = struct {
         return MemoryDatabase.init(allocator);
     }
 
-    fn createMockChainRules() ChainRules {
-        return Frame.chainRulesForHardfork(.CANCUN);
-    }
 };
 
 test "Frame - basic initialization" {
@@ -473,7 +375,7 @@ test "Frame - basic initialization" {
     defer self_destruct.deinit();
     var db = try TestHelpers.createMockDatabase(allocator);
     defer db.deinit();
-    const chain_rules = TestHelpers.createMockChainRules();
+    const chain_rules = ChainRules.for_hardfork(.CANCUN);
 
     var ctx = try Frame.init(
         1000000, // gas
@@ -530,7 +432,7 @@ test "Frame - gas consumption" {
         &analysis,
         &access_list,
         db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
@@ -575,7 +477,7 @@ test "Frame - jumpdest validation" {
         &analysis,
         &access_list,
         db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
@@ -626,7 +528,7 @@ test "Frame - address access tracking" {
         &analysis,
         host,
         db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
@@ -669,7 +571,7 @@ test "Frame - static call restrictions" {
         &analysis,
         &access_list,
         db1.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
@@ -685,7 +587,7 @@ test "Frame - static call restrictions" {
         &analysis,
         &access_list,
         db2.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
@@ -723,7 +625,7 @@ test "Frame - selfdestruct availability" {
         &analysis,
         &access_list,
         db3.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
@@ -743,7 +645,7 @@ test "Frame - selfdestruct availability" {
         &analysis,
         &access_list,
         db4.to_database_interface(),
-        TestHelpers.createMockChainRules(),
+        ChainRules.for_hardfork(.CANCUN),
         null,
         &[_]u8{}, // input
         allocator,

@@ -972,14 +972,14 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // The gas_left from the call should be added back
     frame.gas_remaining += call_result.gas_left;
 
-    // Write return data if successful and there's output
-    if (call_result.success and call_result.output != null and ret_size > 0) {
+    // Write return data to memory if requested, regardless of success
+    // EVM semantics: on failure (e.g., REVERT), return data must still be available to caller
+    if (call_result.output != null and ret_size > 0) {
         const output = call_result.output.?;
         const ret_offset_usize = @as(usize, @intCast(ret_offset));
         const ret_size_usize = @as(usize, @intCast(ret_size));
         const copy_size = @min(output.len, ret_size_usize);
 
-        // Copy output to return memory area
         if (copy_size > 0) {
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
