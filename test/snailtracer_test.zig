@@ -1,6 +1,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
+const Log = @import("evm").Log;
 
 test {
     std.testing.log_level = .warn;
@@ -78,6 +79,15 @@ test "snailtracer benchmark executes successfully" {
     } };
     const call_result = try vm.call(params);
 
+    if (!call_result.success) {
+        Log.debug("[snailtracer-test] Call failed with gas_left={d}", .{call_result.gas_left});
+        Log.debug("[snailtracer-test] Contract deployed at: {x}", .{primitives.Address.to_u256(contract_address)});
+        Log.debug("[snailtracer-test] Calldata length: {d}", .{calldata.len});
+        if (calldata.len >= 4) {
+            Log.debug("[snailtracer-test] Function selector: 0x{x:0>8}", .{std.mem.readInt(u32, calldata[0..4], .big)});
+        }
+    }
+
     try std.testing.expect(call_result.success);
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 0);
@@ -122,6 +132,15 @@ test "snailtracer benchmark high gas consumption" {
         .gas = initial_gas,
     } };
     const call_result = try vm.call(params);
+
+    if (!call_result.success) {
+        Log.debug("[snailtracer-test] Call failed with gas_left={d}", .{call_result.gas_left});
+        Log.debug("[snailtracer-test] Contract deployed at: {x}", .{primitives.Address.to_u256(contract_address)});
+        Log.debug("[snailtracer-test] Calldata length: {d}", .{calldata.len});
+        if (calldata.len >= 4) {
+            Log.debug("[snailtracer-test] Function selector: 0x{x:0>8}", .{std.mem.readInt(u32, calldata[0..4], .big)});
+        }
+    }
 
     try std.testing.expect(call_result.success);
 
@@ -169,6 +188,15 @@ test "snailtracer produces expected output format" {
         .gas = 1_000_000_000,
     } };
     const call_result = try vm.call(params);
+
+    if (!call_result.success) {
+        Log.debug("[snailtracer-test] Call failed with gas_left={d}", .{call_result.gas_left});
+        Log.debug("[snailtracer-test] Contract deployed at: {x}", .{primitives.Address.to_u256(contract_address)});
+        Log.debug("[snailtracer-test] Calldata length: {d}", .{calldata.len});
+        if (calldata.len >= 4) {
+            Log.debug("[snailtracer-test] Function selector: 0x{x:0>8}", .{std.mem.readInt(u32, calldata[0..4], .big)});
+        }
+    }
 
     try std.testing.expect(call_result.success);
 

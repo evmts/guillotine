@@ -3,6 +3,7 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address;
+const Log = @import("evm").Log;
 
 // Import REVM wrapper from module
 const revm_wrapper = @import("revm");
@@ -405,11 +406,10 @@ test "CODECOPY opcode copies contract code to memory" {
     }
 }
 
-
 test "STATICCALL opcode enforces read-only execution" {
     testing.log_level = .debug;
     const allocator = testing.allocator;
-    
+
     // Contract A bytecode: attempts SSTORE (state modification)
     const contract_a_sstore_bytecode = [_]u8{
         0x60, 0x42, // PUSH1 0x42 (value)
@@ -422,7 +422,7 @@ test "STATICCALL opcode enforces read-only execution" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract B bytecode: attempts LOG0 (state modification)
     const contract_b_log_bytecode = [_]u8{
         0x60, 0x42, // PUSH1 0x42 (data)
@@ -438,23 +438,23 @@ test "STATICCALL opcode enforces read-only execution" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract C bytecode: read-only operations (SLOAD, BALANCE, etc)
     const contract_c_readonly_bytecode = [_]u8{
         // SLOAD (read storage)
         0x60, 0x01, // PUSH1 0x01 (key)
         0x54, // SLOAD
         0x50, // POP
-        
+
         // BALANCE (read balance)
         0x30, // ADDRESS
         0x31, // BALANCE
         0x50, // POP
-        
+
         // CODESIZE (read code size)
         0x38, // CODESIZE
         0x50, // POP
-        
+
         // Return success value
         0x60, 0x99, // PUSH1 0x99 (return value)
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -463,7 +463,7 @@ test "STATICCALL opcode enforces read-only execution" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract D bytecode: uses STATICCALL to call contracts A, B, and C
     const contract_d_staticcall_bytecode = [_]u8{
         // STATICCALL to contract A (SSTORE - should fail)
@@ -472,45 +472,99 @@ test "STATICCALL opcode enforces read-only execution" {
         0x60, 0x00, // PUSH1 0 (argsOffset)
         0x60, 0x00, // PUSH1 0 (argsSize)
         0x73, // PUSH20 (address of contract A)
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xfa, // STATICCALL (0xFA)
-        
+
         // Store result of first call
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
-        
+
         // STATICCALL to contract B (LOG - should fail)
         0x60, 0x20, // PUSH1 32 (retOffset)
         0x60, 0x00, // PUSH1 0 (retSize)
         0x60, 0x00, // PUSH1 0 (argsOffset)
         0x60, 0x00, // PUSH1 0 (argsSize)
         0x73, // PUSH20 (address of contract B)
-        0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
-        0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xfa, // STATICCALL (0xFA)
-        
+
         // Store result of second call
         0x60, 0x20, // PUSH1 32 (memory offset)
         0x52, // MSTORE
-        
+
         // STATICCALL to contract C (read-only - should succeed)
         0x60, 0x40, // PUSH1 64 (retOffset)
         0x60, 0x00, // PUSH1 0 (retSize)
         0x60, 0x00, // PUSH1 0 (argsOffset)
         0x60, 0x00, // PUSH1 0 (argsSize)
         0x73, // PUSH20 (address of contract C)
-        0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
-        0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
+        0x55,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xfa, // STATICCALL (0xFA)
-        
+
         // Store result of third call
         0x60, 0x40, // PUSH1 64 (memory offset)
         0x52, // MSTORE
-        
+
         // Return all three results (96 bytes)
         0x60, 0x60, // PUSH1 96 (size)
         0x60, 0x00, // PUSH1 0 (offset)
@@ -527,17 +581,17 @@ test "STATICCALL opcode enforces read-only execution" {
     const revm_contract_b = try Address.from_hex("0x4444444444444444444444444444444444444444");
     const revm_contract_c = try Address.from_hex("0x5555555555555555555555555555555555555555");
     const revm_contract_d = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     // Set balance for deployer and contracts
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setBalance(revm_contract_c, 1000); // Give contract C some balance to read
-    
+
     // Deploy all contracts
     try revm_vm.setCode(revm_contract_a, &contract_a_sstore_bytecode);
     try revm_vm.setCode(revm_contract_b, &contract_b_log_bytecode);
     try revm_vm.setCode(revm_contract_c, &contract_c_readonly_bytecode);
     try revm_vm.setCode(revm_contract_d, &contract_d_staticcall_bytecode);
-    
+
     // Call contract D which will use STATICCALL on A, B, and C
     var revm_result = try revm_vm.call(revm_deployer, revm_contract_d, 0, &[_]u8{}, 2000000);
     defer revm_result.deinit();
@@ -565,11 +619,11 @@ test "STATICCALL opcode enforces read-only execution" {
     try vm_instance.state.set_code(contract_c_address, &contract_c_readonly_bytecode);
     std.debug.print("Setting contract D code (len={})\n", .{contract_d_staticcall_bytecode.len});
     try vm_instance.state.set_code(contract_d_address, &contract_d_staticcall_bytecode);
-    
+
     // Verify the code was set correctly
     const verify_d_code = vm_instance.state.get_code(contract_d_address);
     std.debug.print("Contract D code after setting: len={}\n", .{verify_d_code.len});
-    
+
     // Also verify other contracts
     const verify_a_code = vm_instance.state.get_code(contract_a_address);
     const verify_b_code = vm_instance.state.get_code(contract_b_address);
@@ -577,7 +631,7 @@ test "STATICCALL opcode enforces read-only execution" {
     std.debug.print("Contract A (0x3333...) code: len={}\n", .{verify_a_code.len});
     std.debug.print("Contract B (0x4444...) code: len={}\n", .{verify_b_code.len});
     std.debug.print("Contract C (0x5555...) code: len={}\n", .{verify_c_code.len});
-    
+
     // Set balance for contract C
     try vm_instance.state.set_balance(contract_c_address, 1000);
 
@@ -595,12 +649,12 @@ test "STATICCALL opcode enforces read-only execution" {
     // Compare results
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     // Both should succeed (the main call to contract D should succeed)
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     if (revm_succeeded and guillotine_succeeded) {
-        std.debug.print("[staticcall-test] Guillotine output len={}, hex=0x{X}\n", .{ guillotine_result.output.?.len, std.fmt.fmtSliceHexLower(guillotine_result.output.?)});
+        std.debug.print("[staticcall-test] Guillotine output len={}, hex=0x{X}\n", .{ guillotine_result.output.?.len, std.fmt.fmtSliceHexLower(guillotine_result.output.?) });
         // The output should be 96 bytes (3 u256 values)
         try testing.expect(revm_result.output.len == 96);
         try testing.expect(guillotine_result.output != null);
@@ -610,24 +664,33 @@ test "STATICCALL opcode enforces read-only execution" {
         const revm_call_a_result = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const revm_call_b_result = std.mem.readInt(u256, revm_result.output[32..64], .big);
         const revm_call_c_result = std.mem.readInt(u256, revm_result.output[64..96], .big);
-        
+
         const guillotine_call_a_result = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
         const guillotine_call_b_result = std.mem.readInt(u256, guillotine_result.output.?[32..64], .big);
         const guillotine_call_c_result = std.mem.readInt(u256, guillotine_result.output.?[64..96], .big);
 
-        std.debug.print("[staticcall-test] REVM A,B,C = {d},{d},{d}\n", .{revm_call_a_result, revm_call_b_result, revm_call_c_result});
-        std.debug.print("[staticcall-test] ZIG  A,B,C = {d},{d},{d}\n", .{guillotine_call_a_result, guillotine_call_b_result, guillotine_call_c_result});
+        std.debug.print("[staticcall-test] REVM A,B,C = {d},{d},{d}\n", .{ revm_call_a_result, revm_call_b_result, revm_call_c_result });
+        std.debug.print("[staticcall-test] ZIG  A,B,C = {d},{d},{d}\n", .{ guillotine_call_a_result, guillotine_call_b_result, guillotine_call_c_result });
+
+        // Add detailed logging for debugging
+        Log.debug("[staticcall-test] Comparing call A results: REVM={d} vs Guillotine={d}", .{ revm_call_a_result, guillotine_call_a_result });
+        Log.debug("[staticcall-test] Call A expected: 0 (SSTORE should fail in STATICCALL)", .{});
+
+        // Print hex values for easier debugging
+        std.debug.print("[staticcall-test-debug] REVM call A result (hex): 0x{x}\n", .{revm_call_a_result});
+        std.debug.print("[staticcall-test-debug] Guillotine call A result (hex): 0x{x}\n", .{guillotine_call_a_result});
+
         // Compare each call result
         try testing.expectEqual(revm_call_a_result, guillotine_call_a_result);
         try testing.expectEqual(revm_call_b_result, guillotine_call_b_result);
         try testing.expectEqual(revm_call_c_result, guillotine_call_c_result);
-        
+
         // STATICCALL to contract A (SSTORE) should fail (return 0)
         try testing.expectEqual(@as(u256, 0), revm_call_a_result);
-        
+
         // STATICCALL to contract B (LOG) should fail (return 0)
         try testing.expectEqual(@as(u256, 0), revm_call_b_result);
-        
+
         // STATICCALL to contract C (read-only ops) should succeed (return 1)
         try testing.expectEqual(@as(u256, 1), revm_call_c_result);
     }
@@ -635,14 +698,14 @@ test "STATICCALL opcode enforces read-only execution" {
 
 test "DELEGATECALL opcode executes code in caller's context" {
     const allocator = testing.allocator;
-    
+
     // Contract A bytecode: stores value at storage slot 1 and returns caller address
     const contract_a_bytecode = [_]u8{
         // Store 0xdeadbeef at storage slot 1
         0x63, 0xde, 0xad, 0xbe, 0xef, // PUSH4 0xdeadbeef
         0x60, 0x01, // PUSH1 1 (storage slot)
         0x55, // SSTORE
-        
+
         // Get caller address and return it
         0x33, // CALLER
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -651,7 +714,7 @@ test "DELEGATECALL opcode executes code in caller's context" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract B bytecode: uses DELEGATECALL to execute contract A's code
     const contract_b_bytecode = [_]u8{
         // Setup DELEGATECALL to contract A
@@ -660,19 +723,37 @@ test "DELEGATECALL opcode executes code in caller's context" {
         0x60, 0x00, // PUSH1 0 (argsOffset)
         0x60, 0x00, // PUSH1 0 (argsSize)
         0x73, // PUSH20 (address of contract A)
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xf4, // DELEGATECALL
-        
+
         // Check if call succeeded
         0x60, 0x00, // PUSH1 0 (jump dest if fail)
         0x57, // JUMPI (jump if call failed)
-        
+
         // Load storage slot 1 to verify it was written
         0x60, 0x01, // PUSH1 1 (storage slot)
         0x54, // SLOAD
-        
+
         // Store the value to memory and return it
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
@@ -689,14 +770,14 @@ test "DELEGATECALL opcode executes code in caller's context" {
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     const revm_contract_a = try Address.from_hex("0x3333333333333333333333333333333333333333");
     const revm_contract_b = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
-    
+
     // Deploy both contracts
     try revm_vm.setCode(revm_contract_a, &contract_a_bytecode);
     try revm_vm.setCode(revm_contract_b, &contract_b_bytecode);
-    
+
     // Call contract B which will delegatecall to contract A
     var revm_result = try revm_vm.call(revm_deployer, revm_contract_b, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
@@ -731,9 +812,9 @@ test "DELEGATECALL opcode executes code in caller's context" {
     // Compare results
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     if (revm_succeeded and guillotine_succeeded) {
         // Both should succeed and return the storage value
         try testing.expect(revm_result.output.len == 32);
@@ -746,7 +827,7 @@ test "DELEGATECALL opcode executes code in caller's context" {
         try testing.expectEqual(revm_value, guillotine_value);
         // The value should be 0xdeadbeef (what was stored in slot 1)
         try testing.expectEqual(@as(u256, 0xdeadbeef), revm_value);
-        
+
         // Verify storage was written to contract B, not contract A
         // This is implicit in the test - if storage was written to contract A,
         // the SLOAD in contract B would return 0
@@ -755,7 +836,7 @@ test "DELEGATECALL opcode executes code in caller's context" {
 
 test "CREATE opcode deploys new contract" {
     const allocator = testing.allocator;
-    
+
     // Creator contract bytecode that uses CREATE to deploy the new contract
     // The deployed contract will return 0x42
     const creator_bytecode = [_]u8{
@@ -765,34 +846,29 @@ test "CREATE opcode deploys new contract" {
         0x60, 0x00, // PUSH1 0x00
         0x60, 0x00, // PUSH1 0 (memory offset for first byte)
         0x53, // MSTORE8
-        
         0x60, 0x00, // PUSH1 0x00
         0x60, 0x01, // PUSH1 1 (memory offset)
         0x53, // MSTORE8
-        
         0x60, 0x52, // PUSH1 0x52 (MSTORE opcode)
         0x60, 0x02, // PUSH1 2 (memory offset)
         0x53, // MSTORE8
-        
         0x60, 0x20, // PUSH1 0x20
         0x60, 0x03, // PUSH1 3 (memory offset)
         0x53, // MSTORE8
-        
         0x60, 0x00, // PUSH1 0x00
         0x60, 0x04, // PUSH1 4 (memory offset)
         0x53, // MSTORE8
-        
         0x60, 0xf3, // PUSH1 0xf3 (RETURN opcode)
         0x60, 0x05, // PUSH1 5 (memory offset)
         0x53, // MSTORE8
-        
+
         // Now CREATE the contract
         // Stack: [size, offset, value]
         0x60, 0x06, // PUSH1 6 (size of new contract bytecode)
         0x60, 0x00, // PUSH1 0 (offset in memory where bytecode starts)
         0x60, 0x00, // PUSH1 0 (value to send)
         0xf0, // CREATE
-        
+
         // The new contract address is now on the stack
         // Store it in memory and return it
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -809,14 +885,14 @@ test "CREATE opcode deploys new contract" {
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     const revm_creator_contract = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     // Set balance for deployer and creator contract (needs balance for CREATE)
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setBalance(revm_creator_contract, 10000000);
-    
+
     // Deploy the creator contract
     try revm_vm.setCode(revm_creator_contract, &creator_bytecode);
-    
+
     // Call the creator contract which will use CREATE
     var revm_result = try revm_vm.call(revm_deployer, revm_creator_contract, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
@@ -837,7 +913,7 @@ test "CREATE opcode deploys new contract" {
     // Set balance for deployer and creator contract
     try vm_instance.state.set_balance(deployer_address, 10000000);
     try vm_instance.state.set_balance(creator_contract_address, 10000000);
-    
+
     // Deploy the creator contract
     try vm_instance.state.set_code(creator_contract_address, &creator_bytecode);
 
@@ -855,9 +931,9 @@ test "CREATE opcode deploys new contract" {
     // Compare results
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     if (revm_succeeded and guillotine_succeeded) {
         // Both should return the address of the newly created contract
         try testing.expect(revm_result.output.len == 32);
@@ -871,7 +947,7 @@ test "CREATE opcode deploys new contract" {
         // but both should be non-zero if CREATE succeeded
         try testing.expect(revm_address != 0);
         try testing.expect(guillotine_address != 0);
-        
+
         // Optionally, we could call the new contracts to verify they work
         // This would require extracting the addresses and making additional calls
     }
@@ -879,7 +955,7 @@ test "CREATE opcode deploys new contract" {
 
 test "CREATE opcode with subsequent CALL to deployed contract" {
     const allocator = testing.allocator;
-    
+
     // Creator contract that:
     // 1. Uses CREATE to deploy the contract
     // 2. Calls the newly deployed contract
@@ -891,17 +967,17 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
         0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3, // The actual bytecode
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE (store first 32 bytes, but only 11 are used)
-        
+
         // Now CREATE the contract
         0x60, 0x0b, // PUSH1 11 (size of new contract bytecode)
         0x60, 0x15, // PUSH1 21 (offset in memory where bytecode starts - skip the padding)
         0x60, 0x00, // PUSH1 0 (value to send)
         0xf0, // CREATE
-        
+
         // The new contract address is now on the stack
         // Duplicate it for later use
         0x80, // DUP1
-        
+
         // Setup CALL to the newly created contract
         0x60, 0x20, // PUSH1 32 (retSize - we want 32 bytes back)
         0x60, 0x00, // PUSH1 0 (retOffset - store at memory offset 0)
@@ -911,11 +987,11 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
         0x83, // DUP4 (duplicate the contract address)
         0x61, 0xff, 0xff, // PUSH2 65535 (gas for the call)
         0xf1, // CALL
-        
+
         // Check if call succeeded (1 on stack if success, 0 if fail)
         0x60, 0x00, // PUSH1 0 (jump dest if fail)
         0x57, // JUMPI (jump if call failed)
-        
+
         // Return the data from memory (which should contain 0x42)
         0x60, 0x20, // PUSH1 32 (size)
         0x60, 0x00, // PUSH1 0 (offset)
@@ -929,14 +1005,14 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     const revm_creator_contract = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     // Set balance for deployer and creator contract (needs balance for CREATE)
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setBalance(revm_creator_contract, 10000000);
-    
+
     // Deploy the creator contract
     try revm_vm.setCode(revm_creator_contract, &creator_with_call_bytecode);
-    
+
     // Call the creator contract which will use CREATE and then CALL
     var revm_result = try revm_vm.call(revm_deployer, revm_creator_contract, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
@@ -957,7 +1033,7 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
     // Set balance for deployer and creator contract
     try vm_instance.state.set_balance(deployer_address, 10000000);
     try vm_instance.state.set_balance(creator_contract_address, 10000000);
-    
+
     // Deploy the creator contract
     try vm_instance.state.set_code(creator_contract_address, &creator_with_call_bytecode);
 
@@ -975,9 +1051,9 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
     // Compare results
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     if (revm_succeeded and guillotine_succeeded) {
         // Both should return 0x42 from the newly created contract
         try testing.expect(revm_result.output.len == 32);
@@ -995,26 +1071,54 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
 
 test "CREATE2 opcode creates contract at deterministic address" {
     const allocator = testing.allocator;
-    
+
     // Deployer contract bytecode that uses CREATE2
     // The deployed contract simply returns 0x42
     const deployer_bytecode = [_]u8{
         // First, store the deployed contract bytecode in memory
         // The deployed contract bytecode: PUSH1 0x42, PUSH1 0, MSTORE, PUSH1 32, PUSH1 0, RETURN
         0x7f, // PUSH32 (the bytecode as a single word, padded with zeros)
-        0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00,
+        0x60,
+        0x42,
+        0x60,
+        0x00,
+        0x52,
+        0x60,
+        0x20,
+        0x60,
+        0x00,
+        0xf3,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
         0x60, 0x00, // PUSH1 0 (offset in memory)
         0x52, // MSTORE
-        
+
         // CREATE2 parameters
         0x63, 0xde, 0xad, 0xbe, 0xef, // PUSH4 0xdeadbeef (salt)
         0x60, 0x0b, // PUSH1 11 (size of bytecode to deploy)
         0x60, 0x00, // PUSH1 0 (offset of bytecode in memory)
         0x60, 0x00, // PUSH1 0 (value to send)
         0xf5, // CREATE2
-        
+
         // The new contract address is now on the stack
         // Store it in memory and return it
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -1031,14 +1135,14 @@ test "CREATE2 opcode creates contract at deterministic address" {
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     // Set balance for deployer and contract (CREATE2 needs balance for gas)
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setBalance(revm_contract_address, 10000000);
-    
+
     // Set the deployer bytecode
     try revm_vm.setCode(revm_contract_address, &deployer_bytecode);
-    
+
     // Call the contract to execute CREATE2
     var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
@@ -1088,17 +1192,17 @@ test "CREATE2 opcode creates contract at deterministic address" {
 
         // The addresses should match (deterministic based on deployer, salt, and bytecode)
         try testing.expectEqual(revm_created_address, guillotine_created_address);
-        
+
         // The address should not be zero (successful creation)
         try testing.expect(revm_created_address != 0);
-        
+
         // Now verify the deployed contract works by calling it
         const created_address = Address.from_u256(revm_created_address);
-        
+
         // Call the newly created contract on REVM
         var revm_call_result = try revm_vm.call(revm_deployer, created_address, 0, &[_]u8{}, 100000);
         defer revm_call_result.deinit();
-        
+
         // Call the newly created contract on Guillotine
         const call_params2 = evm.CallParams{ .call = .{
             .caller = deployer_address,
@@ -1107,22 +1211,22 @@ test "CREATE2 opcode creates contract at deterministic address" {
             .input = &[_]u8{},
             .gas = 100000,
         } };
-        
+
         const guillotine_call_result = try vm_instance.call(call_params2);
         defer if (guillotine_call_result.output) |output| allocator.free(output);
-        
+
         // Both calls should succeed and return 0x42
         try testing.expect(revm_call_result.success);
         try testing.expect(guillotine_call_result.success);
-        
+
         if (revm_call_result.success and guillotine_call_result.success) {
             try testing.expect(revm_call_result.output.len == 32);
             try testing.expect(guillotine_call_result.output != null);
             try testing.expect(guillotine_call_result.output.?.len == 32);
-            
+
             const revm_return_value = std.mem.readInt(u256, revm_call_result.output[0..32], .big);
             const guillotine_return_value = std.mem.readInt(u256, guillotine_call_result.output.?[0..32], .big);
-            
+
             try testing.expectEqual(@as(u256, 0x42), revm_return_value);
             try testing.expectEqual(@as(u256, 0x42), guillotine_return_value);
         }
@@ -1131,7 +1235,7 @@ test "CREATE2 opcode creates contract at deterministic address" {
 
 test "EXTCALL EOF opcode support check" {
     const allocator = testing.allocator;
-    
+
     // Simple contract that attempts to use EXTCALL (0xF8)
     // EXTCALL is part of the EOF (EVM Object Format) and might not be supported yet
     const extcall_bytecode = [_]u8{
@@ -1142,10 +1246,28 @@ test "EXTCALL EOF opcode support check" {
         0x60, 0x00, // PUSH1 0 (dummy parameter)
         0x60, 0x00, // PUSH1 0 (dummy parameter)
         0x73, // PUSH20 (target address)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
         0xf8, // EXTCALL (0xF8)
-        
+
         // If we somehow get here, return success
         0x60, 0x01, // PUSH1 1
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -1162,10 +1284,10 @@ test "EXTCALL EOF opcode support check" {
 
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setCode(revm_contract_address, &extcall_bytecode);
-    
+
     var revm_result = try revm_vm.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
@@ -1197,9 +1319,9 @@ test "EXTCALL EOF opcode support check" {
     // Compare results - both should agree on whether EXTCALL is supported
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     // If both EVMs don't support EXTCALL yet, they should both fail
     // If they do support it, they should both succeed
     if (!revm_succeeded and !guillotine_succeeded) {
@@ -1213,14 +1335,14 @@ test "EXTCALL EOF opcode support check" {
 
 test "EXTDELEGATECALL EOF opcode support check" {
     const allocator = testing.allocator;
-    
+
     // Contract A: simple storage setter that will be called via EXTDELEGATECALL
     const contract_a_bytecode = [_]u8{
         // Store 0xbeef at storage slot 1
         0x61, 0xbe, 0xef, // PUSH2 0xbeef
         0x60, 0x01, // PUSH1 1 (storage slot)
         0x55, // SSTORE
-        
+
         // Return success
         0x60, 0x01, // PUSH1 1
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -1229,7 +1351,7 @@ test "EXTDELEGATECALL EOF opcode support check" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract B: attempts to use EXTDELEGATECALL (0xF9) to execute contract A's code
     const contract_b_extdelegatecall_bytecode = [_]u8{
         // Setup EXTDELEGATECALL parameters
@@ -1238,19 +1360,37 @@ test "EXTDELEGATECALL EOF opcode support check" {
         0x60, 0x00, // PUSH1 0 (dummy parameter)
         0x60, 0x00, // PUSH1 0 (dummy parameter)
         0x73, // PUSH20 (address of contract A)
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xf9, // EXTDELEGATECALL (0xF9)
-        
+
         // Check if call succeeded
         0x60, 0x00, // PUSH1 0 (jump dest if fail)
         0x57, // JUMPI (jump if call failed)
-        
+
         // Load storage slot 1 to verify it was written
         0x60, 0x01, // PUSH1 1 (storage slot)
         0x54, // SLOAD
-        
+
         // Return the storage value
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
@@ -1267,11 +1407,11 @@ test "EXTDELEGATECALL EOF opcode support check" {
     const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     const revm_contract_a = try Address.from_hex("0x3333333333333333333333333333333333333333");
     const revm_contract_b = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setCode(revm_contract_a, &contract_a_bytecode);
     try revm_vm.setCode(revm_contract_b, &contract_b_extdelegatecall_bytecode);
-    
+
     var revm_result = try revm_vm.call(revm_deployer, revm_contract_b, 0, &[_]u8{}, 1000000);
     defer revm_result.deinit();
 
@@ -1305,9 +1445,9 @@ test "EXTDELEGATECALL EOF opcode support check" {
     // Compare results
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     // If both EVMs don't support EXTDELEGATECALL yet, they should both fail
     if (!revm_succeeded and !guillotine_succeeded) {
         // Expected: EXTDELEGATECALL not supported, treated as invalid opcode
@@ -1317,10 +1457,10 @@ test "EXTDELEGATECALL EOF opcode support check" {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
-        
+
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
-        
+
         try testing.expectEqual(revm_value, guillotine_value);
         // Should have stored 0xbeef in contract B's storage (delegatecall context)
         try testing.expectEqual(@as(u256, 0xbeef), revm_value);
@@ -1329,17 +1469,17 @@ test "EXTDELEGATECALL EOF opcode support check" {
 
 test "EXTSTATICCALL EOF opcode support check" {
     const allocator = testing.allocator;
-    
+
     // Contract A: read-only operations that should work in static context
     const contract_a_readonly_bytecode = [_]u8{
         // Load from storage slot 1
         0x60, 0x01, // PUSH1 1
         0x54, // SLOAD
-        
+
         // Add 0x42 to it
         0x60, 0x42, // PUSH1 0x42
         0x01, // ADD
-        
+
         // Return the result
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
@@ -1347,14 +1487,14 @@ test "EXTSTATICCALL EOF opcode support check" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract B: state-modifying operation that should fail in static context
     const contract_b_statemod_bytecode = [_]u8{
         // Attempt to store value (should fail in static call)
         0x60, 0x99, // PUSH1 0x99
         0x60, 0x01, // PUSH1 1 (storage slot)
         0x55, // SSTORE
-        
+
         // If we get here, return 1
         0x60, 0x01, // PUSH1 1
         0x60, 0x00, // PUSH1 0 (memory offset)
@@ -1363,44 +1503,80 @@ test "EXTSTATICCALL EOF opcode support check" {
         0x60, 0x00, // PUSH1 0 (offset)
         0xf3, // RETURN
     };
-    
+
     // Contract C: uses EXTSTATICCALL to call both A and B
     const contract_c_extstaticcall_bytecode = [_]u8{
         // First, store initial value in storage slot 1
         0x60, 0x10, // PUSH1 0x10
         0x60, 0x01, // PUSH1 1
         0x55, // SSTORE
-        
+
         // EXTSTATICCALL to contract A (should succeed)
         0x60, 0x00, // PUSH1 0 (retOffset)
         0x60, 0x00, // PUSH1 0 (retSize)
         0x60, 0x00, // PUSH1 0 (argsOffset)
         0x60, 0x00, // PUSH1 0 (argsSize)
         0x73, // PUSH20 (address of contract A)
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-        0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
+        0x33,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xfb, // EXTSTATICCALL (0xFB)
-        
+
         // Store result of first call
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
-        
+
         // EXTSTATICCALL to contract B (should fail due to SSTORE)
         0x60, 0x20, // PUSH1 32 (retOffset)
         0x60, 0x00, // PUSH1 0 (retSize)
         0x60, 0x00, // PUSH1 0 (argsOffset)
         0x60, 0x00, // PUSH1 0 (argsSize)
         0x73, // PUSH20 (address of contract B)
-        0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
-        0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
+        0x44,
         0x62, 0x0f, 0x42, 0x40, // PUSH3 1000000 (gas)
         0xfb, // EXTSTATICCALL (0xFB)
-        
+
         // Store result of second call
         0x60, 0x20, // PUSH1 32 (memory offset)
         0x52, // MSTORE
-        
+
         // Return both results (64 bytes)
         0x60, 0x40, // PUSH1 64 (size)
         0x60, 0x00, // PUSH1 0 (offset)
@@ -1416,12 +1592,12 @@ test "EXTSTATICCALL EOF opcode support check" {
     const revm_contract_a = try Address.from_hex("0x3333333333333333333333333333333333333333");
     const revm_contract_b = try Address.from_hex("0x4444444444444444444444444444444444444444");
     const revm_contract_c = try Address.from_hex("0x2222222222222222222222222222222222222222");
-    
+
     try revm_vm.setBalance(revm_deployer, 10000000);
     try revm_vm.setCode(revm_contract_a, &contract_a_readonly_bytecode);
     try revm_vm.setCode(revm_contract_b, &contract_b_statemod_bytecode);
     try revm_vm.setCode(revm_contract_c, &contract_c_extstaticcall_bytecode);
-    
+
     var revm_result = try revm_vm.call(revm_deployer, revm_contract_c, 0, &[_]u8{}, 2000000);
     defer revm_result.deinit();
 
@@ -1457,9 +1633,9 @@ test "EXTSTATICCALL EOF opcode support check" {
     // Compare results
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
-    
+
     try testing.expect(revm_succeeded == guillotine_succeeded);
-    
+
     // If both EVMs don't support EXTSTATICCALL yet, they should both fail
     if (!revm_succeeded and !guillotine_succeeded) {
         // Expected: EXTSTATICCALL not supported, treated as invalid opcode
@@ -1470,21 +1646,21 @@ test "EXTSTATICCALL EOF opcode support check" {
         try testing.expect(revm_result.output.len == 64);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 64);
-        
+
         // Extract the two call results
         const revm_call_a_result = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const revm_call_b_result = std.mem.readInt(u256, revm_result.output[32..64], .big);
-        
+
         const guillotine_call_a_result = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
         const guillotine_call_b_result = std.mem.readInt(u256, guillotine_result.output.?[32..64], .big);
-        
+
         // Compare each call result
         try testing.expectEqual(revm_call_a_result, guillotine_call_a_result);
         try testing.expectEqual(revm_call_b_result, guillotine_call_b_result);
-        
+
         // EXTSTATICCALL to contract A should succeed (return 1)
         try testing.expectEqual(@as(u256, 1), revm_call_a_result);
-        
+
         // EXTSTATICCALL to contract B should fail (return 0) due to SSTORE
         try testing.expectEqual(@as(u256, 0), revm_call_b_result);
     }

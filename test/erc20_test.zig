@@ -1,6 +1,7 @@
 const std = @import("std");
 const evm = @import("evm");
 const primitives = @import("primitives");
+const Log = @import("evm").Log;
 
 test {
     std.testing.log_level = .warn;
@@ -95,6 +96,12 @@ test "erc20 transfer benchmark executes successfully" {
 
     if (!call_result.success) {
         std.log.err("ERC20 transfer call failed, gas_left: {}", .{call_result.gas_left});
+        Log.debug("[erc20-test] Call failed with gas_left={d}, initial_gas={d}", .{ call_result.gas_left, initial_gas });
+        Log.debug("[erc20-test] Contract deployed at: {x}", .{primitives.Address.to_u256(contract_address)});
+        Log.debug("[erc20-test] Calldata length: {d}", .{calldata.len});
+        if (calldata.len >= 4) {
+            Log.debug("[erc20-test] Function selector: 0x{x:0>8}", .{std.mem.readInt(u32, calldata[0..4], .big)});
+        }
     }
     try std.testing.expect(call_result.success);
     const gas_used = initial_gas - call_result.gas_left;
@@ -103,6 +110,8 @@ test "erc20 transfer benchmark executes successfully" {
     if (call_result.output) |output| {
         defer allocator.free(output);
         std.log.debug("ERC20 transfer returned {} bytes", .{output.len});
+        Log.debug("[erc20-test] Transfer output length: {d}", .{output.len});
+        Log.debug("[erc20-test] Call success: {}, gas_left: {d}", .{ call_result.success, call_result.gas_left });
         if (output.len > 0) {
             std.log.debug("First few bytes: {x}", .{output[0..@min(8, output.len)]});
             if (output.len >= 32) {
