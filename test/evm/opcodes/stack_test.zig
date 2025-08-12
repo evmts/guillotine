@@ -4,7 +4,7 @@ const evm = @import("evm");
 const primitives = @import("primitives");
 
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 
 // Helper function to create test addresses
@@ -23,12 +23,12 @@ test "Stack: PUSH0 operation" {
     defer vm.deinit();
 
     const bytecode = &[_]u8{
-        0x5F,       // PUSH0
+        0x5F, // PUSH0
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1000);
@@ -42,7 +42,7 @@ test "Stack: PUSH0 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -69,10 +69,10 @@ test "Stack: PUSH1 operation" {
     const bytecode = &[_]u8{
         0x60, 0xAB, // PUSH1 0xAB
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1001);
@@ -86,7 +86,7 @@ test "Stack: PUSH1 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -113,11 +113,11 @@ test "Stack: PUSH2 operation" {
 
     const bytecode = &[_]u8{
         0x61, 0x12, 0x34, // PUSH2 0x1234
-        0x60, 0x00,       // PUSH1 0
-        0x52,             // MSTORE
-        0x60, 0x20,       // PUSH1 32
-        0x60, 0x00,       // PUSH1 0
-        0xF3,             // RETURN
+        0x60, 0x00, // PUSH1 0
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32
+        0x60, 0x00, // PUSH1 0
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1002);
@@ -131,7 +131,7 @@ test "Stack: PUSH2 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -158,15 +158,43 @@ test "Stack: PUSH32 operation" {
 
     const bytecode = &[_]u8{
         0x7F, // PUSH32
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-        0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+        0x01,
+        0x02,
+        0x03,
+        0x04,
+        0x05,
+        0x06,
+        0x07,
+        0x08,
+        0x09,
+        0x0A,
+        0x0B,
+        0x0C,
+        0x0D,
+        0x0E,
+        0x0F,
+        0x10,
+        0x11,
+        0x12,
+        0x13,
+        0x14,
+        0x15,
+        0x16,
+        0x17,
+        0x18,
+        0x19,
+        0x1A,
+        0x1B,
+        0x1C,
+        0x1D,
+        0x1E,
+        0x1F,
+        0x20,
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1003);
@@ -180,7 +208,7 @@ test "Stack: PUSH32 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -212,12 +240,12 @@ test "Stack: POP operation" {
     const bytecode = &[_]u8{
         0x60, 0x42, // PUSH1 0x42 (first value)
         0x60, 0x99, // PUSH1 0x99 (second value)
-        0x50,       // POP (remove 0x99)
+        0x50, // POP (remove 0x99)
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1004);
@@ -231,7 +259,7 @@ test "Stack: POP operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -258,13 +286,13 @@ test "Stack: DUP1 operation" {
 
     const bytecode = &[_]u8{
         0x60, 0x42, // PUSH1 0x42
-        0x80,       // DUP1 (duplicate top item)
-        0x01,       // ADD (0x42 + 0x42 = 0x84)
+        0x80, // DUP1 (duplicate top item)
+        0x01, // ADD (0x42 + 0x42 = 0x84)
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1005);
@@ -278,7 +306,7 @@ test "Stack: DUP1 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -313,9 +341,9 @@ test "Stack: DUP16 operation" {
         try bytecode.append(0x60); // PUSH1
         try bytecode.append(i);
     }
-    
+
     try bytecode.append(0x8F); // DUP16 (duplicate the 16th item from top, which is value 1)
-    
+
     // Store the result
     try bytecode.append(0x60); // PUSH1
     try bytecode.append(0x00);
@@ -337,7 +365,7 @@ test "Stack: DUP16 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -365,12 +393,12 @@ test "Stack: SWAP1 operation" {
     const bytecode = &[_]u8{
         0x60, 0x11, // PUSH1 0x11
         0x60, 0x22, // PUSH1 0x22
-        0x90,       // SWAP1 (swap top two items)
+        0x90, // SWAP1 (swap top two items)
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1007);
@@ -384,7 +412,7 @@ test "Stack: SWAP1 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -419,9 +447,9 @@ test "Stack: SWAP16 operation" {
         try bytecode.append(0x60); // PUSH1
         try bytecode.append(i);
     }
-    
+
     try bytecode.append(0x9F); // SWAP16 (swap top with 17th from top)
-    
+
     // Store the result (top of stack after swap)
     try bytecode.append(0x60); // PUSH1
     try bytecode.append(0x00);
@@ -443,7 +471,7 @@ test "Stack: SWAP16 operation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -473,16 +501,16 @@ test "Stack: Complex stack manipulation" {
         0x60, 0x10, // PUSH1 0x10
         0x60, 0x20, // PUSH1 0x20
         0x60, 0x30, // PUSH1 0x30  Stack: [0x10, 0x20, 0x30]
-        0x81,       // DUP2        Stack: [0x10, 0x20, 0x30, 0x20]
-        0x91,       // SWAP2       Stack: [0x10, 0x20, 0x20, 0x30]
-        0x50,       // POP         Stack: [0x10, 0x20, 0x20]
-        0x01,       // ADD         Stack: [0x10, 0x40]
-        0x01,       // ADD         Stack: [0x50]
+        0x81, // DUP2        Stack: [0x10, 0x20, 0x30, 0x20]
+        0x91, // SWAP2       Stack: [0x10, 0x20, 0x20, 0x30]
+        0x50, // POP         Stack: [0x10, 0x20, 0x20]
+        0x01, // ADD         Stack: [0x10, 0x40]
+        0x01, // ADD         Stack: [0x50]
         0x60, 0x00, // PUSH1 0
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 32
         0x60, 0x00, // PUSH1 0
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
 
     const contract_addr = testAddress(0x1009);
@@ -496,7 +524,7 @@ test "Stack: Complex stack manipulation" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
@@ -537,7 +565,7 @@ test "Stack: PUSH with insufficient bytes should fail" {
         .value = 0,
         .input = &[_]u8{},
         .gas = 100000,
-    }};
+    } };
 
     const result = try vm.call(call_params);
     defer if (result.output) |output| allocator.free(output);

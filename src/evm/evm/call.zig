@@ -189,7 +189,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         }
 
         // Create host interface from self
-        var host = Host.init(self);
+        const host = Host.init(self);
 
         // Initialize only the first frame now. Nested frames will be initialized on demand
         const first_next_frame: ?*Frame = null; // no nested calls pre-allocated
@@ -203,7 +203,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             analysis_ptr, // analysis
             &self.access_list,
             &self.journal,
-            &host,
+            host,
             0, // snapshot_id
             self.state.database,
             ChainRules{},
@@ -257,7 +257,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         }
 
         // Create host interface from self
-        var host = Host.init(self);
+        const host = Host.init(self);
 
         // Initialize the new frame
         const parent_frame = &self.frame_stack.?[self.current_frame_depth];
@@ -271,7 +271,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             analysis_ptr, // analysis
             &self.access_list,
             &self.journal,
-            &host,
+            host,
             snapshot_id, // use pre-created snapshot
             self.state.database,
             ChainRules{},

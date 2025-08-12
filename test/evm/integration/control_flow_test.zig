@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 // test {
-//     std.testing.log_level = .debug;
+//     std.testing.log_level = .warn;
 // }
 
 // Import EVM components directly
@@ -146,7 +146,6 @@ test "Integration: Loop implementation with JUMP" {
         &[_]u8{},
         false,
     );
-
 
     // Create frame
     const frame_ptr = try allocator.create(Frame);
@@ -487,7 +486,6 @@ test "Integration: Nested conditions with jumps" {
         false,
     );
 
-
     // Create frame
     const frame_ptr = try allocator.create(Frame);
     defer allocator.destroy(frame_ptr);
@@ -527,10 +525,10 @@ test "Integration: Nested conditions with jumps" {
     _ = try frame_ptr.stack.pop(); // Pop destination
     try testing.expectEqual(@as(u256, 0), should_skip_first); // Should not skip
 
-    // Second condition: c < d (should be true) with corrected LT  
+    // Second condition: c < d (should be true) with corrected LT
     // LT now computes (top < second), so we need [d, c] for c < d
     try frame_ptr.stack.append(d); // Push d (second)
-    try frame_ptr.stack.append(c); // Push c (top), Stack: [d, c] 
+    try frame_ptr.stack.append(c); // Push c (top), Stack: [d, c]
     _ = try vm.table.execute(0, interpreter, state, 0x10); // LT: computes c < d
 
     // AND the conditions

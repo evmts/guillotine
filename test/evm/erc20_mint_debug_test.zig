@@ -5,7 +5,7 @@ const Address = @import("Address").Address;
 
 test {
     // Enable ALL debug logging
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 }
 
 fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {

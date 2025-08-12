@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 // test {
-//     std.testing.log_level = .debug;
+//     std.testing.log_level = .warn;
 // }
 const Evm = @import("evm");
 const primitives = @import("primitives");

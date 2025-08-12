@@ -213,7 +213,7 @@ test "KECCAK256 opcode hashes test data" {
 
 test "KECCAK256 opcode hashes 32-byte data" {
     const allocator = testing.allocator;
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 
     // Store 32 bytes of data in memory, then hash it
     // The test data 0x01..0x20 should hash to start with 0x52...
@@ -226,7 +226,7 @@ test "KECCAK256 opcode hashes 32-byte data" {
         0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
         0x60, 0x00, // PUSH1 0 (memory offset to store at)
         0x52, // MSTORE (store data at memory[0])
-        
+
         // Now hash the data - EVM stack order for KECCAK256: bottom[offset, size]top
         0x60, 0x00, // PUSH1 0 (offset - where to read from)
         0x60, 0x20, // PUSH1 32 (size - how many bytes to hash)

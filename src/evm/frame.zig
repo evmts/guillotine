@@ -101,7 +101,7 @@ pub const Frame = struct {
 
     // WARM - Call context (grouped together)
     journal: *CallJournal, // 8 bytes
-    host: *Host, // 8 bytes
+    host: Host, // 16 bytes (ptr + vtable)
     snapshot_id: u32, // 4 bytes
     caller: primitives.Address.Address, // 20 bytes
     value: u256, // 32 bytes
@@ -147,7 +147,7 @@ pub const Frame = struct {
         analysis: *const CodeAnalysis,
         access_list: *AccessList,
         journal: *CallJournal,
-        host: *Host,
+        host: Host,
         snapshot_id: u32,
         state: DatabaseInterface,
         chain_rules: ChainRules,

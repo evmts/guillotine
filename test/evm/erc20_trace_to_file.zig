@@ -5,7 +5,7 @@ const Address = @import("Address").Address;
 
 test {
     // Enable ALL debug logging
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 }
 
 // Custom log function that writes to both stdout and file

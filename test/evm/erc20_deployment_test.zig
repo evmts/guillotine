@@ -28,7 +28,7 @@ fn loadERC20Bytecode(allocator: std.mem.Allocator) ![]u8 {
 }
 
 test "ERC20 contract deployment hangs - minimal reproduction" {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
     const allocator = std.testing.allocator;
 
     std.log.info("=== TEST: Starting ERC20 deployment hang reproduction ===", .{});
@@ -71,7 +71,7 @@ test "ERC20 contract deployment hangs - minimal reproduction" {
 }
 
 test "Simple contract deployment works" {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
     const allocator = std.testing.allocator;
 
     std.log.info("=== TEST: Starting simple contract deployment test ===", .{});

@@ -5,7 +5,7 @@ const testing = std.testing;
 
 // Debug logging disabled for clean output
 // test {
-//     std.testing.log_level = .debug;
+//     std.testing.log_level = .warn;
 // }
 
 test "fuzz_crypto_keccak256_empty" {

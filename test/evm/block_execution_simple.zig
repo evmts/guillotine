@@ -7,7 +7,7 @@ const CallResult = evm.CallResult;
 // Updated to new API - migration in progress, tests not run yet
 
 test "Simple bytecode works with block execution" {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
     const allocator = std.testing.allocator;
 
     std.log.info("=== TEST: Starting Simple bytecode block execution test ===", .{});

@@ -3,7 +3,7 @@ const evm = @import("evm");
 const primitives = @import("primitives");
 
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 
 fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
@@ -85,19 +85,19 @@ test "ten-thousand-hashes benchmark executes successfully" {
 
 test "hexDecode handles various hex formats" {
     const allocator = std.testing.allocator;
-    
+
     // Test with 0x prefix
     const hex1 = "0x68656c6c6f";
     const bytes1 = try hexDecode(allocator, hex1);
     defer allocator.free(bytes1);
     try std.testing.expectEqualStrings("hello", bytes1);
-    
+
     // Test without 0x prefix
     const hex2 = "776f726c64";
     const bytes2 = try hexDecode(allocator, hex2);
     defer allocator.free(bytes2);
     try std.testing.expectEqualStrings("world", bytes2);
-    
+
     // Test empty string
     const hex3 = "";
     const bytes3 = try hexDecode(allocator, hex3);
@@ -107,23 +107,23 @@ test "hexDecode handles various hex formats" {
 
 test "deploy function creates contract successfully" {
     const allocator = std.testing.allocator;
-    
+
     // Set up VM
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    
+
     var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
-    
+
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
     try vm.state.set_balance(caller, std.math.maxInt(u256));
-    
+
     // Simple bytecode that returns 42
-    const bytecode = &[_]u8{0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3};
-    
+    const bytecode = &[_]u8{ 0x60, 0x2a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
+
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
-    
+
     // Verify contract was deployed
     const code = vm.state.get_code(contract_address);
     try std.testing.expect(code.len > 0);
@@ -131,50 +131,50 @@ test "deploy function creates contract successfully" {
 
 test "deploy function handles deployment failure" {
     const allocator = std.testing.allocator;
-    
+
     // Set up VM
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    
+
     var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
-    
+
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
     try vm.state.set_balance(caller, std.math.maxInt(u256));
-    
+
     // Invalid bytecode that will fail deployment (REVERT immediately)
     const bytecode = &[_]u8{0xfd};
-    
+
     const result = deploy(&vm, allocator, caller, bytecode);
     try std.testing.expectError(error.DeploymentFailed, result);
 }
 
 test "ten-thousand-hashes benchmark gas consumption" {
     const allocator = std.testing.allocator;
-    
+
     // Load bytecode and calldata
     const bytecode_hex = try readCaseFile(allocator, "ten-thousand-hashes", "bytecode.txt");
     defer allocator.free(bytecode_hex);
     const calldata_hex = try readCaseFile(allocator, "ten-thousand-hashes", "calldata.txt");
     defer allocator.free(calldata_hex);
-    
+
     const bytecode = try hexDecode(allocator, bytecode_hex);
     defer allocator.free(bytecode);
     const calldata = try hexDecode(allocator, calldata_hex);
     defer allocator.free(calldata);
-    
+
     // Set up VM
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    
+
     var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
-    
+
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
     try vm.state.set_balance(caller, std.math.maxInt(u256));
-    
+
     // Deploy and call with limited gas
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
     const initial_gas: u64 = 10_000_000;
@@ -186,13 +186,13 @@ test "ten-thousand-hashes benchmark gas consumption" {
         .gas = initial_gas,
     } };
     const call_result = try vm.call(params);
-    
+
     try std.testing.expect(call_result.success);
-    
+
     // Verify significant gas was consumed (10,000 hashes should use substantial gas)
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 100_000); // Should use at least 100k gas
-    
+
     if (call_result.output) |output| {
         if (output.len > 0) allocator.free(output);
     }
@@ -200,14 +200,14 @@ test "ten-thousand-hashes benchmark gas consumption" {
 
 test "readCaseFile reads and trims files correctly" {
     const allocator = std.testing.allocator;
-    
+
     // Read a known file
     const content = try readCaseFile(allocator, "ten-thousand-hashes", "calldata.txt");
     defer allocator.free(content);
-    
+
     // Verify content was read and trimmed
     try std.testing.expect(content.len > 0);
-    
+
     // Verify no leading/trailing whitespace
     try std.testing.expect(content[0] != ' ' and content[0] != '\t' and content[0] != '\n');
     try std.testing.expect(content[content.len - 1] != ' ' and content[content.len - 1] != '\t' and content[content.len - 1] != '\n');

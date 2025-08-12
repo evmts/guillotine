@@ -114,7 +114,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     defer analysis.deinit();
 
     // Create host interface from self
-    var host = Host.init(self);
+    const host = Host.init(self);
     
     // Create temporary AccessList for Frame (different type from EVM's access_list)
     const Context = @import("../access_list/context.zig");
@@ -133,7 +133,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         &analysis, // code analysis
         &frame_access_list, // access list
         &self.journal, // call journal
-        &host, // host interface from self
+        host, // host interface from self
         self.journal.create_snapshot(), // create new snapshot id
         self.state.database, // database interface
         self.chain_rules, // chain rules

@@ -16,7 +16,7 @@ const Vm = Evm.Evm;
 const Context = Evm.Context;
 
 test {
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 }
 
 test "OpcodeMetadata basic operations" {

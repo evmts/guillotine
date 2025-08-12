@@ -5,7 +5,7 @@ const Address = primitives.Address;
 const CallParams = @import("evm").CallParams;
 
 test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" {
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 
     const allocator = std.testing.allocator;
 
@@ -50,10 +50,10 @@ test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" 
     // Deploy the contract by setting the deployment bytecode directly
     const caller = Address.from_u256(0x1000);
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
-    
+
     // Set the deployment bytecode for the contract address
     try vm.state.set_code(contract_address, &deployment_bytecode);
-    
+
     // Execute the deployment bytecode to see what gets returned
     const call_params = CallParams{ .call = .{
         .caller = caller,
@@ -61,7 +61,7 @@ test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" 
         .value = 0,
         .input = &[_]u8{},
         .gas = 1_000_000,
-    }};
+    } };
 
     const deploy_result = try vm.call(call_params);
     defer if (deploy_result.output) |output| allocator.free(output);
@@ -73,7 +73,7 @@ test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" 
 
     if (deploy_result.output) |output| {
         std.log.debug("Deployment output length: {}", .{output.len});
-        
+
         // This should fail - we expect 1 byte of runtime code, not 0
         try std.testing.expect(output.len > 0);
         try std.testing.expectEqual(@as(usize, 1), output.len);

@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 
 // test {
-//     std.testing.log_level = .debug;
+//     std.testing.log_level = .warn;
 // }
 const Evm = @import("evm");
 const primitives = @import("primitives");
@@ -12,7 +12,7 @@ const CallResult = Evm.CallResult;
 // Updated to new API - migration in progress, tests not run yet
 
 // test {
-//     std.testing.log_level = .debug;
+//     std.testing.log_level = .warn;
 // }
 
 const Vm = Evm.Evm;

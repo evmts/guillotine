@@ -4,7 +4,7 @@ const Evm = @import("evm");
 const Address = @import("Address").Address;
 
 test {
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 }
 
 test "minimal string storage in constructor" {

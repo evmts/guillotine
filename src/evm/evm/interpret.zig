@@ -246,7 +246,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             .push_sub_fusion => |immediate| {
                 current_index += 1;
                 const a = frame.stack.peek_unsafe().*;
-                const result = a -% immediate;
+                const result = immediate -% a;
                 frame.stack.set_top_unsafe(result);
             },
             .push_mul_fusion => |immediate| {
@@ -262,7 +262,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             .push_div_fusion => |immediate| {
                 current_index += 1;
                 const a = frame.stack.peek_unsafe().*;
-                const result = if (immediate == 0) 0 else a / immediate;
+                const result = if (a == 0) 0 else immediate / a;
                 frame.stack.set_top_unsafe(result);
             },
             .push_push_result => |result| {

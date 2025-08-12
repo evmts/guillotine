@@ -53,9 +53,8 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
         Log.debug("KECCAK256 stack before pop: top={}, second={}", .{ top, second });
     }
 
-    // EVM stack order: [..., offset, size] with size on top
-    const size = frame.stack.pop_unsafe();
     const offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     Log.debug("KECCAK256 opcode: offset={}, size={} (stack_size={})", .{ offset, size, frame.stack.size() });
 

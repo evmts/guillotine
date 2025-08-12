@@ -473,7 +473,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     const frame_gas: u64 = gas - precharge;
 
     // Prepare a standalone frame for constructor execution
-    var host = @import("host.zig").Host.init(self);
+    const host = @import("host.zig").Host.init(self);
     const snapshot_id: u32 = self.journal.create_snapshot();
     var frame = try Frame.init(
         frame_gas,
@@ -485,7 +485,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         analysis_ptr,
         &self.access_list,
         &self.journal,
-        &host,
+        host,
         snapshot_id,
         self.state.database,
         ChainRules.DEFAULT,

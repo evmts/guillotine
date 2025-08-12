@@ -3,7 +3,7 @@ const expect = std.testing.expect;
 const evm = @import("evm");
 
 test "TenThousandHashes benchmark test" {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
     const allocator = std.testing.allocator;
 
     std.debug.print("\n=== TenThousandHashes Benchmark Test ===\n", .{});

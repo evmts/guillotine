@@ -9,7 +9,7 @@ test "JUMPI should take jump when condition is non-zero" {
     const allocator = std.testing.allocator;
 
     // Enable debug logging
-    // std.testing.log_level = .debug;
+    // std.testing.log_level = .warn;
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -45,13 +45,15 @@ test "JUMPI should take jump when condition is non-zero" {
     };
 
     // Call the contract to execute the bytecode
-    const call_params = CallParams{ .call = .{
-        .caller = caller,
-        .to = Address.from_u256(0x2000000000000000000000000000000000000002), // arbitrary contract address
-        .value = 0,
-        .input = bytecode, // using bytecode as calldata for simplicity
-        .gas = 1000000,
-    }};
+    const call_params = CallParams{
+        .call = .{
+            .caller = caller,
+            .to = Address.from_u256(0x2000000000000000000000000000000000000002), // arbitrary contract address
+            .value = 0,
+            .input = bytecode, // using bytecode as calldata for simplicity
+            .gas = 1000000,
+        },
+    };
     const result = try evm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
 
@@ -92,13 +94,15 @@ test "JUMPI should NOT jump when condition is zero" {
     };
 
     // Call the contract
-    const call_params = CallParams{ .call = .{
-        .caller = caller,
-        .to = Address.from_u256(0x2000000000000000000000000000000000000002), // arbitrary contract address
-        .value = 0,
-        .input = bytecode, // using bytecode as calldata
-        .gas = 1000000,
-    }};
+    const call_params = CallParams{
+        .call = .{
+            .caller = caller,
+            .to = Address.from_u256(0x2000000000000000000000000000000000000002), // arbitrary contract address
+            .value = 0,
+            .input = bytecode, // using bytecode as calldata
+            .gas = 1000000,
+        },
+    };
     const result = try evm.call(call_params);
     defer if (result.output) |output| allocator.free(output);
 
