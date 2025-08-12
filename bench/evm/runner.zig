@@ -22,7 +22,7 @@ const CALLER_ADDRESS_U256: u256 = 0x1000000000000000000000000000000000000001;
 
 // Override log level to suppress debug output for clean benchmark results
 pub const std_options: std.Options = .{
-    .log_level = .debug,
+    .log_level = .warn,
 };
 
 pub fn main() !void {

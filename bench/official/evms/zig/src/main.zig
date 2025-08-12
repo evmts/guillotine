@@ -12,7 +12,7 @@ const CALLER_ADDRESS = "0x1000000000000000000000000000000000000001";
 // Updated to new API - migration in progress, tests not run yet
 
 pub const std_options: std.Options = .{
-    .log_level = .debug,
+    .log_level = .err,
 };
 
 pub fn main() !void {
