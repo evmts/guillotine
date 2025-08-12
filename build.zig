@@ -32,6 +32,9 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     build_options.addOption(bool, "no_precompiles", no_precompiles);
     build_options.addOption(bool, "no_bn254", no_bn254);
+    // Compile-time tracing toggle (no runtime checks). Usage: zig build -Denable-tracing=true
+    const enable_tracing = b.option(bool, "enable-tracing", "Enable EVM instruction tracing (compile-time)") orelse false;
+    build_options.addOption(bool, "enable_tracing", enable_tracing);
     const build_options_mod = build_options.createModule();
 
     const lib_mod = b.createModule(.{

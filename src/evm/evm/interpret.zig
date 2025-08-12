@@ -1,5 +1,6 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
+const build_options = @import("build_options");
 const Tracer = @import("../tracer.zig").Tracer;
 const Frame = @import("../frame.zig").Frame;
 const Log = @import("../log.zig");
@@ -158,20 +159,21 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             }
         }
 
-        // Optional tracing hook (REVM-compatible JSON) using inst->pc mapping
-        if (self.tracer) |writer| {
-            if (current_index < analysis.inst_to_pc.len) {
-                const pc_u16 = analysis.inst_to_pc[current_index];
-                if (pc_u16 != std.math.maxInt(u16)) {
-                    const pc: usize = pc_u16;
-                    const opcode: u8 = if (pc < analysis.code_len) analysis.code[pc] else 0x00;
-                    const stack_len: usize = frame.stack.size();
-                    const stack_view: []const u256 = frame.stack.data[0..stack_len];
-                    const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
-                    const mem_size: usize = frame.memory.size();
-                    var tr = Tracer.init(writer);
-                    // Best-effort tracing; ignore errors to avoid affecting execution
-                    _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
+        // Optional tracing hook (compile-time gated; zero runtime overhead when disabled)
+        if (comptime build_options.enable_tracing) {
+            if (self.tracer) |writer| {
+                if (current_index < analysis.inst_to_pc.len) {
+                    const pc_u16 = analysis.inst_to_pc[current_index];
+                    if (pc_u16 != std.math.maxInt(u16)) {
+                        const pc: usize = pc_u16;
+                        const opcode: u8 = if (pc < analysis.code_len) analysis.code[pc] else 0x00;
+                        const stack_len: usize = frame.stack.size();
+                        const stack_view: []const u256 = frame.stack.data[0..stack_len];
+                        const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
+                        const mem_size: usize = frame.memory.size();
+                        var tr = Tracer.init(writer);
+                        _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
+                    }
                 }
             }
         }

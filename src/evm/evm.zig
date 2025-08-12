@@ -269,8 +269,14 @@ pub fn deinit(self: *Evm) void {
     // created_contracts is initialized in init(); single deinit above is sufficient
 }
 
+const build_options = @import("build_options");
+
 /// Enable instruction tracing to a file. If append is true, appends to existing file.
 pub fn enable_tracing_to_path(self: *Evm, path: []const u8, append: bool) !void {
+    if (!comptime build_options.enable_tracing) {
+        // Tracing disabled at compile-time; keep binary size smaller with no runtime feature
+        return error.FeatureDisabled;
+    }
     // Close previous file if any
     if (self.trace_file) |f| {
         f.close();
@@ -289,6 +295,7 @@ pub fn enable_tracing_to_path(self: *Evm, path: []const u8, append: bool) !void 
 
 /// Disable tracing and close any open trace file.
 pub fn disable_tracing(self: *Evm) void {
+    if (!comptime build_options.enable_tracing) return;
     self.tracer = null;
     if (self.trace_file) |f| {
         f.close();
