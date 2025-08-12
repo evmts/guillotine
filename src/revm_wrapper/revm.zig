@@ -252,7 +252,7 @@ pub const Revm = struct {
         const result = result_ptr.?.*;
 
         // Debug logging
-        std.log.debug("REVM execute: success={}, gas_used={}, outputLen={}", .{ result.success, result.gasUsed, result.outputLen });
+        // std.log.debug("REVM execute: success={}, gas_used={}, outputLen={}", .{ result.success, result.gasUsed, result.outputLen });
         
         // Copy output data
         const output = if (result.outputData != null and result.outputLen > 0) blk: {
@@ -260,11 +260,11 @@ pub const Revm = struct {
             @memcpy(data, @as([*]u8, @ptrCast(result.outputData))[0..result.outputLen]);
             
             // Debug: print first few bytes
-            std.log.debug("REVM output data (first 8 bytes): ", .{});
-            for (data[0..@min(8, data.len)]) |byte| {
-                std.log.debug("{x:0>2} ", .{byte});
-            }
-            std.log.debug("\n", .{});
+            // std.log.debug("REVM output data (first 8 bytes): ", .{});
+            // for (data[0..@min(8, data.len)]) |byte| {
+            //     std.log.debug("{x:0>2} ", .{byte});
+            // }
+            // std.log.debug("\n", .{});
             
             break :blk data;
         } else try self.allocator.alloc(u8, 0);

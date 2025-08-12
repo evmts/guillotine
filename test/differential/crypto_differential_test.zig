@@ -213,7 +213,7 @@ test "KECCAK256 opcode hashes test data" {
 
 test "KECCAK256 opcode hashes 32-byte data" {
     const allocator = testing.allocator;
-    std.testing.log_level = .debug;
+    // std.testing.log_level = .debug;
 
     // Store 32 bytes of data in memory, then hash it
     // The test data 0x01..0x20 should hash to start with 0x52...
@@ -299,17 +299,17 @@ test "KECCAK256 opcode hashes 32-byte data" {
             try testing.expectEqual(byte, guillotine_result.output.?[i]);
         }
 
-        std.debug.print("KECCAK256 32-byte test: Hashes match\n", .{});
-        std.debug.print("REVM hash: ", .{});
-        for (revm_result.output) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
-        }
-        std.debug.print("\n", .{});
-        std.debug.print("Guillotine hash: ", .{});
-        for (guillotine_result.output.?) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
-        }
-        std.debug.print("\n", .{});
+        // std.debug.print("KECCAK256 32-byte test: Hashes match\n", .{});
+        // std.debug.print("REVM hash: ", .{});
+        // for (revm_result.output) |byte| {
+        //     std.debug.print("{x:0>2}", .{byte});
+        // }
+        // std.debug.print("\n", .{});
+        // std.debug.print("Guillotine hash: ", .{});
+        // for (guillotine_result.output.?) |byte| {
+        //     std.debug.print("{x:0>2}", .{byte});
+        // }
+        // std.debug.print("\n", .{});
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path

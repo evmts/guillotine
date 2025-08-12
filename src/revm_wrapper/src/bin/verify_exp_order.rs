@@ -7,12 +7,12 @@ use revm::{
     Evm,
 };
 
-fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
+fn test_exp(a: U256, b: U256, expected_name: &str) -> U256 {
     let mut db = CacheDB::new(EmptyDB::default());
     let caller = Address::from([0x11; 20]);
     let contract_address = Address::from([0x33; 20]);
     
-    // Create bytecode that pushes a, then b, then SUB
+    // Create bytecode that pushes a, then b, then EXP
     let mut bytecode = vec![];
     
     // PUSH a
@@ -23,8 +23,8 @@ fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
     bytecode.push(0x60);
     bytecode.push(b.byte(0));
     
-    // SUB
-    bytecode.push(0x03);
+    // EXP (opcode 0x0A)
+    bytecode.push(0x0A);
     
     // Store result
     bytecode.extend_from_slice(&[
@@ -75,7 +75,7 @@ fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
                     let mut bytes = [0u8; 32];
                     bytes.copy_from_slice(&data);
                     let value = U256::from_be_bytes(bytes);
-                    println!("PUSH {} then PUSH {}, SUB = {} (expecting {})", a, b, value, expected_name);
+                    println!("PUSH {} then PUSH {}, EXP = {} (expecting {})", a, b, value, expected_name);
                     value
                 }
                 _ => panic!("Unexpected output"),
@@ -86,20 +86,29 @@ fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
 }
 
 fn main() {
-    println!("=== Verifying REVM SUB Stack Order ===\n");
-    println!("Testing what REVM actually computes for SUB operation:\n");
+    println!("=== Verifying REVM EXP Stack Order ===\n");
+    println!("Testing what REVM actually computes for EXP operation:\n");
     
-    // Test 1: 10 - 5
-    let result1 = test_sub(U256::from(10), U256::from(5), "10 - 5 = 5 OR 5 - 10 = -5 (wraps)");
+    // Test 1: 2^3 = 8 OR 3^2 = 9
+    let result1 = test_exp(U256::from(2), U256::from(3), "2^3 = 8 OR 3^2 = 9");
     
-    // Test 2: 5 - 10
-    test_sub(U256::from(5), U256::from(10), "5 - 10 = -5 (wraps) OR 10 - 5 = 5");
+    // Test 2: 3^4 = 81 OR 4^3 = 64
+    let result2 = test_exp(U256::from(3), U256::from(4), "3^4 = 81 OR 4^3 = 64");
+    
+    // Test 3: 10^2 = 100 OR 2^10 = 1024
+    let result3 = test_exp(U256::from(10), U256::from(2), "10^2 = 100 OR 2^10 = 1024");
     
     println!("\nConclusion:");
-    if result1 == U256::from(5) {
-        println!("REVM computes: second_from_top - top (a - b where stack is [a, b])");
-    } else {
-        println!("REVM computes: top - second_from_top (b - a where stack is [a, b])");
-        println!("Result was: {}", result1);
+    if result1 == U256::from(8) {
+        println!("REVM computes: second_from_top ^ top (a^b where stack is [a, b])");
+        println!("This means: base=a (second_from_top), exponent=b (top)");
+    } else if result1 == U256::from(9) {
+        println!("REVM computes: top ^ second_from_top (b^a where stack is [a, b])");
+        println!("This means: base=b (top), exponent=a (second_from_top)");
     }
+    
+    println!("\nAll results:");
+    println!("Result1 (2,3): {}", result1);
+    println!("Result2 (3,4): {}", result2);
+    println!("Result3 (10,2): {}", result3);
 }

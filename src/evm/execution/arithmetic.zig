@@ -159,10 +159,11 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe().*;
 
-    // EVM semantics: a - b (second - top)
-    const result = a -% b;
+    // EVM semantics: b - a (top - second)
+    // REVM computes: top - second_from_top
+    const result = b -% a;
 
-    Log.debug("SUB: a(second)={x:0>64} b(top)={x:0>64} -> res={x:0>64}", .{ a, b, result });
+    Log.debug("SUB: top(b)={x:0>64} second(a)={x:0>64} -> res={x:0>64} (b - a)", .{ b, a, result });
 
     frame.stack.set_top_unsafe(result);
 }
@@ -202,14 +203,15 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const divisor = frame.stack.pop_unsafe();
-    const dividend = frame.stack.peek_unsafe().*;
+    const b = frame.stack.pop_unsafe(); // divisor (top)
+    const a = frame.stack.peek_unsafe().*; // dividend (second from top)
 
-    // EVM semantics: dividend / divisor
-    const result = if (divisor == 0) blk: {
+    // EVM semantics: b / a (top / second_from_top)
+    // REVM computes: top / second_from_top
+    const result = if (a == 0) blk: {
         break :blk 0;
     } else blk: {
-        const result_u256 = U256.from_u256_unsafe(dividend).wrapping_div(U256.from_u256_unsafe(divisor));
+        const result_u256 = U256.from_u256_unsafe(b).wrapping_div(U256.from_u256_unsafe(a));
         break :blk result_u256.to_u256_unsafe();
     };
 
@@ -255,25 +257,26 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const divisor = frame.stack.pop_unsafe();
-    const dividend = frame.stack.peek_unsafe().*;
+    const b = frame.stack.pop_unsafe(); // top (dividend)
+    const a = frame.stack.peek_unsafe().*; // second from top (divisor)
 
-    // EVM semantics: dividend / divisor - signed division
+    // EVM semantics: b / a (top / second_from_top) - signed division
+    // REVM computes: top / second_from_top
     var result: u256 = undefined;
-    if (divisor == 0) {
+    if (a == 0) {
         @branchHint(.unlikely);
         result = 0;
     } else {
-        const dividend_i256 = @as(i256, @bitCast(dividend));
-        const divisor_i256 = @as(i256, @bitCast(divisor));
+        const b_i256 = @as(i256, @bitCast(b));
+        const a_i256 = @as(i256, @bitCast(a));
         const min_i256 = std.math.minInt(i256);
-        if (dividend_i256 == min_i256 and divisor_i256 == -1) {
+        if (b_i256 == min_i256 and a_i256 == -1) {
             @branchHint(.unlikely);
             // MIN_I256 / -1 = MIN_I256 (overflow wraps)
             // This matches EVM behavior where overflow wraps around
-            result = dividend;
+            result = b;
         } else {
-            const result_i256 = @divTrunc(dividend_i256, divisor_i256);
+            const result_i256 = @divTrunc(b_i256, a_i256);
             result = @as(u256, @bitCast(result_i256));
         }
     }
@@ -315,18 +318,19 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const divisor = frame.stack.pop_unsafe();
-    const dividend = frame.stack.peek_unsafe().*;
+    const b = frame.stack.pop_unsafe(); // top
+    const a = frame.stack.peek_unsafe().*; // second from top
 
-    // EVM semantics: dividend % divisor
-    const result = if (divisor == 0) blk: {
+    // EVM semantics: b % a (top % second_from_top)
+    // REVM computes: top % second_from_top
+    const result = if (a == 0) blk: {
         @branchHint(.unlikely);
         break :blk 0;
     } else blk: {
         // Use optimized U256 modulo
-        const dividend_u256 = U256.from_u256_unsafe(dividend);
-        const divisor_u256 = U256.from_u256_unsafe(divisor);
-        const div_rem_result = dividend_u256.div_rem(divisor_u256);
+        const b_u256 = U256.from_u256_unsafe(b);
+        const a_u256 = U256.from_u256_unsafe(a);
+        const div_rem_result = b_u256.div_rem(a_u256);
         break :blk div_rem_result.remainder.to_u256_unsafe();
     };
 
@@ -371,18 +375,19 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const divisor = frame.stack.pop_unsafe();
-    const dividend = frame.stack.peek_unsafe().*;
+    const b = frame.stack.pop_unsafe(); // top (dividend)
+    const a = frame.stack.peek_unsafe().*; // second from top (divisor)
 
-    // EVM semantics: dividend % divisor - signed modulo
+    // EVM semantics: b % a (top % second_from_top) - signed modulo
+    // REVM computes: top % second_from_top
     var result: u256 = undefined;
-    if (divisor == 0) {
+    if (a == 0) {
         @branchHint(.unlikely);
         result = 0;
     } else {
-        const dividend_i256 = @as(i256, @bitCast(dividend));
-        const divisor_i256 = @as(i256, @bitCast(divisor));
-        const result_i256 = @rem(dividend_i256, divisor_i256);
+        const b_i256 = @as(i256, @bitCast(b));
+        const a_i256 = @as(i256, @bitCast(a));
+        const result_i256 = @rem(b_i256, a_i256);
         result = @as(u256, @bitCast(result_i256));
     }
 
@@ -565,10 +570,13 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const exponent = frame.stack.pop_unsafe();
-    const base = frame.stack.peek_unsafe().*;
+    const b = frame.stack.pop_unsafe(); // top (will be base)
+    const a = frame.stack.peek_unsafe().*; // second from top (will be exponent)
 
-    // EVM semantics: base^exponent
+    // EVM semantics: b^a (top ^ second_from_top)
+    // REVM computes: top ^ second_from_top
+    const base = b;
+    const exponent = a;
 
     // Calculate gas cost based on exponent byte size
     var exp_copy = exponent;
@@ -606,17 +614,17 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
 
     // Square-and-multiply algorithm
     var result: u256 = 1;
-    var b = base;
+    var b_copy = base;
     var e = exponent;
 
     while (e > 0) {
         if ((e & 1) == 1) {
-            const mul_result = @mulWithOverflow(result, b);
+            const mul_result = @mulWithOverflow(result, b_copy);
             result = mul_result[0];
         }
         if (e > 1) {
-            const square_result = @mulWithOverflow(b, b);
-            b = square_result[0];
+            const square_result = @mulWithOverflow(b_copy, b_copy);
+            b_copy = square_result[0];
         }
         e >>= 1;
     }

@@ -10,9 +10,9 @@ const CallResult = evm.CallResult;
 const revm_wrapper = @import("revm");
 
 // Enable debug logging
-test {
-    std.testing.log_level = .debug;
-}
+// test {
+//     std.testing.log_level = .debug;
+// }
 
 // Updated to new API - migration in progress, tests not run yet
 

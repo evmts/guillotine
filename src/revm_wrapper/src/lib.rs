@@ -209,13 +209,13 @@ pub unsafe extern "C" fn revm_set_code(
         }
     };
 
-    eprintln!("REVM FFI: revm_set_code called with code_str: {}", code_str);
+    // eprintln!("REVM FFI: revm_set_code called with code_str: {}", code_str);
     
     let code_str = code_str.trim_start_matches("0x");
     let code_bytes = match hex::decode(code_str) {
         Ok(bytes) => bytes,
         Err(e) => {
-            eprintln!("REVM FFI: Failed to decode hex: {:?}", e);
+            // eprintln!("REVM FFI: Failed to decode hex: {:?}", e);
             *out_error = RevmError::new(
                 RevmErrorCode::InvalidInput,
                 format!("Invalid hex code: {:?}", e),
@@ -238,11 +238,11 @@ pub unsafe extern "C" fn revm_set_code(
     // Insert the account with code
     vm.db.insert_account_info(addr, account_info);
     
-    eprintln!("REVM FFI: Set code for {:?}, code_len: {}, code_hash: {:?}", addr, code_bytes.len(), code_hash);
+    // eprintln!("REVM FFI: Set code for {:?}, code_len: {}, code_hash: {:?}", addr, code_bytes.len(), code_hash);
     
     // Verify the code was set by checking the contracts map
     if let Some(contract_code) = vm.db.contracts.get(&code_hash) {
-        eprintln!("REVM FFI: Code successfully stored in contracts map, bytecode len: {}", contract_code.len());
+        // eprintln!("REVM FFI: Code successfully stored in contracts map, bytecode len: {}", contract_code.len());
     } else {
         panic!("REVM FFI: PANIC - Code not found in contracts map after setCode!");
     }
@@ -393,16 +393,16 @@ pub unsafe extern "C" fn revm_execute(
     // Check if 'to' address has code
     if let Some(to) = to_addr {
         let account = vm.db.basic(to).unwrap_or_default();
-        eprintln!("REVM FFI: Account at {:?} has code: {}, code_hash: {:?}", 
-            to, 
-            account.as_ref().map(|a| a.code.is_some()).unwrap_or(false),
-            account.as_ref().map(|a| a.code_hash).unwrap_or_default()
-        );
+        // eprintln!("REVM FFI: Account at {:?} has code: {}, code_hash: {:?}", 
+        //     to, 
+        //     account.as_ref().map(|a| a.code.is_some()).unwrap_or(false),
+        //     account.as_ref().map(|a| a.code_hash).unwrap_or_default()
+        // );
         
         // Also check if we can get the account info directly
         if let Some(acc_info) = account {
             if let Some(code) = &acc_info.code {
-                eprintln!("REVM FFI: Code bytes len: {}", code.original_bytes().len());
+                // eprintln!("REVM FFI: Code bytes len: {}", code.original_bytes().len());
             }
         }
     }
@@ -441,13 +441,13 @@ pub unsafe extern "C" fn revm_execute(
         .build();
 
     let input_len_debug = input.len();
-    eprintln!("REVM FFI: About to execute transaction - from: {:?}, to: {:?}, value: {:?}, input_len: {}, gas_limit: {}", 
-        from_addr, to_addr, value, input_len_debug, gas_limit);
+    // eprintln!("REVM FFI: About to execute transaction - from: {:?}, to: {:?}, value: {:?}, input_len: {}, gas_limit: {}", 
+    //     from_addr, to_addr, value, input_len_debug, gas_limit);
     
     let result = match evm.transact_commit() {
         Ok(res) => res,
         Err(e) => {
-            eprintln!("REVM FFI: Transaction failed: {:?}", e);
+            // eprintln!("REVM FFI: Transaction failed: {:?}", e);
             *out_error = RevmError::new(
                 RevmErrorCode::ExecutionError,
                 format!("Execution failed: {:?}", e),
@@ -456,8 +456,8 @@ pub unsafe extern "C" fn revm_execute(
         }
     };
     
-    eprintln!("REVM FFI: Transaction succeeded");
-    eprintln!("REVM FFI: Result type: {:?}", result);
+    // eprintln!("REVM FFI: Transaction succeeded");
+    // eprintln!("REVM FFI: Result type: {:?}", result);
 
     // Convert result
     let (success, gas_used, gas_refunded, output, revert_reason) = match result {
@@ -469,7 +469,7 @@ pub unsafe extern "C" fn revm_execute(
         } => {
             let output_bytes = match output {
                 revm::primitives::Output::Call(bytes) => {
-                    eprintln!("REVM FFI: Call output length: {}, bytes: {:?}", bytes.len(), bytes);
+                    // eprintln!("REVM FFI: Call output length: {}, bytes: {:?}", bytes.len(), bytes);
                     bytes
                 },
                 revm::primitives::Output::Create(bytes, _) => bytes,
@@ -492,7 +492,7 @@ pub unsafe extern "C" fn revm_execute(
     };
 
     // Create result
-    eprintln!("REVM FFI: Creating result with output length: {}", output.len());
+    // eprintln!("REVM FFI: Creating result with output length: {}", output.len());
     let mut output_vec = output.to_vec();
     let output_ptr = if output_vec.is_empty() {
         ptr::null_mut()

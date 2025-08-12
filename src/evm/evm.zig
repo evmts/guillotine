@@ -158,10 +158,10 @@ pub fn init(
     read_only: bool,
     tracer: ?std.io.AnyWriter,
 ) !Evm {
-    std.debug.print("[Evm.init] Starting initialization...\n", .{});
+    // std.debug.print("[Evm.init] Starting initialization...\n", .{});
     Log.debug("Evm.init: Initializing EVM with configuration", .{});
 
-    std.debug.print("[Evm.init] Creating arena allocator...\n", .{});
+    // std.debug.print("[Evm.init] Creating arena allocator...\n", .{});
     // MEMORY ALLOCATION: Arena allocator for temporary data
     // Expected size: 256KB (ARENA_INITIAL_CAPACITY)
     // Lifetime: Per EVM instance (freed on deinit)
@@ -178,15 +178,15 @@ pub fn init(
 
     _ = internal_arena.reset(.retain_capacity);
 
-    std.debug.print("[Evm.init] Creating EVM state...\n", .{});
+    // std.debug.print("[Evm.init] Creating EVM state...\n", .{});
     var state = try EvmState.init(allocator, database);
     errdefer state.deinit();
-    std.debug.print("[Evm.init] EVM state created\n", .{});
+    // std.debug.print("[Evm.init] EVM state created\n", .{});
 
-    std.debug.print("[Evm.init] Creating context and access list...\n", .{});
+    // std.debug.print("[Evm.init] Creating context and access list...\n", .{});
     const ctx = context orelse Context.init();
     var access_list = AccessList.init(allocator, ctx);
-    std.debug.print("[Evm.init] Access list created\n", .{});
+    // std.debug.print("[Evm.init] Access list created\n", .{});
     errdefer access_list.deinit();
 
     // NOTE: Execution state is left undefined - will be initialized fresh in each call
@@ -194,7 +194,7 @@ pub fn init(
     // - self_destruct: initialized in call execution
     // - analysis_stack_buffer: initialized in call execution
 
-    std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
+    // std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
     Log.debug("Evm.init: EVM initialization complete", .{});
     return Evm{
         .allocator = allocator,

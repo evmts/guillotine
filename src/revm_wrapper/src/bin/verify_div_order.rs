@@ -7,12 +7,12 @@ use revm::{
     Evm,
 };
 
-fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
+fn test_div(a: U256, b: U256, expected_name: &str) -> U256 {
     let mut db = CacheDB::new(EmptyDB::default());
     let caller = Address::from([0x11; 20]);
     let contract_address = Address::from([0x33; 20]);
     
-    // Create bytecode that pushes a, then b, then SUB
+    // Create bytecode that pushes a, then b, then DIV
     let mut bytecode = vec![];
     
     // PUSH a
@@ -23,8 +23,8 @@ fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
     bytecode.push(0x60);
     bytecode.push(b.byte(0));
     
-    // SUB
-    bytecode.push(0x03);
+    // DIV
+    bytecode.push(0x04);
     
     // Store result
     bytecode.extend_from_slice(&[
@@ -75,7 +75,7 @@ fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
                     let mut bytes = [0u8; 32];
                     bytes.copy_from_slice(&data);
                     let value = U256::from_be_bytes(bytes);
-                    println!("PUSH {} then PUSH {}, SUB = {} (expecting {})", a, b, value, expected_name);
+                    println!("PUSH {} then PUSH {}, DIV = {} (expecting {})", a, b, value, expected_name);
                     value
                 }
                 _ => panic!("Unexpected output"),
@@ -86,20 +86,21 @@ fn test_sub(a: U256, b: U256, expected_name: &str) -> U256 {
 }
 
 fn main() {
-    println!("=== Verifying REVM SUB Stack Order ===\n");
-    println!("Testing what REVM actually computes for SUB operation:\n");
+    println!("=== Verifying REVM DIV Stack Order ===\n");
+    println!("Testing what REVM actually computes for DIV operation:\n");
     
-    // Test 1: 10 - 5
-    let result1 = test_sub(U256::from(10), U256::from(5), "10 - 5 = 5 OR 5 - 10 = -5 (wraps)");
+    // Test 1: 10 / 5 = 2
+    let result1 = test_div(U256::from(10), U256::from(5), "10 / 5 = 2 OR 5 / 10 = 0");
     
-    // Test 2: 5 - 10
-    test_sub(U256::from(5), U256::from(10), "5 - 10 = -5 (wraps) OR 10 - 5 = 5");
+    // Test 2: 42 / 6 = 7
+    let result2 = test_div(U256::from(42), U256::from(6), "42 / 6 = 7 OR 6 / 42 = 0");
     
     println!("\nConclusion:");
-    if result1 == U256::from(5) {
-        println!("REVM computes: second_from_top - top (a - b where stack is [a, b])");
-    } else {
-        println!("REVM computes: top - second_from_top (b - a where stack is [a, b])");
-        println!("Result was: {}", result1);
+    if result1 == U256::from(2) {
+        println!("REVM computes: second_from_top / top (a / b where stack is [a, b])");
+    } else if result1 == U256::from(0) {
+        println!("REVM computes: top / second_from_top (b / a where stack is [a, b])");
     }
+    
+    println!("Result1: {}, Result2: {}", result1, result2);
 }

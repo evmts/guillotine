@@ -26,3 +26,19 @@ codegen-units = 1
 panic = "abort"
 lto = true
 codegen-units = 1
+
+# [[bin]]
+# name = "verify_lt_order"
+# path = "src/bin/verify_lt_order.rs"
+
+# [[bin]]
+# name = "verify_sub_order"
+# path = "src/bin/verify_sub_order.rs"
+
+# [[bin]]
+# name = "verify_div_order"
+# path = "src/bin/verify_div_order.rs"
+
+# [[bin]]
+# name = "verify_exp_order"
+# path = "src/bin/verify_exp_order.rs"

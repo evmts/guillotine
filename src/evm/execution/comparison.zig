@@ -24,15 +24,16 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the second from top operand unsafely
     const second_from_top = frame.stack.peek_unsafe().*;
 
-    // EVM semantics: compare second-from-top (a) with top (b), push a < b
-    const result: u256 = switch (std.math.order(second_from_top, top)) {
+    // EVM semantics: compare top (b) with second-from-top (a), push b < a
+    // REVM computes: top < second_from_top
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
         .lt => 1,
         .eq, .gt => 0,
     };
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
-    Log.debug("LT: a={} b={} -> {}", .{ second_from_top, top, result });
+    Log.debug("LT: top(b)={} second(a)={} -> {} (b < a)", .{ top, second_from_top, result });
 }
 
 pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
@@ -44,12 +45,13 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the second from top operand unsafely
     const second_from_top = frame.stack.peek_unsafe().*;
 
-    // EVM semantics: compare second-from-top (a) with top (b), push a > b
-    const result: u256 = switch (std.math.order(second_from_top, top)) {
+    // EVM semantics: compare top (b) with second-from-top (a), push b > a
+    // REVM computes: top > second_from_top
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
         .gt => 1,
         .eq, .lt => 0,
     };
-    Log.debug("GT: a={} b={} -> {}", .{ second_from_top, top, result });
+    Log.debug("GT: top(b)={} second(a)={} -> {} (b > a)", .{ top, second_from_top, result });
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
@@ -64,18 +66,19 @@ pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the second from top operand unsafely
     const second_from_top = frame.stack.peek_unsafe().*;
 
-    // EVM semantics: compare second-from-top (a) with top (b), push a < b (signed)
+    // EVM semantics: compare top (b) with second-from-top (a), push b < a (signed)
+    // REVM computes: top < second_from_top
     const top_i256 = @as(i256, @bitCast(top));
     const second_from_top_i256 = @as(i256, @bitCast(second_from_top));
 
-    const result: u256 = switch (std.math.order(second_from_top_i256, top_i256)) {
+    const result: u256 = switch (std.math.order(top_i256, second_from_top_i256)) {
         .lt => 1,
         .eq, .gt => 0,
     };
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
-    Log.debug("SLT: a={} b={} -> {}", .{ second_from_top_i256, top_i256, result });
+    Log.debug("SLT: top(b)={} second(a)={} -> {} (b < a signed)", .{ top_i256, second_from_top_i256, result });
 }
 
 pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
@@ -87,12 +90,13 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
     // Peek the second from top operand unsafely
     const second_from_top = frame.stack.peek_unsafe().*;
 
-    // EVM semantics: compare second-from-top (a) with top (b), push a > b (signed)
+    // EVM semantics: compare top (b) with second-from-top (a), push b > a (signed)
+    // REVM computes: top > second_from_top
     const top_i256 = @as(i256, @bitCast(top));
     const second_from_top_i256 = @as(i256, @bitCast(second_from_top));
 
-    const result: u256 = if (second_from_top_i256 > top_i256) 1 else 0;
-    Log.debug("SGT: a={} b={} -> {}", .{ second_from_top_i256, top_i256, result });
+    const result: u256 = if (top_i256 > second_from_top_i256) 1 else 0;
+    Log.debug("SGT: top(b)={} second(a)={} -> {} (b > a signed)", .{ top_i256, second_from_top_i256, result });
 
     // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);

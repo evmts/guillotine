@@ -5,7 +5,7 @@ const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const GasConstants = @import("primitives").GasConstants;
-const Log = std.log.scoped(.default);
+const log = std.log.scoped(.default);
 
 pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
@@ -76,16 +76,18 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    // Stack (top -> bottom): size, code_offset, mem_offset, address
-    const size = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
-    const mem_offset = try frame.stack.pop();
+    // EVM stack order (top -> bottom): address, destOffset, offset, length
+    // So we pop in reverse: length, offset, destOffset, address
     const address_u256 = try frame.stack.pop();
+    const mem_offset = try frame.stack.pop();
+    const code_offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
     
-    Log.debug("EXTCODECOPY: address={x}, mem_offset={}, code_offset={}, size={}", .{address_u256, mem_offset, code_offset, size});
+    log.debug("EXTCODECOPY: address={x}, mem_offset={}, code_offset={}, size={}", .{address_u256, mem_offset, code_offset, size});
 
     if (mem_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize) or code_offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
+        log.debug("EXTCODECOPY OutOfOffset: mem_offset={}, code_offset={}, size={}, maxInt={}", .{mem_offset, code_offset, size, std.math.maxInt(usize)});
         return ExecutionError.Error.OutOfOffset;
     }
 
