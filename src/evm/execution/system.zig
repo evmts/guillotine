@@ -1315,7 +1315,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
     const evm_depth_before = evm_ptr.current_frame_depth;
     
-    const pre_stack_ptr_u = @intFromPtr(frame.stack);
+    const pre_stack_ptr_u = @intFromPtr(&frame.stack);
     const pre_stack_base_u = @intFromPtr(frame.stack.base);
     const pre_stack_limit_u = @intFromPtr(frame.stack.limit);
     const pre_depth = frame.depth;
@@ -1324,7 +1324,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         .{
             @intFromPtr(frame),
             pre_depth,
-            @intFromPtr(frame.stack),
+            @intFromPtr(&frame.stack),
             @intFromPtr(frame.stack.base),
             @intFromPtr(frame.stack.current),
             @intFromPtr(frame.stack.limit),
@@ -1349,7 +1349,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             frame.depth,
             evm_depth_before,
             evm_depth_after,
-            @intFromPtr(frame.stack),
+            @intFromPtr(&frame.stack),
             @intFromPtr(frame.stack.base),
             @intFromPtr(frame.stack.current),
             @intFromPtr(frame.stack.limit),
@@ -1363,7 +1363,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         std.debug.assert(@intFromPtr(frame) == original_frame_ptr);
         
         // The parent frame's stack object and its data allocation must not change across nested calls
-        std.debug.assert(@intFromPtr(frame.stack) == pre_stack_ptr_u);
+        std.debug.assert(@intFromPtr(&frame.stack) == pre_stack_ptr_u);
         std.debug.assert(@intFromPtr(frame.stack.base) == pre_stack_base_u);
         std.debug.assert(@intFromPtr(frame.stack.limit) == pre_stack_limit_u);
     }

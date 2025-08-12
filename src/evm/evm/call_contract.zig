@@ -10,7 +10,6 @@ const Frame = @import("../frame.zig").Frame;
 const CodeAnalysis = @import("../analysis.zig");
 const ChainRules = @import("../frame.zig").ChainRules;
 const Host = @import("../host.zig").Host;
-const CallFrameAccessList = @import("../access_list/access_list.zig");
 const evm_limits = @import("../constants/evm_limits.zig");
 
 pub const CallContractError = std.mem.Allocator.Error || ExecutionError.Error || @import("../state/database_interface.zig").DatabaseError;
@@ -116,11 +115,6 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     // Create host interface from self
     const host = Host.init(self);
 
-    // Create temporary AccessList for Frame (different type from EVM's access_list)
-    const Context = @import("../access_list/context.zig");
-    const access_context = Context.init();
-    var frame_access_list = CallFrameAccessList.init(self.allocator, access_context);
-    defer frame_access_list.deinit();
 
     // Create snapshot before creating the frame
     const snapshot_id = host.create_snapshot();
@@ -134,7 +128,6 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         caller, // caller address
         value, // value being transferred
         &analysis, // code analysis
-        &frame_access_list, // access list
         host, // host interface from self
         self.state.database, // database interface
         self.chain_rules, // chain rules

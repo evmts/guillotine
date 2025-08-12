@@ -81,11 +81,11 @@ pub const Flags = packed struct {
 /// Layout optimized for actual opcode access patterns and cache performance
 pub const Frame = struct {
     // ULTRA HOT - First cache line priority (accessed by virtually every opcode)
-    stack: *Stack, // 8 bytes pointer - accessed by every opcode (now heap-allocated)
+    stack: Stack, // value - accessed by every opcode (heap-backed storage inside)
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
 
     // HOT - Second cache line priority (accessed by major opcode categories)
-    memory: *Memory, // 8 bytes - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
+    memory: Memory, // value - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
     depth: u10, // 10 bits - call stack depth
     is_static: bool, // 1 bit - static call restriction
@@ -98,15 +98,6 @@ pub const Frame = struct {
     host: Host, // 16 bytes (ptr + vtable)
     caller: primitives.Address.Address, // 20 bytes
     value: u256, // 32 bytes
-
-    // Block context - accessed by block opcodes (COINBASE, TIMESTAMP, etc.)
-    block_number: u64, // 8 bytes
-    block_timestamp: u64, // 8 bytes
-    block_difficulty: u256, // 32 bytes - pre-merge: difficulty, post-merge: prevrandao
-    block_gas_limit: u64, // 8 bytes
-    block_coinbase: primitives.Address.Address, // 20 bytes
-    block_base_fee: u256, // 32 bytes - EIP-1559
-    block_blob_base_fee: ?u256, // 32 bytes - EIP-4844 (None for pre-Cancun)
 
     // COLD - Validation flags and rarely accessed data
     hardfork: Hardfork, // 1 byte - hardfork validation
@@ -158,28 +149,21 @@ pub const Frame = struct {
             break :blk Hardfork.FRONTIER;
         };
 
-        // Fetch block info from host
-        const block_info = host.get_block_info();
-
         return Frame{
             // MEMORY ALLOCATION: Stack for EVM execution
             // Expected size: 32KB (1024 * 32 bytes)
             // Lifetime: Per frame (freed on frame.deinit)
             // Frequency: Once per call frame
             .stack = blk: {
-                const stack_ptr = try allocator.create(Stack);
-                errdefer allocator.destroy(stack_ptr);
-                stack_ptr.* = try Stack.init(allocator);
-
+                const stack_val = try Stack.init(allocator);
                 if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                     // Stack should allocate exactly 32KB for data
-                    std.debug.assert(stack_ptr.data.len == Stack.CAPACITY);
+                    std.debug.assert(stack_val.data.len == Stack.CAPACITY);
                     std.debug.assert(Stack.CAPACITY == 1024); // EVM spec
-                    const stack_size = stack_ptr.data.len * @sizeOf(u256);
+                    const stack_size = stack_val.data.len * @sizeOf(u256);
                     std.debug.assert(stack_size == 32 * 1024); // Exactly 32KB
                 }
-
-                break :blk stack_ptr;
+                break :blk stack_val;
             },
             .gas_remaining = gas_remaining,
 
@@ -189,19 +173,15 @@ pub const Frame = struct {
             // Frequency: Once per call frame
             // Growth: Doubles on demand, gas limited
             .memory = blk: {
-                const memory_ptr = try allocator.create(Memory);
-                errdefer allocator.destroy(memory_ptr);
-                memory_ptr.* = try Memory.init_default(allocator);
-
+                const memory_val = try Memory.init_default(allocator);
                 if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                     // Memory should start with reasonable initial capacity
-                    std.debug.assert(memory_ptr.memory_limit > 0);
-                    std.debug.assert(memory_ptr.memory_limit == Memory.DEFAULT_MEMORY_LIMIT);
+                    std.debug.assert(memory_val.memory_limit > 0);
+                    std.debug.assert(memory_val.memory_limit == Memory.DEFAULT_MEMORY_LIMIT);
                     // Initial capacity should be 4KB
                     std.debug.assert(Memory.INITIAL_CAPACITY == 4 * 1024);
                 }
-
-                break :blk memory_ptr;
+                break :blk memory_val;
             },
             .analysis = analysis,
             .depth = @intCast(call_depth),
@@ -211,15 +191,6 @@ pub const Frame = struct {
             .host = host,
             .caller = caller,
             .value = value,
-
-            // Block context from host
-            .block_number = block_info.number,
-            .block_timestamp = block_info.timestamp,
-            .block_difficulty = block_info.difficulty, // pre-merge: difficulty, post-merge: prevrandao
-            .block_gas_limit = block_info.gas_limit,
-            .block_coinbase = block_info.coinbase,
-            .block_base_fee = block_info.base_fee,
-            .block_blob_base_fee = if (chain_rules.is_cancun) 0 else null, // TODO: Add blob_base_fee to BlockInfo - for now return 0 as REVM likely does
 
             // Storage cluster
             .contract_address = contract_address,
@@ -241,9 +212,7 @@ pub const Frame = struct {
 
     pub fn deinit(self: *Frame) void {
         self.stack.deinit();
-        self.allocator.destroy(self.stack);
         self.memory.deinit();
-        self.allocator.destroy(self.memory);
     }
 
     /// Gas consumption with bounds checking - used by all opcodes that consume gas
@@ -681,7 +650,6 @@ test "Frame - address access tracking" {
     const cost2 = try ctx.access_address(primitives.Address.ZERO_ADDRESS);
     try std.testing.expectEqual(@as(u64, 2600), cost2);
 }
-
 
 test "Frame - static call restrictions" {
     const allocator = std.testing.allocator;

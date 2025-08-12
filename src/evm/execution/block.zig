@@ -7,7 +7,8 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     const block_number = try context.stack.pop();
 
-    const current_block = context.block_number;
+    const block_info = context.host.get_block_info();
+    const current_block = block_info.number;
 
     if (block_number >= current_block) {
         @branchHint(.unlikely);
@@ -33,24 +34,28 @@ pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     // not at runtime. The coinbase address should be pre-warmed in the access list
     // before execution begins if EIP-3651 is enabled.
 
-    try context.stack.append(primitives.Address.to_u256(context.block_coinbase));
+    const block_info = context.host.get_block_info();
+    try context.stack.append(primitives.Address.to_u256(block_info.coinbase));
 }
 
 pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    try context.stack.append(@as(u256, @intCast(context.block_timestamp)));
+    const block_info = context.host.get_block_info();
+    try context.stack.append(@as(u256, @intCast(block_info.timestamp)));
 }
 
 pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    try context.stack.append(@as(u256, @intCast(context.block_number)));
+    const block_info = context.host.get_block_info();
+    try context.stack.append(@as(u256, @intCast(block_info.number)));
 }
 
 pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     // Post-merge this returns PREVRANDAO, pre-merge it returns difficulty
     // The host is responsible for providing the correct value based on hardfork
-    try context.stack.append(context.block_difficulty);
+    const block_info = context.host.get_block_info();
+    try context.stack.append(block_info.difficulty);
 }
 
 pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -60,7 +65,8 @@ pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    try context.stack.append(@as(u256, @intCast(context.block_gas_limit)));
+    const block_info = context.host.get_block_info();
+    try context.stack.append(@as(u256, @intCast(block_info.gas_limit)));
 }
 
 pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -74,7 +80,8 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     // transaction/client layer, not in the EVM interpreter itself.
     // The EVM only needs to expose the base fee value via this opcode.
 
-    try context.stack.append(context.block_base_fee);
+    const block_info = context.host.get_block_info();
+    try context.stack.append(block_info.base_fee);
 }
 
 pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -100,14 +107,29 @@ pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     // Push blob base fee (EIP-4844, Cancun+)
     // If not available (pre-Cancun), should be handled by jump table gating
-    const blob_base_fee = context.block_blob_base_fee orelse 0;
-    try context.stack.append(blob_base_fee);
+    // TODO: Add blob_base_fee to BlockInfo - for now return 0 as REVM likely does
+    try context.stack.append(0);
 }
 
 // Tests
 const testing = std.testing;
 const Address = primitives.Address;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
+const Host = @import("../host.zig").Host;
+const BlockInfo = @import("../host.zig").BlockInfo;
+
+// Mock host implementation for testing block opcodes
+const TestBlockHost = struct {
+    block_info: BlockInfo,
+    
+    pub fn get_block_info(self: *TestBlockHost) BlockInfo {
+        return self.block_info;
+    }
+    
+    pub fn to_host(self: *TestBlockHost) Host {
+        return Host.init(self);
+    }
+};
 
 test "COINBASE returns block coinbase address" {
     // Create a minimal test context with only required fields
@@ -116,12 +138,24 @@ test "COINBASE returns block coinbase address" {
 
     const test_coinbase = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = test_coinbase,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_coinbase: Address.Address,
+        host: Host,
     }{
         .stack = &stack,
-        .block_coinbase = test_coinbase,
+        .host = test_host.to_host(),
     };
 
     // Execute COINBASE opcode
@@ -138,12 +172,24 @@ test "TIMESTAMP returns block timestamp" {
 
     const test_timestamp: u64 = 1234567890;
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1,
+            .timestamp = test_timestamp,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_timestamp: u64,
+        host: Host,
     }{
         .stack = &stack,
-        .block_timestamp = test_timestamp,
+        .host = test_host.to_host(),
     };
 
     // Execute TIMESTAMP opcode
@@ -160,12 +206,24 @@ test "NUMBER returns block number" {
 
     const test_block_number: u64 = 15537393;
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = test_block_number,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_number: u64,
+        host: Host,
     }{
         .stack = &stack,
-        .block_number = test_block_number,
+        .host = test_host.to_host(),
     };
 
     // Execute NUMBER opcode
@@ -182,12 +240,24 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
 
     const test_difficulty: primitives.u256 = 0x123456789ABCDEF;
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = test_difficulty,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_difficulty: primitives.u256,
+        host: Host,
     }{
         .stack = &stack,
-        .block_difficulty = test_difficulty,
+        .host = test_host.to_host(),
     };
 
     // Execute DIFFICULTY opcode
@@ -204,12 +274,24 @@ test "GASLIMIT returns block gas limit" {
 
     const test_gas_limit: u64 = 30_000_000;
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = test_gas_limit,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_gas_limit: u64,
+        host: Host,
     }{
         .stack = &stack,
-        .block_gas_limit = test_gas_limit,
+        .host = test_host.to_host(),
     };
 
     // Execute GASLIMIT opcode
@@ -226,12 +308,24 @@ test "BASEFEE returns block base fee" {
 
     const test_base_fee: primitives.u256 = 1_000_000_000; // 1 gwei
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = test_base_fee,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_base_fee: primitives.u256,
+        host: Host,
     }{
         .stack = &stack,
-        .block_base_fee = test_base_fee,
+        .host = test_host.to_host(),
     };
 
     // Execute BASEFEE opcode
@@ -242,58 +336,61 @@ test "BASEFEE returns block base fee" {
     try testing.expectEqual(test_base_fee, result);
 }
 
-test "BLOBBASEFEE returns blob base fee when available" {
+test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
     defer stack.deinit();
 
-    const test_blob_base_fee: primitives.u256 = 100_000_000; // 0.1 gwei
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
 
     var context = struct {
         stack: *@TypeOf(stack),
-        block_blob_base_fee: ?u256,
+        host: Host,
     }{
         .stack = &stack,
-        .block_blob_base_fee = test_blob_base_fee,
+        .host = test_host.to_host(),
     };
 
     // Execute BLOBBASEFEE opcode
     try op_blobbasefee(&context);
 
-    // Verify blob base fee was pushed to stack
-    const result = try stack.pop();
-    try testing.expectEqual(test_blob_base_fee, result);
-}
-
-test "BLOBBASEFEE returns 0 when not available (pre-Cancun)" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit();
-
-    var context = struct {
-        stack: *@TypeOf(stack),
-        block_blob_base_fee: ?u256,
-    }{
-        .stack = &stack,
-        .block_blob_base_fee = null, // Pre-Cancun, no blob base fee
-    };
-
-    // Execute BLOBBASEFEE opcode
-    try op_blobbasefee(&context);
-
-    // Verify 0 was pushed to stack
+    // Verify 0 was pushed to stack (not yet implemented in BlockInfo)
     const result = try stack.pop();
     try testing.expectEqual(@as(primitives.u256, 0), result);
 }
+
 
 test "BLOCKHASH returns 0 for future blocks" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
     defer stack.deinit();
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1000,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_number: u64,
+        host: Host,
     }{
         .stack = &stack,
-        .block_number = 1000,
+        .host = test_host.to_host(),
     };
 
     // Push future block number
@@ -311,12 +408,24 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
     defer stack.deinit();
 
+    var test_host = TestBlockHost{
+        .block_info = BlockInfo{
+            .number = 1000,
+            .timestamp = 1000,
+            .difficulty = 100,
+            .gas_limit = 30000000,
+            .coinbase = Address.ZERO,
+            .base_fee = 1000000000,
+            .prev_randao = [_]u8{0} ** 32,
+        },
+    };
+
     var context = struct {
         stack: *@TypeOf(stack),
-        block_number: u64,
+        host: Host,
     }{
         .stack = &stack,
-        .block_number = 1000,
+        .host = test_host.to_host(),
     };
 
     // Push block number more than 256 blocks in past

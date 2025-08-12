@@ -36,7 +36,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     // Create host interface from self
     const host = Host.init(self);
-    
+
     // Create snapshot for nested calls early to ensure proper revert on any error
     const snapshot_id = if (self.current_frame_depth > 0) host.create_snapshot() else 0;
 
@@ -214,14 +214,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         // Mark that we've allocated the first frame
         self.max_allocated_depth = 0;
 
-        // Set block context from VM's context
-        self.frame_stack.?[0].block_number = self.context.block_number;
-        self.frame_stack.?[0].block_timestamp = self.context.block_timestamp;
-        self.frame_stack.?[0].block_difficulty = self.context.block_difficulty;
-        self.frame_stack.?[0].block_gas_limit = self.context.block_gas_limit;
-        self.frame_stack.?[0].block_coinbase = self.context.block_coinbase;
-        self.frame_stack.?[0].block_base_fee = self.context.block_base_fee;
-        self.frame_stack.?[0].block_blob_base_fee = if (self.context.blob_base_fee > 0) self.context.blob_base_fee else null;
+        // Block context is now accessed via Host interface, no need to set
     } else {
         // Nested call: Allocate a new frame on-demand
         const new_depth = self.current_frame_depth + 1;
@@ -239,14 +232,13 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
-
         // Initialize the new frame
         const parent_frame = &self.frame_stack.?[self.current_frame_depth];
-        const parent_stack_ptr_before: usize = @intFromPtr(parent_frame.stack);
+        const parent_stack_ptr_before: usize = @intFromPtr(&parent_frame.stack);
         const parent_stack_base_before: usize = @intFromPtr(parent_frame.stack.base);
         const parent_stack_limit_before: usize = @intFromPtr(parent_frame.stack.limit);
         const parent_stack_current_before: usize = @intFromPtr(parent_frame.stack.current);
-        
+
         if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
             // Basic invariants on parent frame before child init
             std.debug.assert(parent_stack_base_before != 0);
@@ -285,22 +277,15 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
             // Verify parent frame stack pointers did not change after child init
-            std.debug.assert(@intFromPtr(parent_frame.stack) == parent_stack_ptr_before);
+            std.debug.assert(@intFromPtr(&parent_frame.stack) == parent_stack_ptr_before);
             std.debug.assert(@intFromPtr(parent_frame.stack.base) == parent_stack_base_before);
             std.debug.assert(@intFromPtr(parent_frame.stack.limit) == parent_stack_limit_before);
             std.debug.assert(@intFromPtr(parent_frame.stack.current) == parent_stack_current_before);
             // Verify child has a distinct stack object
-            std.debug.assert(@intFromPtr(self.frame_stack.?[new_depth].stack) != parent_stack_ptr_before);
+            std.debug.assert(@intFromPtr(&self.frame_stack.?[new_depth].stack) != parent_stack_ptr_before);
         }
 
-        // Copy block context from parent frame
-        self.frame_stack.?[new_depth].block_number = parent_frame.block_number;
-        self.frame_stack.?[new_depth].block_timestamp = parent_frame.block_timestamp;
-        self.frame_stack.?[new_depth].block_difficulty = parent_frame.block_difficulty;
-        self.frame_stack.?[new_depth].block_gas_limit = parent_frame.block_gas_limit;
-        self.frame_stack.?[new_depth].block_coinbase = parent_frame.block_coinbase;
-        self.frame_stack.?[new_depth].block_base_fee = parent_frame.block_base_fee;
-        self.frame_stack.?[new_depth].block_blob_base_fee = parent_frame.block_blob_base_fee;
+        // Block context is now accessed via Host interface, no need to copy
     }
 
     if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
@@ -328,14 +313,14 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     var parent_stack_base_before_interpret: usize = 0;
     var parent_stack_limit_before_interpret: usize = 0;
     var parent_stack_current_before_interpret: usize = 0;
-    
+
     if (self.current_frame_depth > 0) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
-        parent_stack_ptr_before_interpret = @intFromPtr(parent.stack);
+        parent_stack_ptr_before_interpret = @intFromPtr(&parent.stack);
         parent_stack_base_before_interpret = @intFromPtr(parent.stack.base);
         parent_stack_limit_before_interpret = @intFromPtr(parent.stack.limit);
         parent_stack_current_before_interpret = @intFromPtr(parent.stack.current);
-        
+
         if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
             // Verify parent invariants before interpret
             std.debug.assert(parent_stack_base_before_interpret != 0);
@@ -351,14 +336,14 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         Log.debug("[call] Interpret ended with error: {}", .{err});
         exec_err = err;
     };
-    
+
     // For nested calls, verify parent pointers after interpret
     if (self.current_frame_depth > 0) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
-        
+
         if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
             // Verify parent frame was not corrupted during interpret
-            std.debug.assert(@intFromPtr(parent.stack) == parent_stack_ptr_before_interpret);
+            std.debug.assert(@intFromPtr(&parent.stack) == parent_stack_ptr_before_interpret);
             std.debug.assert(@intFromPtr(parent.stack.base) == parent_stack_base_before_interpret);
             std.debug.assert(@intFromPtr(parent.stack.limit) == parent_stack_limit_before_interpret);
             std.debug.assert(@intFromPtr(parent.stack.current) == parent_stack_current_before_interpret);
@@ -392,10 +377,10 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     var parent_stack_base_before_deinit: usize = 0;
     var parent_stack_limit_before_deinit: usize = 0;
     var parent_stack_current_before_deinit: usize = 0;
-    
+
     if (self.current_frame_depth > 0) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
-        parent_stack_ptr_before_deinit = @intFromPtr(parent.stack);
+        parent_stack_ptr_before_deinit = @intFromPtr(&parent.stack);
         parent_stack_base_before_deinit = @intFromPtr(parent.stack.base);
         parent_stack_limit_before_deinit = @intFromPtr(parent.stack.limit);
         parent_stack_current_before_deinit = @intFromPtr(parent.stack.current);
@@ -403,14 +388,14 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     // Release frame resources
     current_frame.deinit();
-    
+
     // For nested calls, verify parent pointers after deinit
     if (self.current_frame_depth > 0) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
-        
+
         if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
             // Verify parent frame was not corrupted during child deinit
-            std.debug.assert(@intFromPtr(parent.stack) == parent_stack_ptr_before_deinit);
+            std.debug.assert(@intFromPtr(&parent.stack) == parent_stack_ptr_before_deinit);
             std.debug.assert(@intFromPtr(parent.stack.base) == parent_stack_base_before_deinit);
             std.debug.assert(@intFromPtr(parent.stack.limit) == parent_stack_limit_before_deinit);
             std.debug.assert(@intFromPtr(parent.stack.current) == parent_stack_current_before_deinit);
