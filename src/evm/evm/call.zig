@@ -36,7 +36,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     // Create snapshot for nested calls early to ensure proper revert on any error
     const snapshot_id = if (self.current_frame_depth > 0) self.journal.create_snapshot() else 0;
-    
+
     // Extract call info from params - for now just handle the .call case
     // TODO: Handle other call types properly
     // Extract call information based on the call type
@@ -143,7 +143,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     const analysis = analysis_ptr.*;
 
     Log.debug("[call] Code analysis complete: {} instructions", .{analysis.instructions.len});
-    
+
     // Prewarm addresses after analysis but before frame allocation
     // EIP-2929: Warm the target contract address and caller for gas optimization
     // This reduces gas costs for common access patterns
@@ -175,7 +175,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             // Allocate frame stack with maximum capacity to avoid reallocation
             // This prevents frame pointer invalidation during nested calls
             self.frame_stack = try self.allocator.alloc(Frame, MAX_CALL_DEPTH);
-            
+
             if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                 // Verify initial allocation is within expected bounds
                 const frame_size = @sizeOf(Frame);
@@ -248,9 +248,21 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         // Initialize the new frame
         const parent_frame = &self.frame_stack.?[self.current_frame_depth];
+        const parent_stack_ptr_before: usize = @intFromPtr(parent_frame.stack);
+        const parent_stack_base_before: usize = @intFromPtr(parent_frame.stack.base);
+        const parent_stack_limit_before: usize = @intFromPtr(parent_frame.stack.limit);
+        const parent_stack_current_before: usize = @intFromPtr(parent_frame.stack.current);
+        
+        if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+            // Basic invariants on parent frame before child init
+            std.debug.assert(parent_stack_base_before != 0);
+            std.debug.assert(parent_stack_limit_before != 0);
+            std.debug.assert(parent_stack_current_before >= parent_stack_base_before);
+            std.debug.assert(parent_stack_current_before <= parent_stack_limit_before);
+        }
         self.frame_stack.?[new_depth] = Frame.init(
             call_info.gas, // gas_remaining
-            call_info.is_static or parent_frame.is_static(), // inherit static context
+            call_info.is_static or parent_frame.is_static, // inherit static context
             @intCast(new_depth), // call_depth
             call_info.address, // contract_address
             call_caller, // caller
@@ -281,6 +293,16 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             self.max_allocated_depth = new_depth;
         }
 
+        if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+            // Verify parent frame stack pointers did not change after child init
+            std.debug.assert(@intFromPtr(parent_frame.stack) == parent_stack_ptr_before);
+            std.debug.assert(@intFromPtr(parent_frame.stack.base) == parent_stack_base_before);
+            std.debug.assert(@intFromPtr(parent_frame.stack.limit) == parent_stack_limit_before);
+            std.debug.assert(@intFromPtr(parent_frame.stack.current) == parent_stack_current_before);
+            // Verify child has a distinct stack object
+            std.debug.assert(@intFromPtr(self.frame_stack.?[new_depth].stack) != parent_stack_ptr_before);
+        }
+
         // Copy block context from parent frame
         self.frame_stack.?[new_depth].block_number = parent_frame.block_number;
         self.frame_stack.?[new_depth].block_timestamp = parent_frame.block_timestamp;
@@ -299,7 +321,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
                 else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
             };
         };
-        
+
         // For nested calls, check if precompile failed and revert if needed
         if (self.current_frame_depth > 0 and !precompile_result.success) {
             self.journal.revert_to_snapshot(snapshot_id);
@@ -311,6 +333,28 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     const current_frame = &self.frame_stack.?[self.current_frame_depth];
     Log.debug("[call] Starting interpret at depth {}, gas={}", .{ self.current_frame_depth, current_frame.gas_remaining });
 
+    // For nested calls, capture parent pointers before interpret
+    var parent_stack_ptr_before_interpret: usize = 0;
+    var parent_stack_base_before_interpret: usize = 0;
+    var parent_stack_limit_before_interpret: usize = 0;
+    var parent_stack_current_before_interpret: usize = 0;
+    
+    if (self.current_frame_depth > 0) {
+        const parent = &self.frame_stack.?[self.current_frame_depth - 1];
+        parent_stack_ptr_before_interpret = @intFromPtr(parent.stack);
+        parent_stack_base_before_interpret = @intFromPtr(parent.stack.base);
+        parent_stack_limit_before_interpret = @intFromPtr(parent.stack.limit);
+        parent_stack_current_before_interpret = @intFromPtr(parent.stack.current);
+        
+        if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+            // Verify parent invariants before interpret
+            std.debug.assert(parent_stack_base_before_interpret != 0);
+            std.debug.assert(parent_stack_limit_before_interpret != 0);
+            std.debug.assert(parent_stack_current_before_interpret >= parent_stack_base_before_interpret);
+            std.debug.assert(parent_stack_current_before_interpret <= parent_stack_limit_before_interpret);
+        }
+    }
+
     // Execute and normalize result handling so we can always clean up the frame
     var exec_err: ?ExecutionError.Error = null;
     interpret(self, current_frame) catch |err| {
@@ -318,6 +362,19 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         exec_err = err;
     };
     
+    // For nested calls, verify parent pointers after interpret
+    if (self.current_frame_depth > 0) {
+        const parent = &self.frame_stack.?[self.current_frame_depth - 1];
+        
+        if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+            // Verify parent frame was not corrupted during interpret
+            std.debug.assert(@intFromPtr(parent.stack) == parent_stack_ptr_before_interpret);
+            std.debug.assert(@intFromPtr(parent.stack.base) == parent_stack_base_before_interpret);
+            std.debug.assert(@intFromPtr(parent.stack.limit) == parent_stack_limit_before_interpret);
+            std.debug.assert(@intFromPtr(parent.stack.current) == parent_stack_current_before_interpret);
+        }
+    }
+
     // Handle snapshot revert for failed nested calls
     if (self.current_frame_depth > 0 and exec_err != null) {
         const should_revert = switch (exec_err.?) {
@@ -340,8 +397,35 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     // Save gas remaining for return
     const gas_remaining = executed_frame.gas_remaining;
 
+    // For nested calls, capture parent pointers before deinit
+    var parent_stack_ptr_before_deinit: usize = 0;
+    var parent_stack_base_before_deinit: usize = 0;
+    var parent_stack_limit_before_deinit: usize = 0;
+    var parent_stack_current_before_deinit: usize = 0;
+    
+    if (self.current_frame_depth > 0) {
+        const parent = &self.frame_stack.?[self.current_frame_depth - 1];
+        parent_stack_ptr_before_deinit = @intFromPtr(parent.stack);
+        parent_stack_base_before_deinit = @intFromPtr(parent.stack.base);
+        parent_stack_limit_before_deinit = @intFromPtr(parent.stack.limit);
+        parent_stack_current_before_deinit = @intFromPtr(parent.stack.current);
+    }
+
     // Release frame resources
     executed_frame.deinit();
+    
+    // For nested calls, verify parent pointers after deinit
+    if (self.current_frame_depth > 0) {
+        const parent = &self.frame_stack.?[self.current_frame_depth - 1];
+        
+        if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+            // Verify parent frame was not corrupted during child deinit
+            std.debug.assert(@intFromPtr(parent.stack) == parent_stack_ptr_before_deinit);
+            std.debug.assert(@intFromPtr(parent.stack.base) == parent_stack_base_before_deinit);
+            std.debug.assert(@intFromPtr(parent.stack.limit) == parent_stack_limit_before_deinit);
+            std.debug.assert(@intFromPtr(parent.stack.current) == parent_stack_current_before_deinit);
+        }
+    }
 
     // Restore parent frame depth (or stay at 0 if top-level)
     if (self.current_frame_depth > 0) {
@@ -374,33 +458,33 @@ test "nested call snapshot revert on input validation failure" {
     const allocator = std.testing.allocator;
     const MemoryDatabase = @import("../state/memory_database.zig");
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    
+
     // Setup database and EVM
     var memory_db = try MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    
+
     const db_interface = memory_db.to_database_interface();
     const jump_table = OpcodeMetadata.DEFAULT;
     const chain_rules = ChainRules{ .is_berlin = true };
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
-    
+
     // Setup a contract with simple code
     const code = [_]u8{0x00}; // STOP
     const addr = primitives.Address.ZERO_ADDRESS;
     try memory_db.set_code(addr, &code);
-    
+
     // Simulate being in a nested call
     evm.current_frame_depth = 1;
-    
+
     // Create an oversized input that should fail validation
     const oversized_input = try allocator.alloc(u8, MAX_INPUT_SIZE + 1);
     defer allocator.free(oversized_input);
     @memset(oversized_input, 0xAA);
-    
+
     // Take initial snapshot count
     const initial_snapshot_count = evm.journal.next_snapshot_id;
-    
+
     // Make nested call with oversized input
     const nested_call = CallParams{ .call = .{
         .to = addr,
@@ -408,14 +492,14 @@ test "nested call snapshot revert on input validation failure" {
         .input = oversized_input,
         .value = 0,
         .gas = 50000,
-    }};
-    
+    } };
+
     const result = try evm.call(nested_call);
-    
+
     // Verify call failed
     try std.testing.expect(!result.success);
     try std.testing.expectEqual(@as(u64, 0), result.gas_left);
-    
+
     // Verify snapshot was created and reverted (next_snapshot_id should be unchanged)
     try std.testing.expectEqual(initial_snapshot_count, evm.journal.next_snapshot_id);
 }
@@ -424,30 +508,30 @@ test "nested call snapshot revert on code analysis failure" {
     const allocator = std.testing.allocator;
     const MemoryDatabase = @import("../state/memory_database.zig");
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    
+
     // Setup database and EVM
     var memory_db = try MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    
+
     const db_interface = memory_db.to_database_interface();
     const jump_table = OpcodeMetadata.DEFAULT;
     const chain_rules = ChainRules{ .is_berlin = true };
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
-    
+
     // Setup a contract with oversized code
     const oversized_code = try allocator.alloc(u8, MAX_CODE_SIZE + 1);
     defer allocator.free(oversized_code);
     @memset(oversized_code, 0x00);
-    
+
     const addr = primitives.Address.ZERO_ADDRESS;
     try memory_db.set_code(addr, oversized_code);
-    
+
     evm.current_frame_depth = 1; // Simulate being in a nested call
-    
+
     // Take initial snapshot count
     const initial_snapshot_count = evm.journal.next_snapshot_id;
-    
+
     // Make nested call that should fail due to code size
     const nested_call = CallParams{ .call = .{
         .to = addr,
@@ -455,13 +539,13 @@ test "nested call snapshot revert on code analysis failure" {
         .input = &.{},
         .value = 0,
         .gas = 50000,
-    }};
-    
+    } };
+
     const result = try evm.call(nested_call);
-    
+
     // Verify call failed
     try std.testing.expect(!result.success);
-    
+
     // Verify snapshot was properly handled
     try std.testing.expectEqual(initial_snapshot_count, evm.journal.next_snapshot_id);
 }
@@ -470,32 +554,32 @@ test "nested call snapshot revert on max depth exceeded" {
     const allocator = std.testing.allocator;
     const MemoryDatabase = @import("../state/memory_database.zig");
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    
+
     // Setup database and EVM
     var memory_db = try MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    
+
     const db_interface = memory_db.to_database_interface();
     const jump_table = OpcodeMetadata.DEFAULT;
     const chain_rules = ChainRules{ .is_berlin = true };
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
-    
+
     // Setup a simple contract
     const code = [_]u8{0x00}; // STOP
     const addr = primitives.Address.ZERO_ADDRESS;
     try memory_db.set_code(addr, &code);
-    
+
     // Set depth to just below max
     evm.current_frame_depth = MAX_CALL_DEPTH - 1;
-    
+
     // Allocate frame stack
     evm.frame_stack = try allocator.alloc(Frame, MAX_CALL_DEPTH);
     defer allocator.free(evm.frame_stack.?);
-    
+
     // Take initial snapshot count
     const initial_snapshot_count = evm.journal.next_snapshot_id;
-    
+
     // Make nested call that should fail due to depth limit
     const nested_call = CallParams{ .call = .{
         .to = addr,
@@ -503,13 +587,13 @@ test "nested call snapshot revert on max depth exceeded" {
         .input = &.{},
         .value = 0,
         .gas = 50000,
-    }};
-    
+    } };
+
     const result = try evm.call(nested_call);
-    
+
     // Verify call failed
     try std.testing.expect(!result.success);
-    
+
     // Verify snapshot was properly handled
     try std.testing.expectEqual(initial_snapshot_count, evm.journal.next_snapshot_id);
 }
@@ -518,26 +602,26 @@ test "address prewarming for Berlin hardfork" {
     const allocator = std.testing.allocator;
     const MemoryDatabase = @import("../state/memory_database.zig");
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    
+
     // Setup database and EVM with Berlin rules
     var memory_db = try MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    
+
     const db_interface = memory_db.to_database_interface();
     const jump_table = OpcodeMetadata.DEFAULT;
     const chain_rules = ChainRules{ .is_berlin = true };
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
-    
+
     // Setup contracts
     const code = [_]u8{0x00}; // STOP
     const contract_addr = [_]u8{0x11} ** 20;
     const caller_addr = [_]u8{0x22} ** 20;
     try memory_db.set_code(contract_addr, &code);
-    
+
     // Clear access list to ensure clean state
     evm.access_list.clear();
-    
+
     // Make call
     const call_params = CallParams{ .call = .{
         .to = contract_addr,
@@ -545,10 +629,10 @@ test "address prewarming for Berlin hardfork" {
         .input = &.{},
         .value = 0,
         .gas = 100000,
-    }};
-    
+    } };
+
     _ = try evm.call(call_params);
-    
+
     // Verify both addresses were warmed
     try std.testing.expect(evm.access_list.is_address_warm(contract_addr));
     try std.testing.expect(evm.access_list.is_address_warm(caller_addr));
@@ -558,26 +642,26 @@ test "no address prewarming for pre-Berlin hardfork" {
     const allocator = std.testing.allocator;
     const MemoryDatabase = @import("../state/memory_database.zig");
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    
+
     // Setup database and EVM without Berlin rules
     var memory_db = try MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    
+
     const db_interface = memory_db.to_database_interface();
     const jump_table = OpcodeMetadata.DEFAULT;
     const chain_rules = ChainRules{ .is_berlin = false };
     var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
     defer evm.deinit();
-    
+
     // Setup contracts
     const code = [_]u8{0x00}; // STOP
     const contract_addr = [_]u8{0x11} ** 20;
     const caller_addr = [_]u8{0x22} ** 20;
     try memory_db.set_code(contract_addr, &code);
-    
+
     // Clear access list to ensure clean state
     evm.access_list.clear();
-    
+
     // Make call
     const call_params = CallParams{ .call = .{
         .to = contract_addr,
@@ -585,10 +669,10 @@ test "no address prewarming for pre-Berlin hardfork" {
         .input = &.{},
         .value = 0,
         .gas = 100000,
-    }};
-    
+    } };
+
     _ = try evm.call(call_params);
-    
+
     // Verify addresses were NOT warmed (pre-Berlin behavior)
     try std.testing.expect(!evm.access_list.is_address_warm(contract_addr));
     try std.testing.expect(!evm.access_list.is_address_warm(caller_addr));

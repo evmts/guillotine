@@ -161,7 +161,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     const mem_size: usize = frame.memory.size();
                     var tr = Tracer.init(writer);
                     // Best-effort tracing; ignore errors to avoid affecting execution
-                    _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth())) catch {};
+                    _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
                 }
             }
         }

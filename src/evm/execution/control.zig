@@ -33,7 +33,7 @@ pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
-    
+
     // PC opcode pushes the current program counter onto the stack
     // This should never be called - PC is handled by storing the value in the instruction
     // If we get here, it's a bug in the analysis
@@ -163,7 +163,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const frame = ctx;
 
     // Check if we're in a static call
-    if (frame.is_static()) {
+    if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }

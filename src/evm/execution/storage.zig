@@ -30,7 +30,7 @@ pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
 /// SSTORE opcode - Store value in persistent storage
 pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    if (frame.is_static()) {
+    if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
@@ -98,7 +98,7 @@ pub fn op_tstore(context: *anyopaque) ExecutionError.Error!void {
     //     return ExecutionError.Error.InvalidOpcode;
     // }
 
-    if (frame.is_static()) {
+    if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }

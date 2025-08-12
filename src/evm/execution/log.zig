@@ -17,17 +17,17 @@ const Log = Vm.Log;
 
 pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
     return struct {
-        pub fn log(context: *Frame) ExecutionError.Error!void {
+        pub fn log(frame: *Frame) ExecutionError.Error!void {
 
             // Check if we're in a static call
-            if (context.is_static()) {
+            if (frame.is_static) {
                 @branchHint(.unlikely);
                 return ExecutionError.Error.WriteProtection;
             }
 
             // REVM EXACT MATCH: Pop offset first, then len (revm: popn!([offset, len]))
-            const offset = try context.stack.pop();
-            const size = try context.stack.pop();
+            const offset = try frame.stack.pop();
+            const size = try frame.stack.pop();
 
             // Early bounds checking to avoid unnecessary topic pops on invalid input
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -39,7 +39,7 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
             var topics: [4]u256 = undefined;
             // Pop N topics in reverse order (LIFO stack order) for efficient processing
             for (0..num_topics) |i| {
-                topics[num_topics - 1 - i] = try context.stack.pop();
+                topics[num_topics - 1 - i] = try frame.stack.pop();
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -48,7 +48,7 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
             if (size_usize == 0) {
                 @branchHint(.unlikely);
                 // Empty data - emit empty log without memory operations
-                context.host.emit_log(context.contract_address, topics[0..num_topics], &[_]u8{});
+                frame.host.emit_log(frame.contract_address, topics[0..num_topics], &[_]u8{});
                 return;
             }
 
@@ -59,29 +59,29 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
 
             // 1. Calculate memory expansion gas cost
             const new_size = offset_usize + size_usize;
-            const memory_gas = context.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+            const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
 
             // Memory expansion gas calculated
 
-            try context.consume_gas(memory_gas);
+            try frame.consume_gas(memory_gas);
 
             // 2. Dynamic gas for data
             const byte_cost = GasConstants.LogDataGas * size_usize;
 
             // Calculate dynamic gas for data
 
-            try context.consume_gas(byte_cost);
+            try frame.consume_gas(byte_cost);
 
             // Gas consumed successfully
 
             // Ensure memory is available
-            _ = try context.memory.ensure_context_capacity(offset_usize + size_usize);
+            _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
 
             // Get log data
-            const data = try context.memory.get_slice(offset_usize, size_usize);
+            const data = try frame.memory.get_slice(offset_usize, size_usize);
 
             // Emit log with data
-            context.host.emit_log(context.contract_address, topics[0..num_topics], data);
+            frame.host.emit_log(frame.contract_address, topics[0..num_topics], data);
         }
     }.log;
 }
@@ -115,16 +115,16 @@ pub fn log_4(context: *anyopaque) ExecutionError.Error!void {
 }
 
 // Common implementation for all LOG operations
-fn log_impl(num_topics: u8, context: *Frame) ExecutionError.Error!void {
+fn log_impl(num_topics: u8, frame: *Frame) ExecutionError.Error!void {
     // Check if we're in a static call
-    if (context.is_static()) {
+    if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
 
     // Pop offset and size
-    const offset = try context.stack.pop();
-    const size = try context.stack.pop();
+    const offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
 
     // Early bounds checking for better error handling
     const offset_usize = std.math.cast(usize, offset) orelse return ExecutionError.Error.InvalidOffset;
@@ -134,41 +134,41 @@ fn log_impl(num_topics: u8, context: *Frame) ExecutionError.Error!void {
     var topics: [4]u256 = undefined;
     // Pop N topics in reverse order for efficient processing
     for (0..num_topics) |i| {
-        topics[num_topics - 1 - i] = try context.stack.pop();
+        topics[num_topics - 1 - i] = try frame.stack.pop();
     }
 
     if (size_usize == 0) {
         @branchHint(.unlikely);
         // Empty data - emit empty log without memory operations
-        context.host.emit_log(context.contract_address, topics[0..num_topics], &[_]u8{});
+        frame.host.emit_log(frame.contract_address, topics[0..num_topics], &[_]u8{});
         return;
     }
 
     // 1. Calculate memory expansion gas cost
     const new_size = offset_usize + size_usize;
-    const memory_gas = context.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
 
-    try context.consume_gas(memory_gas);
+    try frame.consume_gas(memory_gas);
 
     // 2. Dynamic gas for data
     const byte_cost = GasConstants.LogDataGas * size_usize;
-    try context.consume_gas(byte_cost);
+    try frame.consume_gas(byte_cost);
 
     // Ensure memory is available
-    _ = try context.memory.ensure_context_capacity(offset_usize + size_usize);
+    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
 
     // Get log data
-    const data = try context.memory.get_slice(offset_usize, size_usize);
+    const data = try frame.memory.get_slice(offset_usize, size_usize);
 
     // Emit the log
-    context.host.emit_log(context.contract_address, topics[0..num_topics], data);
+    frame.host.emit_log(frame.contract_address, topics[0..num_topics], data);
 }
 
 // LOG operations are now generated directly in jump_table.zig using make_log()
 
 // =============================================================================
-// TESTS - TODO: Update to use ExecutionContext pattern
+// TESTS - TODO: Update to use frame pattern
 // =============================================================================
 
-// NOTE: Tests temporarily disabled while ExecutionContext integration is completed
+// NOTE: Tests temporarily disabled while frame integration is completed
 // The tests need to be updated to use ExecutionContext instead of the old Frame/VM pattern

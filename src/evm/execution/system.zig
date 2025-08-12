@@ -1,5 +1,6 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
+const builtin = @import("builtin");
 const Frame = @import("../frame.zig").Frame;
 const Evm = @import("../evm.zig");
 const Vm = Evm; // Alias for compatibility
@@ -181,7 +182,7 @@ pub const CallResult = struct {
 /// Check call depth limit shared by all call operations
 /// Returns true if depth limit is exceeded, false otherwise
 fn validate_call_depth(frame: *Frame) bool {
-    return frame.hot_flags.depth >= 1024;
+    return frame.depth >= 1024;
 }
 
 /// Handle memory expansion for call arguments
@@ -547,13 +548,13 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     const init_size = params.c; // top = size
 
     // Check if in static context (CREATE not allowed)
-    if (frame.hot_flags.is_static) {
+    if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.StaticStateChange;
     }
 
     // Check call depth limit
-    if (frame.hot_flags.depth >= 1024) {
+    if (frame.depth >= 1024) {
         @branchHint(.unlikely);
         frame.stack.append_unsafe(0);
         return;
@@ -687,13 +688,13 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     const init_size = params.c; // top = size
 
     // Check if in static context (CREATE2 not allowed)
-    if (frame.hot_flags.is_static) {
+    if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.StaticStateChange;
     }
 
     // Check call depth limit
-    if (frame.hot_flags.depth >= 1024) {
+    if (frame.depth >= 1024) {
         @branchHint(.unlikely);
         frame.stack.append_unsafe(0);
         return;
@@ -833,7 +834,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     const ret_size = params3.b;
 
     // Validate static context for value transfers
-    if (frame.is_static() and value != 0) {
+    if (frame.is_static and value != 0) {
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -996,7 +997,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     const ret_size = params3.b;
 
     // CALLCODE obeys static context for value transfers
-    if (frame.is_static() and value != 0) {
+    if (frame.is_static and value != 0) {
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -1151,7 +1152,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     try frame.consume_gas(total_gas_cost);
 
-    if (frame.hot_flags.depth >= 1024) {
+    if (frame.depth >= 1024) {
         @branchHint(.unlikely);
         frame.stack.append_unsafe(0);
         return;
@@ -1272,7 +1273,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(total_gas_cost);
 
     // Check call depth limit
-    if (frame.hot_flags.depth >= 1024) {
+    if (frame.depth >= 1024) {
         @branchHint(.unlikely);
         frame.stack.append_unsafe(0);
         return;
@@ -1306,6 +1307,9 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // Execute the staticcall through the host
     // Debug: capture stack/frame state before call
+    const pre_stack_ptr_u = @intFromPtr(frame.stack);
+    const pre_stack_base_u = @intFromPtr(frame.stack.base);
+    const pre_stack_limit_u = @intFromPtr(frame.stack.limit);
     Log.debug(
         "[STATICCALL] pre-call: frame={x}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
         .{
@@ -1339,6 +1343,13 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             frame.stack.data.len,
         },
     );
+
+    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+        // The parent frame's stack object and its data allocation must not change across nested calls
+        std.debug.assert(@intFromPtr(frame.stack) == pre_stack_ptr_u);
+        std.debug.assert(@intFromPtr(frame.stack.base) == pre_stack_base_u);
+        std.debug.assert(@intFromPtr(frame.stack.limit) == pre_stack_limit_u);
+    }
 
     // Handle result based on success/failure
     if (call_result.success) {
@@ -1388,7 +1399,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
     // Check static call restriction
-    if (frame.is_static()) {
+    if (frame.is_static) {
         return ExecutionError.Error.WriteProtection;
     }
 

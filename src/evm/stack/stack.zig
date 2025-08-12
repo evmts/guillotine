@@ -106,7 +106,7 @@ pub fn init(allocator: std.mem.Allocator) !Stack {
     // Frequency: Once per frame
     const data = try allocator.alloc(u256, CAPACITY);
     errdefer allocator.free(data);
-    
+
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
         // Stack must be exactly 32KB (1024 * 32 bytes) per EVM spec
         std.debug.assert(data.len == CAPACITY);
@@ -230,6 +230,10 @@ pub fn pop(self: *Stack) Error!u256 {
 /// @return The popped value
 pub inline fn pop_unsafe(self: *Stack) u256 {
     @branchHint(.likely);
+    if (comptime CLEAR_ON_POP) {
+        std.debug.assert(@intFromPtr(self.current) > @intFromPtr(self.base));
+        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    }
     self.current -= 1;
     const value = self.current[0];
     if (comptime CLEAR_ON_POP) {
@@ -258,6 +262,12 @@ pub inline fn peek_unsafe(self: *const Stack) *const u256 {
 pub inline fn dup_unsafe(self: *Stack, n: usize) void {
     @branchHint(.likely);
     @setRuntimeSafety(false);
+    if (comptime CLEAR_ON_POP) {
+        std.debug.assert(n >= 1);
+        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+        std.debug.assert(cur_size >= n);
+        std.debug.assert(@intFromPtr(self.current) < @intFromPtr(self.limit));
+    }
     const value = (self.current - n)[0];
     self.append_unsafe(value);
 }
@@ -266,6 +276,11 @@ pub inline fn dup_unsafe(self: *Stack, n: usize) void {
 pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
     @branchHint(.likely);
     @setRuntimeSafety(false);
+    if (comptime CLEAR_ON_POP) {
+        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+        std.debug.assert(cur_size >= 2);
+        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    }
     self.current -= 2;
     const a = self.current[0];
     const b = self.current[1];
@@ -281,6 +296,11 @@ pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
 pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
     @branchHint(.likely);
     @setRuntimeSafety(false);
+    if (comptime CLEAR_ON_POP) {
+        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+        std.debug.assert(cur_size >= 3);
+        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    }
     self.current -= 3;
     const a = self.current[0];
     const b = self.current[1];
@@ -297,6 +317,10 @@ pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
 /// Set the top element (unsafe version)
 pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
     @branchHint(.likely);
+    if (comptime CLEAR_ON_POP) {
+        std.debug.assert(@intFromPtr(self.current) > @intFromPtr(self.base));
+        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    }
     (self.current - 1)[0] = value;
 }
 
@@ -310,6 +334,12 @@ pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
 /// @param n Position below top to swap with (1-16)
 pub inline fn swap_unsafe(self: *Stack, n: usize) void {
     @branchHint(.likely);
+    if (comptime CLEAR_ON_POP) {
+        std.debug.assert(n >= 1);
+        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+        std.debug.assert(cur_size >= n + 1);
+        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    }
     std.mem.swap(u256, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
 }
 
@@ -598,12 +628,12 @@ test "stack_boundary_empty" {
     try std.testing.expectEqual(@as(usize, 0), stack.size());
     try std.testing.expect(stack.is_empty());
     try std.testing.expect(!stack.is_full());
-    
+
     // Test operations on empty stack
     try std.testing.expectError(Error.StackUnderflow, stack.pop());
     try std.testing.expectError(Error.StackUnderflow, stack.peek());
     try std.testing.expectError(Error.StackUnderflow, stack.peek_n(0));
-    
+
     // Verify stack remains empty after failed operations
     try std.testing.expectEqual(@as(usize, 0), stack.size());
     try std.testing.expect(stack.is_empty());
@@ -618,12 +648,12 @@ test "stack_boundary_single_element" {
     try std.testing.expectEqual(@as(usize, 1), stack.size());
     try std.testing.expect(!stack.is_empty());
     try std.testing.expect(!stack.is_full());
-    
+
     // Peek operations
     try std.testing.expectEqual(@as(u256, 42), try stack.peek());
     try std.testing.expectEqual(@as(u256, 42), try stack.peek_n(0));
     try std.testing.expectError(Error.StackUnderflow, stack.peek_n(1));
-    
+
     // Pop the element
     try std.testing.expectEqual(@as(u256, 42), try stack.pop());
     try std.testing.expectEqual(@as(usize, 0), stack.size());
@@ -639,17 +669,17 @@ test "stack_boundary_near_capacity" {
     while (i < CAPACITY - 1) : (i += 1) {
         try stack.append(@as(u256, i));
     }
-    
+
     try std.testing.expectEqual(@as(usize, 1023), stack.size());
     try std.testing.expect(!stack.is_empty());
     try std.testing.expect(!stack.is_full());
-    
+
     // Add one more to reach capacity
     try stack.append(1023);
     try std.testing.expectEqual(@as(usize, 1024), stack.size());
     try std.testing.expect(!stack.is_empty());
     try std.testing.expect(stack.is_full());
-    
+
     // Verify cannot exceed capacity
     try std.testing.expectError(Error.StackOverflow, stack.append(1024));
     try std.testing.expectEqual(@as(usize, 1024), stack.size());
@@ -664,19 +694,19 @@ test "stack_boundary_at_capacity" {
     while (i < CAPACITY) : (i += 1) {
         try stack.append(@as(u256, i));
     }
-    
+
     try std.testing.expectEqual(@as(usize, 1024), stack.size());
     try std.testing.expect(!stack.is_empty());
     try std.testing.expect(stack.is_full());
-    
+
     // Verify overflow protection
     try std.testing.expectError(Error.StackOverflow, stack.append(9999));
-    
+
     // Verify can still pop
     try std.testing.expectEqual(@as(u256, 1023), try stack.pop());
     try std.testing.expectEqual(@as(usize, 1023), stack.size());
     try std.testing.expect(!stack.is_full());
-    
+
     // Verify can push again after pop
     try stack.append(9999);
     try std.testing.expectEqual(@as(usize, 1024), stack.size());
@@ -690,23 +720,23 @@ test "stack_error_conditions_comprehensive" {
     // Underflow on empty stack
     try std.testing.expectError(Error.StackUnderflow, stack.pop());
     try std.testing.expectError(Error.StackUnderflow, stack.peek());
-    
+
     // Push and pop cycle
     try stack.append(100);
     try std.testing.expectEqual(@as(u256, 100), try stack.pop());
-    
+
     // Underflow after becoming empty
     try std.testing.expectError(Error.StackUnderflow, stack.pop());
-    
+
     // Fill to capacity
     var i: usize = 0;
     while (i < CAPACITY) : (i += 1) {
         try stack.append(@as(u256, i));
     }
-    
+
     // Overflow at capacity
     try std.testing.expectError(Error.StackOverflow, stack.append(9999));
-    
+
     // Clear and test underflow again
     stack.clear();
     try std.testing.expectError(Error.StackUnderflow, stack.pop());
@@ -721,23 +751,23 @@ test "stack_dup_comprehensive_DUP1_to_DUP16" {
     while (i <= 16) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
-    
+
     // Test DUP1 (duplicate top)
     stack.dup_unsafe(1);
     try std.testing.expectEqual(@as(u256, 16), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 16), stack.pop_unsafe());
-    
+
     // Restore stack
     stack.append_unsafe(16);
-    
+
     // Test DUP2 (duplicate second from top)
     stack.dup_unsafe(2);
     try std.testing.expectEqual(@as(u256, 15), stack.pop_unsafe());
-    
+
     // Test DUP16 (duplicate 16th from top)
     stack.dup_unsafe(16);
     try std.testing.expectEqual(@as(u256, 1), stack.pop_unsafe());
-    
+
     // Verify stack size after operations
     try std.testing.expectEqual(@as(usize, 16), stack.size());
 }
@@ -751,13 +781,13 @@ test "stack_dup_edge_cases" {
     stack.dup_unsafe(1);
     try std.testing.expectEqual(@as(u256, 42), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 42), stack.pop_unsafe());
-    
+
     // DUP at near capacity
     var i: usize = 0;
     while (i < CAPACITY - 1) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
-    
+
     // Should succeed - one slot left
     stack.dup_unsafe(1);
     try std.testing.expectEqual(@as(usize, CAPACITY), stack.size());
@@ -773,22 +803,22 @@ test "stack_swap_comprehensive_SWAP1_to_SWAP16" {
     while (i <= 17) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
-    
+
     // Test SWAP1 (swap top with second)
     // Before: [..., 16, 17] -> After: [..., 17, 16]
     stack.swap_unsafe(1);
     try std.testing.expectEqual(@as(u256, 16), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 17), stack.pop_unsafe());
-    
+
     // Restore for next test
     stack.append_unsafe(16);
     stack.append_unsafe(17);
-    
+
     // Test SWAP16 (swap top with 17th element)
     // Top is at position 17, swap with position 1
     stack.swap_unsafe(16);
     try std.testing.expectEqual(@as(u256, 1), stack.pop_unsafe());
-    
+
     // Verify element at bottom
     while (stack.size() > 1) {
         _ = stack.pop_unsafe();
@@ -806,7 +836,7 @@ test "stack_swap_edge_cases" {
     stack.swap_unsafe(1);
     try std.testing.expectEqual(@as(u256, 100), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 200), stack.pop_unsafe());
-    
+
     // SWAP with same value
     stack.append_unsafe(42);
     stack.append_unsafe(42);
@@ -826,7 +856,7 @@ test "stack_pop2_unsafe_edge_cases" {
     try std.testing.expectEqual(@as(u256, 100), result.a);
     try std.testing.expectEqual(@as(u256, 200), result.b);
     try std.testing.expectEqual(@as(usize, 0), stack.size());
-    
+
     // Test with more than 2 elements
     stack.append_unsafe(1);
     stack.append_unsafe(2);
@@ -836,7 +866,7 @@ test "stack_pop2_unsafe_edge_cases" {
     try std.testing.expectEqual(@as(u256, 3), result2.a);
     try std.testing.expectEqual(@as(u256, 4), result2.b);
     try std.testing.expectEqual(@as(usize, 2), stack.size());
-    
+
     // Verify remaining elements
     try std.testing.expectEqual(@as(u256, 2), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 1), stack.pop_unsafe());
@@ -855,7 +885,7 @@ test "stack_pop3_unsafe_edge_cases" {
     try std.testing.expectEqual(@as(u256, 200), result.b);
     try std.testing.expectEqual(@as(u256, 300), result.c);
     try std.testing.expectEqual(@as(usize, 0), stack.size());
-    
+
     // Test with more than 3 elements
     stack.append_unsafe(1);
     stack.append_unsafe(2);
@@ -867,7 +897,7 @@ test "stack_pop3_unsafe_edge_cases" {
     try std.testing.expectEqual(@as(u256, 4), result2.b);
     try std.testing.expectEqual(@as(u256, 5), result2.c);
     try std.testing.expectEqual(@as(usize, 2), stack.size());
-    
+
     // Verify remaining elements
     try std.testing.expectEqual(@as(u256, 2), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 1), stack.pop_unsafe());
@@ -881,7 +911,7 @@ test "stack_set_top_unsafe" {
     stack.append_unsafe(100);
     stack.set_top_unsafe(200);
     try std.testing.expectEqual(@as(u256, 200), stack.pop_unsafe());
-    
+
     // Test with multiple elements
     stack.append_unsafe(1);
     stack.append_unsafe(2);
@@ -901,17 +931,17 @@ test "stack_peek_n_comprehensive" {
     while (i < 10) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
-    
+
     // Test peek_n for all valid positions
     i = 0;
     while (i < 10) : (i += 1) {
         try std.testing.expectEqual(@as(u256, 9 - i), try stack.peek_n(i));
     }
-    
+
     // Test underflow
     try std.testing.expectError(Error.StackUnderflow, stack.peek_n(10));
     try std.testing.expectError(Error.StackUnderflow, stack.peek_n(100));
-    
+
     // Verify stack unchanged
     try std.testing.expectEqual(@as(usize, 10), stack.size());
 }
@@ -925,19 +955,19 @@ test "stack_clear_behavior" {
     while (i < 100) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
-    
+
     try std.testing.expectEqual(@as(usize, 100), stack.size());
-    
+
     // Clear and verify
     stack.clear();
     try std.testing.expectEqual(@as(usize, 0), stack.size());
     try std.testing.expect(stack.is_empty());
     try std.testing.expect(!stack.is_full());
-    
+
     // Verify can use after clear
     try stack.append(42);
     try std.testing.expectEqual(@as(u256, 42), try stack.pop());
-    
+
     // Multiple clears
     stack.clear();
     stack.clear(); // Should be idempotent
@@ -948,28 +978,28 @@ test "stack_memory_cleanup_verification" {
     if (comptime !CLEAR_ON_POP) {
         return; // Skip test in release mode
     }
-    
+
     var stack = try Stack.init(std.testing.allocator);
     defer stack.deinit();
 
     // Push sensitive value
     const sensitive_value: u256 = 0xDEADBEEFCAFEBABE;
     stack.append_unsafe(sensitive_value);
-    
+
     // Pop and verify cleanup
     _ = stack.pop_unsafe();
-    
+
     // Check that the memory was cleared (in debug/safe modes)
     const cleared_value = stack.base[0];
     try std.testing.expectEqual(@as(u256, 0), cleared_value);
-    
+
     // Test pop2_unsafe cleanup
     stack.append_unsafe(0x1111);
     stack.append_unsafe(0x2222);
     _ = stack.pop2_unsafe();
     try std.testing.expectEqual(@as(u256, 0), stack.base[0]);
     try std.testing.expectEqual(@as(u256, 0), stack.base[1]);
-    
+
     // Test pop3_unsafe cleanup
     stack.append_unsafe(0x3333);
     stack.append_unsafe(0x4444);
@@ -987,14 +1017,14 @@ test "stack_set_size_unsafe" {
     // Test setting various sizes
     stack.set_size_unsafe(0);
     try std.testing.expectEqual(@as(usize, 0), stack.size());
-    
+
     stack.set_size_unsafe(10);
     try std.testing.expectEqual(@as(usize, 10), stack.size());
-    
+
     stack.set_size_unsafe(CAPACITY);
     try std.testing.expectEqual(@as(usize, CAPACITY), stack.size());
     try std.testing.expect(stack.is_full());
-    
+
     stack.set_size_unsafe(0);
     try std.testing.expect(stack.is_empty());
 }
@@ -1011,24 +1041,24 @@ test "stack_alternating_operations_stress" {
         while (j < 10 and stack.size() < CAPACITY) : (j += 1) {
             stack.append_unsafe(@as(u256, i * 10 + j));
         }
-        
+
         // Pop some
         j = 0;
         while (j < 5 and !stack.is_empty()) : (j += 1) {
             _ = stack.pop_unsafe();
         }
-        
+
         // Dup if possible
         if (stack.size() > 0 and stack.size() < CAPACITY) {
             stack.dup_unsafe(1);
         }
-        
+
         // Swap if we have at least 2 elements
         if (stack.size() >= 2) {
             stack.swap_unsafe(1);
         }
     }
-    
+
     // Verify stack is still valid
     try validate_stack_invariants(&stack);
 }
@@ -1042,18 +1072,18 @@ test "stack_unsafe_operations_preconditions" {
     while (i < 20) : (i += 1) {
         stack.append_unsafe(@as(u256, i));
     }
-    
+
     // Test all unsafe operations work correctly with valid preconditions
     const peek_val = stack.peek_unsafe().*;
     try std.testing.expectEqual(@as(u256, 19), peek_val);
-    
+
     stack.set_top_unsafe(999);
     try std.testing.expectEqual(@as(u256, 999), stack.peek_unsafe().*);
-    
+
     stack.dup_unsafe(10);
     try std.testing.expectEqual(@as(u256, 999), stack.pop_unsafe());
     try std.testing.expectEqual(@as(u256, 999), stack.pop_unsafe());
-    
+
     stack.swap_unsafe(5);
     const top = stack.pop_unsafe();
     try std.testing.expectEqual(@as(u256, 13), top);
@@ -1076,7 +1106,7 @@ test "stack_concurrent_safety_simulation" {
         .{ .op = .push, .val = 4 },
         .{ .op = .pop, .val = 0 },
     };
-    
+
     for (operations) |op| {
         switch (op.op) {
             .push => stack.append_unsafe(op.val),
@@ -1096,7 +1126,7 @@ test "stack_concurrent_safety_simulation" {
                 }
             },
         }
-        
+
         // Verify invariants after each operation
         try validate_stack_invariants(&stack);
     }

@@ -119,8 +119,8 @@ test "Frame initialization with minimal parameters" {
 
     // Verify frame initialization
     try testing.expectEqual(@as(u64, 100_000), frame.gas_remaining);
-    try testing.expectEqual(false, frame.hot_flags.is_static);
-    try testing.expectEqual(@as(u10, 0), frame.hot_flags.depth);
+    try testing.expectEqual(false, frame.is_static);
+    try testing.expectEqual(@as(u10, 0), frame.depth);
     try testing.expectEqual(testAddress(0x1000), frame.contract_address);
     try testing.expectEqual(testAddress(0x2000), frame.caller);
 }

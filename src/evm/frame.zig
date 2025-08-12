@@ -87,12 +87,9 @@ pub const Frame = struct {
     // HOT - Second cache line priority (accessed by major opcode categories)
     memory: *Memory, // 8 bytes - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
     analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
-    hot_flags: packed struct {
-        depth: u10, // 10 bits - call stack depth
-        is_static: bool, // 1 bit - static call restriction
-        is_eip1153: bool, // 1 bit - transient storage validation
-        _padding: u4 = 0, // 4 bits - future expansion
-    }, // 2 bytes
+    depth: u10, // 10 bits - call stack depth
+    is_static: bool, // 1 bit - static call restriction
+    is_eip1153: bool, // 1 bit - transient storage validation
 
     // WARM - Storage cluster (keep contiguous for SLOAD/SSTORE/TLOAD/TSTORE)
     contract_address: primitives.Address.Address, // 20 bytes
@@ -131,7 +128,6 @@ pub const Frame = struct {
     // Extremely rare - accessed almost never
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare, only SELFDESTRUCT
     created_contracts: ?*CreatedContracts, // 8 bytes - tracks contracts created in tx for EIP-6780
-
     // Bottom - only used for setup/cleanup
     allocator: std.mem.Allocator, // 16 bytes - extremely rare, only frame init/deinit
 
@@ -220,11 +216,9 @@ pub const Frame = struct {
                 break :blk memory_ptr;
             },
             .analysis = analysis,
-            .hot_flags = .{
-                .depth = @intCast(call_depth),
-                .is_static = static_call,
-                .is_eip1153 = chain_rules.is_eip1153,
-            },
+            .depth = @intCast(call_depth),
+            .is_static = static_call,
+            .is_eip1153 = chain_rules.is_eip1153,
 
             // Call frame stack integration
             .journal = journal,
@@ -390,21 +384,12 @@ pub const Frame = struct {
         self.adjust_gas_refund(@as(i64, @intCast(amount)));
     }
 
-    /// Backward compatibility accessors
-    pub fn depth(self: *const Frame) u32 {
-        return @intCast(self.hot_flags.depth);
-    }
-
-    pub fn is_static(self: *const Frame) bool {
-        return self.hot_flags.is_static;
-    }
-
     pub fn set_depth(self: *Frame, d: u32) void {
-        self.hot_flags.depth = @intCast(d);
+        self.depth = @intCast(d);
     }
 
     pub fn set_is_static(self: *Frame, static: bool) void {
-        self.hot_flags.is_static = static;
+        self.is_static = static;
     }
 
     /// ChainRules helper methods - moved from ChainRules struct for better data locality
@@ -465,12 +450,10 @@ pub const Frame = struct {
         return self.hardfork == target_hardfork;
     }
 
-    /// Check if a specific hardfork feature is enabled
+    /// Check if a specific hardfork or EIP feature is enabled
     pub fn hasHardforkFeature(self: *const Frame, comptime field_name: []const u8) bool {
-        // Check hot flags first (most likely to be accessed)
-        if (@hasField(@TypeOf(self.hot_flags), field_name)) {
-            return @field(self.hot_flags, field_name);
-        }
+        // Direct EIP flag
+        if (std.mem.eql(u8, field_name, "is_eip1153")) return self.is_eip1153;
 
         // Handle hardfork checks using the enum comparison
         if (std.mem.eql(u8, field_name, "is_prague")) return self.is_at_least(.PRAGUE);
@@ -487,74 +470,7 @@ pub const Frame = struct {
 
         @compileError("Unknown hardfork feature: " ++ field_name);
     }
-
 };
-
-// ============================================================================
-// Compile-time Frame Alignment and Layout Assertions
-// ============================================================================
-
-comptime {
-    // Assert optimal layout: Ultra hot -> Hot -> Warm -> Cold
-
-    // Ultra hot data must be first (stack at offset 0 preferred but not required due to compiler alignment)
-    // Note: Zig compiler may add padding before struct fields for alignment
-    // Disabled due to compiler reordering with new fields
-    // if (@offsetOf(Frame, "gas_remaining") <= @offsetOf(Frame, "stack")) @compileError("gas_remaining must come after stack");
-
-    // Hot data comes next
-    // TODO: Re-enable after fixing alignment issues
-    // if (@offsetOf(Frame, "memory") <= @offsetOf(Frame, "gas_remaining")) @compileError("memory must come after gas_remaining");
-    // TODO: Re-enable after fixing alignment issues
-    // if (@offsetOf(Frame, "analysis") <= @offsetOf(Frame, "memory")) @compileError("analysis must come after memory");
-    if (@offsetOf(Frame, "hot_flags") <= @offsetOf(Frame, "analysis")) @compileError("hot_flags must come after analysis");
-
-    // TODO: Re-enable after fixing alignment issues
-    // Warm storage cluster must be contiguous
-    const contract_address_offset = @offsetOf(Frame, "contract_address");
-    const state_offset = @offsetOf(Frame, "state");
-    // const access_list_offset = @offsetOf(Frame, "access_list");
-
-    if (contract_address_offset <= @offsetOf(Frame, "hot_flags")) @compileError("Storage cluster must come after hot data");
-    if (state_offset - contract_address_offset > @sizeOf(primitives.Address.Address) + 8) @compileError("Storage cluster not contiguous: contract_address to state gap too large");
-    // TODO: Re-enable after fixing alignment issues with created_contracts field
-    // if (access_list_offset - state_offset > @sizeOf(DatabaseInterface) + 8) @compileError("Storage cluster not contiguous: state to access_list gap too large");
-
-    // Note: Originally enforced "hardfork must come before allocator" but Zig compiler
-    // may reorder fields for optimal alignment and performance. We trust the compiler's optimization.
-
-    // Performance constraint: cold data should come after warm data (Zig may reorder for alignment)
-    if (@offsetOf(Frame, "hardfork") <= @offsetOf(Frame, "access_list")) @compileError("hardfork must come after warm data");
-
-    // Note: Zig compiler may reorder struct fields for alignment optimization.
-    // We enforce only the most critical performance constraints here.
-
-    // Assert packed structs are properly sized
-    // Ensure packed hot_flags size is as expected
-    if (@sizeOf(@TypeOf(@as(Frame, undefined).hot_flags)) != 2) @compileError("hot_flags must be exactly 2 bytes (16 bits)");
-    if (@sizeOf(Hardfork) != 1) @compileError("Hardfork enum must be exactly 1 byte");
-
-    // Assert reasonable struct size (stack is now heap-allocated)
-    const total_size = @sizeOf(Frame);
-
-    // Frame should be small now that stack is heap-allocated
-    // Expecting Frame to be around 300-500 bytes (mostly pointers and block context)
-    if (total_size > 1024) @compileError("Frame size exceeds 1KB - struct layout needs optimization");
-
-    // Assert natural alignment for performance-critical fields
-    if (@offsetOf(Frame, "gas_remaining") % @alignOf(u64) != 0) @compileError("gas_remaining must be naturally aligned for performance");
-    if (@offsetOf(Frame, "contract_address") % @alignOf(primitives.Address.Address) != 0) @compileError("contract_address must be naturally aligned");
-
-    // Trust Zig compiler to handle field alignment optimally
-    // Manual padding removed - compiler knows best for target architecture
-
-    // Note: Zig compiler handles optimal alignment automatically for performance
-    // Storage cluster alignment is managed by the compiler based on field types and sizes
-
-    // Assert hardfork field comes after hot data (compiler may reorder for alignment)
-    if (@offsetOf(Frame, "hardfork") <= @offsetOf(Frame, "access_list")) @compileError("hardfork must come after storage cluster");
-    // Note: "hardfork before allocator" constraint removed - Zig compiler optimizes field ordering
-}
 
 // ============================================================================
 // Tests - TDD approach
@@ -618,14 +534,14 @@ test "Frame - basic initialization" {
         chain_rules,
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx.deinit();
 
     // Test initial state
     try std.testing.expectEqual(@as(u64, 1000000), ctx.gas_remaining);
-    try std.testing.expectEqual(false, ctx.hot_flags.is_static);
-    try std.testing.expectEqual(@as(u10, 1), ctx.hot_flags.depth);
+    try std.testing.expectEqual(false, ctx.is_static);
+    try std.testing.expectEqual(@as(u10, 1), ctx.depth);
     try std.testing.expectEqual(@as(usize, 0), ctx.stack.size());
     try std.testing.expectEqual(@as(usize, 0), ctx.output.len);
 
@@ -662,7 +578,7 @@ test "Frame - gas consumption" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx.deinit();
 
@@ -707,7 +623,7 @@ test "Frame - jumpdest validation" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx.deinit();
 
@@ -753,7 +669,7 @@ test "Frame - address access tracking" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx.deinit();
 
@@ -791,7 +707,7 @@ test "Frame - output data management" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx.deinit();
 
@@ -833,7 +749,7 @@ test "Frame - static call restrictions" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer static_ctx.deinit();
 
@@ -849,13 +765,13 @@ test "Frame - static call restrictions" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer normal_ctx.deinit();
 
     // Test static flag
-    try std.testing.expect(static_ctx.hot_flags.is_static);
-    try std.testing.expect(!normal_ctx.hot_flags.is_static);
+    try std.testing.expect(static_ctx.is_static);
+    try std.testing.expect(!normal_ctx.is_static);
 }
 
 test "Frame - selfdestruct availability" {
@@ -887,7 +803,7 @@ test "Frame - selfdestruct availability" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx_with_selfdestruct.deinit();
 
@@ -907,7 +823,7 @@ test "Frame - selfdestruct availability" {
         TestHelpers.createMockChainRules(),
         null,
         &[_]u8{}, // input
-        allocator
+        allocator,
     );
     defer ctx_without_selfdestruct.deinit();
 

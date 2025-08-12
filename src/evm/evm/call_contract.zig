@@ -115,17 +115,17 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
 
     // Create host interface from self
     const host = Host.init(self);
-    
+
     // Create temporary AccessList for Frame (different type from EVM's access_list)
     const Context = @import("../access_list/context.zig");
     const access_context = Context.init();
     var frame_access_list = CallFrameAccessList.init(self.allocator, access_context);
     defer frame_access_list.deinit();
-    
+
     // Create execution context for the contract
     var context = Frame.init(
         execution_gas, // gas remaining
-        is_static, // static call flag 
+        is_static, // static call flag
         @intCast(self.depth), // call depth
         to, // contract address
         caller, // caller address
@@ -154,7 +154,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     // For now, return a failure indicating this isn't implemented yet
     Log.debug("VM.call_contract: Contract execution with Frame not yet implemented", .{});
     const result = CallResult{ .success = false, .gas_left = execution_gas, .output = null };
-    
+
     // Handle execution errors (placeholder)
     const err_handler_start = false;
     if (err_handler_start) {
@@ -167,6 +167,6 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     // When actual execution is implemented, this will process the real result
     Log.debug("VM.call_contract: Call completed (placeholder implementation), gas_left={}", .{result.gas_left});
 
-    // The intrinsic gas is consumed, so we don't add it back to gas_left  
+    // The intrinsic gas is consumed, so we don't add it back to gas_left
     return result;
 }
