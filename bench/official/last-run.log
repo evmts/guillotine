@@ -1,18 +1,20 @@
 
-[2025-08-12 00:37:02] Starting perf-fastest.sh
-[2025-08-12 00:37:02] ROOT_DIR=/Users/williamcory/guillotine
-[2025-08-12 00:37:02] System: Darwin Williams-Mac-mini.local 24.3.0 Darwin Kernel Version 24.3.0: Thu Jan  2 20:24:22 PST 2025; root:xnu-11215.81.4~3/RELEASE_ARM64_T6041 arm64
-[2025-08-12 00:37:02] zig: 0.14.1
-[2025-08-12 00:37:02] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
-[2025-08-12 00:37:02] cargo: cargo 1.88.0 (873a06493 2025-05-10)
-[2025-08-12 00:37:02] bun: 1.2.20
-[2025-08-12 00:37:02] hyperfine: hyperfine 1.19.0
-[2025-08-12 00:37:02] git: branch=review commit=81ec245 dirty=yes
-[2025-08-12 00:37:02] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
-[2025-08-12 00:37:02] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
-[2025-08-12 00:37:02] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
-[2025-08-12 00:37:02] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
-[2025-08-12 00:37:02] Building Zig runners (ReleaseFast)
+[2025-08-12 09:55:23] Starting perf-fastest.sh
+[2025-08-12 09:55:23] ROOT_DIR=/Users/williamcory/guillotine
+[2025-08-12 09:55:23] System: Darwin Williams-Mac-mini.local 24.3.0 Darwin Kernel Version 24.3.0: Thu Jan  2 20:24:22 PST 2025; root:xnu-11215.81.4~3/RELEASE_ARM64_T6041 arm64
+[2025-08-12 09:55:23] zig: 0.14.1
+[2025-08-12 09:55:23] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
+[2025-08-12 09:55:23] cargo: cargo 1.88.0 (873a06493 2025-05-10)
+[2025-08-12 09:55:23] bun: 1.2.20
+[2025-08-12 09:55:23] hyperfine: hyperfine 1.19.0
+[2025-08-12 09:55:23] git: branch=review commit=3e56ac7 dirty=yes
+[2025-08-12 09:55:23] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
+[2025-08-12 09:55:23] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
+[2025-08-12 09:55:23] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
+[2025-08-12 09:55:23] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
+[2025-08-12 09:55:23] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner
+[2025-08-12 09:55:23] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner-small
+[2025-08-12 09:55:23] Building Zig runners (ReleaseFast and ReleaseSmall)
 info: Downloading blst library...
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
 package:   /Users/williamcory/guillotine/src/compilers/Cargo.toml
@@ -21,33 +23,25 @@ warning: profiles for the non root package will be ignored, specify profiles at 
 package:   /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml
 workspace: /Users/williamcory/guillotine/Cargo.toml
 warning: /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
-warning: unused variable: `contract_code`
-   --> src/revm_wrapper/src/lib.rs:244:17
-    |
-244 |     if let Some(contract_code) = vm.db.contracts.get(&code_hash) {
-    |                 ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_contract_code`
-    |
-    = note: `#[warn(unused_variables)]` on by default
-
-warning: unused variable: `code`
-   --> src/revm_wrapper/src/lib.rs:404:25
-    |
-404 |             if let Some(code) = &acc_info.code {
-    |                         ^^^^ help: if this is intentional, prefix it with an underscore: `_code`
-
-warning: unused variable: `input_len_debug`
-   --> src/revm_wrapper/src/lib.rs:443:9
-    |
-443 |     let input_len_debug = input.len();
-    |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_input_len_debug`
-
-warning: `revm_wrapper` (lib) generated 3 warnings
-    Finished `release` profile [optimized] target(s) in 0.13s
+    Finished `release` profile [optimized] target(s) in 0.28s
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100  583k  100  583k    0     0  1000k      0 --:--:-- --:--:-- --:--:-- 1000k
-[2025-08-12 00:37:09] Building orchestrator (ReleaseFast)
+100  583k    0  583k    0     0   874k      0 --:--:-- --:--:-- --:--:--  874k
+info: Downloading blst library...
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/williamcory/guillotine/src/compilers/Cargo.toml
+workspace: /Users/williamcory/guillotine/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml
+workspace: /Users/williamcory/guillotine/Cargo.toml
+warning: /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
+    Finished `release` profile [optimized] target(s) in 0.12s
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+  0  583k    0   833    0     0   2380      0  0:04:10 --:--:--  0:04:10  2380100  583k  100  583k    0     0  1000k      0 --:--:-- --:--:-- --:--:-- 2499k
+[2025-08-12 09:55:32] Building orchestrator (ReleaseFast)
 info: Downloading blst library...
 -- CPM: adding package evmone@0.9.1 (v0.9.1)
 CMake Warning (dev) at /opt/homebrew/share/cmake/Modules/FetchContent.cmake:1953 (message):
@@ -1398,29 +1392,43 @@ CMake Warning (dev) at build/_deps/evmone-src/lib/evmone/CMakeLists.txt:8 (find_
   .cmake module might still use it.
 This warning is for project developers.  Use -Wno-dev to suppress it.
 
--- Configuring done (1.0s)
+-- Configuring done (1.1s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Users/williamcory/guillotine/bench/official/evms/evmone/build
 [ 18%] Built target instructions
-[ 25%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_analysis.cpp.o
-[ 31%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/baseline.cpp.o
-[ 43%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_instructions.cpp.o
-[ 43%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/baseline_instruction_table.cpp.o
-[ 62%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/eof.cpp.o
-[ 62%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_execution.cpp.o
-[ 62%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/instructions_calls.cpp.o
-[ 75%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/tracing.cpp.o
-[ 81%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/instructions_storage.cpp.o
-[ 81%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/vm.cpp.o
-[ 87%] Linking CXX shared library ../../../../lib/libevmone.dylib
 [ 87%] Built target evmone
-[ 93%] Building CXX object CMakeFiles/evmone-runner.dir/runner.cpp.o
-[100%] Linking CXX executable evmone-runner
 [100%] Built target evmone-runner
-[2025-08-12 00:37:12] Running orchestrator with compare mode (single run per case)
-[2025-08-12 00:37:12] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
+[2025-08-12 09:55:37] Running orchestrator with compare mode (single run per case)
+[2025-08-12 09:55:37] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
 
 === Running benchmarks for zig ===
+
+=== Benchmarking erc20-approval-transfer ===
+Errors:
+Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
+  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+Errors:
+Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
+  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+Errors:
+Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
+  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+Errors:
+Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
+  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+Errors:
+Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
+  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
+
+=== Running benchmarks for zig-small ===
 
 === Benchmarking erc20-approval-transfer ===
 Errors:
@@ -1450,19 +1458,19 @@ Error: Command terminated with non-zero exit code 1 in the first warmup run. Use
 === Running benchmarks for revm ===
 
 === Benchmarking erc20-approval-transfer ===
-  Mean: 7.12 ms, Min: 7.12 ms, Max: 7.12 ms (per run, 1 internal runs)
+  Mean: 1.23 ms, Min: 1.23 ms, Max: 1.23 ms (per run, 1 internal runs)
 
 === Benchmarking erc20-mint ===
-  Mean: 4.87 ms, Min: 4.87 ms, Max: 4.87 ms (per run, 1 internal runs)
+  Mean: 1.16 ms, Min: 1.16 ms, Max: 1.16 ms (per run, 1 internal runs)
 
 === Benchmarking ten-thousand-hashes ===
-  Mean: 3.95 ms, Min: 3.95 ms, Max: 3.95 ms (per run, 1 internal runs)
+  Mean: 1.25 ms, Min: 1.25 ms, Max: 1.25 ms (per run, 1 internal runs)
 
 === Benchmarking snailtracer ===
-  Mean: 31.27 ms, Min: 31.27 ms, Max: 31.27 ms (per run, 1 internal runs)
+  Mean: 1.29 ms, Min: 1.29 ms, Max: 1.29 ms (per run, 1 internal runs)
 
 === Benchmarking erc20-transfer ===
-  Mean: 7.30 ms, Min: 7.30 ms, Max: 7.30 ms (per run, 1 internal runs)
+  Mean: 1.18 ms, Min: 1.18 ms, Max: 1.18 ms (per run, 1 internal runs)
 
 === Running benchmarks for ethereumjs ===
 
@@ -1494,13 +1502,13 @@ Error: Command terminated with non-zero exit code 1 in the first warmup run. Use
 === Running benchmarks for geth ===
 
 === Benchmarking erc20-approval-transfer ===
-  Mean: 13.09 ms, Min: 13.09 ms, Max: 13.09 ms (per run, 1 internal runs)
+  Mean: 12.70 ms, Min: 12.70 ms, Max: 12.70 ms (per run, 1 internal runs)
 
 === Benchmarking erc20-mint ===
-  Mean: 12.08 ms, Min: 12.08 ms, Max: 12.08 ms (per run, 1 internal runs)
+  Mean: 11.26 ms, Min: 11.26 ms, Max: 11.26 ms (per run, 1 internal runs)
 
 === Benchmarking ten-thousand-hashes ===
-  Mean: 9.46 ms, Min: 9.46 ms, Max: 9.46 ms (per run, 1 internal runs)
+  Mean: 8.36 ms, Min: 8.36 ms, Max: 8.36 ms (per run, 1 internal runs)
 
 === Benchmarking snailtracer ===
 Errors:
@@ -1508,18 +1516,18 @@ Error: Command terminated with non-zero exit code 2 in the first warmup run. Use
   Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
 
 === Benchmarking erc20-transfer ===
-  Mean: 16.16 ms, Min: 16.16 ms, Max: 16.16 ms (per run, 1 internal runs)
+  Mean: 14.93 ms, Min: 14.93 ms, Max: 14.93 ms (per run, 1 internal runs)
 
 === Running benchmarks for evmone ===
 
 === Benchmarking erc20-approval-transfer ===
-  Mean: 6.10 ms, Min: 6.10 ms, Max: 6.10 ms (per run, 1 internal runs)
+  Mean: 7.63 ms, Min: 7.63 ms, Max: 7.63 ms (per run, 1 internal runs)
 
 === Benchmarking erc20-mint ===
-  Mean: 3.62 ms, Min: 3.62 ms, Max: 3.62 ms (per run, 1 internal runs)
+  Mean: 4.50 ms, Min: 4.50 ms, Max: 4.50 ms (per run, 1 internal runs)
 
 === Benchmarking ten-thousand-hashes ===
-  Mean: 2.34 ms, Min: 2.34 ms, Max: 2.34 ms (per run, 1 internal runs)
+  Mean: 5.29 ms, Min: 5.29 ms, Max: 5.29 ms (per run, 1 internal runs)
 
 === Benchmarking snailtracer ===
 Errors:
@@ -1527,8 +1535,7 @@ Error: Command terminated with non-zero exit code 1 in the first warmup run. Use
   Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
 
 === Benchmarking erc20-transfer ===
-  Mean: 5.96 ms, Min: 5.96 ms, Max: 5.96 ms (per run, 1 internal runs)
+  Mean: 5.69 ms, Min: 5.69 ms, Max: 5.69 ms (per run, 1 internal runs)
 Comparison results exported to bench/official/results.md
-[2025-08-12 00:37:14] Benchmark results written to: /Users/williamcory/guillotine/bench/official/results.md
-[2025-08-12 00:37:14] Opening results in browser...
-[2025-08-12 00:37:14] ERROR: Command failed (exit=1) at line 93: npx -y markserv "./bench/official/results.md"
+[2025-08-12 09:55:39] Benchmark results written to: /Users/williamcory/guillotine/bench/official/results.md
+[2025-08-12 09:55:39] Opening results in browser...

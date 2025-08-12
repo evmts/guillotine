@@ -68,9 +68,9 @@ pub fn main() !void {
         // Differential trace mode
         var orchestrator = try Orchestrator.init(allocator, "zig", 1, 1, 1, 1, 1, 1, false, use_next, show_output);
         defer orchestrator.deinit();
-        
+
         try orchestrator.discoverTestCases();
-        
+
         // Find the specific test case
         var found_test: ?Orchestrator.TestCase = null;
         for (orchestrator.test_cases) |tc| {
@@ -79,7 +79,7 @@ pub fn main() !void {
                 break;
             }
         }
-        
+
         if (found_test) |test_case| {
             try orchestrator.runDifferentialTrace(test_case, diff_output_dir);
         } else {
@@ -92,7 +92,7 @@ pub fn main() !void {
         }
     } else if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
-        const evms = [_][]const u8{ "zig", "revm", "ethereumjs", "geth", "evmone" };
+        const evms = [_][]const u8{ "zig", "zig-small", "revm", "ethereumjs", "geth", "evmone" };
 
         var all_results = std.ArrayList(Orchestrator.BenchmarkResult).init(allocator);
         defer all_results.deinit();
@@ -217,18 +217,12 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     } else {
         try file.writer().print("**Test Runs per Case**: {}\n", .{num_runs});
     }
-    try file.writer().print("**EVMs Compared**: Guillotine (Zig), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
+    try file.writer().print("**EVMs Compared**: Guillotine (Zig ReleaseFast), Guillotine (Zig ReleaseSmall), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)\n", .{});
     try file.writer().print("**Timestamp**: {} (Unix epoch)\n\n", .{seconds});
 
     // Determine which test cases to include
-    const working_test_cases = [_][]const u8{
-        "erc20-approval-transfer",
-        "erc20-mint", 
-        "erc20-transfer",
-        "ten-thousand-hashes",
-        "snailtracer"
-    };
-    
+    const working_test_cases = [_][]const u8{ "erc20-approval-transfer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes", "snailtracer" };
+
     const all_test_cases = [_][]const u8{
         "erc20-approval-transfer",
         "erc20-mint",
@@ -263,16 +257,17 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
         "precompile-ripemd160",
         "precompile-sha256",
     };
-    
+
     const test_cases = if (include_all_cases) all_test_cases[0..] else working_test_cases[0..];
 
     // Add summary statistics first
     try file.writer().print("## Overall Performance Summary (Per Run)\n\n", .{});
-    try file.writeAll("| Test Case | Guillotine | REVM | EthereumJS | Geth | evmone |\n");
-    try file.writeAll("|-----------|------------|------|------------|------|--------|\n");
+    try file.writeAll("| Test Case | Zig-Fast | Zig-Small | REVM | EthereumJS | Geth | evmone |\n");
+    try file.writeAll("|-----------|----------|-----------|------|------------|------|--------|\n");
 
     for (test_cases) |test_case| {
-        var zig_mean: f64 = 0;
+        var zig_fast_mean: f64 = 0;
+        var zig_small_mean: f64 = 0;
         var revm_mean: f64 = 0;
         var ethereumjs_mean: f64 = 0;
         var geth_mean: f64 = 0;
@@ -285,7 +280,9 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
                 std.mem.eql(u8, result.test_case[test_case.len .. test_case.len + 2], " ("))
             {
                 if (std.mem.indexOf(u8, result.test_case, "(zig)") != null) {
-                    zig_mean = result.mean_ms;
+                    zig_fast_mean = result.mean_ms;
+                } else if (std.mem.indexOf(u8, result.test_case, "(zig-small)") != null) {
+                    zig_small_mean = result.mean_ms;
                 } else if (std.mem.indexOf(u8, result.test_case, "(revm)") != null) {
                     revm_mean = result.mean_ms;
                 } else if (std.mem.indexOf(u8, result.test_case, "(ethereumjs)") != null) {
@@ -298,15 +295,17 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
             }
         }
 
-        const zig_formatted = formatTimeWithUnit(zig_mean);
+        const zig_fast_formatted = formatTimeWithUnit(zig_fast_mean);
+        const zig_small_formatted = formatTimeWithUnit(zig_small_mean);
         const revm_formatted = formatTimeWithUnit(revm_mean);
         const ethereumjs_formatted = formatTimeWithUnit(ethereumjs_mean);
         const geth_formatted = formatTimeWithUnit(geth_mean);
         const evmone_formatted = formatTimeWithUnit(evmone_mean);
 
-        try file.writer().print("| {s:<25} | {s:>10} | {s:>4} | {s:>10} | {s:>4} | {s:>6} |\n", .{
+        try file.writer().print("| {s:<25} | {s:>8} | {s:>9} | {s:>4} | {s:>10} | {s:>4} | {s:>6} |\n", .{
             test_case,
-            zig_formatted,
+            zig_fast_formatted,
+            zig_small_formatted,
             revm_formatted,
             ethereumjs_formatted,
             geth_formatted,
@@ -332,7 +331,9 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
                 std.mem.eql(u8, result.test_case[test_case.len .. test_case.len + 2], " ("))
             {
                 const evm_name = if (std.mem.indexOf(u8, result.test_case, "(zig)") != null)
-                    "Guillotine"
+                    "Guillotine (Zig Fast)"
+                else if (std.mem.indexOf(u8, result.test_case, "(zig-small)") != null)
+                    "Guillotine (Zig Small)"
                 else if (std.mem.indexOf(u8, result.test_case, "(revm)") != null)
                     "REVM"
                 else if (std.mem.indexOf(u8, result.test_case, "(ethereumjs)") != null)
@@ -368,7 +369,8 @@ fn exportComparisonMarkdown(allocator: std.mem.Allocator, results: []const Orche
     try file.writeAll("- **All times are normalized per individual execution run**\n");
     try file.writeAll("- Times are displayed in the most appropriate unit (μs, ms, or s)\n");
     try file.writeAll("- All implementations use optimized builds:\n");
-    try file.writeAll("  - Zig: ReleaseFast\n");
+    try file.writeAll("  - Zig (Fast): ReleaseFast\n");
+    try file.writeAll("  - Zig (Small): ReleaseSmall\n");
     try file.writeAll("  - Rust (REVM): --release\n");
     try file.writeAll("  - JavaScript (EthereumJS): Bun runtime\n");
     try file.writeAll("  - Go (geth): -O3 optimizations\n");
@@ -422,12 +424,12 @@ test "formatTimeWithUnit selects appropriate unit" {
     const micro_time = formatTimeWithUnit(0.5);
     try std.testing.expectEqual(TimeUnit.microseconds, micro_time.unit);
     try std.testing.expectApproxEqRel(@as(f64, 500.0), micro_time.value, 0.001);
-    
-    // Test milliseconds  
+
+    // Test milliseconds
     const milli_time = formatTimeWithUnit(50.0);
     try std.testing.expectEqual(TimeUnit.milliseconds, milli_time.unit);
     try std.testing.expectApproxEqRel(@as(f64, 50.0), milli_time.value, 0.001);
-    
+
     // Test seconds
     const seconds_time = formatTimeWithUnit(2500.0);
     try std.testing.expectEqual(TimeUnit.seconds, seconds_time.unit);
@@ -439,11 +441,11 @@ test "selectOptimalUnit returns correct unit and value" {
     const edge_micro = selectOptimalUnit(0.999);
     try std.testing.expectEqual(TimeUnit.microseconds, edge_micro.unit);
     try std.testing.expectApproxEqRel(@as(f64, 999.0), edge_micro.value, 0.001);
-    
+
     const edge_milli = selectOptimalUnit(999.999);
     try std.testing.expectEqual(TimeUnit.milliseconds, edge_milli.unit);
     try std.testing.expectApproxEqRel(@as(f64, 999.999), edge_milli.value, 0.001);
-    
+
     const edge_seconds = selectOptimalUnit(1000.0);
     try std.testing.expectEqual(TimeUnit.seconds, edge_seconds.unit);
     try std.testing.expectApproxEqRel(@as(f64, 1.0), edge_seconds.value, 0.001);
@@ -451,21 +453,21 @@ test "selectOptimalUnit returns correct unit and value" {
 
 test "FormattedTime.format outputs correct string" {
     const allocator = std.testing.allocator;
-    
+
     // Test microseconds formatting
     const micro_time = FormattedTime{ .value = 123.45, .unit = .microseconds };
     var micro_buf = std.ArrayList(u8).init(allocator);
     defer micro_buf.deinit();
     try micro_time.format("", .{}, micro_buf.writer());
     try std.testing.expectEqualStrings("123.45 μs", micro_buf.items);
-    
+
     // Test milliseconds formatting
     const milli_time = FormattedTime{ .value = 87.50, .unit = .milliseconds };
     var milli_buf = std.ArrayList(u8).init(allocator);
     defer milli_buf.deinit();
     try milli_time.format("", .{}, milli_buf.writer());
     try std.testing.expectEqualStrings("87.50 ms", milli_buf.items);
-    
+
     // Test seconds formatting
     const seconds_time = FormattedTime{ .value = 3.14, .unit = .seconds };
     var seconds_buf = std.ArrayList(u8).init(allocator);
@@ -478,7 +480,7 @@ test "TimeUnit enum has correct values" {
     const micro = TimeUnit.microseconds;
     const milli = TimeUnit.milliseconds;
     const secs = TimeUnit.seconds;
-    
+
     // Test enum values exist and are distinct
     try std.testing.expect(micro != milli);
     try std.testing.expect(milli != secs);
