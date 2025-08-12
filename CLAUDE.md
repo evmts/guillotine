@@ -549,7 +549,7 @@ To see `std.log.debug` output when running tests, add this to your test file:
 
 ```zig
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 ```
 

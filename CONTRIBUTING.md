@@ -97,7 +97,7 @@ hyperfine --runs 10 \
 2. **Enable debug logging** in tests when needed:
    ```zig
    test {
-       std.testing.log_level = .debug;
+       std.testing.log_level = .warn;
    }
    ```
 
