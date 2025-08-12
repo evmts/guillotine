@@ -6,5 +6,5 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-revm = { version = "14.0", features = ["c-kzg", "blst"] }
+revm = { version = "14.0", features = ["c-kzg", "blst", "std", "serde-json"] }
 hex = "0.4"
