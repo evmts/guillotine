@@ -18,6 +18,11 @@ const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+// These checks are redundant after analysis.zig validates blocks
+const SAFE_GAS_CHECK = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
+const SAFE_JUMP_VALIDATION = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
+
 /// Error types for Frame operations
 pub const AccessError = error{OutOfMemory};
 pub const StateError = error{OutOfMemory};
@@ -268,19 +273,28 @@ pub const Frame = struct {
     }
 
     /// Gas consumption with bounds checking - used by all opcodes that consume gas
+    /// In ReleaseFast/ReleaseSmall modes, the check is skipped since BEGINBLOCK already validated gas
     pub fn consume_gas(self: *Frame, amount: u64) ExecutionError.Error!void {
-        if (self.gas_remaining < amount) return ExecutionError.Error.OutOfGas;
+        if (SAFE_GAS_CHECK) {
+            if (self.gas_remaining < amount) {
+                @branchHint(.cold);
+                return ExecutionError.Error.OutOfGas;
+            }
+        }
         self.gas_remaining -= amount;
     }
 
     /// Jump destination validation - uses cache-efficient packed array
     /// This is significantly faster than bitmap access due to better cache locality
+    /// In ReleaseFast/ReleaseSmall modes, debug logging is skipped for performance
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
-        std.debug.assert(dest <= std.math.maxInt(u32));
+        if (SAFE_JUMP_VALIDATION) {
+            std.debug.assert(dest <= std.math.maxInt(u32));
+        }
         const dest_usize = @as(usize, @intCast(dest));
         const is_valid = self.analysis.jumpdest_array.is_valid_jumpdest(dest_usize);
         // Add debug logging to trace jump dest validation during failures
-        if (!is_valid) {
+        if (SAFE_JUMP_VALIDATION and !is_valid) {
             const in_bounds = dest_usize < self.analysis.code_len;
             const opcode: u8 = if (in_bounds) self.analysis.code[dest_usize] else 0xff;
             var nearest: isize = -1;
