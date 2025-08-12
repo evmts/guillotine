@@ -170,15 +170,17 @@ pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir
         print("  REVM: PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.revm_pc, div.revm_op, self.getOpcodeName(div.revm_op) });
         print("  Zig:  PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.zig_pc, div.zig_op, self.getOpcodeName(div.zig_op) });
         
+        // Show context around divergence
+        try self.showDivergenceContext(revm_trace_path, zig_trace_path, div.step);
+        
         const divergence_file = try std.fmt.allocPrint(self.allocator, "{s}/{s}_divergence.txt", .{ output_dir, test_case.name });
         defer self.allocator.free(divergence_file);
         
         const file = try std.fs.cwd().createFile(divergence_file, .{});
         defer file.close();
         
-        try file.writer().print("Divergence at step {d}:\n", .{div.step});
-        try file.writer().print("REVM: PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.revm_pc, div.revm_op, self.getOpcodeName(div.revm_op) });
-        try file.writer().print("Zig:  PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.zig_pc, div.zig_op, self.getOpcodeName(div.zig_op) });
+        // Write detailed divergence report with context
+        try self.writeDivergenceReport(file.writer(), revm_trace_path, zig_trace_path, div);
         
         print("  Divergence details saved to: {s}\n", .{divergence_file});
     } else {
@@ -192,6 +194,13 @@ const TraceDivergence = struct {
     revm_op: u8,
     zig_pc: usize,
     zig_op: u8,
+};
+
+const TraceEntry = struct {
+    pc: usize,
+    op: u8,
+    gas: []const u8,
+    stack_size: usize,
 };
 
 fn findTraceDivergence(self: *Orchestrator, revm_trace_path: []const u8, zig_trace_path: []const u8) !?TraceDivergence {
@@ -289,6 +298,201 @@ fn extractOp(self: *Orchestrator, json_line: []const u8) ?u8 {
         }
     }
     return null;
+}
+
+fn parseTraceEntry(self: *Orchestrator, json_line: []const u8) ?TraceEntry {
+    // Skip non-trace lines (like summary lines)
+    if (std.mem.indexOf(u8, json_line, "\"pc\":") == null) return null;
+    
+    const pc = self.extractPc(json_line) orelse return null;
+    const op = self.extractOp(json_line) orelse return null;
+    
+    // Extract gas (as string for display)
+    var gas: []const u8 = "0x0";
+    if (std.mem.indexOf(u8, json_line, "\"gas\":\"")) |gas_pos| {
+        const start = gas_pos + 7;
+        if (std.mem.indexOfPos(u8, json_line, start, "\"")) |end| {
+            gas = json_line[start..end];
+        }
+    }
+    
+    // Extract stack size
+    var stack_size: usize = 0;
+    if (std.mem.indexOf(u8, json_line, "\"stack\":[")) |stack_pos| {
+        var count: usize = 0;
+        var pos = stack_pos + 9;
+        if (json_line[pos] != ']') {
+            count = 1;
+            while (pos < json_line.len) : (pos += 1) {
+                if (json_line[pos] == ',') count += 1;
+                if (json_line[pos] == ']') break;
+            }
+        }
+        stack_size = count;
+    }
+    
+    return TraceEntry{
+        .pc = pc,
+        .op = op,
+        .gas = gas,
+        .stack_size = stack_size,
+    };
+}
+
+fn showDivergenceContext(self: *Orchestrator, revm_trace_path: []const u8, zig_trace_path: []const u8, divergence_step: usize) !void {
+    const context_size = 10;
+    const start_step = if (divergence_step > context_size) divergence_step - context_size else 0;
+    const end_step = divergence_step + context_size;
+    
+    print("\n=== Execution Context (10 steps before and after divergence) ===\n\n", .{});
+    
+    // Read REVM context
+    print("REVM Trace:\n", .{});
+    print("Step    PC    Op        Opcode         Gas           Stack\n", .{});
+    print("----  -----  ----  --------------  -------------  -------\n", .{});
+    
+    const revm_entries = try self.readTraceContext(revm_trace_path, start_step, end_step, divergence_step);
+    defer self.allocator.free(revm_entries);
+    
+    for (revm_entries, start_step..) |entry_opt, step| {
+        if (entry_opt) |entry| {
+            const marker = if (step == divergence_step) " <--" else "";
+            print("{d:4}  {d:5}  0x{X:0>2}  {s:<14}  {s:<13}  [{d}]{s}\n", .{
+                step,
+                entry.pc,
+                entry.op,
+                self.getOpcodeName(entry.op),
+                entry.gas,
+                entry.stack_size,
+                marker,
+            });
+        } else if (step == divergence_step) {
+            print("{d:4}  [REVM trace ended]{s}\n", .{ step, " <--" });
+        }
+    }
+    
+    print("\nZig Trace:\n", .{});
+    print("Step    PC    Op        Opcode         Gas           Stack\n", .{});
+    print("----  -----  ----  --------------  -------------  -------\n", .{});
+    
+    const zig_entries = try self.readTraceContext(zig_trace_path, start_step, end_step, divergence_step);
+    defer self.allocator.free(zig_entries);
+    
+    for (zig_entries, start_step..) |entry_opt, step| {
+        if (entry_opt) |entry| {
+            const marker = if (step == divergence_step) " <--" else "";
+            print("{d:4}  {d:5}  0x{X:0>2}  {s:<14}  {s:<13}  [{d}]{s}\n", .{
+                step,
+                entry.pc,
+                entry.op,
+                self.getOpcodeName(entry.op),
+                entry.gas,
+                entry.stack_size,
+                marker,
+            });
+        } else if (step == divergence_step) {
+            print("{d:4}  [Zig trace ended]{s}\n", .{ step, " <--" });
+        }
+    }
+    
+    print("\n================================================================\n", .{});
+}
+
+fn readTraceContext(self: *Orchestrator, trace_path: []const u8, start_step: usize, end_step: usize, divergence_step: usize) ![]?TraceEntry {
+    _ = divergence_step;
+    
+    const file = try std.fs.cwd().openFile(trace_path, .{});
+    defer file.close();
+    
+    var reader = std.io.bufferedReader(file.reader());
+    var line_buf: [16384]u8 = undefined;
+    
+    const num_entries = end_step - start_step + 1;
+    var entries = try self.allocator.alloc(?TraceEntry, num_entries);
+    for (entries) |*e| e.* = null;
+    
+    var current_step: usize = 0;
+    while (try reader.reader().readUntilDelimiterOrEof(&line_buf, '\n')) |line| {
+        if (current_step >= end_step + 1) break;
+        
+        if (current_step >= start_step and current_step <= end_step) {
+            if (self.parseTraceEntry(line)) |entry| {
+                entries[current_step - start_step] = entry;
+            }
+        }
+        
+        // Only count lines that are actual trace entries
+        if (std.mem.indexOf(u8, line, "\"pc\":") != null) {
+            current_step += 1;
+        }
+    }
+    
+    return entries;
+}
+
+fn writeDivergenceReport(self: *Orchestrator, writer: anytype, revm_trace_path: []const u8, zig_trace_path: []const u8, div: TraceDivergence) !void {
+    try writer.print("Divergence Analysis Report\n", .{});
+    try writer.print("=========================\n\n", .{});
+    
+    try writer.print("Divergence at step {d}:\n", .{div.step});
+    try writer.print("REVM: PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.revm_pc, div.revm_op, self.getOpcodeName(div.revm_op) });
+    try writer.print("Zig:  PC={d}, Op=0x{X:0>2} ({s})\n\n", .{ div.zig_pc, div.zig_op, self.getOpcodeName(div.zig_op) });
+    
+    const context_size = 10;
+    const start_step = if (div.step > context_size) div.step - context_size else 0;
+    const end_step = div.step + context_size;
+    
+    try writer.print("Execution Context (10 steps before and after divergence):\n", .{});
+    try writer.print("========================================================\n\n", .{});
+    
+    // Write REVM context
+    try writer.print("REVM Trace:\n", .{});
+    try writer.print("Step    PC    Op        Opcode         Gas           Stack\n", .{});
+    try writer.print("----  -----  ----  --------------  -------------  -------\n", .{});
+    
+    const revm_entries = try self.readTraceContext(revm_trace_path, start_step, end_step, div.step);
+    defer self.allocator.free(revm_entries);
+    
+    for (revm_entries, start_step..) |entry_opt, step| {
+        if (entry_opt) |entry| {
+            const marker = if (step == div.step) " <-- DIVERGENCE" else "";
+            try writer.print("{d:4}  {d:5}  0x{X:0>2}  {s:<14}  {s:<13}  [{d}]{s}\n", .{
+                step,
+                entry.pc,
+                entry.op,
+                self.getOpcodeName(entry.op),
+                entry.gas,
+                entry.stack_size,
+                marker,
+            });
+        } else if (step == div.step) {
+            try writer.print("{d:4}  [REVM trace ended]{s}\n", .{ step, " <-- DIVERGENCE" });
+        }
+    }
+    
+    try writer.print("\nZig Trace:\n", .{});
+    try writer.print("Step    PC    Op        Opcode         Gas           Stack\n", .{});
+    try writer.print("----  -----  ----  --------------  -------------  -------\n", .{});
+    
+    const zig_entries = try self.readTraceContext(zig_trace_path, start_step, end_step, div.step);
+    defer self.allocator.free(zig_entries);
+    
+    for (zig_entries, start_step..) |entry_opt, step| {
+        if (entry_opt) |entry| {
+            const marker = if (step == div.step) " <-- DIVERGENCE" else "";
+            try writer.print("{d:4}  {d:5}  0x{X:0>2}  {s:<14}  {s:<13}  [{d}]{s}\n", .{
+                step,
+                entry.pc,
+                entry.op,
+                self.getOpcodeName(entry.op),
+                entry.gas,
+                entry.stack_size,
+                marker,
+            });
+        } else if (step == div.step) {
+            try writer.print("{d:4}  [Zig trace ended]{s}\n", .{ step, " <-- DIVERGENCE" });
+        }
+    }
 }
 
 fn getOpcodeName(self: *Orchestrator, opcode: u8) []const u8 {
