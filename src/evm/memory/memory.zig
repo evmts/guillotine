@@ -3,6 +3,10 @@ const builtin = @import("builtin");
 const constants = @import("constants.zig");
 const Log = @import("../log.zig");
 
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+// These checks are redundant after analysis.zig validates memory operations
+const SAFE_MEMORY_BOUNDS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
+
 /// Memory implementation for EVM execution contexts.
 pub const Memory = @This();
 
@@ -160,16 +164,33 @@ pub fn clear(self: *Memory) void {
 
 // Read operations
 pub const get_u256 = read_ops.get_u256;
+pub const get_u256_unsafe = read_ops.get_u256_unsafe;
 pub const get_slice = read_ops.get_slice;
+pub const get_slice_unsafe = read_ops.get_slice_unsafe;
 pub const get_byte = read_ops.get_byte;
 
 // Write operations
 pub const set_data = write_ops.set_data;
+pub const set_data_unsafe = write_ops.set_data_unsafe;
 pub const set_data_bounded = write_ops.set_data_bounded;
 pub const set_u256 = write_ops.set_u256;
+pub const set_u256_unsafe = write_ops.set_u256_unsafe;
 
 // Slice operations
 pub const slice = slice_ops.slice;
+
+/// Get direct access to the memory buffer for pre-validated operations.
+/// SAFETY: Caller must ensure all accesses are within bounds (my_checkpoint + offset < buffer.len)
+/// Use only for operations pre-validated by analysis.zig
+pub inline fn get_memory_ptr(self: *const Memory) [*]u8 {
+    return self.shared_buffer_ref.items.ptr;
+}
+
+/// Get the checkpoint offset for this context.
+/// Used with get_memory_ptr for direct memory access.
+pub inline fn get_checkpoint(self: *const Memory) usize {
+    return self.my_checkpoint;
+}
 
 /// Lookup table for small memory sizes (0-4KB in 32-byte increments)
 /// Provides O(1) access for common small memory allocations

@@ -1,8 +1,13 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Log = @import("../log.zig");
 const memory = @import("./memory.zig");
 const errors = @import("errors.zig");
 const context = @import("context.zig");
+
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+// These checks are redundant after analysis.zig validates memory operations
+const SAFE_MEMORY_BOUNDS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
 
 // NOTE: This file has been reviewed for issue #8 optimization opportunities.
 // All manual loops have been replaced with std.mem functions:
@@ -74,4 +79,31 @@ pub inline fn set_u256(self: *memory.Memory, relative_offset: usize, value: u256
     const abs_offset = self.my_checkpoint + relative_offset;
     const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + 32].ptr);
     std.mem.writeInt(u256, bytes_ptr, value, .big);
+}
+
+/// Write u256 value without capacity expansion.
+/// SAFETY: Caller must ensure memory already has capacity for offset + 32
+/// Use only for operations pre-validated by analysis.zig
+pub inline fn set_u256_unsafe(self: *memory.Memory, relative_offset: usize, value: u256) void {
+    if (SAFE_MEMORY_BOUNDS) {
+        std.debug.assert(relative_offset + 32 <= self.context_size());
+    }
+    const abs_offset = self.my_checkpoint + relative_offset;
+    const bytes_ptr: *[32]u8 = @ptrCast(self.shared_buffer_ref.items[abs_offset..abs_offset + 32].ptr);
+    std.mem.writeInt(u256, bytes_ptr, value, .big);
+}
+
+/// Write arbitrary data without capacity expansion.
+/// SAFETY: Caller must ensure memory already has capacity for offset + data.len
+/// Use only for operations pre-validated by analysis.zig
+pub inline fn set_data_unsafe(self: *memory.Memory, relative_offset: usize, data: []const u8) void {
+    if (data.len == 0) return;
+    
+    if (SAFE_MEMORY_BOUNDS) {
+        std.debug.assert(relative_offset + data.len <= self.context_size());
+    }
+    
+    const abs_offset = self.my_checkpoint + relative_offset;
+    const abs_end = abs_offset + data.len;
+    @memcpy(self.shared_buffer_ref.items[abs_offset..abs_end], data);
 }

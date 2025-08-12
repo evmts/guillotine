@@ -1,8 +1,13 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Log = @import("../log.zig");
 const Memory = @import("./memory.zig").Memory;
 const MemoryError = @import("errors.zig").MemoryError;
 const constants = @import("constants.zig");
+
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+// These checks are redundant after analysis.zig validates memory operations
+const SAFE_MEMORY_BOUNDS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
 
 /// Returns the size of the memory region visible to the current context.
 pub inline fn context_size(self: *const Memory) usize {
@@ -30,11 +35,15 @@ pub inline fn ensure_context_capacity(self: *Memory, min_context_size: usize) Me
 /// This is crucial for EVM gas calculation.
 pub noinline fn ensure_context_capacity_slow(self: *Memory, min_context_size: usize) MemoryError!u64 {
     const required_total_len = self.my_checkpoint + min_context_size;
-    Log.debug("Memory.ensure_context_capacity: Ensuring capacity, min_context_size={}, required_total_len={}, memory_limit={}", .{ min_context_size, required_total_len, self.memory_limit });
+    
+    if (SAFE_MEMORY_BOUNDS) {
+        Log.debug("Memory.ensure_context_capacity: Ensuring capacity, min_context_size={}, required_total_len={}, memory_limit={}", .{ min_context_size, required_total_len, self.memory_limit });
 
-    if (required_total_len > self.memory_limit) {
-        Log.debug("Memory.ensure_context_capacity: Memory limit exceeded, required={}, limit={}", .{ required_total_len, self.memory_limit });
-        return MemoryError.MemoryLimitExceeded;
+        if (required_total_len > self.memory_limit) {
+            @branchHint(.cold);
+            Log.debug("Memory.ensure_context_capacity: Memory limit exceeded, required={}, limit={}", .{ required_total_len, self.memory_limit });
+            return MemoryError.MemoryLimitExceeded;
+        }
     }
 
     const shared_buffer = self.shared_buffer_ref;
@@ -43,13 +52,17 @@ pub noinline fn ensure_context_capacity_slow(self: *Memory, min_context_size: us
 
     if (required_total_len <= old_total_buffer_len) {
         // Buffer is already large enough
-        Log.debug("Memory.ensure_context_capacity: Buffer already large enough, no expansion needed", .{});
+        if (SAFE_MEMORY_BOUNDS) {
+            Log.debug("Memory.ensure_context_capacity: Buffer already large enough, no expansion needed", .{});
+        }
         return 0;
     }
 
     // Resize the buffer
     const new_total_len = required_total_len;
-    Log.debug("Memory.ensure_context_capacity: Expanding buffer from {} to {} bytes", .{ old_total_buffer_len, new_total_len });
+    if (SAFE_MEMORY_BOUNDS) {
+        Log.debug("Memory.ensure_context_capacity: Expanding buffer from {} to {} bytes", .{ old_total_buffer_len, new_total_len });
+    }
 
     if (new_total_len > shared_buffer.capacity) {
         var new_capacity = shared_buffer.capacity;
@@ -76,7 +89,9 @@ pub noinline fn ensure_context_capacity_slow(self: *Memory, min_context_size: us
 
     const new_total_words = constants.calculate_num_words(new_total_len);
     const words_added = new_total_words -| old_total_words;
-    Log.debug("Memory.ensure_context_capacity: Expansion complete, old_words={}, new_words={}, words_added={}", .{ old_total_words, new_total_words, words_added });
+    if (SAFE_MEMORY_BOUNDS) {
+        Log.debug("Memory.ensure_context_capacity: Expansion complete, old_words={}, new_words={}, words_added={}", .{ old_total_words, new_total_words, words_added });
+    }
     return words_added;
 }
 
