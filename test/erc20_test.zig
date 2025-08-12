@@ -83,6 +83,7 @@ test "erc20 transfer benchmark executes successfully" {
     // Deploy and call
     const contract_address = try deploy(&vm, allocator, caller, bytecode);
     const initial_gas: u64 = 100_000_000;
+    std.log.debug("Calling ERC20 transfer with gas: {}, calldata len: {}", .{ initial_gas, calldata.len });
     const params = evm.CallParams{ .call = .{
         .caller = caller,
         .to = contract_address,
@@ -92,15 +93,36 @@ test "erc20 transfer benchmark executes successfully" {
     } };
     const call_result = try vm.call(params);
 
+    if (!call_result.success) {
+        std.log.err("ERC20 transfer call failed, gas_left: {}", .{call_result.gas_left});
+    }
     try std.testing.expect(call_result.success);
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 0);
     // transfer(address,uint256) should return 32-byte true
     if (call_result.output) |output| {
         defer allocator.free(output);
+        std.log.debug("ERC20 transfer returned {} bytes", .{output.len});
+        if (output.len > 0) {
+            std.log.debug("First few bytes: {x}", .{output[0..@min(8, output.len)]});
+            if (output.len >= 32) {
+                std.log.debug("Last byte: {x}", .{output[output.len - 1]});
+            }
+        }
+        if (output.len < 32) {
+            std.log.err("Output too short: expected at least 32 bytes, got {}", .{output.len});
+            if (output.len > 0) {
+                std.log.err("Output data: {x}", .{output});
+            }
+        }
         try std.testing.expect(output.len >= 32);
+        if (output[output.len - 1] != 1) {
+            std.log.err("Expected last byte to be 1, got {}", .{output[output.len - 1]});
+            std.log.err("Full output: {x}", .{output});
+        }
         try std.testing.expect(output[output.len - 1] == 1);
     } else {
+        std.log.err("No output returned from ERC20 transfer", .{});
         return error.MissingReturnData;
     }
 }
