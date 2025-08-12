@@ -247,6 +247,7 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     }
 
     if (code.len == 0) {
+        Log.debug("[analysis] Empty code, returning empty analysis", .{});
         // For empty code, convert empty bitmap to empty array and create empty instruction array
         const jumpdest_array = try JumpdestArray.from_bitmap(allocator, &jumpdest_bitmap, code.len);
         jumpdest_bitmap.deinit(); // Free the temporary bitmap
@@ -909,6 +910,19 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
             // Special opcodes that need individual gas tracking for dynamic calculations
             .GAS, .CALL, .CALLCODE, .DELEGATECALL, .STATICCALL, .CREATE, .CREATE2, .SSTORE => {
+                // Isolate dynamic/special ops into their own blocks so that stack_req
+                // validation reflects only the actual instructions present in this block.
+                // This reduces the risk that previous fusion/elimination in the same block
+                // makes the validator underestimate the required stack height.
+                instructions[block.begin_block_index].arg.block_info = block.close();
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = BeginBlockHandler,
+                    .arg = .{ .block_info = BlockInfo{} },
+                };
+                block = BlockAnalysis.init(instruction_count);
+                instruction_count += 1;
+                if (builtin.mode == .Debug) stats.total_blocks += 1;
+
                 const operation = jump_table.get_operation(opcode_byte);
                 // Don't accumulate static gas in block - it will be handled individually
                 block.updateStackTracking(opcode_byte, operation.min_stack);
@@ -927,6 +941,17 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 };
                 instruction_count += 1;
                 pc += 1;
+
+                // Close the block after the dynamic/special op to avoid combining
+                // following instructions into the same validation unit.
+                instructions[block.begin_block_index].arg.block_info = block.close();
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = BeginBlockHandler,
+                    .arg = .{ .block_info = BlockInfo{} },
+                };
+                block = BlockAnalysis.init(instruction_count);
+                instruction_count += 1;
+                if (builtin.mode == .Debug) stats.total_blocks += 1;
             },
 
             // SHA3/KECCAK256 - for now just use regular handling
@@ -1173,8 +1198,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
     }
 
     // Resize arrays to actual sizes
+    Log.debug("[analysis] Resizing arrays: instruction_count={}, inst_jump_type.len={}", .{ instruction_count, inst_jump_type.len });
     const final_instructions = try allocator.realloc(instructions, instruction_count);
     const final_jump_types = try allocator.realloc(inst_jump_type, instruction_count);
+    Log.debug("[analysis] After resize: final_instructions.len={}, final_jump_types.len={}", .{ final_instructions.len, final_jump_types.len });
 
     // Build inst_to_pc mapping
     var inst_to_pc = try allocator.alloc(u16, instruction_count);

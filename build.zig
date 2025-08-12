@@ -1075,6 +1075,53 @@ pub fn build(b: *std.Build) void {
     const differential_test_step = b.step("test-differential", "Run differential tests");
     differential_test_step.dependOn(&run_differential_test.step);
 
+    // Add specific STATICCALL test for debugging
+    const staticcall_test = b.addTest(.{
+        .name = "staticcall-debug-test",
+        .root_source_file = b.path("test/differential/system_differential_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+        .filters = &.{"STATICCALL opcode enforces read-only execution"},
+    });
+    staticcall_test.root_module.stack_check = false;
+    staticcall_test.root_module.addImport("primitives", primitives_mod);
+    staticcall_test.root_module.addImport("evm", evm_mod);
+    staticcall_test.root_module.addImport("revm", revm_mod);
+
+    if (revm_lib) |revm_library| {
+        staticcall_test.linkLibrary(revm_library);
+        staticcall_test.addIncludePath(b.path("src/revm_wrapper"));
+        staticcall_test.linkLibC();
+
+        // Link the compiled Rust dynamic library (needed on macOS for c++/Security deps)
+        const revm_rust_target_dir = if (optimize == .Debug) "debug" else "release";
+        const revm_dylib_path = if (rust_target) |target_triple|
+            b.fmt("target/{s}/{s}/librevm_wrapper.dylib", .{ target_triple, revm_rust_target_dir })
+        else
+            b.fmt("target/{s}/librevm_wrapper.dylib", .{revm_rust_target_dir});
+        staticcall_test.addObjectFile(b.path(revm_dylib_path));
+
+        // Platform-specific system libs/frameworks for REVM
+        if (target.result.os.tag == .linux) {
+            staticcall_test.linkSystemLibrary("m");
+            staticcall_test.linkSystemLibrary("pthread");
+            staticcall_test.linkSystemLibrary("dl");
+        } else if (target.result.os.tag == .macos) {
+            staticcall_test.linkSystemLibrary("c++");
+            staticcall_test.linkFramework("Security");
+            staticcall_test.linkFramework("SystemConfiguration");
+            staticcall_test.linkFramework("CoreFoundation");
+        }
+
+        // Ensure Rust library is built before running tests
+        staticcall_test.step.dependOn(&revm_library.step);
+    }
+
+    const run_staticcall_test = b.addRunArtifact(staticcall_test);
+    const staticcall_test_step = b.step("test-staticcall", "Run isolated STATICCALL test with debug logging");
+    staticcall_test_step.dependOn(&run_staticcall_test.step);
+
     // Add comprehensive ALL tests package
     const all_tests_package = b.addTest(.{
         .name = "all-tests-package",

@@ -188,8 +188,16 @@ pub fn append(self: *Stack, value: u256) Error!void {
 /// @param value The 256-bit value to push
 pub inline fn append_unsafe(self: *Stack, value: u256) void {
     @branchHint(.likely);
+    // Debug/safe builds: assert stack pointer invariants to catch under/overflow early
+    if (comptime CLEAR_ON_POP) {
+        std.debug.assert(@intFromPtr(self.current) >= @intFromPtr(self.base));
+        std.debug.assert(@intFromPtr(self.current) < @intFromPtr(self.limit));
+    }
     self.current[0] = value;
     self.current += 1;
+    if (comptime CLEAR_ON_POP) {
+        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    }
 }
 
 /// Pop a value from the stack (safe version).

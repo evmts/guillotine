@@ -9,8 +9,6 @@ const CallResult = evm.CallResult;
 
 const CALLER_ADDRESS = "0x1000000000000000000000000000000000000001";
 
-// Updated to new API - migration in progress, tests not run yet
-
 pub const std_options: std.Options = .{
     .log_level = .err,
 };
@@ -18,14 +16,10 @@ pub const std_options: std.Options = .{
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const gpa_allocator = gpa.allocator();
+    const allocator = gpa.allocator();
 
-    // Use normal allocator (EVM will handle internal arena allocation)
-    const allocator = gpa_allocator;
-
-    // Parse command line arguments (use GPA for args, not EVM allocator)
-    const args = try std.process.argsAlloc(gpa_allocator);
-    defer std.process.argsFree(gpa_allocator, args);
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
 
     if (args.len < 5) {
         std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>] [--next]\n", .{args[0]});
@@ -86,20 +80,20 @@ pub fn main() !void {
     };
     defer contract_code_file.close();
 
-    const contract_code_hex = try contract_code_file.readToEndAlloc(gpa_allocator, 10 * 1024 * 1024); // 10MB max
-    defer gpa_allocator.free(contract_code_hex);
+    const contract_code_hex = try contract_code_file.readToEndAlloc(allocator, 10 * 1024 * 1024); // 10MB max
+    defer allocator.free(contract_code_hex);
 
     // Trim whitespace
     const trimmed_code = std.mem.trim(u8, contract_code_hex, " \t\n\r");
 
     // Decode hex to bytes
-    const contract_code = try hexToBytes(gpa_allocator, trimmed_code);
-    defer gpa_allocator.free(contract_code);
+    const contract_code = try hexToBytes(allocator, trimmed_code);
+    defer allocator.free(contract_code);
 
     // Decode calldata
     const trimmed_calldata = std.mem.trim(u8, calldata_hex.?, " \t\n\r");
-    const calldata = try hexToBytes(gpa_allocator, trimmed_calldata);
-    defer gpa_allocator.free(calldata);
+    const calldata = try hexToBytes(allocator, trimmed_calldata);
+    defer allocator.free(calldata);
 
     // Parse caller address
     const caller_address = try primitives.Address.from_hex(CALLER_ADDRESS);
@@ -125,7 +119,12 @@ pub fn main() !void {
     // Set up caller account with max balance
     try vm.state.set_balance(caller_address, std.math.maxInt(u256));
 
-    const contract_address = try deployContract(allocator, &vm, caller_address, contract_code);
+    const contract_address = blk: {
+        // Set runtime code directly at a deterministic address for parity
+        const addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+        try vm.state.set_code(addr, contract_code);
+        break :blk addr;
+    };
     const deployed = vm.state.get_code(contract_address);
     std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{ deployed.len, contract_address });
 
@@ -230,31 +229,7 @@ pub fn main() !void {
     }
 }
 
-fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
-    // Attempt 1: Treat input as initcode and use create_contract
-    const create_result = vm.create_contract(caller, 0, bytecode, 10_000_000) catch |err| blk: {
-        std.debug.print("[zig-runner] create_contract error: {}\n", .{err});
-        break :blk null;
-    };
-    if (create_result) |res| {
-        if (res.success) {
-            if (res.output) |out| allocator.free(out);
-            return res.address;
-        }
-        if (res.output) |out| {
-            std.debug.print("[zig-runner] create_contract failed; revert/output hex: 0x{X}\n", .{std.fmt.fmtSliceHexLower(out)});
-            allocator.free(out);
-        } else {
-            std.debug.print("[zig-runner] create_contract failed with no output\n", .{});
-        }
-    }
-
-    // Attempt 2: Treat input as runtime bytecode and set directly
-    const contract_addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
-    try vm.state.set_code(contract_addr, bytecode);
-    std.debug.print("[zig-runner] Fallback: set runtime code at deterministic address {any}\n", .{contract_addr});
-    return contract_addr;
-}
+fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address { _ = allocator; _ = vm; _ = caller; _ = bytecode; return error.Unsupported; }
 
 fn hexToBytes(allocator: std.mem.Allocator, hex: []const u8) ![]u8 {
     // Remove 0x prefix if present

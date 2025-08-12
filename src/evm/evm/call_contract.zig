@@ -141,7 +141,6 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         null, // created_contracts (not needed in isolated call)
         input, // input data
         self.allocator, // allocator
-        null, // next_frame (no nested calls)
         false, // is_create_call
         false, // is_delegate_call
     ) catch |err| {

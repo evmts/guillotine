@@ -493,7 +493,6 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         &self.created_contracts,
         &[_]u8{}, // constructor input (none for tests)
         self.allocator,
-        null,
         true, // is_create_call
         false, // is_delegate_call
     );

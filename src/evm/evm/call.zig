@@ -68,7 +68,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_is_static = true;
             call_caller = call_data.caller;
             call_value = 0; // Static calls have no value transfer
-            Log.debug("[call] Staticcall params: to={any}, input_len={}, gas={}, static={}", .{ call_data.to, call_data.input.len, call_data.gas, true });
+            Log.debug("[call] Staticcall params: to={any}, input_len={}, gas={}, static={}, code_len={}", .{ call_data.to, call_data.input.len, call_data.gas, true, call_code.len });
         },
         else => {
             // For now, return error for unhandled call types
@@ -166,25 +166,24 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
         self.created_contracts = CreatedContracts.init(self.allocator); // Fresh created contracts tracker for EIP-6780
 
-        // MEMORY ALLOCATION: Frame stack array (lazy allocation)
-        // Expected size: 16 * sizeof(Frame) ≈ 16 * ~500 bytes = ~8KB initial
+        // MEMORY ALLOCATION: Frame stack array (preallocated to max)
+        // Expected size: 1024 * sizeof(Frame) ≈ 1024 * ~500 bytes = ~512KB
         // Lifetime: Per call execution (freed after call completes)
-        // Frequency: Once per top-level call, grows on demand for nested calls
-        // Growth: Doubles up to MAX_CALL_DEPTH (1024)
+        // Frequency: Once per top-level call
+        // Growth: None - preallocated to MAX_CALL_DEPTH to prevent pointer invalidation
         if (self.frame_stack == null) {
-            // Allocate initial frame stack with reasonable initial capacity
-            // Most contracts don't go very deep, so start small
-            const initial_capacity = 16; // Start with space for 16 frames
-            self.frame_stack = try self.allocator.alloc(Frame, initial_capacity);
+            // Allocate frame stack with maximum capacity to avoid reallocation
+            // This prevents frame pointer invalidation during nested calls
+            self.frame_stack = try self.allocator.alloc(Frame, MAX_CALL_DEPTH);
             
             if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
                 // Verify initial allocation is within expected bounds
                 const frame_size = @sizeOf(Frame);
                 const allocated_size = self.frame_stack.?.len * frame_size;
                 // Frame is a large struct, likely 200-500 bytes
-                // 16 frames * 500 bytes = 8KB, allow up to 32KB for safety
-                std.debug.assert(allocated_size <= 32 * 1024); // 32KB max
-                std.debug.assert(self.frame_stack.?.len == initial_capacity);
+                // 1024 frames * 500 bytes = ~512KB
+                std.debug.assert(allocated_size <= 1024 * 1024); // 1MB max
+                std.debug.assert(self.frame_stack.?.len == MAX_CALL_DEPTH);
             }
         }
 
@@ -192,7 +191,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         const host = Host.init(self);
 
         // Initialize only the first frame now. Nested frames will be initialized on demand
-        const first_next_frame: ?*Frame = null; // no nested calls pre-allocated
         self.frame_stack.?[0] = try Frame.init(
             call_info.gas, // gas_remaining
             call_info.is_static, // static_call
@@ -211,7 +209,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             &self.created_contracts,
             call_info.input, // input
             self.allocator, // use general allocator for frame-owned allocations
-            first_next_frame,
             false, // is_create_call
             false, // is_delegate_call
         );
@@ -239,18 +236,8 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
-        // Ensure we have space in the frame stack, grow if needed
-        if (self.frame_stack) |frames| {
-            if (new_depth >= frames.len) {
-                // Need to grow the frame stack
-                const new_capacity = @min(frames.len * 2, MAX_CALL_DEPTH);
-                const new_frames = self.allocator.realloc(frames, new_capacity) catch {
-                    if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
-                    return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
-                };
-                self.frame_stack = new_frames;
-            }
-        } else {
+        // Verify we have frame stack allocated (should always be true with MAX_CALL_DEPTH preallocation)
+        if (self.frame_stack == null) {
             // Should not happen, but handle gracefully
             if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
@@ -279,7 +266,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             &self.created_contracts,
             call_info.input, // input
             self.allocator, // use general allocator for frame-owned allocations
-            null, // next_frame
             false, // is_create_call
             false, // is_delegate_call
         ) catch {

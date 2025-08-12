@@ -364,6 +364,11 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 const opcode_at_pc = if (pc_val != std.math.maxInt(u16) and pc_val < frame.analysis.code_len) frame.analysis.code[pc_val] else 0xFF;
                 Log.debug("[interpret] Executing instruction at index {} (pc={}, opcode=0x{x})", .{ current_index, pc_val, opcode_at_pc });
                 // Handle dynamic JUMP/JUMPI at runtime if needed
+                Log.debug("[interpret] inst_jump_type.len={}, current_index={}", .{ frame.analysis.inst_jump_type.len, current_index });
+                if (current_index >= frame.analysis.inst_jump_type.len) {
+                    Log.err("[interpret] ERROR: current_index {} >= inst_jump_type.len {}", .{ current_index, frame.analysis.inst_jump_type.len });
+                    return ExecutionError.Error.InvalidOpcode;
+                }
                 const jt = frame.analysis.inst_jump_type[current_index];
                 switch (jt) {
                     .jump => {

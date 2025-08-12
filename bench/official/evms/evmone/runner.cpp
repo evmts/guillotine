@@ -83,37 +83,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    // Create host for deployment
-    evmc::MockedHost host;
-    
-    // Deploy contract using bytecode directly as init code (like Guillotine does)
-    
-    
-    
-    
-    // Deploy contract using CREATE
-    evmc_message create_msg{};
-    create_msg.kind = EVMC_CREATE;
-    create_msg.recipient = CONTRACT_ADDRESS;
-    create_msg.gas = GAS;
-    
-    auto create_result = evmc_execute(vm, &host.get_interface(), 
-                                     (evmc_host_context*)&host,
-                                     EVMC_SHANGHAI, &create_msg, 
-                                     contract_code.data(), contract_code.size());
-    
-    check_status(create_result);
-    
-    // Extract the deployed code from the CREATE result
-    const auto exec_code = evmc::bytes(create_result.output_data, create_result.output_size);
-    
-    if (exec_code.empty()) {
-        std::cerr << "Contract deployment failed: no runtime code returned" << std::endl;
-        return 1;
-    }
-    
-    // Clean up create result
-    if (create_result.release) create_result.release(&create_result);
+    // We'll treat the input as runtime code and execute directly without CREATE
+    const auto exec_code = contract_code;
     
     // Prepare call message
     evmc_message call_msg{};
@@ -128,25 +99,24 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < num_runs; i++) {
         // Create fresh host for each run
         evmc::MockedHost run_host;
-        
-        auto start = std::chrono::high_resolution_clock::now();
-        
-        auto call_result = evmc_execute(vm, &run_host.get_interface(), 
+        // Set reasonable tx context: gas price = 1, base fee = 7
+        evmc::uint256be gas_price{};
+        gas_price.bytes[31] = 1; // 1
+        run_host.tx_context.tx_gas_price = gas_price;
+
+        evmc::uint256be base_fee{};
+        base_fee.bytes[31] = 7; // 7
+        run_host.tx_context.block_base_fee = base_fee;
+        auto call_result = evmc_execute(vm, &run_host.get_interface(),
                                        (evmc_host_context*)&run_host,
-                                       EVMC_SHANGHAI, &call_msg, 
+                                       EVMC_CANCUN, &call_msg,
                                        exec_code.data(), exec_code.size());
-        
-        auto end = std::chrono::high_resolution_clock::now();
         
         check_status(call_result);
         
         // Clean up call result
         if (call_result.release) call_result.release(&call_result);
-        
-        // Calculate duration
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-        double duration_ms = duration / 1000.0;
-        
+        // no in-run timers
     }
     
     evmc_destroy(vm);

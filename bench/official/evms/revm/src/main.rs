@@ -1,8 +1,8 @@
-use std::{env, fs, str::FromStr, time::Instant};
+use std::{env, fs, str::FromStr};
 
 use revm::{
-    primitives::{Address, Bytes, ExecutionResult, TxKind, U256},
     db::{CacheDB, EmptyDB},
+    primitives::{specification::LATEST_SPEC_ID, Address, Bytes, TxKind, U256},
     Evm,
 };
 
@@ -53,35 +53,14 @@ fn main() {
     };
     db.insert_account_info(caller_address, caller_info);
     
-    // Deploy the contract using bytecode directly as init code (like Guillotine does)
-    let contract_address = {
-        let mut evm_deploy = Evm::builder()
-            .with_db(&mut db)
-            .modify_tx_env(|tx| {
-                tx.caller = caller_address;
-                tx.transact_to = TxKind::Create;
-                tx.value = U256::ZERO;
-                tx.data = contract_code.clone(); // Use bytecode directly as init code
-                tx.gas_limit = 10_000_000;
-                tx.gas_price = U256::from(1u64);
-            })
-            .build();
-            
-        let deploy_result = evm_deploy.transact_commit().unwrap();
-        if let ExecutionResult::Success { output, .. } = deploy_result {
-            if let revm::primitives::Output::Create(_, Some(address)) = output {
-                address
-            } else {
-                panic!("Contract creation failed - no address returned");
-            }
-        } else {
-            panic!("Contract deployment failed");
-        }
-    };
+    // Directly set runtime code at a deterministic address
+    let contract_address = Address::from_str("0x5FbDB2315678afecb367f032d93F642f64180aa3").unwrap();
+    db.insert_account_code(contract_address, contract_code.clone().into());
     
     // Create EVM instance once - outside the loop (like Zig does)
     let mut evm = Evm::builder()
         .with_db(&mut db)
+        .with_spec_id(LATEST_SPEC_ID)
         .modify_tx_env(|tx| {
             tx.caller = caller_address;
             tx.transact_to = TxKind::Call(contract_address);
@@ -90,18 +69,14 @@ fn main() {
             tx.gas_limit = 1_000_000_000; // 1B gas
             tx.gas_price = U256::from(1u64);
         })
+        .modify_block_env(|block| {
+            block.basefee = U256::from(7u64);
+        })
         .build();
     
     // Run the benchmark num_runs times
     for _ in 0..num_runs {
-        let timer = Instant::now();
-        
-        // Execute without error handling for performance
         let _result = evm.transact().unwrap();
-        let dur = timer.elapsed();
-        
-        // Don't commit state changes - just measure execution time
-        
     }
 }
 

@@ -16,7 +16,7 @@ pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    const address_u256 = try frame.stack.pop();
+    const address_u256 = frame.stack.peek_unsafe().*;
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -25,7 +25,7 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
 
     // Get balance from state database
     const balance = try frame.state.get_balance(address);
-    try frame.stack.append(balance);
+    frame.stack.set_top_unsafe(balance);
 }
 
 pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {

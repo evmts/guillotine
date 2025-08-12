@@ -407,6 +407,7 @@ test "CODECOPY opcode copies contract code to memory" {
 
 
 test "STATICCALL opcode enforces read-only execution" {
+    testing.log_level = .debug;
     const allocator = testing.allocator;
     
     // Contract A bytecode: attempts SSTORE (state modification)
@@ -556,10 +557,26 @@ test "STATICCALL opcode enforces read-only execution" {
     const contract_c_address = Address.from_u256(0x5555555555555555555555555555555555555555);
     const contract_d_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
+    std.debug.print("Setting contract A code (len={})\n", .{contract_a_sstore_bytecode.len});
     try vm_instance.state.set_code(contract_a_address, &contract_a_sstore_bytecode);
+    std.debug.print("Setting contract B code (len={})\n", .{contract_b_log_bytecode.len});
     try vm_instance.state.set_code(contract_b_address, &contract_b_log_bytecode);
+    std.debug.print("Setting contract C code (len={})\n", .{contract_c_readonly_bytecode.len});
     try vm_instance.state.set_code(contract_c_address, &contract_c_readonly_bytecode);
+    std.debug.print("Setting contract D code (len={})\n", .{contract_d_staticcall_bytecode.len});
     try vm_instance.state.set_code(contract_d_address, &contract_d_staticcall_bytecode);
+    
+    // Verify the code was set correctly
+    const verify_d_code = vm_instance.state.get_code(contract_d_address);
+    std.debug.print("Contract D code after setting: len={}\n", .{verify_d_code.len});
+    
+    // Also verify other contracts
+    const verify_a_code = vm_instance.state.get_code(contract_a_address);
+    const verify_b_code = vm_instance.state.get_code(contract_b_address);
+    const verify_c_code = vm_instance.state.get_code(contract_c_address);
+    std.debug.print("Contract A (0x3333...) code: len={}\n", .{verify_a_code.len});
+    std.debug.print("Contract B (0x4444...) code: len={}\n", .{verify_b_code.len});
+    std.debug.print("Contract C (0x5555...) code: len={}\n", .{verify_c_code.len});
     
     // Set balance for contract C
     try vm_instance.state.set_balance(contract_c_address, 1000);

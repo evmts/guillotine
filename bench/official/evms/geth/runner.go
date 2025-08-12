@@ -1,22 +1,23 @@
 package main
 
 import (
-	"encoding/hex"
-	"flag"
-	"fmt"
-	"math/big"
-	"os"
-	"strings"
+    "encoding/hex"
+    "flag"
+    "fmt"
+    "math/big"
+    "os"
+    "strings"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm/runtime"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/holiman/uint256"
+    "github.com/ethereum/go-ethereum/common"
+    "github.com/ethereum/go-ethereum/core/state"
+    "github.com/ethereum/go-ethereum/core/types"
+    "github.com/ethereum/go-ethereum/core/vm/runtime"
+    "github.com/ethereum/go-ethereum/params"
+    "github.com/holiman/uint256"
 )
 
 var callerAddress = common.HexToAddress("0x1000000000000000000000000000000000000001")
+var contractAddress = common.HexToAddress("0x5FbDB2315678afecb367f032d93F642f64180aa3")
 
 func main() {
 	// Parse command line arguments
@@ -64,65 +65,46 @@ func main() {
 		panic(fmt.Sprintf("Failed to decode calldata: %v", err))
 	}
 
-	// Create runtime config with Shanghai support for PUSH0
-	shanghaiTime := uint64(0)
-	chainConfig := &params.ChainConfig{
-		ChainID:                       big.NewInt(1),
-		HomesteadBlock:                big.NewInt(0),
-		EIP150Block:                   big.NewInt(0),
-		EIP155Block:                   big.NewInt(0),
-		EIP158Block:                   big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
-		MergeNetsplitBlock:            big.NewInt(0),
-		ShanghaiTime:                  &shanghaiTime, // Shanghai at genesis (supports PUSH0)
-		TerminalTotalDifficulty:       big.NewInt(0),
-	}
-	
-	// Note: We deploy fresh for each run to avoid state accumulation issues
+    // Use mainnet chain config as a proxy for latest supported rules
+    chainConfig := params.MainnetChainConfig
 
-	// Run the benchmark num_runs times
-	for i := 0; i < numRuns; i++ {
-		// Create fresh state for each run to avoid state accumulation issues
-		freshStatedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
-		freshStatedb.CreateAccount(callerAddress)
-		freshStatedb.SetBalance(callerAddress, uint256.MustFromBig(new(big.Int).Lsh(big.NewInt(1), 256-1)), 0) // Max balance
-		
-		// Create fresh config with the fresh state
-		freshCfg := runtime.Config{
-			ChainConfig: chainConfig,
-			Origin:      callerAddress,
-			GasLimit:    1_000_000_000,
-			GasPrice:    big.NewInt(0),
-			Value:       big.NewInt(0),
-			Difficulty:  big.NewInt(0),
-			Time:        1,
-			Coinbase:    common.Address{},
-			BlockNumber: big.NewInt(1),
-			State:       freshStatedb,
-		}
-		
-		// Deploy contract using bytecode directly as init code (like Guillotine does)
-		_, freshContractAddr, _, err := runtime.Create(contractCode, &freshCfg)
-		if err != nil {
-			panic(fmt.Sprintf("Contract creation failed in run %d: %v", i, err))
-		}
-		
-		// Call the deployed contract
-		ret, _, err := runtime.Call(freshContractAddr, calldata, &freshCfg)
+    // Create state once and deploy runtime code once (apples-to-apples)
+    statedb, _ := state.New(types.EmptyRootHash, state.NewDatabaseForTesting())
+    statedb.CreateAccount(callerAddress)
+    statedb.CreateAccount(contractAddress)
+    statedb.SetBalance(callerAddress, uint256.MustFromBig(new(big.Int).Lsh(big.NewInt(1), 256-1)), 0) // Max balance
 
-		// Check for errors
-		if err != nil {
-			panic(fmt.Sprintf("Call failed: %v", err))
-		}
-		_ = ret // Ignore return value
+    cfg := runtime.Config{
+        ChainConfig: chainConfig,
+        Origin:      callerAddress,
+        GasLimit:    1_000_000_000,
+        GasPrice:    big.NewInt(1),
+        Value:       big.NewInt(0),
+        Difficulty:  big.NewInt(0),
+        Time:        1_800_000_000, // ensure after Shanghai
+        Coinbase:    common.Address{},
+        BlockNumber: big.NewInt(20_000_000), // ensure after all fork blocks
+        State:       statedb,
+        BaseFee:     big.NewInt(7),
+    }
 
-	}
+    // Deploy once if input is initcode; if deployment returns runtime code and address, prefer that
+    if len(contractCode) > 0 {
+        if _, createdAddr, ret, err := runtime.Create(contractCode, &cfg); err == nil && ret != nil && len(ret) > 0 {
+            // Use created address and runtime code
+            contractAddress = createdAddr
+        } else {
+            // Otherwise, treat as runtime code at fixed address
+            statedb.SetCode(contractAddress, contractCode)
+        }
+    }
+
+    // Run the benchmark num_runs times (no redeploy)
+    for i := 0; i < numRuns; i++ {
+        ret, _, err := runtime.Call(contractAddress, calldata, &cfg)
+        if err != nil {
+            panic(fmt.Sprintf("Call failed: %v", err))
+        }
+        _ = ret
+    }
 }

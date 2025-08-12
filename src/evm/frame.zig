@@ -131,7 +131,6 @@ pub const Frame = struct {
     // Extremely rare - accessed almost never
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare, only SELFDESTRUCT
     created_contracts: ?*CreatedContracts, // 8 bytes - tracks contracts created in tx for EIP-6780
-    next_frame: ?*Frame, // 8 bytes - only for nested calls
 
     // Bottom - only used for setup/cleanup
     allocator: std.mem.Allocator, // 16 bytes - extremely rare, only frame init/deinit
@@ -155,7 +154,6 @@ pub const Frame = struct {
         created_contracts: ?*CreatedContracts,
         input: []const u8,
         allocator: std.mem.Allocator,
-        next_frame: ?*Frame,
         is_create_call: bool,
         is_delegate_call: bool,
     ) !Frame {
@@ -265,7 +263,6 @@ pub const Frame = struct {
             .self_destruct = self_destruct,
             .created_contracts = created_contracts,
             .allocator = allocator,
-            .next_frame = next_frame,
         };
     }
 
@@ -491,34 +488,6 @@ pub const Frame = struct {
         @compileError("Unknown hardfork feature: " ++ field_name);
     }
 
-    /// Get the next available frame for nested calls (CALL, DELEGATECALL, etc.)
-    /// Returns null if we've reached maximum call depth (stack overflow)
-    pub fn get_next_frame(self: *Frame) ?*Frame {
-        return self.next_frame;
-    }
-
-    /// Check if we can make another call (haven't reached max call depth)
-    pub fn can_make_call(self: *const Frame) bool {
-        return self.next_frame != null;
-    }
-
-    /// Prepare the next frame for a nested call
-    /// This should be called by CALL/DELEGATECALL/STATICCALL/CREATE opcodes
-    /// TODO: This will need to be implemented when we add actual CALL/CREATE opcodes
-    pub fn prepare_call_frame(self: *Frame, gas: u64, static_call: bool, contract_address: primitives.Address.Address, analysis: *const CodeAnalysis, input: []const u8) ExecutionError.Error!*Frame {
-        const next_frame = self.get_next_frame() orelse return ExecutionError.Error.DepthLimit;
-
-        // Set up the next frame for execution
-        next_frame.gas_remaining = gas;
-        next_frame.hot_flags.is_static = static_call;
-        next_frame.hot_flags.depth = self.hot_flags.depth + 1;
-        next_frame.contract_address = contract_address;
-        next_frame.analysis = analysis;
-        next_frame.input = input;
-        next_frame.output = &[_]u8{}; // Reset output
-
-        return next_frame;
-    }
 };
 
 // ============================================================================
@@ -649,8 +618,7 @@ test "Frame - basic initialization" {
         chain_rules,
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx.deinit();
 
@@ -694,8 +662,7 @@ test "Frame - gas consumption" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx.deinit();
 
@@ -740,8 +707,7 @@ test "Frame - jumpdest validation" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx.deinit();
 
@@ -787,8 +753,7 @@ test "Frame - address access tracking" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx.deinit();
 
@@ -826,8 +791,7 @@ test "Frame - output data management" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx.deinit();
 
@@ -869,8 +833,7 @@ test "Frame - static call restrictions" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer static_ctx.deinit();
 
@@ -886,8 +849,7 @@ test "Frame - static call restrictions" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer normal_ctx.deinit();
 
@@ -925,8 +887,7 @@ test "Frame - selfdestruct availability" {
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx_with_selfdestruct.deinit();
 
@@ -946,8 +907,7 @@ test "Frame - selfdestruct availability" {
         TestHelpers.createMockChainRules(),
         null,
         &[_]u8{}, // input
-        allocator,
-        null, // next_frame
+        allocator
     );
     defer ctx_without_selfdestruct.deinit();
 

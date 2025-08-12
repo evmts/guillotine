@@ -47,8 +47,8 @@ async function main() {
     // Prepare calldata
     const calldata = Buffer.from(calldataHex.replace('0x', ''), 'hex');
 
-    // Create common instance for latest hardfork
-    const common = new Common({ chain: Chain.Mainnet, hardfork: Hardfork.Shanghai });
+    // Create common instance for latest supported hardfork
+    const common = new Common({ chain: Chain.Mainnet, hardfork: Hardfork.Cancun });
     
     // Create state manager
     const stateManager = new DefaultStateManager();
@@ -66,41 +66,19 @@ async function main() {
     });
     await stateManager.putAccount(CALLER_ADDRESS, callerAccount);
     
-    // Deploy contract using the bytecode directly as init code (like Guillotine does)
-    const deployResult = await evm.runCall({
-        caller: CALLER_ADDRESS,
-        data: contractCode, // Use bytecode directly as deployment code
-        gasLimit: BigInt(10_000_000),
-        value: BigInt(0)
-    });
-    
-    if (deployResult.execResult.exceptionError) {
-        throw new Error(`Contract deployment failed: ${deployResult.execResult.exceptionError}`);
-    }
-    
-    if (!deployResult.createdAddress) {
-        throw new Error('Contract deployment failed - no address returned');
-    }
-    
-    const contractAddress = deployResult.createdAddress;
-    
-    // Store the deployed code (runtime code returned by deployment)
-    if (deployResult.execResult.returnValue && deployResult.execResult.returnValue.length > 0) {
-        await stateManager.putContractCode(contractAddress, deployResult.execResult.returnValue);
-    } else {
-        throw new Error('Contract deployment failed: no runtime code returned');
-    }
+    // Set runtime bytecode directly at a deterministic address
+    const contractAddress = Address.fromString('0x5FbDB2315678afecb367f032d93F642f64180aa3');
+    await stateManager.putContractCode(contractAddress, contractCode);
 
     // Run the benchmark num_runs times
     for (let i = 0; i < numRuns; i++) {
-        const startTime = process.hrtime.bigint();
-        
         // Execute the contract call
         const result = await evm.runCall({
             caller: CALLER_ADDRESS,
             to: contractAddress,
             data: calldata,
             gasLimit: BigInt(1_000_000_000),
+            gasPrice: BigInt(1),
             value: BigInt(0)
         });
         
@@ -108,11 +86,7 @@ async function main() {
         if (result.execResult.exceptionError) {
             throw new Error(`Call failed: ${result.execResult.exceptionError.error || result.execResult.exceptionError}`);
         }
-        
-        const endTime = process.hrtime.bigint();
-        const durationNs = endTime - startTime;
-        const durationMs = Number(durationNs) / 1_000_000;
-        
+        // no in-run timers
     }
 }
 
