@@ -600,6 +600,7 @@ test "STATICCALL opcode enforces read-only execution" {
     try testing.expect(revm_succeeded == guillotine_succeeded);
     
     if (revm_succeeded and guillotine_succeeded) {
+        std.debug.print("[staticcall-test] Guillotine output len={}, hex=0x{X}\n", .{ guillotine_result.output.?.len, std.fmt.fmtSliceHexLower(guillotine_result.output.?)});
         // The output should be 96 bytes (3 u256 values)
         try testing.expect(revm_result.output.len == 96);
         try testing.expect(guillotine_result.output != null);
@@ -614,6 +615,8 @@ test "STATICCALL opcode enforces read-only execution" {
         const guillotine_call_b_result = std.mem.readInt(u256, guillotine_result.output.?[32..64], .big);
         const guillotine_call_c_result = std.mem.readInt(u256, guillotine_result.output.?[64..96], .big);
 
+        std.debug.print("[staticcall-test] REVM A,B,C = {d},{d},{d}\n", .{revm_call_a_result, revm_call_b_result, revm_call_c_result});
+        std.debug.print("[staticcall-test] ZIG  A,B,C = {d},{d},{d}\n", .{guillotine_call_a_result, guillotine_call_b_result, guillotine_call_c_result});
         // Compare each call result
         try testing.expectEqual(revm_call_a_result, guillotine_call_a_result);
         try testing.expectEqual(revm_call_b_result, guillotine_call_b_result);
