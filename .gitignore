@@ -153,3 +153,22 @@ execution-specs/
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 go-ethereum/
+
+# Benchmark and test artifacts
+bench/official/orchestrator
+bench/official/evms/zig/bin/
+bench/official/diff_output/
+diff_output/
+test_traces/
+
+# Test trace files
+*.json
+trace_test.json
+test_trace*.json
+
+# Log files
+*.log
+diff-trace.log
+
+# Coordination docs
+coordinate.md
