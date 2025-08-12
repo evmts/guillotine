@@ -2,8 +2,8 @@ use std::{env, fs, str::FromStr};
 
 use revm::{
     db::{CacheDB, EmptyDB},
-    primitives::{specification::PRAGUE, Address, Bytes, TxKind, U256, AccountInfo, ExecutionResult, Output},
-    Evm, Database,
+    primitives::{specification::PRAGUE, Address, Bytes, TxKind, U256, AccountInfo},
+    Evm,
     inspector_handle_register,
     inspectors::TracerEip3155,
 };
@@ -60,72 +60,49 @@ fn main() {
     };
     db.insert_account_info(caller_address, caller_info);
     
-    // Deploy contract first to get runtime code
-    let contract_address = {
-        let mut deploy_evm = Evm::builder()
-            .with_db(&mut db)
-            .with_spec_id(PRAGUE)
-            .modify_tx_env(|tx| {
-                tx.caller = caller_address;
-                tx.transact_to = TxKind::Create;
-                tx.value = U256::ZERO;
-                tx.data = contract_code.clone();
-                tx.gas_limit = 10_000_000;
-                tx.gas_price = U256::from(10u64);
-            })
-            .modify_block_env(|block| {
-                block.basefee = U256::from(7u64);
-            })
-            .build();
-        
-        let deploy_result = deploy_evm.transact().unwrap();
-        match deploy_result.result {
-            ExecutionResult::Success { output: Output::Create(_, Some(addr)), .. } => addr,
-            _ => {
-                // Deployment failed or returned no address, use fallback
-                Address::from_str("0x5FbDB2315678afecb367f032d93F642f64180aa3").unwrap()
-            }
-        }
+    // For now, go back to simple approach: directly set code
+    // TODO: Implement proper contract deployment tracing
+    let contract_address = Address::from_str("0x5FbDB2315678afecb367f032d93F642f64180aa3").unwrap();
+    let contract_info = AccountInfo {
+        balance: U256::ZERO,
+        nonce: 0,
+        code_hash: revm::primitives::keccak256(&contract_code),
+        code: Some(revm::primitives::Bytecode::new_raw(contract_code.clone())),
     };
-    
-    // If deployment failed, directly set code at deterministic address
-    let account_info = db.basic(contract_address).unwrap();
-    if account_info.is_none() || account_info.unwrap().code.is_none() {
-        let contract_info = AccountInfo {
-            balance: U256::ZERO,
-            nonce: 0,
-            code_hash: revm::primitives::keccak256(&contract_code),
-            code: Some(revm::primitives::Bytecode::new_raw(contract_code)),
-        };
-        db.insert_account_info(contract_address, contract_info);
-    }
+    db.insert_account_info(contract_address, contract_info);
     
     // Create EVM instance with optional tracing
     if let Some(trace_path) = trace_path {
         // Open trace file
         let trace_file = fs::File::create(&trace_path).unwrap();
-        let tracer = TracerEip3155::new(Box::new(trace_file));
+        let mut tracer = TracerEip3155::new(Box::new(trace_file));
         
-        let mut evm = Evm::builder()
-            .with_db(&mut db)
-            .with_spec_id(PRAGUE)
-            .with_external_context(tracer)
-            .append_handler_register(inspector_handle_register)
-            .modify_tx_env(|tx| {
-                tx.caller = caller_address;
-                tx.transact_to = TxKind::Call(contract_address);
-                tx.value = U256::ZERO;
-                tx.data = calldata.clone();
-                tx.gas_limit = 1_000_000_000; // 1B gas
-                tx.gas_price = U256::from(10u64);
-            })
-            .modify_block_env(|block| {
-                block.basefee = U256::from(7u64);
-            })
-            .build();
+        {
+            let mut evm = Evm::builder()
+                .with_db(&mut db)
+                .with_spec_id(PRAGUE)
+                .with_external_context(&mut tracer)
+                .append_handler_register(inspector_handle_register)
+                .modify_tx_env(|tx| {
+                    tx.caller = caller_address;
+                    tx.transact_to = TxKind::Call(contract_address);
+                    tx.value = U256::ZERO;
+                    tx.data = calldata.clone();
+                    tx.gas_limit = 1_000_000_000; // 1B gas
+                    tx.gas_price = U256::from(10u64);
+                })
+                .modify_block_env(|block| {
+                    block.basefee = U256::from(7u64);
+                })
+                .build();
+            
+            // Run once with tracing
+            let _result = evm.transact().unwrap();
+        }
+        // EVM is dropped here, releasing the borrow on tracer
         
-        // Run once with tracing
-        let _result = evm.transact().unwrap();
+        // Ensure tracer is dropped to flush output
+        drop(tracer);
     } else {
         // Normal benchmark execution without tracing
         let mut evm = Evm::builder()
