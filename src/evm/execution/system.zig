@@ -656,6 +656,9 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
             } else {
                 try frame.stack.append(0);
             }
+            // Free returned buffer now that we've consumed it
+            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr.allocator.free(address_bytes);
         } else {
             try frame.stack.append(0);
         }
@@ -666,6 +669,11 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
         // Handle gas accounting after failed CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
+        // Free revert/output buffer if present
+        if (call_result.output) |buf| {
+            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr.allocator.free(buf);
+        }
         try frame.stack.append(0);
     }
 }
@@ -796,6 +804,9 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
             } else {
                 try frame.stack.append(0);
             }
+            // Free returned buffer now that we've consumed it
+            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr.allocator.free(address_bytes);
         } else {
             try frame.stack.append(0);
         }
@@ -806,6 +817,11 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
         // Handle gas accounting after failed CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
+        // Free revert/output buffer if present
+        if (call_result.output) |buf| {
+            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr.allocator.free(buf);
+        }
         try frame.stack.append(0);
     }
 }
@@ -968,6 +984,11 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
+    // Free callee-owned output buffer if present (ownership transferred by Host.call)
+    if (call_result.output) |out_buf| {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        evm_ptr.allocator.free(out_buf);
+    }
 
     // Push result (1 for success, 0 for failure)
     try frame.stack.append(if (call_result.success) 1 else 0);
@@ -1080,7 +1101,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     // Return unused gas to caller
     frame.gas_remaining += call_result.gas_left;
 
-    // Write return data
+    // Write return data and free output buffer
     if (call_result.output) |output| {
         if (ret_size > 0) {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
@@ -1090,6 +1111,8 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
                 try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
             }
         }
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        evm_ptr.allocator.free(output);
     }
 
     // Push success flag
@@ -1192,7 +1215,10 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         frame.host.revert_to_snapshot(snapshot);
     }
 
-    // Store return data if any
+    // Return unused gas to caller
+    frame.gas_remaining += call_result.gas_left;
+
+    // Store return data if any and free buffer
     if (call_result.output) |output| {
         if (ret_size > 0) {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
@@ -1200,6 +1226,8 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
             const copy_size = @min(ret_size_usize, output.len);
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        evm_ptr.allocator.free(output);
     }
 
     // Push success flag (1 for success, 0 for failure)
@@ -1355,7 +1383,10 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         frame.host.revert_to_snapshot(snapshot);
     }
 
-    // Store return data if any
+    // Return unused gas to caller
+    frame.gas_remaining += call_result.gas_left;
+
+    // Store return data if any and free buffer
     if (call_result.output) |output| {
         if (ret_size > 0) {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
@@ -1363,6 +1394,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             const copy_size = @min(ret_size_usize, output.len);
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
+        evm_ptr.allocator.free(output);
     }
 
     // Push success flag (1 for success, 0 for failure)
