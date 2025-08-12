@@ -22,10 +22,11 @@ pub fn main() !void {
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 5) {
-        std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>] [--next]\n", .{args[0]});
+        std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>] [--next] [--trace <path>]\n", .{args[0]});
         std.debug.print("Example: {s} --contract-code-path bytecode.txt --calldata 0x12345678\n", .{args[0]});
         std.debug.print("Options:\n", .{});
         std.debug.print("  --next    Use block-based execution (new optimized interpreter)\n", .{});
+        std.debug.print("  --trace   Enable tracing and write to specified file\n", .{});
         std.process.exit(1);
     }
 
@@ -33,6 +34,7 @@ pub fn main() !void {
     var calldata_hex: ?[]const u8 = null;
     var num_runs: u8 = 1;
     var use_block_execution = false;
+    var trace_path: ?[]const u8 = null;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -62,6 +64,13 @@ pub fn main() !void {
             i += 1;
         } else if (std.mem.eql(u8, args[i], "--next")) {
             use_block_execution = true;
+        } else if (std.mem.eql(u8, args[i], "--trace")) {
+            if (i + 1 >= args.len) {
+                std.debug.print("Error: --trace requires a value\n", .{});
+                std.process.exit(1);
+            }
+            trace_path = args[i + 1];
+            i += 1;
         } else {
             std.debug.print("Error: Unknown argument {s}\n", .{args[i]});
             std.process.exit(1);
@@ -102,6 +111,13 @@ pub fn main() !void {
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
+    // Create tracer if requested
+    var trace_file_opt: ?std.fs.File = null;
+    if (trace_path) |path| {
+        trace_file_opt = try std.fs.cwd().createFile(path, .{});
+    }
+    defer if (trace_file_opt) |f| f.close();
+
     // Create EVM instance using new API
     const db_interface = memory_db.to_database_interface();
     var vm = try evm.Evm.init(
@@ -112,7 +128,7 @@ pub fn main() !void {
         null, // context
         0, // depth
         false, // read_only
-        null, // tracer (set to stdout.any() to enable JSON tracing)
+        if (trace_file_opt) |f| f.writer().any() else null, // tracer
     );
     defer vm.deinit();
 
@@ -124,7 +140,13 @@ pub fn main() !void {
         const create_result = vm.create_contract(caller_address, 0, contract_code, 10_000_000) catch null;
         if (create_result) |res| {
             if (res.success) {
-                if (res.output) |out| allocator.free(out);
+                if (trace_path != null) {
+                    // During tracing, silence debug output
+                    if (res.output) |out| allocator.free(out);
+                } else {
+                    std.debug.print("[create_contract] Success {s}, deploying runtime code len={}\n", .{ @tagName(res.status), if (res.output) |out| out.len else 0 });
+                    if (res.output) |out| allocator.free(out);
+                }
                 break :blk res.address;
             } else if (res.output) |out| {
                 allocator.free(out);
@@ -135,11 +157,15 @@ pub fn main() !void {
         break :blk addr;
     };
     const deployed = vm.state.get_code(contract_address);
-    std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{ deployed.len, contract_address });
+    if (trace_path == null) {
+        std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{ deployed.len, contract_address });
+    }
 
     // Run benchmarks
     var run: u8 = 0;
     while (run < num_runs) : (run += 1) {
+        // Skip validation when tracing (run only once)
+        if (trace_path != null and run > 0) break;
         // Execute contract using new call API
         const call_params = CallParams{ .call = .{
             .caller = caller_address,
@@ -176,6 +202,9 @@ pub fn main() !void {
             std.process.exit(1);
         }
 
+        // Skip output validation when tracing
+        if (trace_path != null) continue;
+        
         // Sanity: lightly validate outputs by selector when available
         const selector: u32 = if (calldata.len >= 4) std.mem.readInt(u32, calldata[0..4], .big) else 0;
         switch (selector) {
