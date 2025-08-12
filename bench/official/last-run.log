@@ -1,18 +1,18 @@
 
-[2025-08-11 21:23:43] Starting perf-fastest.sh
-[2025-08-11 21:23:43] ROOT_DIR=/Users/williamcory/guillotine
-[2025-08-11 21:23:43] System: Darwin Williams-Mac-mini.local 24.3.0 Darwin Kernel Version 24.3.0: Thu Jan  2 20:24:22 PST 2025; root:xnu-11215.81.4~3/RELEASE_ARM64_T6041 arm64
-[2025-08-11 21:23:43] zig: 0.14.1
-[2025-08-11 21:23:44] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
-[2025-08-11 21:23:44] cargo: cargo 1.88.0 (873a06493 2025-05-10)
-[2025-08-11 21:23:44] bun: NOT FOUND (ethereumjs runner will fail)
-[2025-08-11 21:23:44] hyperfine: hyperfine 1.19.0
-[2025-08-11 21:23:44] git: branch=review commit=e1bc32a dirty=yes
-[2025-08-11 21:23:44] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
-[2025-08-11 21:23:44] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
-[2025-08-11 21:23:44] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
-[2025-08-11 21:23:44] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
-[2025-08-11 21:23:44] Building Zig runners (ReleaseFast)
+[2025-08-11 21:33:04] Starting perf-fastest.sh
+[2025-08-11 21:33:04] ROOT_DIR=/Users/williamcory/guillotine
+[2025-08-11 21:33:04] System: Darwin Williams-Mac-mini.local 24.3.0 Darwin Kernel Version 24.3.0: Thu Jan  2 20:24:22 PST 2025; root:xnu-11215.81.4~3/RELEASE_ARM64_T6041 arm64
+[2025-08-11 21:33:04] zig: 0.14.1
+[2025-08-11 21:33:04] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
+[2025-08-11 21:33:04] cargo: cargo 1.88.0 (873a06493 2025-05-10)
+[2025-08-11 21:33:04] bun: 1.2.20
+[2025-08-11 21:33:04] hyperfine: hyperfine 1.19.0
+[2025-08-11 21:33:04] git: branch=review commit=78ac7fd dirty=yes
+[2025-08-11 21:33:04] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
+[2025-08-11 21:33:04] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
+[2025-08-11 21:33:04] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
+[2025-08-11 21:33:04] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
+[2025-08-11 21:33:04] Building Zig runners (ReleaseFast)
 info: Downloading blst library...
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
 package:   /Users/williamcory/guillotine/src/compilers/Cargo.toml
@@ -46,8 +46,8 @@ warning: `revm_wrapper` (lib) generated 3 warnings
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100  2209    0  2209    0     0   5175      0 --:--:-- --:--:-- --:--:--  5175100  583k    0  583k    0     0   947k      0 --:--:-- --:--:-- --:--:-- 3090k
-[2025-08-11 21:23:45] Building orchestrator (ReleaseFast)
+100  583k  100  583k    0     0  1112k      0 --:--:-- --:--:-- --:--:-- 1112k
+[2025-08-11 21:33:05] Building orchestrator (ReleaseFast)
 info: Downloading blst library...
 -- CPM: adding package evmone@0.9.1 (v0.9.1)
 CMake Warning (dev) at /opt/homebrew/share/cmake/Modules/FetchContent.cmake:1953 (message):
@@ -1401,119 +1401,19 @@ This warning is for project developers.  Use -Wno-dev to suppress it.
 -- Configuring done (1.1s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Users/williamcory/guillotine/bench/official/evms/evmone/build
+# command-line-arguments
+./runner.go:93:97: invalid operation: ret != nil (mismatched types uint64 and untyped nil)
+./runner.go:93:108: invalid argument: ret (variable of type uint64) for built-in len
 [ 18%] Built target instructions
 [ 87%] Built target evmone
-[ 93%] Building CXX object CMakeFiles/evmone-runner.dir/runner.cpp.o
-[100%] Linking CXX executable evmone-runner
 [100%] Built target evmone-runner
-[2025-08-11 21:23:47] Running orchestrator with compare mode (single run per case)
-[2025-08-11 21:23:47] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
-
-=== Running benchmarks for zig ===
-
-=== Benchmarking erc20-approval-transfer ===
-Errors:
-Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking erc20-mint ===
-Errors:
-Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking ten-thousand-hashes ===
-Errors:
-Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking snailtracer ===
-Errors:
-Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking erc20-transfer ===
-Errors:
-Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Running benchmarks for revm ===
-
-=== Benchmarking erc20-approval-transfer ===
-  Mean: 6.70 ms, Min: 6.70 ms, Max: 6.70 ms (per run, 1 internal runs)
-
-=== Benchmarking erc20-mint ===
-  Mean: 4.71 ms, Min: 4.71 ms, Max: 4.71 ms (per run, 1 internal runs)
-
-=== Benchmarking ten-thousand-hashes ===
-  Mean: 2.45 ms, Min: 2.45 ms, Max: 2.45 ms (per run, 1 internal runs)
-
-=== Benchmarking snailtracer ===
-  Mean: 29.13 ms, Min: 29.13 ms, Max: 29.13 ms (per run, 1 internal runs)
-
-=== Benchmarking erc20-transfer ===
-  Mean: 6.76 ms, Min: 6.76 ms, Max: 6.76 ms (per run, 1 internal runs)
-
-=== Running benchmarks for ethereumjs ===
-
-=== Benchmarking erc20-approval-transfer ===
-Errors:
-Error: Command terminated with non-zero exit code 127 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking erc20-mint ===
-Errors:
-Error: Command terminated with non-zero exit code 127 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking ten-thousand-hashes ===
-Errors:
-Error: Command terminated with non-zero exit code 127 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking snailtracer ===
-Errors:
-Error: Command terminated with non-zero exit code 127 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Benchmarking erc20-transfer ===
-Errors:
-Error: Command terminated with non-zero exit code 127 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-  Mean: 0.00 μs, Min: 0.00 μs, Max: 0.00 μs (per run, 1 internal runs)
-
-=== Running benchmarks for geth ===
-
-=== Benchmarking erc20-approval-transfer ===
-  Mean: 3.91 ms, Min: 3.91 ms, Max: 3.91 ms (per run, 1 internal runs)
-
-=== Benchmarking erc20-mint ===
-  Mean: 3.34 ms, Min: 3.34 ms, Max: 3.34 ms (per run, 1 internal runs)
-
-=== Benchmarking ten-thousand-hashes ===
-  Mean: 3.29 ms, Min: 3.29 ms, Max: 3.29 ms (per run, 1 internal runs)
-
-=== Benchmarking snailtracer ===
-  Mean: 3.24 ms, Min: 3.24 ms, Max: 3.24 ms (per run, 1 internal runs)
-
-=== Benchmarking erc20-transfer ===
-  Mean: 2.93 ms, Min: 2.93 ms, Max: 2.93 ms (per run, 1 internal runs)
-
-=== Running benchmarks for evmone ===
-
-=== Benchmarking erc20-approval-transfer ===
-  Mean: 1.35 ms, Min: 1.35 ms, Max: 1.35 ms (per run, 1 internal runs)
-
-=== Benchmarking erc20-mint ===
-  Mean: 1.25 ms, Min: 1.25 ms, Max: 1.25 ms (per run, 1 internal runs)
-
-=== Benchmarking ten-thousand-hashes ===
-  Mean: 1.32 ms, Min: 1.32 ms, Max: 1.32 ms (per run, 1 internal runs)
-
-=== Benchmarking snailtracer ===
-  Mean: 1.37 ms, Min: 1.37 ms, Max: 1.37 ms (per run, 1 internal runs)
-
-=== Benchmarking erc20-transfer ===
-  Mean: 1.44 ms, Min: 1.44 ms, Max: 1.44 ms (per run, 1 internal runs)
-Comparison results exported to bench/official/results.md
-[2025-08-11 21:23:48] Benchmark results written to: /Users/williamcory/guillotine/bench/official/results.md
-[2025-08-11 21:23:48] Opening results in browser...
-[2025-08-11 21:23:48] ERROR: Command failed (exit=1) at line 93: npx -y markserv "./bench/official/results.md"
+build-orchestrator
++- run go failure
+error: the following command exited with error code 1:
+cd /Users/williamcory/guillotine/bench/official/evms/geth && go build -o runner runner.go 
+Build Summary: 4/6 steps succeeded; 1 failed
+build-orchestrator transitive failure
++- run go failure
+error: the following build command failed with exit code 1:
+/Users/williamcory/guillotine/.zig-cache/o/53c63fb1536ad379a9c8f35a2a6dabd0/build /opt/homebrew/Cellar/zig/0.14.1/bin/zig /opt/homebrew/Cellar/zig/0.14.1/lib/zig /Users/williamcory/guillotine /Users/williamcory/guillotine/.zig-cache /Users/williamcory/.cache/zig --seed 0x18ce4a2a -Z523752effa5cfea5 build-orchestrator -Doptimize=ReleaseFast
+[2025-08-11 21:33:07] ERROR: Command failed (exit=1) at line 64: tee -a "${LOG_FILE}"

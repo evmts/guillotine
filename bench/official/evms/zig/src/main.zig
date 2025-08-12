@@ -120,7 +120,16 @@ pub fn main() !void {
     try vm.state.set_balance(caller_address, std.math.maxInt(u256));
 
     const contract_address = blk: {
-        // Set runtime code directly at a deterministic address for parity
+        // Try deploy as initcode to extract runtime code, else set as runtime
+        const create_result = vm.create_contract(caller_address, 0, contract_code, 10_000_000) catch null;
+        if (create_result) |res| {
+            if (res.success) {
+                if (res.output) |out| allocator.free(out);
+                break :blk res.address;
+            } else if (res.output) |out| {
+                allocator.free(out);
+            }
+        }
         const addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
         try vm.state.set_code(addr, contract_code);
         break :blk addr;
@@ -229,7 +238,13 @@ pub fn main() !void {
     }
 }
 
-fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address { _ = allocator; _ = vm; _ = caller; _ = bytecode; return error.Unsupported; }
+fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
+    _ = allocator;
+    _ = vm;
+    _ = caller;
+    _ = bytecode;
+    return error.Unsupported;
+}
 
 fn hexToBytes(allocator: std.mem.Allocator, hex: []const u8) ![]u8 {
     // Remove 0x prefix if present

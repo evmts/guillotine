@@ -90,7 +90,7 @@ func main() {
 
     // Deploy once if input is initcode; if deployment returns runtime code and address, prefer that
     if len(contractCode) > 0 {
-        if _, createdAddr, ret, err := runtime.Create(contractCode, &cfg); err == nil && ret != nil && len(ret) > 0 {
+        if ret, createdAddr, _, err := runtime.Create(contractCode, &cfg); err == nil && len(ret) > 0 {
             // Use created address and runtime code
             contractAddress = createdAddr
         } else {
@@ -99,11 +99,33 @@ func main() {
         }
     }
 
+    // Precompute selector for simple output sanity checks
+    var selector uint32
+    if len(calldata) >= 4 {
+        selector = uint32(calldata[0])<<24 | uint32(calldata[1])<<16 | uint32(calldata[2])<<8 | uint32(calldata[3])
+    }
+
     // Run the benchmark num_runs times (no redeploy)
     for i := 0; i < numRuns; i++ {
-        ret, _, err := runtime.Call(contractAddress, calldata, &cfg)
+        ret, gasLeft, err := runtime.Call(contractAddress, calldata, &cfg)
         if err != nil {
             panic(fmt.Sprintf("Call failed: %v", err))
+        }
+        // Sanity: ensure gas was consumed
+        const gasLimit uint64 = 1_000_000_000
+        if gasLeft >= gasLimit {
+            panic("Sanity failed: no gas consumed")
+        }
+        // Basic output validation aligned with other runners
+        switch selector {
+        case 0xa9059cbb, 0x095ea7b3, 0x40c10f19: // transfer/approve/mint -> 32-byte true
+            if len(ret) < 32 || ret[len(ret)-1] != 1 {
+                panic("Unexpected boolean return (expected 32-byte true)")
+            }
+        case 0x30627b7c: // TenThousandHashes.Benchmark()
+            if len(ret) != 0 {
+                panic("Unexpected output for Benchmark()")
+            }
         }
         _ = ret
     }
