@@ -718,6 +718,91 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 if (pc < code.len) {
                     const next_op = code[pc];
                     const synthetic = @import("execution/synthetic.zig");
+                    
+                    // Check for PUSH+PUSH+operation patterns first
+                    if (next_op >= 0x60 and next_op <= 0x7f) { // Another PUSH
+                        const next_push_size = if (next_op == 0x5f) 0 else next_op - 0x5f;
+                        const next_pc = pc + 1 + next_push_size;
+                        
+                        if (next_pc < code.len) {
+                            var next_value: u256 = 0;
+                            
+                            // Read the second push value
+                            if (next_push_size > 0 and pc + 1 + next_push_size <= code.len) {
+                                var i: usize = 0;
+                                while (i < next_push_size) : (i += 1) {
+                                    next_value = (next_value << 8) | code[pc + 1 + i];
+                                }
+                            }
+                            
+                            const operation_op = code[next_pc];
+                            
+                            // Check for arithmetic operations after the second PUSH
+                            switch (operation_op) {
+                                0x01 => { // ADD
+                                    // Precompute the result
+                                    const result = value +% next_value;
+                                    // Replace our PUSH with the precomputed result
+                                    instructions[instruction_count - 1] = Instruction{
+                                        .opcode_fn = UnreachableHandler,
+                                        .arg = .{ .push_value = result },
+                                    };
+                                    // Update gas and stack tracking
+                                    block.gas_cost += 3 + 3; // Two PUSHes (already counted one) + ADD
+                                    pc = next_pc + 1; // Skip both the second PUSH and ADD
+                                    if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                    Log.debug("[analysis] Precomputed PUSH+PUSH+ADD at pc={} result={x}", .{original_pc, result});
+                                    continue;
+                                },
+                                0x02 => { // MUL
+                                    // Precompute the result
+                                    const result = value *% next_value;
+                                    // Replace our PUSH with the precomputed result
+                                    instructions[instruction_count - 1] = Instruction{
+                                        .opcode_fn = UnreachableHandler,
+                                        .arg = .{ .push_value = result },
+                                    };
+                                    // Update gas and stack tracking
+                                    block.gas_cost += 3 + 5; // Two PUSHes (already counted one) + MUL
+                                    pc = next_pc + 1; // Skip both the second PUSH and MUL
+                                    if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                    Log.debug("[analysis] Precomputed PUSH+PUSH+MUL at pc={} result={x}", .{original_pc, result});
+                                    continue;
+                                },
+                                0x03 => { // SUB
+                                    // Precompute the result (note: stack order is top - second, so next_value - value)
+                                    const result = next_value -% value;
+                                    // Replace our PUSH with the precomputed result
+                                    instructions[instruction_count - 1] = Instruction{
+                                        .opcode_fn = UnreachableHandler,
+                                        .arg = .{ .push_value = result },
+                                    };
+                                    // Update gas and stack tracking
+                                    block.gas_cost += 3 + 3; // Two PUSHes (already counted one) + SUB
+                                    pc = next_pc + 1; // Skip both the second PUSH and SUB
+                                    if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                    Log.debug("[analysis] Precomputed PUSH+PUSH+SUB at pc={} result={x}", .{original_pc, result});
+                                    continue;
+                                },
+                                0x04 => { // DIV
+                                    // Precompute the result (note: stack order is top / second, so next_value / value)
+                                    const result = if (value == 0) 0 else next_value / value;
+                                    // Replace our PUSH with the precomputed result
+                                    instructions[instruction_count - 1] = Instruction{
+                                        .opcode_fn = UnreachableHandler,
+                                        .arg = .{ .push_value = result },
+                                    };
+                                    // Update gas and stack tracking
+                                    block.gas_cost += 3 + 5; // Two PUSHes (already counted one) + DIV
+                                    pc = next_pc + 1; // Skip both the second PUSH and DIV
+                                    if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                                    Log.debug("[analysis] Precomputed PUSH+PUSH+DIV at pc={} result={x}", .{original_pc, result});
+                                    continue;
+                                },
+                                else => {},
+                            }
+                        }
+                    }
 
                     switch (next_op) {
                         0x01 => { // ADD
@@ -847,10 +932,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             // SHA3/KECCAK256 - for now just use regular handling
             .KECCAK256 => {
                 const operation = jump_table.get_operation(opcode_byte);
-                
+
                 // Record PC to instruction mapping
                 pc_to_instruction[pc] = @intCast(instruction_count);
-                
+
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
                 instructions[instruction_count] = Instruction{
@@ -899,6 +984,85 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 };
                 if (builtin.mode == .Debug) stats.inline_opcodes += 1;
                 Log.debug("[analysis] Using inline EQ at pc={}", .{pc});
+                instruction_count += 1;
+                pc += 1;
+            },
+
+            // DUP1 - check for DUP1+PUSH0+EQ pattern
+            .DUP1 => {
+                const operation = jump_table.get_operation(opcode_byte);
+                
+                // Look ahead for PUSH0+EQ pattern
+                if (pc + 2 < code.len and code[pc + 1] == 0x5f and code[pc + 2] == 0x14) { // PUSH0, EQ
+                    // This is DUP1+PUSH0+EQ = ISZERO pattern
+                    // Record PC to instruction mapping
+                    pc_to_instruction[pc] = @intCast(instruction_count);
+                    
+                    const synthetic = @import("execution/synthetic.zig");
+                    block.gas_cost += 3 + 3 + 3; // DUP1 + PUSH0 + EQ gas
+                    block.updateStackTracking(0x80, 1); // DUP1 needs 1 item
+                    
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = synthetic.op_iszero_inline,
+                        .arg = .none,
+                    };
+                    instruction_count += 1;
+                    pc += 3; // Skip DUP1, PUSH0, and EQ
+                    if (builtin.mode == .Debug) stats.eliminated_opcodes += 2; // Saved 2 operations
+                    Log.debug("[analysis] Converted DUP1+PUSH0+EQ to ISZERO at pc={}", .{pc - 3});
+                    continue;
+                }
+                
+                // Check for DUP+DROP pattern
+                if (pc + 1 < code.len and code[pc + 1] == 0x50) { // DROP
+                    // DUP1+DROP = NOP
+                    pc += 2; // Skip both DUP1 and DROP
+                    if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                    Log.debug("[analysis] Eliminated DUP1+DROP at pc={}", .{pc - 2});
+                    continue;
+                }
+                
+                // Regular DUP1 handling
+                pc_to_instruction[pc] = @intCast(instruction_count);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = operation.execute,
+                    .arg = .none,
+                };
+                instruction_count += 1;
+                pc += 1;
+            },
+            
+            // POP - check if previous instruction was a PUSH
+            .POP => {
+                // Check if the previous instruction was a PUSH
+                if (instruction_count > 0) {
+                    const prev_instruction = instructions[instruction_count - 1];
+                    
+                    // Check if it was a push by looking at the arg type
+                    switch (prev_instruction.arg) {
+                        .push_value => {
+                            // PUSH+POP = NOP, remove the PUSH
+                            instruction_count -= 1;
+                            pc += 1; // Skip POP
+                            if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
+                            Log.debug("[analysis] Eliminated PUSH+POP at pc={}", .{pc - 1});
+                            continue;
+                        },
+                        else => {},
+                    }
+                }
+                
+                // Regular POP handling
+                const operation = jump_table.get_operation(opcode_byte);
+                pc_to_instruction[pc] = @intCast(instruction_count);
+                block.gas_cost += @intCast(operation.constant_gas);
+                block.updateStackTracking(opcode_byte, operation.min_stack);
+                instructions[instruction_count] = Instruction{
+                    .opcode_fn = operation.execute,
+                    .arg = .none,
+                };
                 instruction_count += 1;
                 pc += 1;
             },
@@ -1267,7 +1431,7 @@ test "conditional jump (JUMPI) target resolution" {
 
 test "fusion and optimization statistics" {
     const allocator = std.testing.allocator;
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 
     // Bytecode with various optimization opportunities:
     const code = &[_]u8{
