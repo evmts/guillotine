@@ -69,6 +69,330 @@ pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, i
     };
 }
 
+pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir: []const u8) !void {
+    print("\n=== Running differential trace for {s} ===\n", .{test_case.name});
+    
+    // Create output directory
+    try std.fs.cwd().makePath(output_dir);
+    
+    // Read calldata
+    const calldata_file = try std.fs.cwd().openFile(test_case.calldata_path, .{});
+    defer calldata_file.close();
+    
+    const calldata_hex = try calldata_file.readToEndAlloc(self.allocator, 1024 * 1024);
+    defer self.allocator.free(calldata_hex);
+    
+    const trimmed_calldata = std.mem.trim(u8, calldata_hex, " \t\n\r");
+    
+    // Run REVM with tracing
+    const revm_trace_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_revm_trace.json", .{ output_dir, test_case.name });
+    defer self.allocator.free(revm_trace_path);
+    
+    const revm_runner_path = "/Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner";
+    
+    var revm_argv = std.ArrayList([]const u8).init(self.allocator);
+    defer revm_argv.deinit();
+    try revm_argv.appendSlice(&[_][]const u8{
+        revm_runner_path,
+        "--contract-code-path", test_case.bytecode_path,
+        "--calldata", trimmed_calldata,
+        "--num-runs", "1",
+        "--trace", revm_trace_path,
+    });
+    
+    const revm_result = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = revm_argv.items,
+    });
+    defer self.allocator.free(revm_result.stdout);
+    defer self.allocator.free(revm_result.stderr);
+    
+    if (revm_result.term.Exited != 0) {
+        print("REVM execution failed:\n{s}", .{revm_result.stderr});
+        return error.RevmExecutionFailed;
+    }
+    
+    // Run Zig with tracing
+    const zig_trace_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_zig_trace.json", .{ output_dir, test_case.name });
+    defer self.allocator.free(zig_trace_path);
+    
+    const zig_runner_path = "/Users/williamcory/guillotine/zig-out/bin/evm-runner";
+    
+    var zig_argv = std.ArrayList([]const u8).init(self.allocator);
+    defer zig_argv.deinit();
+    try zig_argv.appendSlice(&[_][]const u8{
+        zig_runner_path,
+        "--contract-code-path", test_case.bytecode_path,
+        "--calldata", trimmed_calldata,
+        "--num-runs", "1",
+        "--trace", zig_trace_path,
+    });
+    if (self.use_next) try zig_argv.append("--next");
+    
+    print("Running Zig command: ", .{});
+    for (zig_argv.items) |arg| {
+        print("{s} ", .{arg});
+    }
+    print("\n", .{});
+    
+    const zig_result = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = zig_argv.items,
+    });
+    defer self.allocator.free(zig_result.stdout);
+    defer self.allocator.free(zig_result.stderr);
+    
+    if (zig_result.term.Exited != 0) {
+        print("Zig execution failed:\n{s}", .{zig_result.stderr});
+        return error.ZigExecutionFailed;
+    }
+    
+    if (zig_result.stdout.len > 0) {
+        print("Zig stdout: {s}\n", .{zig_result.stdout});
+    }
+    
+    // Check if trace files exist
+    const zig_trace_stat = std.fs.cwd().statFile(zig_trace_path) catch |err| {
+        print("Failed to stat Zig trace file: {}\n", .{err});
+        return err;
+    };
+    print("Zig trace file size: {} bytes\n", .{zig_trace_stat.size});
+    
+    // Compare traces
+    print("\nTraces saved to:\n", .{});
+    print("  REVM: {s}\n", .{revm_trace_path});
+    print("  Zig:  {s}\n", .{zig_trace_path});
+    
+    // Parse and compare traces to find divergence
+    const divergence = try self.findTraceDivergence(revm_trace_path, zig_trace_path);
+    if (divergence) |div| {
+        print("\n🔍 Divergence found at step {d}:\n", .{div.step});
+        print("  REVM: PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.revm_pc, div.revm_op, self.getOpcodeName(div.revm_op) });
+        print("  Zig:  PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.zig_pc, div.zig_op, self.getOpcodeName(div.zig_op) });
+        
+        const divergence_file = try std.fmt.allocPrint(self.allocator, "{s}/{s}_divergence.txt", .{ output_dir, test_case.name });
+        defer self.allocator.free(divergence_file);
+        
+        const file = try std.fs.cwd().createFile(divergence_file, .{});
+        defer file.close();
+        
+        try file.writer().print("Divergence at step {d}:\n", .{div.step});
+        try file.writer().print("REVM: PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.revm_pc, div.revm_op, self.getOpcodeName(div.revm_op) });
+        try file.writer().print("Zig:  PC={d}, Op=0x{X:0>2} ({s})\n", .{ div.zig_pc, div.zig_op, self.getOpcodeName(div.zig_op) });
+        
+        print("  Divergence details saved to: {s}\n", .{divergence_file});
+    } else {
+        print("\n✅ Traces match - no divergence found\n", .{});
+    }
+}
+
+const TraceDivergence = struct {
+    step: usize,
+    revm_pc: usize,
+    revm_op: u8,
+    zig_pc: usize,
+    zig_op: u8,
+};
+
+fn findTraceDivergence(self: *Orchestrator, revm_trace_path: []const u8, zig_trace_path: []const u8) !?TraceDivergence {
+    const revm_file = try std.fs.cwd().openFile(revm_trace_path, .{});
+    defer revm_file.close();
+    
+    const zig_file = try std.fs.cwd().openFile(zig_trace_path, .{});
+    defer zig_file.close();
+    
+    var revm_reader = std.io.bufferedReader(revm_file.reader());
+    var zig_reader = std.io.bufferedReader(zig_file.reader());
+    
+    var step: usize = 0;
+    var line_buf: [4096]u8 = undefined;
+    
+    while (true) : (step += 1) {
+        const revm_line = try revm_reader.reader().readUntilDelimiterOrEof(&line_buf, '\n');
+        var line_buf2: [4096]u8 = undefined;
+        const zig_line = try zig_reader.reader().readUntilDelimiterOrEof(&line_buf2, '\n');
+        
+        if (revm_line == null and zig_line == null) break;
+        
+        if (revm_line == null or zig_line == null) {
+            // One trace ended before the other
+            return TraceDivergence{
+                .step = step,
+                .revm_pc = 0,
+                .revm_op = 0,
+                .zig_pc = 0,
+                .zig_op = 0,
+            };
+        }
+        
+        // Parse PC and opcode from JSON lines
+        const revm_pc = self.extractPc(revm_line.?) orelse {
+            // REVM might have summary lines, check if Zig line is valid
+            if (self.extractPc(zig_line.?) != null) {
+                // REVM trace ended but Zig continues
+                return TraceDivergence{
+                    .step = step,
+                    .revm_pc = 0,
+                    .revm_op = 0,
+                    .zig_pc = self.extractPc(zig_line.?) orelse 0,
+                    .zig_op = self.extractOp(zig_line.?) orelse 0,
+                };
+            }
+            continue;
+        };
+        const revm_op = self.extractOp(revm_line.?) orelse continue;
+        const zig_pc = self.extractPc(zig_line.?) orelse {
+            // Zig trace ended but REVM continues
+            return TraceDivergence{
+                .step = step,
+                .revm_pc = revm_pc,
+                .revm_op = revm_op,
+                .zig_pc = 0,
+                .zig_op = 0,
+            };
+        };
+        const zig_op = self.extractOp(zig_line.?) orelse continue;
+        
+        if (revm_pc != zig_pc or revm_op != zig_op) {
+            return TraceDivergence{
+                .step = step,
+                .revm_pc = revm_pc,
+                .revm_op = revm_op,
+                .zig_pc = zig_pc,
+                .zig_op = zig_op,
+            };
+        }
+    }
+    
+    return null;
+}
+
+fn extractPc(self: *Orchestrator, json_line: []const u8) ?usize {
+    _ = self;
+    if (std.mem.indexOf(u8, json_line, "\"pc\":")) |pc_pos| {
+        const start = pc_pos + 5;
+        if (std.mem.indexOfPos(u8, json_line, start, ",")) |end| {
+            const pc_str = std.mem.trim(u8, json_line[start..end], " ");
+            return std.fmt.parseInt(usize, pc_str, 10) catch null;
+        }
+    }
+    return null;
+}
+
+fn extractOp(self: *Orchestrator, json_line: []const u8) ?u8 {
+    _ = self;
+    if (std.mem.indexOf(u8, json_line, "\"op\":")) |op_pos| {
+        const start = op_pos + 5;
+        if (std.mem.indexOfPos(u8, json_line, start, ",")) |end| {
+            const op_str = std.mem.trim(u8, json_line[start..end], " ");
+            return std.fmt.parseInt(u8, op_str, 10) catch null;
+        }
+    }
+    return null;
+}
+
+fn getOpcodeName(self: *Orchestrator, opcode: u8) []const u8 {
+    _ = self;
+    return switch (opcode) {
+        0x00 => "STOP",
+        0x01 => "ADD",
+        0x02 => "MUL",
+        0x03 => "SUB",
+        0x04 => "DIV",
+        0x05 => "SDIV",
+        0x06 => "MOD",
+        0x07 => "SMOD",
+        0x08 => "ADDMOD",
+        0x09 => "MULMOD",
+        0x0a => "EXP",
+        0x0b => "SIGNEXTEND",
+        0x10 => "LT",
+        0x11 => "GT",
+        0x12 => "SLT",
+        0x13 => "SGT",
+        0x14 => "EQ",
+        0x15 => "ISZERO",
+        0x16 => "AND",
+        0x17 => "OR",
+        0x18 => "XOR",
+        0x19 => "NOT",
+        0x1a => "BYTE",
+        0x1b => "SHL",
+        0x1c => "SHR",
+        0x1d => "SAR",
+        0x20 => "KECCAK256",
+        0x30 => "ADDRESS",
+        0x31 => "BALANCE",
+        0x32 => "ORIGIN",
+        0x33 => "CALLER",
+        0x34 => "CALLVALUE",
+        0x35 => "CALLDATALOAD",
+        0x36 => "CALLDATASIZE",
+        0x37 => "CALLDATACOPY",
+        0x38 => "CODESIZE",
+        0x39 => "CODECOPY",
+        0x3a => "GASPRICE",
+        0x3b => "EXTCODESIZE",
+        0x3c => "EXTCODECOPY",
+        0x3d => "RETURNDATASIZE",
+        0x3e => "RETURNDATACOPY",
+        0x3f => "EXTCODEHASH",
+        0x40 => "BLOCKHASH",
+        0x41 => "COINBASE",
+        0x42 => "TIMESTAMP",
+        0x43 => "NUMBER",
+        0x44 => "DIFFICULTY",
+        0x45 => "GASLIMIT",
+        0x46 => "CHAINID",
+        0x47 => "SELFBALANCE",
+        0x48 => "BASEFEE",
+        0x50 => "POP",
+        0x51 => "MLOAD",
+        0x52 => "MSTORE",
+        0x53 => "MSTORE8",
+        0x54 => "SLOAD",
+        0x55 => "SSTORE",
+        0x56 => "JUMP",
+        0x57 => "JUMPI",
+        0x58 => "PC",
+        0x59 => "MSIZE",
+        0x5a => "GAS",
+        0x5b => "JUMPDEST",
+        0x5f => "PUSH0",
+        0x60...0x7f => |op| blk: {
+            var buf: [6]u8 = undefined;
+            const result = std.fmt.bufPrint(&buf, "PUSH{d}", .{op - 0x5f}) catch "PUSH?";
+            break :blk result;
+        },
+        0x80...0x8f => |op| blk: {
+            var buf: [5]u8 = undefined;
+            const result = std.fmt.bufPrint(&buf, "DUP{d}", .{op - 0x7f}) catch "DUP?";
+            break :blk result;
+        },
+        0x90...0x9f => |op| blk: {
+            var buf: [6]u8 = undefined;
+            const result = std.fmt.bufPrint(&buf, "SWAP{d}", .{op - 0x8f}) catch "SWAP?";
+            break :blk result;
+        },
+        0xa0 => "LOG0",
+        0xa1 => "LOG1",
+        0xa2 => "LOG2",
+        0xa3 => "LOG3",
+        0xa4 => "LOG4",
+        0xf0 => "CREATE",
+        0xf1 => "CALL",
+        0xf2 => "CALLCODE",
+        0xf3 => "RETURN",
+        0xf4 => "DELEGATECALL",
+        0xf5 => "CREATE2",
+        0xfa => "STATICCALL",
+        0xfd => "REVERT",
+        0xfe => "INVALID",
+        0xff => "SELFDESTRUCT",
+        else => "UNKNOWN",
+    };
+}
+
 pub fn deinit(self: *Orchestrator) void {
     for (self.test_cases) |tc| {
         self.allocator.free(tc.name);
@@ -87,7 +411,7 @@ pub fn deinit(self: *Orchestrator) void {
 pub fn discoverTestCases(self: *Orchestrator) !void {
     // Get the absolute path to cases directory
     // This works whether we're in zig-out/bin or running from project root
-    const cases_path = "/Users/williamcory/Guillotine/bench/official/cases";
+    const cases_path = "/Users/williamcory/guillotine/bench/official/cases";
     
     const cases_dir = try std.fs.openDirAbsolute(cases_path, .{ .iterate = true });
     
@@ -198,7 +522,7 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     
     // Build the runner path
     const runner_path = if (std.mem.eql(u8, self.evm_name, "zig")) 
-        "/Users/williamcory/Guillotine/zig-out/bin/evm-runner"
+        "/Users/williamcory/guillotine/zig-out/bin/evm-runner"
     else if (std.mem.eql(u8, self.evm_name, "ethereumjs"))
         "/Users/williamcory/Guillotine/bench/official/evms/ethereumjs/runner.js"
     else if (std.mem.eql(u8, self.evm_name, "geth"))

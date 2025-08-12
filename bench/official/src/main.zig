@@ -21,6 +21,8 @@ pub fn main() !void {
         \\--all                      Include all test cases (by default only working benchmarks are included)
         \\--next                     Use block-based execution for Zig EVM (new optimized interpreter)
         \\--show-output              Show output from hyperfine
+        \\--diff <TEST>              Run differential trace comparison between REVM and Zig for a specific test case
+        \\--diff-output <DIR>        Output directory for differential traces (default: differential_traces)
         \\
     );
 
@@ -28,6 +30,8 @@ pub fn main() !void {
         .NAME = clap.parsers.string,
         .NUM = clap.parsers.int(u32, 10),
         .FORMAT = clap.parsers.string,
+        .TEST = clap.parsers.string,
+        .DIR = clap.parsers.string,
     };
 
     var diag = clap.Diagnostic{};
@@ -57,8 +61,36 @@ pub fn main() !void {
     const include_all_cases = res.args.all != 0;
     const use_next = res.args.next != 0;
     const show_output = res.args.@"show-output" != 0;
+    const diff_test = res.args.diff;
+    const diff_output_dir = res.args.@"diff-output" orelse "differential_traces";
 
-    if (compare_mode) {
+    if (diff_test) |test_name| {
+        // Differential trace mode
+        var orchestrator = try Orchestrator.init(allocator, "zig", 1, 1, 1, 1, 1, 1, false, use_next, show_output);
+        defer orchestrator.deinit();
+        
+        try orchestrator.discoverTestCases();
+        
+        // Find the specific test case
+        var found_test: ?Orchestrator.TestCase = null;
+        for (orchestrator.test_cases) |tc| {
+            if (std.mem.eql(u8, tc.name, test_name)) {
+                found_test = tc;
+                break;
+            }
+        }
+        
+        if (found_test) |test_case| {
+            try orchestrator.runDifferentialTrace(test_case, diff_output_dir);
+        } else {
+            std.debug.print("Error: Test case '{s}' not found\n", .{test_name});
+            std.debug.print("Available test cases:\n", .{});
+            for (orchestrator.test_cases) |tc| {
+                std.debug.print("  - {s}\n", .{tc.name});
+            }
+            std.process.exit(1);
+        }
+    } else if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
         const evms = [_][]const u8{ "zig", "revm", "ethereumjs", "geth", "evmone" };
 
@@ -379,6 +411,8 @@ fn printHelp() !void {
         \\  orchestrator --export markdown  Export results to Markdown
         \\  orchestrator --compare --export markdown  Compare all EVMs and export
         \\  orchestrator --compare --js-runs 1  Compare EVMs with only 1 run for JavaScript
+        \\  orchestrator --diff erc20-transfer  Run differential trace comparison
+        \\  orchestrator --diff snailtracer --diff-output traces  Custom output directory
         \\
     , .{});
 }
