@@ -954,8 +954,8 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // The gas_left from the call should be added back
     frame.gas_remaining += call_result.gas_left;
 
-    // Write return data if successful and there's output
-    if (call_result.success and call_result.output != null and ret_size > 0) {
+    // Write return data to memory if there's output (regardless of call success)
+    if (call_result.output != null and ret_size > 0) {
         const output = call_result.output.?;
         const ret_offset_usize = @as(usize, @intCast(ret_offset));
         const ret_size_usize = @as(usize, @intCast(ret_size));
@@ -964,6 +964,12 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         // Copy output to return memory area
         if (copy_size > 0) {
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+        }
+        
+        // Zero out remaining bytes if output was smaller than requested
+        if (copy_size < ret_size_usize) {
+            const memory_slice = frame.memory.slice();
+            @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
         }
     }
 
@@ -1075,7 +1081,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     // Return unused gas to caller
     frame.gas_remaining += call_result.gas_left;
 
-    // Write return data
+    // Write return data to memory if there's output (regardless of call success)
     if (call_result.output) |output| {
         if (ret_size > 0) {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
@@ -1083,6 +1089,12 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
             const copy_size = @min(output.len, ret_size_usize);
             if (copy_size > 0) {
                 try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+            }
+            
+            // Zero out remaining bytes if output was smaller than requested
+            if (copy_size < ret_size_usize) {
+                const memory_slice = frame.memory.slice();
+                @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
             }
         }
     }
@@ -1192,13 +1204,21 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         frame.journal.revert_to_snapshot(snapshot);
     }
 
-    // Store return data if any
+    // Store return data to memory if there's output (regardless of call success)
     if (call_result.output) |output| {
         if (ret_size > 0) {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+            if (copy_size > 0) {
+                try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+            }
+            
+            // Zero out remaining bytes if output was smaller than requested
+            if (copy_size < ret_size_usize) {
+                const memory_slice = frame.memory.slice();
+                @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
+            }
         }
     }
 
@@ -1307,13 +1327,21 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         frame.journal.revert_to_snapshot(snapshot);
     }
 
-    // Store return data if any
+    // Store return data to memory if there's output (regardless of call success)
     if (call_result.output) |output| {
         if (ret_size > 0) {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
-            try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+            if (copy_size > 0) {
+                try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
+            }
+            
+            // Zero out remaining bytes if output was smaller than requested
+            if (copy_size < ret_size_usize) {
+                const memory_slice = frame.memory.slice();
+                @memset(memory_slice[ret_offset_usize + copy_size .. ret_offset_usize + ret_size_usize], 0);
+            }
         }
     }
 
