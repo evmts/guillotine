@@ -97,6 +97,14 @@ pub const Host = struct {
         register_created_contract: *const fn (ptr: *anyopaque, address: Address) anyerror!void,
         /// Check if a contract was created in the current transaction (EIP-6780)
         was_created_in_tx: *const fn (ptr: *anyopaque, address: Address) bool,
+        /// Create a new journal snapshot for reverting state changes
+        create_snapshot: *const fn (ptr: *anyopaque) u32,
+        /// Revert state changes to a previous snapshot
+        revert_to_snapshot: *const fn (ptr: *anyopaque, snapshot_id: u32) void,
+        /// Record a storage change in the journal
+        record_storage_change: *const fn (ptr: *anyopaque, snapshot_id: u32, address: Address, slot: u256, original_value: u256) anyerror!void,
+        /// Get the original storage value from the journal
+        get_original_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) ?u256,
     };
 
     /// Initialize a Host interface from any implementation
@@ -149,6 +157,26 @@ pub const Host = struct {
                 return self.was_created_in_tx(address);
             }
 
+            fn vtable_create_snapshot(ptr: *anyopaque) u32 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.create_snapshot();
+            }
+
+            fn vtable_revert_to_snapshot(ptr: *anyopaque, snapshot_id: u32) void {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.revert_to_snapshot(snapshot_id);
+            }
+
+            fn vtable_record_storage_change(ptr: *anyopaque, snapshot_id: u32, address: Address, slot: u256, original_value: u256) anyerror!void {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.record_storage_change(snapshot_id, address, slot, original_value);
+            }
+
+            fn vtable_get_original_storage(ptr: *anyopaque, address: Address, slot: u256) ?u256 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_original_storage(address, slot);
+            }
+
             const vtable = VTable{
                 .get_balance = vtable_get_balance,
                 .account_exists = vtable_account_exists,
@@ -158,6 +186,10 @@ pub const Host = struct {
                 .call = vtable_call,
                 .register_created_contract = vtable_register_created_contract,
                 .was_created_in_tx = vtable_was_created_in_tx,
+                .create_snapshot = vtable_create_snapshot,
+                .revert_to_snapshot = vtable_revert_to_snapshot,
+                .record_storage_change = vtable_record_storage_change,
+                .get_original_storage = vtable_get_original_storage,
             };
         };
 
@@ -205,6 +237,26 @@ pub const Host = struct {
     /// Check if a contract was created in the current transaction (EIP-6780)
     pub fn was_created_in_tx(self: Host, address: Address) bool {
         return self.vtable.was_created_in_tx(self.ptr, address);
+    }
+
+    /// Create a new journal snapshot for reverting state changes
+    pub fn create_snapshot(self: Host) u32 {
+        return self.vtable.create_snapshot(self.ptr);
+    }
+
+    /// Revert state changes to a previous snapshot
+    pub fn revert_to_snapshot(self: Host, snapshot_id: u32) void {
+        return self.vtable.revert_to_snapshot(self.ptr, snapshot_id);
+    }
+
+    /// Record a storage change in the journal
+    pub fn record_storage_change(self: Host, snapshot_id: u32, address: Address, slot: u256, original_value: u256) !void {
+        return self.vtable.record_storage_change(self.ptr, snapshot_id, address, slot, original_value);
+    }
+
+    /// Get the original storage value from the journal
+    pub fn get_original_storage(self: Host, address: Address, slot: u256) ?u256 {
+        return self.vtable.get_original_storage(self.ptr, address, slot);
     }
 };
 
@@ -306,6 +358,35 @@ pub const MockHost = struct {
         _ = address;
         // Mock implementation - always return false
         return false;
+    }
+    
+    pub fn create_snapshot(self: *MockHost) u32 {
+        _ = self;
+        // Mock implementation - return dummy snapshot id
+        return 0;
+    }
+    
+    pub fn revert_to_snapshot(self: *MockHost, snapshot_id: u32) void {
+        _ = self;
+        _ = snapshot_id;
+        // Mock implementation - do nothing
+    }
+    
+    pub fn record_storage_change(self: *MockHost, snapshot_id: u32, address: Address, slot: u256, original_value: u256) !void {
+        _ = self;
+        _ = snapshot_id;
+        _ = address;
+        _ = slot;
+        _ = original_value;
+        // Mock implementation - do nothing
+    }
+    
+    pub fn get_original_storage(self: *MockHost, address: Address, slot: u256) ?u256 {
+        _ = self;
+        _ = address;
+        _ = slot;
+        // Mock implementation - return null
+        return null;
     }
     
     pub fn to_host(self: *MockHost) Host {

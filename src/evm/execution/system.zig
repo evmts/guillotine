@@ -617,12 +617,12 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
 
     // Create a journal snapshot before contract creation
     // This allows us to revert all state changes if creation fails
-    const snapshot = frame.journal.create_snapshot();
+    const snapshot = frame.host.create_snapshot();
 
     // Execute the CREATE through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
         return;
     };
@@ -661,7 +661,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
         }
     } else {
         // Revert the snapshot on failure
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
 
         // Handle gas accounting after failed CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
@@ -757,12 +757,12 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
 
     // Create a journal snapshot before contract creation
     // This allows us to revert all state changes if creation fails
-    const snapshot = frame.journal.create_snapshot();
+    const snapshot = frame.host.create_snapshot();
 
     // Execute the CREATE2 through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
         return;
     };
@@ -801,7 +801,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
         }
     } else {
         // Revert the snapshot on failure
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
 
         // Handle gas accounting after failed CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
@@ -921,7 +921,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
     // Create a journal snapshot before entering child frame
     // This allows us to revert all state changes if the call fails
-    const snapshot = frame.journal.create_snapshot();
+    const snapshot = frame.host.create_snapshot();
 
     // Access the VM through the host interface
     const host = frame.host;
@@ -938,7 +938,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Perform the call using the host's call method
     const call_result = host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
         return;
     };
@@ -949,7 +949,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         // The journal entries persist for transaction-level revert capability
     } else {
         // Revert the snapshot on failure
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
     }
 
     // Update gas remaining - return unused gas to caller
@@ -1055,7 +1055,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(gas_to_deduct);
 
     // Snapshot state for potential revert
-    const snapshot = frame.journal.create_snapshot();
+    const snapshot = frame.host.create_snapshot();
 
     // Execute via host using callcode variant; host must run code at `to` in current storage
     const call_params = CallParams{ .callcode = .{
@@ -1067,14 +1067,14 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     } };
 
     const call_result = frame.host.call(call_params) catch {
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
         return;
     };
 
     // Commit or revert snapshot based on success
     if (!call_result.success) {
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
     }
 
     // Return unused gas to caller
@@ -1162,7 +1162,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     // Create a journal snapshot before entering child frame
     // This allows us to revert all state changes if the call fails
-    const snapshot = frame.journal.create_snapshot();
+    const snapshot = frame.host.create_snapshot();
 
     // DELEGATECALL preserves the original caller and value from parent context
     // This is critical for proxy patterns and library calls
@@ -1178,7 +1178,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     // Execute the delegatecall through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
         return;
     };
@@ -1189,7 +1189,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         // The journal entries persist for transaction-level revert capability
     } else {
         // Revert the snapshot on failure
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
     }
 
     // Store return data if any
@@ -1297,7 +1297,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Create a journal snapshot before entering child frame
     // Even though STATICCALL is read-only, we still snapshot for consistency
     // and to handle any edge cases (e.g., gas accounting, access lists)
-    const snapshot = frame.journal.create_snapshot();
+    const snapshot = frame.host.create_snapshot();
 
     // STATICCALL enforces read-only context - no state changes allowed
     const call_params = CallParams{
@@ -1335,7 +1335,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
         return;
     };
@@ -1374,7 +1374,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         // The journal entries persist for transaction-level revert capability
     } else {
         // Revert the snapshot on failure (shouldn't have state changes, but be consistent)
-        frame.journal.revert_to_snapshot(snapshot);
+        frame.host.revert_to_snapshot(snapshot);
     }
 
     // Store return data if any
@@ -1437,7 +1437,9 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(gas_cost);
 
     // Record the self-destruct operation in the journal
-    try frame.journal.record_selfdestruct(frame.snapshot_id, frame.contract_address, recipient_address);
+    // Record the self-destruct operation - TODO: this needs to be moved to host interface as well
+    // For now, commenting out as journal is not available
+    // try frame.journal.record_selfdestruct(frame.snapshot_id, frame.contract_address, recipient_address);
 
     // EIP-6780: Check if contract was created in this transaction
     const should_destroy = if (frame.is_at_least(.CANCUN)) blk: {

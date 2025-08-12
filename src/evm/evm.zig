@@ -383,6 +383,26 @@ pub fn was_created_in_tx(self: *Evm, address: primitives.Address.Address) bool {
     return self.created_contracts.was_created_in_tx(address);
 }
 
+/// Create a new journal snapshot for reverting state changes (Host interface)
+pub fn create_snapshot(self: *Evm) u32 {
+    return self.journal.create_snapshot();
+}
+
+/// Revert state changes to a previous snapshot (Host interface)
+pub fn revert_to_snapshot(self: *Evm, snapshot_id: u32) void {
+    self.journal.revert_to_snapshot(snapshot_id);
+}
+
+/// Record a storage change in the journal (Host interface)
+pub fn record_storage_change(self: *Evm, snapshot_id: u32, address: primitives.Address.Address, slot: u256, original_value: u256) !void {
+    return self.journal.record_storage_change(snapshot_id, address, slot, original_value);
+}
+
+/// Get the original storage value from the journal (Host interface)
+pub fn get_original_storage(self: *Evm, address: primitives.Address.Address, slot: u256) ?u256 {
+    return self.journal.get_original_storage(address, slot);
+}
+
 // The actual call implementation is in evm/call.zig
 // Import it with usingnamespace below
 
@@ -484,7 +504,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
 
     // Prepare a standalone frame for constructor execution
     const host = @import("host.zig").Host.init(self);
-    const snapshot_id: u32 = self.journal.create_snapshot();
+    const snapshot_id: u32 = host.create_snapshot();
     var frame = try Frame.init(
         frame_gas,
         false, // not static
@@ -494,7 +514,6 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         value,
         analysis_ptr,
         &self.access_list,
-        &self.journal,
         host,
         snapshot_id,
         self.state.database,
@@ -519,7 +538,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
             ExecutionError.Error.REVERT => {
                 std.debug.print("[create_contract] REVERT with output_len={}\n", .{frame.output.len});
                 // Revert state changes since snapshot
-                self.journal.revert_to_snapshot(snapshot_id);
+                host.revert_to_snapshot(snapshot_id);
                 // Duplicate revert data for return
                 var out: ?[]u8 = null;
                 if (frame.output.len > 0) {
@@ -538,7 +557,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
             },
             ExecutionError.Error.OutOfGas => {
                 std.debug.print("[create_contract] OutOfGas during constructor\n", .{});
-                self.journal.revert_to_snapshot(snapshot_id);
+                host.revert_to_snapshot(snapshot_id);
                 frame.deinit();
                 return InterprResult{
                     .status = .OutOfGas,
@@ -552,7 +571,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
             else => {
                 std.debug.print("[create_contract] Failure during constructor: {}\n", .{e});
                 // Treat other errors as failure
-                self.journal.revert_to_snapshot(snapshot_id);
+                host.revert_to_snapshot(snapshot_id);
                 frame.deinit();
                 return InterprResult{
                     .status = .Failure,

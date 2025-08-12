@@ -132,9 +132,8 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         value, // value being transferred
         &analysis, // code analysis
         &frame_access_list, // access list
-        &self.journal, // call journal
         host, // host interface from self
-        self.journal.create_snapshot(), // create new snapshot id
+        host.create_snapshot(), // create new snapshot id
         self.state.database, // database interface
         self.chain_rules, // chain rules
         null, // self_destruct (not supported in this context)

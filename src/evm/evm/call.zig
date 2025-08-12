@@ -34,8 +34,11 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     const Log = @import("../log.zig");
     Log.debug("[call] Starting call execution", .{});
 
+    // Create host interface from self
+    const host = Host.init(self);
+    
     // Create snapshot for nested calls early to ensure proper revert on any error
-    const snapshot_id = if (self.current_frame_depth > 0) self.journal.create_snapshot() else 0;
+    const snapshot_id = if (self.current_frame_depth > 0) host.create_snapshot() else 0;
 
     // Extract call info from params - for now just handle the .call case
     // TODO: Handle other call types properly
@@ -88,23 +91,23 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     // Input validation - revert snapshot on errors for nested calls
     if (call_info.input.len > MAX_INPUT_SIZE) {
-        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
     if (call_info.code_size > MAX_CODE_SIZE) {
-        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
     if (call_info.code_size != call_info.code.len) {
-        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
     if (call_info.gas == 0) {
-        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
     if (call_info.code_size > 0 and call_info.code.len == 0) {
-        if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+        if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
 
@@ -116,7 +119,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         Log.debug("[call] Using analysis cache for code analysis", .{});
         break :blk cache.getOrAnalyze(call_info.code[0..call_info.code_size], &self.table) catch |err| {
             Log.err("[call] Cached code analysis failed: {}", .{err});
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
     } else blk: {
@@ -124,13 +127,13 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         // Fallback to direct analysis if no cache
         var analysis_val = CodeAnalysis.from_code(self.allocator, call_info.code[0..call_info.code_size], &self.table) catch |err| {
             Log.err("[call] Code analysis failed: {}", .{err});
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         // Heap-allocate CodeAnalysis when not using cache to ensure valid lifetime
         const analysis_heap = self.allocator.create(CodeAnalysis) catch {
             analysis_val.deinit();
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         analysis_heap.* = analysis_val;
@@ -187,9 +190,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             }
         }
 
-        // Create host interface from self
-        const host = Host.init(self);
-
         // Initialize only the first frame now. Nested frames will be initialized on demand
         self.frame_stack.?[0] = try Frame.init(
             call_info.gas, // gas_remaining
@@ -200,7 +200,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_value, // value
             analysis_ptr, // analysis
             &self.access_list,
-            &self.journal,
             host,
             0, // snapshot_id
             self.state.database,
@@ -231,19 +230,17 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         // Check call depth limit
         if (new_depth >= MAX_CALL_DEPTH) {
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
         // Verify we have frame stack allocated (should always be true with MAX_CALL_DEPTH preallocation)
         if (self.frame_stack == null) {
             // Should not happen, but handle gracefully
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         }
 
-        // Create host interface from self
-        const host = Host.init(self);
 
         // Initialize the new frame
         const parent_frame = &self.frame_stack.?[self.current_frame_depth];
@@ -268,7 +265,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_value, // value
             analysis_ptr, // analysis
             &self.access_list,
-            &self.journal,
             host,
             snapshot_id, // use pre-created snapshot
             self.state.database,
@@ -280,7 +276,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             false, // is_delegate_call
         ) catch {
             // Frame initialization failed, revert snapshot
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         self.frame_stack.?[new_depth].code = call_info.code;
@@ -314,7 +310,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     if (precompile_addresses.get_precompile_id_checked(call_info.address)) |precompile_id| {
         const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_info.input, call_info.gas, call_info.is_static) catch |err| {
             // Revert snapshot on precompile failure for nested calls
-            if (self.current_frame_depth > 0) self.journal.revert_to_snapshot(snapshot_id);
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return switch (err) {
                 else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
             };
@@ -322,7 +318,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         // For nested calls, check if precompile failed and revert if needed
         if (self.current_frame_depth > 0 and !precompile_result.success) {
-            self.journal.revert_to_snapshot(snapshot_id);
+            host.revert_to_snapshot(snapshot_id);
         }
 
         return precompile_result;
@@ -380,7 +376,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             else => true,
         };
         if (should_revert) {
-            self.journal.revert_to_snapshot(snapshot_id);
+            host.revert_to_snapshot(snapshot_id);
         }
     }
 

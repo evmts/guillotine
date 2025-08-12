@@ -11,7 +11,6 @@ const Memory = @import("memory/memory.zig");
 const ExecutionError = @import("execution/execution_error.zig");
 const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 const AccessList = @import("access_list/access_list.zig");
-const CallJournal = @import("call_frame_stack.zig").CallJournal;
 const Host = @import("root.zig").Host;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
@@ -101,7 +100,6 @@ pub const Frame = struct {
     access_list: *AccessList, // 8 bytes
 
     // WARM - Call context (grouped together)
-    journal: *CallJournal, // 8 bytes
     host: Host, // 16 bytes (ptr + vtable)
     snapshot_id: u32, // 4 bytes
     caller: primitives.Address.Address, // 20 bytes
@@ -144,7 +142,6 @@ pub const Frame = struct {
         value: u256,
         analysis: *const CodeAnalysis,
         access_list: *AccessList,
-        journal: *CallJournal,
         host: Host,
         snapshot_id: u32,
         state: DatabaseInterface,
@@ -223,7 +220,6 @@ pub const Frame = struct {
             .is_eip1153 = chain_rules.is_eip1153,
 
             // Call frame stack integration
-            .journal = journal,
             .host = host,
             .snapshot_id = snapshot_id,
             .caller = caller,
@@ -354,14 +350,14 @@ pub const Frame = struct {
         // Record the original value in journal before changing
         const original_value = self.state.get_storage(self.contract_address, slot) catch 0;
         if (original_value != value) {
-            try self.journal.record_storage_change(self.snapshot_id, self.contract_address, slot, original_value);
+            try self.host.record_storage_change(self.snapshot_id, self.contract_address, slot, original_value);
         }
         try self.state.set_storage(self.contract_address, slot, value);
     }
 
     /// Get the original storage value for this slot at transaction start if recorded
     pub fn get_original_storage(self: *const Frame, slot: u256) u256 {
-        if (self.journal.get_original_storage(self.contract_address, slot)) |val| return val;
+        if (self.host.get_original_storage(self.contract_address, slot)) |val| return val;
         return self.state.get_storage(self.contract_address, slot) catch 0;
     }
 

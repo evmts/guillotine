@@ -76,7 +76,10 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     // Consume all gas at once
     try frame.consume_gas(total_gas);
 
-    try frame.set_storage(slot, value);
+    frame.set_storage(slot, value) catch {
+        // Convert any error to a generic execution error
+        return ExecutionError.Error.OutOfMemory;
+    };
 
     // Apply refund delta (can be negative per EIP-2200)
     frame.adjust_gas_refund(cost.refund);
