@@ -44,6 +44,7 @@ pub const string_storage_test = @import("string_storage_test.zig");
 pub const sub_opcode_bug_test = @import("sub_opcode_bug_test.zig");
 pub const sub_operand_order_test = @import("sub_operand_order_test.zig");
 pub const sub_stack_test = @import("sub_stack_test.zig");
+pub const test_return_stops_execution = @import("test_return_stops_execution.zig");
 pub const trace_erc20_constructor_test = @import("trace_erc20_constructor_test.zig");
 pub const tracer_test = @import("tracer_test.zig");
 pub const vm_core_comprehensive_test = @import("vm_core_comprehensive_test.zig");
@@ -94,6 +95,7 @@ test {
     _ = sub_opcode_bug_test;
     _ = sub_operand_order_test;
     _ = sub_stack_test;
+    _ = test_return_stops_execution;
     _ = trace_erc20_constructor_test;
     _ = tracer_test;
     _ = vm_core_comprehensive_test;
