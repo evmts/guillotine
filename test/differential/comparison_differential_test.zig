@@ -11,7 +11,7 @@ const revm_wrapper = @import("revm");
 
 // Enable debug logging
 // test {
-//     std.testing.log_level = .debug;
+//     std.testing.log_level = .warn;
 // }
 
 // Updated to new API - migration in progress, tests not run yet
@@ -103,14 +103,14 @@ test "LT opcode 5 < 10 = 1" {
         std.debug.print("LT test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
         std.debug.print("LT test bytecode executed: 5 < 10 should be 1\n", .{});
         std.debug.print("REVM output length: {}, Guillotine output length: {}\n", .{ revm_result.output.len, guillotine_result.output.?.len });
-        
+
         // Debug: print first few bytes of REVM output
         std.debug.print("REVM output bytes: ", .{});
         for (revm_result.output[0..@min(8, revm_result.output.len)]) |byte| {
             std.debug.print("{x:0>2} ", .{byte});
         }
         std.debug.print("\n", .{});
-        
+
         try testing.expectEqual(revm_value, guillotine_value);
     } else {
         // If either failed, print debug info
@@ -556,7 +556,7 @@ test "Simple PUSH and RETURN test" {
     if (revm_result.success and guillotine_result.success) {
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
-        
+
         std.debug.print("Simple test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
         try testing.expectEqual(@as(u256, 1), guillotine_value);
     }

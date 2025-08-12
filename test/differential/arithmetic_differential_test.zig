@@ -297,11 +297,11 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
 }
 
 test "SUB opcode 10 - 5 = 5" {
+    std.testing.log_level = .warn;
     const allocator = testing.allocator;
-    
+
     std.debug.print("\n=== SUB test: Testing 10 - 5 = 5 ===\n", .{});
 
-    // PUSH32 5, PUSH32 10, SUB, MSTORE, RETURN (stack: [5, 10] -> SUB computes top - second = 10 - 5 = 5)
     const bytecode = [_]u8{
         0x7f, // PUSH32
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 5 (32 bytes)
@@ -384,14 +384,14 @@ test "SUB opcode 10 - 5 = 5" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         std.debug.print("SUB test results: REVM={}, Guillotine={}, expected={}\n", .{ revm_value, guillotine_value, expected });
-        
+
         // Debug: print first few bytes of output
         std.debug.print("REVM output bytes: ", .{});
         for (revm_result.output[0..@min(8, revm_result.output.len)]) |byte| {
             std.debug.print("{x:0>2} ", .{byte});
         }
         std.debug.print("\n", .{});
-        
+
         try testing.expectEqual(revm_value, guillotine_value);
         try testing.expectEqual(expected, revm_value);
     } else {
@@ -406,7 +406,7 @@ test "SUB opcode 10 - 5 = 5" {
 test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
     const allocator = testing.allocator;
 
-    // PUSH32 10, PUSH32 5, SUB, MSTORE, RETURN (stack: [10, 5] -> SUB computes 5 - 10)
+    // PUSH32 10, PUSH32 5, SUB, MSTORE, RETURN (stack: [10, 5] -> SUB computes 5 - 10 = -5 underflow)
     const bytecode = [_]u8{
         0x7f, // PUSH32
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 10 (32 bytes)
@@ -426,6 +426,10 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
         0xf3, // RETURN
     };
     const expected: u256 = std.math.maxInt(u256) - 4; // 5 - 10 wraps to max - 4
+    std.debug.print("\nSUB UNDERFLOW TEST: Expected {} (max - 4)\n", .{expected});
+    std.debug.print("Bytecode pushes 10 then 5, stack will be [10, 5] with 5 on top\n", .{});
+    std.debug.print("SUB should compute: top(5) - second(10) = -5 = max - 4\n", .{});
+    // UNIQUE MARKER FOR SUB UNDERFLOW TEST
 
     // Execute on REVM - inline all setup
     const revm_settings = revm_wrapper.RevmSettings{};
@@ -487,6 +491,13 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+
+        std.debug.print("SUB underflow results: REVM={}, Guillotine={}, expected={}\n", .{ revm_value, guillotine_value, expected });
+
+        // Debug: check if values match what we expect
+        if (revm_value != guillotine_value) {
+            std.debug.print("ERROR: Values don't match! Difference: {}\n", .{if (revm_value > guillotine_value) revm_value - guillotine_value else guillotine_value - revm_value});
+        }
 
         try testing.expectEqual(revm_value, guillotine_value);
         try testing.expectEqual(expected, revm_value);
@@ -1559,4 +1570,480 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
         // For SIGNEXTEND, we expect this to succeed
         try testing.expect(false);
     }
+}
+
+// Fusion vs Non-fusion differential tests
+// These tests ensure that our fusion optimizations produce the same results as non-fused operations
+
+test "ADD fusion: PUSH 5, PUSH 10, ADD vs PUSH 5, MSTORE, PUSH 10, ADD" {
+    const allocator = testing.allocator;
+
+    // Fusion bytecode: PUSH1 5, PUSH1 10, ADD
+    const fusion_bytecode = [_]u8{
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x0A, // PUSH1 10
+        0x01, // ADD
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Non-fusion bytecode: PUSH1 5, MSTORE at 0x20, PUSH1 10, ADD
+    // The MSTORE prevents fusion
+    const non_fusion_bytecode = [_]u8{
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x20, // PUSH1 32 (memory offset to store 5)
+        0x52, // MSTORE (this breaks the fusion pattern)
+        0x60, 0x20, // PUSH1 32 (memory offset to load 5)
+        0x51, // MLOAD (load 5 back onto stack)
+        0x60, 0x0A, // PUSH1 10
+        0x01, // ADD
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Test fusion bytecode with REVM
+    const revm_settings = revm_wrapper.RevmSettings{};
+    var revm_vm_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_fusion.deinit();
+
+    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+
+    try revm_vm_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_fusion.setCode(revm_contract_address, &fusion_bytecode);
+    var revm_result_fusion = try revm_vm_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_fusion.deinit();
+
+    // Test non-fusion bytecode with REVM
+    var revm_vm_non_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_non_fusion.deinit();
+
+    try revm_vm_non_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_non_fusion.setCode(revm_contract_address, &non_fusion_bytecode);
+    var revm_result_non_fusion = try revm_vm_non_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_non_fusion.deinit();
+
+    // Test fusion bytecode with Guillotine
+    const MemoryDatabase = evm.MemoryDatabase;
+    var memory_db_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_fusion.deinit();
+
+    const db_interface_fusion = memory_db_fusion.to_database_interface();
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    defer vm_instance_fusion.deinit();
+
+    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    try vm_instance_fusion.state.set_code(contract_address, &fusion_bytecode);
+
+    const call_params_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_fusion = try vm_instance_fusion.call(call_params_fusion);
+    defer if (guillotine_result_fusion.output) |output| allocator.free(output);
+
+    // Test non-fusion bytecode with Guillotine
+    var memory_db_non_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_non_fusion.deinit();
+
+    const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    defer vm_instance_non_fusion.deinit();
+
+    try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
+
+    const call_params_non_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_non_fusion = try vm_instance_non_fusion.call(call_params_non_fusion);
+    defer if (guillotine_result_non_fusion.output) |output| allocator.free(output);
+
+    // All should succeed
+    try testing.expect(revm_result_fusion.success);
+    try testing.expect(revm_result_non_fusion.success);
+    try testing.expect(guillotine_result_fusion.success);
+    try testing.expect(guillotine_result_non_fusion.success);
+
+    // Extract values
+    const revm_fusion_value = std.mem.readInt(u256, revm_result_fusion.output[0..32], .big);
+    const revm_non_fusion_value = std.mem.readInt(u256, revm_result_non_fusion.output[0..32], .big);
+    const guillotine_fusion_value = std.mem.readInt(u256, guillotine_result_fusion.output.?[0..32], .big);
+    const guillotine_non_fusion_value = std.mem.readInt(u256, guillotine_result_non_fusion.output.?[0..32], .big);
+
+    // All should equal 15 (5 + 10)
+    try testing.expectEqual(@as(u256, 15), revm_fusion_value);
+    try testing.expectEqual(@as(u256, 15), revm_non_fusion_value);
+    try testing.expectEqual(@as(u256, 15), guillotine_fusion_value);
+    try testing.expectEqual(@as(u256, 15), guillotine_non_fusion_value);
+
+    std.debug.print("ADD fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
+}
+
+test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
+    const allocator = testing.allocator;
+
+    // Fusion bytecode: PUSH1 5, PUSH1 10, SUB (computes 10 - 5 = 5)
+    const fusion_bytecode = [_]u8{
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x0A, // PUSH1 10  
+        0x03, // SUB
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Non-fusion bytecode: PUSH1 5, MSTORE, PUSH1 10, SUB
+    const non_fusion_bytecode = [_]u8{
+        0x60, 0x05, // PUSH1 5
+        0x60, 0x20, // PUSH1 32 (memory offset to store 5)
+        0x52, // MSTORE (this breaks the fusion pattern)
+        0x60, 0x20, // PUSH1 32 (memory offset to load 5)
+        0x51, // MLOAD (load 5 back onto stack)
+        0x60, 0x0A, // PUSH1 10
+        0x03, // SUB  
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Test fusion bytecode with REVM
+    const revm_settings = revm_wrapper.RevmSettings{};
+    var revm_vm_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_fusion.deinit();
+
+    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+
+    try revm_vm_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_fusion.setCode(revm_contract_address, &fusion_bytecode);
+    var revm_result_fusion = try revm_vm_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_fusion.deinit();
+
+    // Test non-fusion bytecode with REVM
+    var revm_vm_non_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_non_fusion.deinit();
+
+    try revm_vm_non_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_non_fusion.setCode(revm_contract_address, &non_fusion_bytecode);
+    var revm_result_non_fusion = try revm_vm_non_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_non_fusion.deinit();
+
+    // Test fusion bytecode with Guillotine
+    const MemoryDatabase = evm.MemoryDatabase;
+    var memory_db_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_fusion.deinit();
+
+    const db_interface_fusion = memory_db_fusion.to_database_interface();
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    defer vm_instance_fusion.deinit();
+
+    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    try vm_instance_fusion.state.set_code(contract_address, &fusion_bytecode);
+
+    const call_params_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_fusion = try vm_instance_fusion.call(call_params_fusion);
+    defer if (guillotine_result_fusion.output) |output| allocator.free(output);
+
+    // Test non-fusion bytecode with Guillotine
+    var memory_db_non_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_non_fusion.deinit();
+
+    const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    defer vm_instance_non_fusion.deinit();
+
+    try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
+
+    const call_params_non_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_non_fusion = try vm_instance_non_fusion.call(call_params_non_fusion);
+    defer if (guillotine_result_non_fusion.output) |output| allocator.free(output);
+
+    // All should succeed
+    try testing.expect(revm_result_fusion.success);
+    try testing.expect(revm_result_non_fusion.success);
+    try testing.expect(guillotine_result_fusion.success);
+    try testing.expect(guillotine_result_non_fusion.success);
+
+    // Extract values
+    const revm_fusion_value = std.mem.readInt(u256, revm_result_fusion.output[0..32], .big);
+    const revm_non_fusion_value = std.mem.readInt(u256, revm_result_non_fusion.output[0..32], .big);
+    const guillotine_fusion_value = std.mem.readInt(u256, guillotine_result_fusion.output.?[0..32], .big);
+    const guillotine_non_fusion_value = std.mem.readInt(u256, guillotine_result_non_fusion.output.?[0..32], .big);
+
+    // All should equal 5 (10 - 5)
+    try testing.expectEqual(@as(u256, 5), revm_fusion_value);
+    try testing.expectEqual(@as(u256, 5), revm_non_fusion_value);
+    try testing.expectEqual(@as(u256, 5), guillotine_fusion_value);
+    try testing.expectEqual(@as(u256, 5), guillotine_non_fusion_value);
+
+    std.debug.print("SUB fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
+}
+
+test "MUL fusion: PUSH 6, PUSH 7, MUL vs PUSH 6, MSTORE, PUSH 7, MUL" {
+    const allocator = testing.allocator;
+
+    // Fusion bytecode: PUSH1 6, PUSH1 7, MUL
+    const fusion_bytecode = [_]u8{
+        0x60, 0x06, // PUSH1 6
+        0x60, 0x07, // PUSH1 7
+        0x02, // MUL
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Non-fusion bytecode: PUSH1 6, MSTORE, PUSH1 7, MUL
+    const non_fusion_bytecode = [_]u8{
+        0x60, 0x06, // PUSH1 6
+        0x60, 0x20, // PUSH1 32 (memory offset to store 6)
+        0x52, // MSTORE (this breaks the fusion pattern)
+        0x60, 0x20, // PUSH1 32 (memory offset to load 6)
+        0x51, // MLOAD (load 6 back onto stack)
+        0x60, 0x07, // PUSH1 7
+        0x02, // MUL
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Test fusion bytecode with REVM
+    const revm_settings = revm_wrapper.RevmSettings{};
+    var revm_vm_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_fusion.deinit();
+
+    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+
+    try revm_vm_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_fusion.setCode(revm_contract_address, &fusion_bytecode);
+    var revm_result_fusion = try revm_vm_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_fusion.deinit();
+
+    // Test non-fusion bytecode with REVM
+    var revm_vm_non_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_non_fusion.deinit();
+
+    try revm_vm_non_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_non_fusion.setCode(revm_contract_address, &non_fusion_bytecode);
+    var revm_result_non_fusion = try revm_vm_non_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_non_fusion.deinit();
+
+    // Test fusion bytecode with Guillotine
+    const MemoryDatabase = evm.MemoryDatabase;
+    var memory_db_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_fusion.deinit();
+
+    const db_interface_fusion = memory_db_fusion.to_database_interface();
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    defer vm_instance_fusion.deinit();
+
+    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    try vm_instance_fusion.state.set_code(contract_address, &fusion_bytecode);
+
+    const call_params_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_fusion = try vm_instance_fusion.call(call_params_fusion);
+    defer if (guillotine_result_fusion.output) |output| allocator.free(output);
+
+    // Test non-fusion bytecode with Guillotine
+    var memory_db_non_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_non_fusion.deinit();
+
+    const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    defer vm_instance_non_fusion.deinit();
+
+    try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
+
+    const call_params_non_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_non_fusion = try vm_instance_non_fusion.call(call_params_non_fusion);
+    defer if (guillotine_result_non_fusion.output) |output| allocator.free(output);
+
+    // All should succeed
+    try testing.expect(revm_result_fusion.success);
+    try testing.expect(revm_result_non_fusion.success);
+    try testing.expect(guillotine_result_fusion.success);
+    try testing.expect(guillotine_result_non_fusion.success);
+
+    // Extract values
+    const revm_fusion_value = std.mem.readInt(u256, revm_result_fusion.output[0..32], .big);
+    const revm_non_fusion_value = std.mem.readInt(u256, revm_result_non_fusion.output[0..32], .big);
+    const guillotine_fusion_value = std.mem.readInt(u256, guillotine_result_fusion.output.?[0..32], .big);
+    const guillotine_non_fusion_value = std.mem.readInt(u256, guillotine_result_non_fusion.output.?[0..32], .big);
+
+    // All should equal 42 (6 * 7)
+    try testing.expectEqual(@as(u256, 42), revm_fusion_value);
+    try testing.expectEqual(@as(u256, 42), revm_non_fusion_value);
+    try testing.expectEqual(@as(u256, 42), guillotine_fusion_value);
+    try testing.expectEqual(@as(u256, 42), guillotine_non_fusion_value);
+
+    std.debug.print("MUL fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
+}
+
+test "DIV fusion: PUSH 42, PUSH 6, DIV vs PUSH 42, MSTORE, PUSH 6, DIV" {
+    const allocator = testing.allocator;
+
+    // Fusion bytecode: PUSH1 42, PUSH1 6, DIV (computes 6 / 42 = 0)
+    const fusion_bytecode = [_]u8{
+        0x60, 0x2A, // PUSH1 42
+        0x60, 0x06, // PUSH1 6
+        0x04, // DIV
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Non-fusion bytecode: PUSH1 42, MSTORE, PUSH1 6, DIV
+    const non_fusion_bytecode = [_]u8{
+        0x60, 0x2A, // PUSH1 42
+        0x60, 0x20, // PUSH1 32 (memory offset to store 42)
+        0x52, // MSTORE (this breaks the fusion pattern)
+        0x60, 0x20, // PUSH1 32 (memory offset to load 42)
+        0x51, // MLOAD (load 42 back onto stack)
+        0x60, 0x06, // PUSH1 6
+        0x04, // DIV
+        0x60, 0x00, // PUSH1 0 (memory offset)
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0xf3, // RETURN
+    };
+
+    // Test fusion bytecode with REVM
+    const revm_settings = revm_wrapper.RevmSettings{};
+    var revm_vm_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_fusion.deinit();
+
+    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+
+    try revm_vm_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_fusion.setCode(revm_contract_address, &fusion_bytecode);
+    var revm_result_fusion = try revm_vm_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_fusion.deinit();
+
+    // Test non-fusion bytecode with REVM
+    var revm_vm_non_fusion = try revm_wrapper.Revm.init(allocator, revm_settings);
+    defer revm_vm_non_fusion.deinit();
+
+    try revm_vm_non_fusion.setBalance(revm_deployer, 10000000);
+    try revm_vm_non_fusion.setCode(revm_contract_address, &non_fusion_bytecode);
+    var revm_result_non_fusion = try revm_vm_non_fusion.call(revm_deployer, revm_contract_address, 0, &[_]u8{}, 1000000);
+    defer revm_result_non_fusion.deinit();
+
+    // Test fusion bytecode with Guillotine
+    const MemoryDatabase = evm.MemoryDatabase;
+    var memory_db_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_fusion.deinit();
+
+    const db_interface_fusion = memory_db_fusion.to_database_interface();
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    defer vm_instance_fusion.deinit();
+
+    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    try vm_instance_fusion.state.set_code(contract_address, &fusion_bytecode);
+
+    const call_params_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_fusion = try vm_instance_fusion.call(call_params_fusion);
+    defer if (guillotine_result_fusion.output) |output| allocator.free(output);
+
+    // Test non-fusion bytecode with Guillotine
+    var memory_db_non_fusion = MemoryDatabase.init(allocator);
+    defer memory_db_non_fusion.deinit();
+
+    const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    defer vm_instance_non_fusion.deinit();
+
+    try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
+
+    const call_params_non_fusion = CallParams{ .call = .{
+        .caller = contract_address,
+        .to = contract_address,
+        .value = 0,
+        .input = &[_]u8{},
+        .gas = 1000000,
+    } };
+
+    const guillotine_result_non_fusion = try vm_instance_non_fusion.call(call_params_non_fusion);
+    defer if (guillotine_result_non_fusion.output) |output| allocator.free(output);
+
+    // All should succeed
+    try testing.expect(revm_result_fusion.success);
+    try testing.expect(revm_result_non_fusion.success);
+    try testing.expect(guillotine_result_fusion.success);
+    try testing.expect(guillotine_result_non_fusion.success);
+
+    // Extract values
+    const revm_fusion_value = std.mem.readInt(u256, revm_result_fusion.output[0..32], .big);
+    const revm_non_fusion_value = std.mem.readInt(u256, revm_result_non_fusion.output[0..32], .big);
+    const guillotine_fusion_value = std.mem.readInt(u256, guillotine_result_fusion.output.?[0..32], .big);
+    const guillotine_non_fusion_value = std.mem.readInt(u256, guillotine_result_non_fusion.output.?[0..32], .big);
+
+    // All should equal 0 (6 / 42 = 0)
+    try testing.expectEqual(@as(u256, 0), revm_fusion_value);
+    try testing.expectEqual(@as(u256, 0), revm_non_fusion_value);
+    try testing.expectEqual(@as(u256, 0), guillotine_fusion_value);
+    try testing.expectEqual(@as(u256, 0), guillotine_non_fusion_value);
+
+    std.debug.print("DIV fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
 }
