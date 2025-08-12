@@ -241,9 +241,7 @@ pub unsafe extern "C" fn revm_set_code(
     // eprintln!("REVM FFI: Set code for {:?}, code_len: {}, code_hash: {:?}", addr, code_bytes.len(), code_hash);
     
     // Verify the code was set by checking the contracts map
-    if let Some(contract_code) = vm.db.contracts.get(&code_hash) {
-        // eprintln!("REVM FFI: Code successfully stored in contracts map, bytecode len: {}", contract_code.len());
-    } else {
+    if !vm.db.contracts.contains_key(&code_hash) {
         panic!("REVM FFI: PANIC - Code not found in contracts map after setCode!");
     }
 
@@ -391,21 +389,20 @@ pub unsafe extern "C" fn revm_execute(
     };
 
     // Check if 'to' address has code
-    if let Some(to) = to_addr {
-        let account = vm.db.basic(to).unwrap_or_default();
-        // eprintln!("REVM FFI: Account at {:?} has code: {}, code_hash: {:?}", 
-        //     to, 
-        //     account.as_ref().map(|a| a.code.is_some()).unwrap_or(false),
-        //     account.as_ref().map(|a| a.code_hash).unwrap_or_default()
-        // );
-        
-        // Also check if we can get the account info directly
-        if let Some(acc_info) = account {
-            if let Some(code) = &acc_info.code {
-                // eprintln!("REVM FFI: Code bytes len: {}", code.original_bytes().len());
-            }
-        }
-    }
+    // if let Some(to) = to_addr {
+    //     let account = vm.db.basic(to).unwrap_or_default();
+    //     eprintln!("REVM FFI: Account at {:?} has code: {}, code_hash: {:?}", 
+    //         to, 
+    //         account.as_ref().map(|a| a.code.is_some()).unwrap_or(false),
+    //         account.as_ref().map(|a| a.code_hash).unwrap_or_default()
+    //     );
+    //     
+    //     if let Some(acc_info) = account {
+    //         if let Some(code) = &acc_info.code {
+    //             eprintln!("REVM FFI: Code bytes len: {}", code.original_bytes().len());
+    //         }
+    //     }
+    // }
     
     // Build and execute EVM
     let mut evm = Evm::builder()
@@ -440,9 +437,8 @@ pub unsafe extern "C" fn revm_execute(
         })
         .build();
 
-    let input_len_debug = input.len();
     // eprintln!("REVM FFI: About to execute transaction - from: {:?}, to: {:?}, value: {:?}, input_len: {}, gas_limit: {}", 
-    //     from_addr, to_addr, value, input_len_debug, gas_limit);
+    //     from_addr, to_addr, value, input.len(), gas_limit);
     
     let result = match evm.transact_commit() {
         Ok(res) => res,
