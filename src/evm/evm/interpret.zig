@@ -490,8 +490,8 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     var created_contracts = CreatedContracts.init(allocator);
     defer created_contracts.deinit();
 
-    var host_impl = vm; // Evm implements Host interface
-    var host = Host.init(&host_impl);
+    // Evm implements Host interface
+    const host = Host.init(vm);
 
     // Gas is less than block base cost (5*3 = 15)
     var frame = try Frame.init(
@@ -504,7 +504,7 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
         &analysis,
         &access_list,
         &journal,
-        &host,
+        host,
         0, // snapshot_id
         db_interface,
         Frame.ChainRules.DEFAULT,
@@ -554,8 +554,7 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
     var created_contracts = CreatedContracts.init(allocator);
     defer created_contracts.deinit();
 
-    var host_impl = vm;
-    var host = Host.init(&host_impl);
+    const host = Host.init(vm);
 
     var frame = try Frame.init(
         1000,
@@ -567,7 +566,7 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
         &analysis,
         &access_list,
         &journal,
-        &host,
+        host,
         0,
         db_interface,
         Frame.ChainRules.DEFAULT,
@@ -619,8 +618,7 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
     var created_contracts = CreatedContracts.init(allocator);
     defer created_contracts.deinit();
 
-    var host_impl = vm;
-    var host = Host.init(&host_impl);
+    const host = Host.init(vm);
 
     var frame = try Frame.init(
         1000,
@@ -632,7 +630,7 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
         &analysis,
         &access_list,
         &journal,
-        &host,
+        host,
         0,
         db_interface,
         Frame.ChainRules.DEFAULT,
@@ -713,8 +711,8 @@ test "dynamic jump returns 32-byte true" {
     var created_contracts = CreatedContracts.init(allocator);
     defer created_contracts.deinit();
 
-    var host_impl = vm; // Evm implements Host
-    var host = Host.init(&host_impl);
+    // Evm implements Host
+    const host = Host.init(vm);
 
     var frame = try Frame.init(
         1_000_000,
@@ -726,7 +724,7 @@ test "dynamic jump returns 32-byte true" {
         &analysis,
         &access_list,
         &journal,
-        &host,
+        host,
         0,
         db_interface,
         Frame.ChainRules.DEFAULT,
