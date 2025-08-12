@@ -1315,21 +1315,14 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
     const evm_depth_before = evm_ptr.current_frame_depth;
     
-    const pre_stack_ptr_u = @intFromPtr(&frame.stack);
-    const pre_stack_base_u = @intFromPtr(frame.stack.base);
-    const pre_stack_limit_u = @intFromPtr(frame.stack.limit);
     const pre_depth = frame.depth;
+    const pre_stack_size = frame.stack.size();
     Log.debug(
-        "[STATICCALL] pre-call: frame={x}, depth={}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
+        "[STATICCALL] pre-call: frame={x}, depth={}, stack size={}",
         .{
             @intFromPtr(frame),
             pre_depth,
-            @intFromPtr(&frame.stack),
-            @intFromPtr(frame.stack.base),
-            @intFromPtr(frame.stack.current),
-            @intFromPtr(frame.stack.limit),
-            @intFromPtr(frame.stack.data.ptr),
-            frame.stack.data.len,
+            pre_stack_size,
         },
     );
 
@@ -1343,30 +1336,15 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Debug: capture stack/frame state after call
     const evm_depth_after = evm_ptr.current_frame_depth;
     Log.debug(
-        "[STATICCALL] post-call: frame={x}, depth={}, evm_depth_before={}, evm_depth_after={}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
+        "[STATICCALL] post-call: frame={x}, depth={}, evm_depth_before={}, evm_depth_after={}, stack size={}",
         .{
             @intFromPtr(frame),
             frame.depth,
             evm_depth_before,
             evm_depth_after,
-            @intFromPtr(&frame.stack),
-            @intFromPtr(frame.stack.base),
-            @intFromPtr(frame.stack.current),
-            @intFromPtr(frame.stack.limit),
-            @intFromPtr(frame.stack.data.ptr),
-            frame.stack.data.len,
+            frame.stack.size(),
         },
     );
-
-    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        // Verify frame pointer hasn't changed
-        std.debug.assert(@intFromPtr(frame) == original_frame_ptr);
-        
-        // The parent frame's stack object and its data allocation must not change across nested calls
-        std.debug.assert(@intFromPtr(&frame.stack) == pre_stack_ptr_u);
-        std.debug.assert(@intFromPtr(frame.stack.base) == pre_stack_base_u);
-        std.debug.assert(@intFromPtr(frame.stack.limit) == pre_stack_limit_u);
-    }
 
     // Handle result based on success/failure
     if (call_result.success) {
@@ -1388,7 +1366,24 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Push success flag (1 for success, 0 for failure)
-    try frame.stack.append(if (call_result.success) 1 else 0);
+    const result_value = if (call_result.success) @as(u256, 1) else @as(u256, 0);
+    Log.debug("[STATICCALL] About to push result={}, current stack size={}", .{ result_value, frame.stack.size() });
+    try frame.stack.append(result_value);
+    Log.debug("[STATICCALL] After push, stack size={}", .{frame.stack.size()});
+    
+    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+        // Verify frame pointer hasn't changed
+        std.debug.assert(@intFromPtr(frame) == original_frame_ptr);
+        
+        // Note: Stack is now a value type in Frame, so we can't assert on internal pointers
+        // Just verify stack size increased by 1 (the result)
+        const final_stack_size = frame.stack.size();
+        const expected_size = pre_stack_size + 1;
+        if (final_stack_size != expected_size) {
+            Log.debug("[STATICCALL] Stack size mismatch! pre_stack_size={}, expected={}, actual={}", .{ pre_stack_size, expected_size, final_stack_size });
+        }
+        std.debug.assert(final_stack_size == expected_size); // Should have pushed result
+    }
 }
 
 /// SELFDESTRUCT opcode (0xFF): Destroy the current contract and send balance to recipient

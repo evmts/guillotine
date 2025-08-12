@@ -37,8 +37,10 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     // Create host interface from self
     const host = Host.init(self);
 
+    // Determine if this is a top-level call using execution flag instead of current_frame_depth
+    const is_top_level_call = !self.is_executing;
     // Create snapshot for nested calls early to ensure proper revert on any error
-    const snapshot_id = if (self.current_frame_depth > 0) host.create_snapshot() else 0;
+    const snapshot_id = if (!is_top_level_call) host.create_snapshot() else 0;
 
     // Extract call info from params - for now just handle the .call case
     // TODO: Handle other call types properly
@@ -160,7 +162,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     }
 
     // Handle frame allocation based on call depth
-    if (self.current_frame_depth == 0) {
+    if (is_top_level_call) {
         // Top-level call: Initialize fresh execution state
         // Initialize fresh execution state in EVM instance (per-call isolation)
         // CRITICAL: Clear all state at beginning of top-level call
@@ -310,7 +312,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     var parent_stack_limit_before_interpret: usize = 0;
     var parent_stack_current_before_interpret: usize = 0;
 
-    if (self.current_frame_depth > 0) {
+    if (!is_top_level_call) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
         parent_stack_ptr_before_interpret = @intFromPtr(&parent.stack);
         parent_stack_base_before_interpret = @intFromPtr(parent.stack.base);
@@ -328,13 +330,18 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     // Execute and normalize result handling so we can always clean up the frame
     var exec_err: ?ExecutionError.Error = null;
+    // Mark executing to enable nested-call behavior
+    const was_executing = self.is_executing;
+    self.is_executing = true;
     interpret(self, current_frame) catch |err| {
         Log.debug("[call] Interpret ended with error: {}", .{err});
         exec_err = err;
     };
+    // Restore executing flag
+    self.is_executing = was_executing;
 
     // For nested calls, verify parent pointers after interpret
-    if (self.current_frame_depth > 0) {
+    if (!is_top_level_call) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
 
         if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
@@ -347,7 +354,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     }
 
     // Handle snapshot revert for failed nested calls
-    if (self.current_frame_depth > 0 and exec_err != null) {
+    if (!is_top_level_call and exec_err != null) {
         const should_revert = switch (exec_err.?) {
             ExecutionError.Error.STOP => false,
             else => true,
@@ -374,7 +381,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     var parent_stack_limit_before_deinit: usize = 0;
     var parent_stack_current_before_deinit: usize = 0;
 
-    if (self.current_frame_depth > 0) {
+    if (!is_top_level_call) {
         const parent = &self.frame_stack.?[self.current_frame_depth - 1];
         parent_stack_ptr_before_deinit = @intFromPtr(&parent.stack);
         parent_stack_base_before_deinit = @intFromPtr(parent.stack.base);
@@ -399,7 +406,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     }
 
     // Restore parent frame depth (or stay at 0 if top-level)
-    if (self.current_frame_depth > 0) {
+    if (!is_top_level_call) {
         self.current_frame_depth -= 1;
     }
 

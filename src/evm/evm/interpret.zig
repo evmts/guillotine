@@ -6,6 +6,9 @@ const Log = @import("../log.zig");
 const Evm = @import("../evm.zig");
 const builtin = @import("builtin");
 
+// Hoist U256 type alias used by fused arithmetic ops
+const U256 = @import("primitives").Uint(256, 4);
+
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 
@@ -42,9 +45,9 @@ inline fn handle_jumpi(self: *Evm, frame: *Frame, current_index: *usize) Executi
         }
         Log.debug("[interpret] JUMPI condition true, jumping to dest {}", .{dest});
         const dest_usize: usize = @intCast(dest);
-        const idx = frame.analysis.pc_to_block_start[dest_usize];
-        if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
-            Log.debug("[interpret] JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+        const idx = analysis.pc_to_block_start[dest_usize];
+        if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
+            Log.debug("[interpret] JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
             return ExecutionError.Error.InvalidJump;
         }
         current_index.* = idx;
@@ -57,24 +60,25 @@ inline fn handle_jumpi(self: *Evm, frame: *Frame, current_index: *usize) Executi
 inline fn handle_dynamic_jump(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
     // Backtrace last few original PCs/opcodes to understand control flow
     var bt: usize = 1;
+    const analysis = frame.analysis;
     while (bt <= 4 and current_index.* >= bt) : (bt += 1) {
         const iprev = current_index.* - bt;
-        const pcprev16 = frame.analysis.inst_to_pc[iprev];
+        const pcprev16 = analysis.inst_to_pc[iprev];
         if (pcprev16 == std.math.maxInt(u16)) break;
         const pcprev: usize = pcprev16;
-        const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
+        const opprev: u8 = if (pcprev < analysis.code_len) analysis.code[pcprev] else 0x00;
         Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
     }
     const dest = try frame.stack.pop();
     Log.debug("[interpret] Dynamic JUMP to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
     if (!frame.valid_jumpdest(dest)) {
-        Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+        Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, analysis.code_len });
         return ExecutionError.Error.InvalidJump;
     }
     const dest_usize: usize = @intCast(dest);
-    const idx = frame.analysis.pc_to_block_start[dest_usize];
-    if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
-        Log.debug("[interpret] Dynamic JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+    const idx = analysis.pc_to_block_start[dest_usize];
+    if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
+        Log.debug("[interpret] Dynamic JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
         return ExecutionError.Error.InvalidJump;
     }
     Log.debug("[interpret] Dynamic JUMP mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
@@ -83,14 +87,15 @@ inline fn handle_dynamic_jump(self: *Evm, frame: *Frame, current_index: *usize) 
 }
 
 inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
+    const analysis = frame.analysis;
     // Backtrace before conditional jump as well
     var bt: usize = 1;
     while (bt <= 4 and current_index.* >= bt) : (bt += 1) {
         const iprev = current_index.* - bt;
-        const pcprev16 = frame.analysis.inst_to_pc[iprev];
+        const pcprev16 = analysis.inst_to_pc[iprev];
         if (pcprev16 == std.math.maxInt(u16)) break;
         const pcprev: usize = pcprev16;
-        const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
+        const opprev: u8 = if (pcprev < analysis.code_len) analysis.code[pcprev] else 0x00;
         Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
     }
     const pops = try frame.stack.pop2();
@@ -100,13 +105,13 @@ inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize)
     Log.debug("[interpret] Dynamic JUMPI to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, current_index.*, self.depth, frame.gas_remaining });
     if (condition != 0) {
         if (!frame.valid_jumpdest(dest)) {
-            Log.debug("[interpret] Dynamic JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
+            Log.debug("[interpret] Dynamic JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, analysis.code_len });
             return ExecutionError.Error.InvalidJump;
         }
         const dest_usize: usize = @intCast(dest);
-        const idx = frame.analysis.pc_to_block_start[dest_usize];
-        if (idx == std.math.maxInt(u16) or idx >= frame.analysis.instructions.len) {
-            Log.debug("[interpret] Dynamic JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, frame.analysis.instructions.len });
+        const idx = analysis.pc_to_block_start[dest_usize];
+        if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
+            Log.debug("[interpret] Dynamic JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
             return ExecutionError.Error.InvalidJump;
         }
         Log.debug("[interpret] Dynamic JUMPI mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
@@ -128,18 +133,21 @@ inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize)
 ///
 /// The caller is responsible for creating and managing the Frame and its components.
 pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
+    const analysis = frame.analysis;
     self.require_one_thread();
 
-    Log.debug("[interpret] Starting with {} instructions, gas={}", .{ frame.analysis.instructions.len, frame.gas_remaining });
+    Log.debug("[interpret] Starting with {} instructions, gas={}", .{ analysis.instructions.len, frame.gas_remaining });
 
     // Frame is provided by caller, get the analysis from it
-    const instructions = frame.analysis.instructions;
+    const instructions = analysis.instructions;
     var current_index: usize = 0;
     var loop_iterations: usize = 0;
+    // Precompute once for opcode thunks
+    const frame_opaque: *anyopaque = @ptrCast(frame);
 
     while (current_index < instructions.len) {
         @branchHint(.likely);
-        const nextInstruction = instructions[current_index];
+        const inst = &instructions[current_index];
 
         // In safe mode we make sure we don't loop too much. If this happens
         if (comptime SAFE) {
@@ -152,11 +160,11 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
         // Optional tracing hook (REVM-compatible JSON) using inst->pc mapping
         if (self.tracer) |writer| {
-            if (current_index < frame.analysis.inst_to_pc.len) {
-                const pc_u16 = frame.analysis.inst_to_pc[current_index];
+            if (current_index < analysis.inst_to_pc.len) {
+                const pc_u16 = analysis.inst_to_pc[current_index];
                 if (pc_u16 != std.math.maxInt(u16)) {
                     const pc: usize = pc_u16;
-                    const opcode: u8 = if (pc < frame.analysis.code_len) frame.analysis.code[pc] else 0x00;
+                    const opcode: u8 = if (pc < analysis.code_len) analysis.code[pc] else 0x00;
                     const stack_len: usize = frame.stack.size();
                     const stack_view: []const u256 = frame.stack.data[0..stack_len];
                     const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
@@ -167,13 +175,15 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
             }
         }
-        switch (nextInstruction.arg) {
+        switch (inst.arg) {
             // BEGINBLOCK instructions - validate entire basic block upfront
             // This eliminates per-instruction gas and stack validation for the entire block
             .block_info => |block| {
+                // Compute current stack size once for logging and validation
+                const current_stack_size: u16 = @intCast(frame.stack.size());
                 // Debug: show block-level validation details
-                const dbg_pc: usize = if (current_index < frame.analysis.inst_to_pc.len) blk: {
-                    const pc16 = frame.analysis.inst_to_pc[current_index];
+                const dbg_pc: usize = if (current_index < analysis.inst_to_pc.len) blk: {
+                    const pc16 = analysis.inst_to_pc[current_index];
                     break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
                 } else 0;
                 Log.debug("[interpret] BEGINBLOCK at inst_idx={} pc={} gas_cost={} stack_req={} max_growth={} curr_stack={}", .{
@@ -182,7 +192,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     block.gas_cost,
                     block.stack_req,
                     block.stack_max_growth,
-                    frame.stack.size(),
+                    current_stack_size,
                 });
                 // Validate gas for the entire block up-front
                 if (frame.gas_remaining < block.gas_cost) {
@@ -193,7 +203,6 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 frame.gas_remaining -= block.gas_cost;
 
                 // Validate stack requirements for this block
-                const current_stack_size: u16 = @intCast(frame.stack.size());
                 if (current_stack_size < block.stack_req) {
                     Log.debug("[interpret] StackUnderflow at block entry: need {} have {}", .{ block.stack_req, current_stack_size });
                     return ExecutionError.Error.StackUnderflow;
@@ -204,9 +213,11 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
 
                 // Advance to the next instruction in the block
+                // Keep a reference to the opcode function pointer to avoid warnings
+                const op_fn_dbg = inst.opcode_fn;
                 current_index += 1;
                 // Note: The opcode_fn for BEGINBLOCK is a no-op; validation is handled here
-                _ = nextInstruction.opcode_fn; // keep reference to avoid warnings
+                _ = op_fn_dbg;
             },
             // For jumps we handle them inline as they are preprocessed by analysis
             // 1. Handle dynamic jumps validating it is a valid jumpdest
@@ -224,11 +235,12 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
             },
             .push_value => |value| {
-                const pc_dbg: usize = if (current_index < frame.analysis.inst_to_pc.len) blk: {
-                    const pc16 = frame.analysis.inst_to_pc[current_index];
+                @branchHint(.likely);
+                const pc_dbg: usize = if (current_index < analysis.inst_to_pc.len) blk: {
+                    const pc16 = analysis.inst_to_pc[current_index];
                     break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
                 } else 0;
-                const op_dbg: u8 = if (pc_dbg < frame.analysis.code_len) frame.analysis.code[pc_dbg] else 0x00;
+                const op_dbg: u8 = if (pc_dbg < analysis.code_len) analysis.code[pc_dbg] else 0x00;
                 Log.debug("[interpret] PUSH at pc={} op=0x{x} value={x}", .{ pc_dbg, op_dbg, value });
                 current_index += 1;
                 try frame.stack.append(value);
@@ -254,7 +266,6 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             .push_mul_fusion => |immediate| {
                 current_index += 1;
                 const a = try frame.stack.peek();
-                const U256 = @import("primitives").Uint(256, 4);
                 const a_u256 = U256.from_u256_unsafe(a);
                 const b_u256 = U256.from_u256_unsafe(immediate);
                 const product_u256 = a_u256.wrapping_mul(b_u256);
@@ -362,16 +373,16 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             .none => {
                 @branchHint(.likely);
                 // Debug logging for all instructions
-                const pc_val = if (current_index < frame.analysis.inst_to_pc.len) frame.analysis.inst_to_pc[current_index] else std.math.maxInt(u16);
-                const opcode_at_pc = if (pc_val != std.math.maxInt(u16) and pc_val < frame.analysis.code_len) frame.analysis.code[pc_val] else 0xFF;
+                const pc_val = if (current_index < analysis.inst_to_pc.len) analysis.inst_to_pc[current_index] else std.math.maxInt(u16);
+                const opcode_at_pc = if (pc_val != std.math.maxInt(u16) and pc_val < analysis.code_len) analysis.code[pc_val] else 0xFF;
                 Log.debug("[interpret] Executing instruction at index {} (pc={}, opcode=0x{x})", .{ current_index, pc_val, opcode_at_pc });
                 // Handle dynamic JUMP/JUMPI at runtime if needed
-                Log.debug("[interpret] inst_jump_type.len={}, current_index={}", .{ frame.analysis.inst_jump_type.len, current_index });
-                if (current_index >= frame.analysis.inst_jump_type.len) {
-                    Log.err("[interpret] ERROR: current_index {} >= inst_jump_type.len {}", .{ current_index, frame.analysis.inst_jump_type.len });
+                Log.debug("[interpret] inst_jump_type.len={}, current_index={}", .{ analysis.inst_jump_type.len, current_index });
+                if (current_index >= analysis.inst_jump_type.len) {
+                    Log.err("[interpret] ERROR: current_index {} >= inst_jump_type.len {}", .{ current_index, analysis.inst_jump_type.len });
                     return ExecutionError.Error.InvalidOpcode;
                 }
-                const jt = frame.analysis.inst_jump_type[current_index];
+                const jt = analysis.inst_jump_type[current_index];
                 switch (jt) {
                     .jump => {
                         try handle_dynamic_jump(self, frame, &current_index);
@@ -384,8 +395,10 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     .other => {
                         // Most opcodes now have .none - no individual gas/stack validation needed
                         // Gas and stack validation is handled by BEGINBLOCK instructions
+                        // Cache function pointer before advancing index
+                        const op_fn = inst.opcode_fn;
                         current_index += 1;
-                        nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
+                        op_fn(frame_opaque) catch |err| {
                             // Frame already manages its own output, no need to copy
                             Log.debug("[interpret] Opcode at index {} returned error: {}", .{ current_index - 1, err });
 
@@ -401,6 +414,8 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             },
             .gas_cost => |cost| {
                 // Legacy path - kept for compatibility
+                // Cache function pointer before advancing index
+                const op_fn = inst.opcode_fn;
                 current_index += 1;
                 if (frame.gas_remaining < cost) {
                     @branchHint(.cold);
@@ -410,7 +425,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 frame.gas_remaining -= cost;
 
                 // Execute the opcode after charging gas
-                nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
+                op_fn(frame_opaque) catch |err| {
                     if (err == ExecutionError.Error.InvalidOpcode) {
                         frame.gas_remaining = 0;
                     }
@@ -419,6 +434,8 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             },
             .dynamic_gas => |dyn_gas| {
                 // New path for opcodes with dynamic gas
+                // Cache function pointer before advancing index
+                const op_fn = inst.opcode_fn;
                 current_index += 1;
 
                 // Charge static gas first
@@ -450,7 +467,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
 
                 // Execute the opcode after all gas is charged
-                nextInstruction.opcode_fn(@ptrCast(frame)) catch |err| {
+                op_fn(frame_opaque) catch |err| {
                     if (err == ExecutionError.Error.InvalidOpcode) {
                         frame.gas_remaining = 0;
                     }

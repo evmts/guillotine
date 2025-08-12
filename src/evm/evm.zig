@@ -60,6 +60,8 @@ table: OpcodeMetadata,
 depth: u11 = 0,
 /// Whether the current context is read-only (STATICCALL)
 read_only: bool = false,
+  /// Whether the VM is currently executing a call (used to detect nested calls)
+  is_executing: bool = false,
 
 // Configuration fields (set at initialization)
 /// Protocol rules for the current hardfork
@@ -213,6 +215,7 @@ pub fn init(
         .initial_thread_id = std.Thread.getCurrentId(),
         .depth = @intCast(depth),
         .read_only = read_only,
+        .is_executing = false,
         .tracer = tracer,
         // New execution state fields (initialized fresh in each call)
         .frame_stack = null,
@@ -356,17 +359,15 @@ pub fn get_code(self: *Evm, address: primitives.Address.Address) []const u8 {
 
 /// Get block information (Host interface)
 pub fn get_block_info(self: *Evm) BlockInfo {
-    _ = self;
-    // Return default block info for benchmarking
-    // In production, this would come from the actual blockchain state
+    // Return block info from context
     return BlockInfo{
-        .number = 1,
-        .timestamp = 1000,
-        .difficulty = 100,
-        .gas_limit = 30_000_000,
-        .coinbase = primitives.Address.ZERO_ADDRESS,
-        .base_fee = 1_000_000_000, // 1 gwei
-        .prev_randao = [_]u8{0} ** 32,
+        .number = self.context.block_number,
+        .timestamp = self.context.block_timestamp,
+        .difficulty = self.context.block_difficulty,
+        .gas_limit = self.context.block_gas_limit,
+        .coinbase = self.context.block_coinbase,
+        .base_fee = self.context.block_base_fee,
+        .prev_randao = [_]u8{0} ** 32, // TODO: Add prev_randao to Context
     };
 }
 

@@ -260,6 +260,10 @@ When encountering bugs, crashes, or unexpected behavior:
 - ✅ Trace execution until exact failure point is found
 - ✅ Only make changes after understanding the root cause
 
+### Logging and Tracing
+
+- `Log.debug` calls are compiled out at comptime in non-safe builds by default, so they impose no runtime overhead in release. Do not rely on side effects within debug log expressions. If a log requires heavy formatting or backtracing, still prefer gating it with a comptime flag (e.g., `builtin.mode == .Debug or .ReleaseSafe`).
+
 ### ENFORCEMENT
 
 Speculating about bugs without evidence demonstrates unprofessional debugging practices. All debugging must be evidence-based.
