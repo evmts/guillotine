@@ -206,7 +206,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             self.state.database,
             ChainRules{},
             &self.self_destruct,
-            &self.created_contracts,
             call_info.input, // input
             self.allocator, // use general allocator for frame-owned allocations
             false, // is_create_call
@@ -275,7 +274,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             self.state.database,
             ChainRules{},
             &self.self_destruct,
-            &self.created_contracts,
             call_info.input, // input
             self.allocator, // use general allocator for frame-owned allocations
             false, // is_create_call

@@ -12,7 +12,6 @@ const CodeAnalysis = @import("analysis.zig");
 const Host = @import("host.zig").Host;
 const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
-const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 
 // Helper to create test addresses
 fn testAddress(value: u32) primitives.Address.Address {
@@ -76,8 +75,6 @@ test "Frame initialization with all parameters" {
     var self_destruct = SelfDestruct.init(allocator);
     defer self_destruct.deinit();
 
-    var created_contracts = CreatedContracts.init(allocator);
-    defer created_contracts.deinit();
 
     const bytecode = &[_]u8{ 0x60, 0x01 }; // PUSH1 1
     var analysis = try CodeAnalysis.analyze(allocator, bytecode);
@@ -92,7 +89,7 @@ test "Frame initialization with all parameters" {
         testAddress(0x5678), // caller
         1000, // value
         &analysis, &access_list, &journal, host, 42, // snapshot_id
-        memory_db.to_database_interface(), Frame.chainRulesForHardfork(.CANCUN), &self_destruct, &created_contracts, input, allocator, false, // is_create_call
+        memory_db.to_database_interface(), Frame.chainRulesForHardfork(.CANCUN), &self_destruct, input, allocator, false, // is_create_call
         true // is_delegate_call
     );
     defer frame.deinit();
@@ -208,7 +205,7 @@ test "Frame hardfork detection from chain rules" {
     };
 
     for (test_cases) |tc| {
-        var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), tc.rules, null, null, &[_]u8{}, allocator, false, false);
+        var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), tc.rules, null, &[_]u8{}, allocator, false, false);
         defer frame.deinit();
 
         try testing.expectEqual(tc.expected_hardfork, frame.hardfork);
@@ -243,7 +240,7 @@ test "Frame gas consumption" {
     defer analysis.deinit(allocator);
 
     var frame = try Frame.init(1000, // Initial gas
-        false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, false);
+        false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, false);
     defer frame.deinit();
 
     // Test gas consumption
@@ -290,7 +287,7 @@ test "Frame depth tracking" {
     const depths = [_]u10{ 0, 1, 10, 100, 512, 1023 };
 
     for (depths) |depth| {
-        var frame = try Frame.init(100_000, false, depth, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, false);
+        var frame = try Frame.init(100_000, false, depth, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, false);
         defer frame.deinit();
 
         try testing.expectEqual(depth, frame.depth);
@@ -327,7 +324,7 @@ test "Frame static call restrictions" {
     // Create static call frame
     var static_frame = try Frame.init(100_000, true, // static call
         0, testAddress(0x1000), testAddress(0x2000), 0, // value must be 0 for static calls
-        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, false);
+        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, false);
     defer static_frame.deinit();
 
     try testing.expectEqual(true, static_frameis_static);
@@ -336,7 +333,7 @@ test "Frame static call restrictions" {
     // Create non-static frame
     var normal_frame = try Frame.init(100_000, false, // not static
         0, testAddress(0x3000), testAddress(0x4000), 1000, // can have value
-        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, false);
+        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, false);
     defer normal_frame.deinit();
 
     try testing.expectEqual(false, normal_frameis_static);
@@ -382,7 +379,7 @@ test "Frame block context" {
     var analysis = try CodeAnalysis.analyze(allocator, bytecode);
     defer analysis.deinit(allocator);
 
-    var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.CANCUN), null, null, &[_]u8{}, allocator, false, false);
+    var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.CANCUN), null, &[_]u8{}, allocator, false, false);
     defer frame.deinit();
 
     // Verify block context is properly set
@@ -422,19 +419,16 @@ test "Frame CREATE context" {
     var analysis = try CodeAnalysis.analyze(allocator, init_code);
     defer analysis.deinit(allocator);
 
-    var created_contracts = CreatedContracts.init(allocator);
-    defer created_contracts.deinit();
 
     var frame = try Frame.init(500_000, false, 0, testAddress(0xFFFF), // Contract being created
         testAddress(0x5000), // Creator
         10000, // Value being sent
-        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &created_contracts, &[_]u8{}, allocator, true, // is_create_call
+        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, true, // is_create_call
         false);
     defer frame.deinit();
 
     try testing.expectEqual(true, frame.is_create);
     try testing.expectEqual(false, frame.is_delegate);
-    try testing.expect(frame.created_contracts != null);
 }
 
 test "Frame DELEGATECALL context" {
@@ -467,7 +461,7 @@ test "Frame DELEGATECALL context" {
     var frame = try Frame.init(100_000, false, 1, testAddress(0x6000), // Storage context
         testAddress(0x7000), // Original caller preserved
         5000, // Original value preserved
-        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, true // is_delegate_call
+        &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, true // is_delegate_call
     );
     defer frame.deinit();
 
@@ -502,7 +496,7 @@ test "Frame memory and stack access" {
     var analysis = try CodeAnalysis.analyze(allocator, bytecode);
     defer analysis.deinit(allocator);
 
-    var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, false);
+    var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, false);
     defer frame.deinit();
 
     // Test stack operations through frame
@@ -554,7 +548,7 @@ test "Frame cleanup and deinitialization" {
         var analysis = try CodeAnalysis.analyze(allocator, bytecode);
         defer analysis.deinit(allocator);
 
-        var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, null, &[_]u8{}, allocator, false, false);
+        var frame = try Frame.init(100_000, false, 0, testAddress(0x1000), testAddress(0x2000), 0, &analysis, &access_list, &journal, host, 0, memory_db.to_database_interface(), Frame.chainRulesForHardfork(.LONDON), null, &[_]u8{}, allocator, false, false);
 
         // Frame cleanup happens here
         frame.deinit();

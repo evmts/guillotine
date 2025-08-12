@@ -1,13 +1,22 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const storage_costs = @import("../gas/storage_costs.zig");
 
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+// These checks are redundant after analysis.zig validates operations
+const SAFE_STACK_CHECKS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
+
 pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 1);
+    if (SAFE_STACK_CHECKS) {
+        if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 1);
+    }
+    }
 
     const slot = try frame.stack.peek();
 
@@ -42,7 +51,9 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.OutOfGas;
     }
 
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     // Stack order: [..., value, slot] where slot is on top
     const popped = try frame.stack.pop2();
@@ -80,7 +91,9 @@ pub fn op_tload(context: *anyopaque) ExecutionError.Error!void {
 
     // Gas is already handled by jump table constant_gas = 100
 
-    std.debug.assert(frame.stack.size() >= 1);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 1);
+    }
 
     // Get slot from top of stack unsafely - bounds checking is done in jump_table.zig
     const slot = try frame.stack.peek();
@@ -105,7 +118,9 @@ pub fn op_tstore(context: *anyopaque) ExecutionError.Error!void {
 
     // Gas is already handled by jump table constant_gas = 100
 
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // Stack order: [..., value, slot] where slot is on top

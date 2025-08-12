@@ -52,11 +52,16 @@
 /// EXP          | [a, b]      | [a^b]        | Exponentiation
 /// SIGNEXTEND   | [b, x]      | [y]          | Sign extend x from byte b
 const std = @import("std");
+const builtin = @import("builtin");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 const Log = @import("../log.zig");
+
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+// These checks are redundant after analysis.zig validates operations
+const SAFE_STACK_CHECKS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
 
 const ArithmeticOpType = enum {
     add,
@@ -80,7 +85,9 @@ const Operation = @import("../opcodes/operation.zig");
 /// ADD opcode (0x01) - Addition with wrapping overflow
 pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const top = try frame.stack.pop(); // top
     const top_minus_1 = try frame.stack.peek(); // second from top
@@ -114,7 +121,9 @@ pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
 /// Stack: [2^128, 2^128] => [0] (overflow wraps)
 pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const top = try frame.stack.pop();
     const top_minus_1 = try frame.stack.peek();
@@ -154,7 +163,9 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
 /// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
 pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const a = try frame.stack.pop();
     const b = try frame.stack.peek();
@@ -196,7 +207,9 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
 /// to avoid exceptional halting conditions.
 pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const b = try frame.stack.pop(); // divisor (top)
     const a = try frame.stack.peek(); // dividend (second from top)
@@ -250,7 +263,9 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
 /// In this case, we return MIN_I256 to match EVM behavior.
 pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const b = try frame.stack.pop(); // top (dividend)
     const a = try frame.stack.peek(); // second from top (divisor)
@@ -311,7 +326,9 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
 /// Like DIV, modulo by zero returns 0 rather than throwing an error.
 pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const b = try frame.stack.pop(); // top
     const a = try frame.stack.peek(); // second from top
@@ -368,7 +385,9 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
 /// a = b * q + r, where |r| < |b| and sign(r) = sign(a)
 pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const b = try frame.stack.pop(); // top (dividend)
     const a = try frame.stack.peek(); // second from top (divisor)
@@ -425,7 +444,9 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
 /// intermediate overflow.
 pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 3);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 3);
+    }
 
     const top = try frame.stack.pop();
     const second = try frame.stack.pop();
@@ -493,7 +514,9 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
 /// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
 pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 3);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 3);
+    }
 
     const top = try frame.stack.pop();
     const second = try frame.stack.pop();
@@ -563,7 +586,9 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
 /// - 2^(2^255): 10 + 50*32 = 1610 gas (huge exponent)
 pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const b = try frame.stack.pop(); // top (will be base)
     const a = try frame.stack.peek(); // second from top (will be exponent)
@@ -670,7 +695,9 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
 /// - Implementing higher-level language semantics
 pub fn op_signextend(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    std.debug.assert(frame.stack.size() >= 2);
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 2);
+    }
 
     const byte_num = try frame.stack.pop();
     const x = try frame.stack.peek();

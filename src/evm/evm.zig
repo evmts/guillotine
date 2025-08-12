@@ -373,6 +373,16 @@ pub fn emit_log(self: *Evm, contract_address: primitives.Address.Address, topics
     };
 }
 
+/// Register a contract as created in the current transaction (Host interface)
+pub fn register_created_contract(self: *Evm, address: primitives.Address.Address) !void {
+    return self.created_contracts.mark_created(address);
+}
+
+/// Check if a contract was created in the current transaction (Host interface)
+pub fn was_created_in_tx(self: *Evm, address: primitives.Address.Address) bool {
+    return self.created_contracts.was_created_in_tx(address);
+}
+
 // The actual call implementation is in evm/call.zig
 // Import it with usingnamespace below
 
@@ -490,7 +500,6 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         self.state.database,
         ChainRules.DEFAULT,
         &self.self_destruct,
-        &self.created_contracts,
         &[_]u8{}, // constructor input (none for tests)
         self.allocator,
         true, // is_create_call

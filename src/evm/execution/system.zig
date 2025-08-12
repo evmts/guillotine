@@ -645,15 +645,11 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                 }
 
                 // EIP-6780: Track created contract for SELFDESTRUCT restriction
-                if (frame.created_contracts) |created| {
-                    var contract_address: primitives.Address.Address = undefined;
-                    @memcpy(&contract_address, address_bytes);
-                    created.mark_created(contract_address) catch {};
-                }
-
-                // EIP-2929: Mark newly created address as warm
                 var contract_address: primitives.Address.Address = undefined;
                 @memcpy(&contract_address, address_bytes);
+                frame.host.register_created_contract(contract_address) catch {};
+
+                // EIP-2929: Mark newly created address as warm
                 _ = try frame.access_list.access_address(contract_address);
 
                 try frame.stack.append(address_u256);
@@ -789,15 +785,11 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                 }
 
                 // EIP-6780: Track created contract for SELFDESTRUCT restriction
-                if (frame.created_contracts) |created| {
-                    var contract_address: primitives.Address.Address = undefined;
-                    @memcpy(&contract_address, address_bytes);
-                    created.mark_created(contract_address) catch {};
-                }
-
-                // EIP-2929: Mark newly created address as warm
                 var contract_address: primitives.Address.Address = undefined;
                 @memcpy(&contract_address, address_bytes);
+                frame.host.register_created_contract(contract_address) catch {};
+
+                // EIP-2929: Mark newly created address as warm
                 _ = try frame.access_list.access_address(contract_address);
 
                 try frame.stack.append(address_u256);
@@ -1320,7 +1312,6 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Execute the staticcall through the host
     // Debug: capture stack/frame state before call
     // Get the EVM to check current state
-    const Evm = @import("../evm.zig");
     const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
     const evm_depth_before = evm_ptr.current_frame_depth;
     
@@ -1451,11 +1442,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     // EIP-6780: Check if contract was created in this transaction
     const should_destroy = if (frame.is_at_least(.CANCUN)) blk: {
         // Only destroy if contract was created in this transaction
-        if (frame.created_contracts) |created| {
-            break :blk created.was_created_in_tx(frame.contract_address);
-        }
-        // If no created_contracts tracking, assume pre-existing (don't destroy)
-        break :blk false;
+        break :blk frame.host.was_created_in_tx(frame.contract_address);
     } else true; // Pre-Cancun: always destroy
 
     // Mark for destruction or just transfer balance based on EIP-6780

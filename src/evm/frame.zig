@@ -14,7 +14,6 @@ const AccessList = @import("access_list/access_list.zig");
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
 const Host = @import("root.zig").Host;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
-const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 
@@ -132,7 +131,6 @@ pub const Frame = struct {
 
     // Extremely rare - accessed almost never
     self_destruct: ?*SelfDestruct, // 8 bytes - extremely rare, only SELFDESTRUCT
-    created_contracts: ?*CreatedContracts, // 8 bytes - tracks contracts created in tx for EIP-6780
     // Bottom - only used for setup/cleanup
     allocator: std.mem.Allocator, // 16 bytes - extremely rare, only frame init/deinit
 
@@ -152,7 +150,6 @@ pub const Frame = struct {
         state: DatabaseInterface,
         chain_rules: ChainRules,
         self_destruct: ?*SelfDestruct,
-        created_contracts: ?*CreatedContracts,
         input: []const u8,
         allocator: std.mem.Allocator,
         is_create_call: bool,
@@ -260,7 +257,6 @@ pub const Frame = struct {
             .is_delegate = is_delegate_call,
 
             .self_destruct = self_destruct,
-            .created_contracts = created_contracts,
             .allocator = allocator,
         };
     }

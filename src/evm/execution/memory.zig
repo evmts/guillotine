@@ -112,9 +112,11 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    if (frame.stack.size() < 2) {
-        @branchHint(.cold);
-        unreachable;
+    if (SAFE_STACK_CHECKS) {
+        if (frame.stack.size() < 2) {
+            @branchHint(.cold);
+            unreachable;
+        }
     }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
@@ -138,19 +140,30 @@ pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    if (SAFE_MEMORY_EXPANSION) {
+        _ = try frame.memory.ensure_context_capacity(aligned_size);
+    } else {
+        // In fast modes, we trust that gas charging validated the expansion
+        _ = frame.memory.ensure_context_capacity(aligned_size) catch unreachable;
+    }
 
     // Write single byte to memory
     const byte_value = @as(u8, @truncate(value));
     const bytes = [_]u8{byte_value};
-    try frame.memory.set_data(offset_usize, &bytes);
+    if (SAFE_MEMORY_EXPANSION) {
+        try frame.memory.set_data(offset_usize, &bytes);
+    } else {
+        frame.memory.set_data_unsafe(offset_usize, &bytes);
+    }
 }
 
 pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    if (frame.stack.size() >= Stack.CAPACITY) {
-        @branchHint(.cold);
-        unreachable;
+    if (SAFE_STACK_CHECKS) {
+        if (frame.stack.size() >= Stack.CAPACITY) {
+            @branchHint(.cold);
+            unreachable;
+        }
     }
 
     // MSIZE returns the size in bytes, but memory is always expanded in 32-byte words
@@ -167,9 +180,11 @@ pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
     // EIP-5656 validation should be handled during bytecode analysis phase,
     // not at runtime. Invalid MCOPY opcodes should be rejected during code analysis.
 
-    if (frame.stack.size() < 3) {
-        @branchHint(.cold);
-        unreachable;
+    if (SAFE_STACK_CHECKS) {
+        if (frame.stack.size() < 3) {
+            @branchHint(.cold);
+            unreachable;
+        }
     }
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
@@ -202,7 +217,12 @@ pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
     // Ensure memory is available for both source and destination
-    _ = try frame.memory.ensure_context_capacity(max_addr);
+    if (SAFE_MEMORY_EXPANSION) {
+        _ = try frame.memory.ensure_context_capacity(max_addr);
+    } else {
+        // In fast modes, we trust that gas charging validated the expansion
+        _ = frame.memory.ensure_context_capacity(max_addr) catch unreachable;
+    }
 
     // Copy with overlap handling
     // Get memory slice and handle overlapping copy
