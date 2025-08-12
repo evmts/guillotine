@@ -81,8 +81,8 @@ pub const Flags = packed struct {
 /// Layout optimized for actual opcode access patterns and cache performance
 pub const Frame = struct {
     // ULTRA HOT - First cache line priority (accessed by virtually every opcode)
-    stack: Stack, // value - accessed by every opcode (heap-backed storage inside)
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
+    stack: Stack, // value - accessed by every opcode (heap-backed storage inside)
 
     // HOT - Second cache line priority (accessed by major opcode categories)
     memory: Memory, // value - memory ops (MLOAD/MSTORE/MCOPY/LOG*/KECCAK256)
@@ -146,6 +146,7 @@ pub const Frame = struct {
         };
 
         return Frame{
+            .gas_remaining = gas_remaining,
             // MEMORY ALLOCATION: Stack for EVM execution
             // Expected size: 32KB (1024 * 32 bytes)
             // Lifetime: Per frame (freed on frame.deinit)
@@ -161,7 +162,6 @@ pub const Frame = struct {
                 }
                 break :blk stack_val;
             },
-            .gas_remaining = gas_remaining,
 
             // MEMORY ALLOCATION: EVM memory for MLOAD/MSTORE
             // Expected initial size: 4KB (INITIAL_CAPACITY)
@@ -762,7 +762,7 @@ test "Frame - memory footprint" {
     std.debug.print("  Frame total: {} bytes\n", .{@sizeOf(Frame)});
 
     // Verify hot data is at the beginning for better cache locality
-    try std.testing.expectEqual(@as(usize, 0), @offsetOf(Frame, "stack"));
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(Frame, "gas_remaining"));
 
     // Frame should be much smaller now with heap-allocated Stack
     try std.testing.expect(@sizeOf(Frame) < 1024);
