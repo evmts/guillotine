@@ -1,6 +1,7 @@
 #!/bin/bash
 
 zig build build-evm-runner -Doptimize=ReleaseFast \
+  && zig build build-evm-runner-small -Doptimize=ReleaseSmall \
   && zig build build-orchestrator -Doptimize=ReleaseFast \
   && zig-out/bin/orchestrator \
     --compare \
