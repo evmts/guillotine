@@ -3,6 +3,9 @@ const builtin = @import("builtin");
 const stack_constants = @import("../constants/stack_constants.zig");
 
 const CLEAR_ON_POP = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
+// For now, determine safety behavior directly from builtin. TODO: move to EvmConfig and
+// make `Stack` generic over word size and safety features.
+const SAFE_STACK = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
 
 /// High-performance EVM stack implementation using pointer arithmetic.
 ///
@@ -161,7 +164,7 @@ pub inline fn is_full(self: *const Stack) bool {
     return self.current >= self.limit;
 }
 
-/// Push a value onto the stack (safe version).
+/// Push a value onto the stack (single unified API).
 ///
 /// @param self The stack to push onto
 /// @param value The 256-bit value to push
@@ -172,33 +175,26 @@ pub inline fn is_full(self: *const Stack) bool {
 /// try stack.append(0x1234);
 /// ```
 pub fn append(self: *Stack, value: u256) Error!void {
-    if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
-        @branchHint(.cold);
-        return Error.StackOverflow;
+    if (SAFE_STACK) {
+        if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
+            @branchHint(.cold);
+            return Error.StackOverflow;
+        }
     }
-    self.append_unsafe(value);
-}
-
-/// Push a value onto the stack (unsafe version).
-///
-/// Caller must ensure stack has capacity. Used in hot paths
-/// after validation has already been performed.
-///
-/// @param self The stack to push onto
-/// @param value The 256-bit value to push
-pub inline fn append_unsafe(self: *Stack, value: u256) void {
-    @branchHint(.likely);
-    // Debug/safe builds: assert stack pointer invariants to catch under/overflow early
-    if (comptime CLEAR_ON_POP) {
+    // Direct push
+    if (SAFE_STACK) {
+        // Minimal invariants in checked modes
         std.debug.assert(@intFromPtr(self.current) >= @intFromPtr(self.base));
         std.debug.assert(@intFromPtr(self.current) < @intFromPtr(self.limit));
     }
     self.current[0] = value;
     self.current += 1;
-    if (comptime CLEAR_ON_POP) {
+    if (SAFE_STACK) {
         std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
     }
 }
+
+// Removed: append_unsafe. Use append().
 
 /// Pop a value from the stack (safe version).
 ///
@@ -214,23 +210,13 @@ pub inline fn append_unsafe(self: *Stack, value: u256) void {
 /// const value = try stack.pop();
 /// ```
 pub fn pop(self: *Stack) Error!u256 {
-    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
-        @branchHint(.cold);
-        return Error.StackUnderflow;
-    }
-    return self.pop_unsafe();
-}
-
-/// Pop a value from the stack (unsafe version).
-///
-/// Caller must ensure stack is not empty. Used in hot paths
-/// after validation.
-///
-/// @param self The stack to pop from
-/// @return The popped value
-pub inline fn pop_unsafe(self: *Stack) u256 {
-    @branchHint(.likely);
-    if (comptime CLEAR_ON_POP) {
+    if (SAFE_STACK) {
+        if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
+            @branchHint(.cold);
+            return Error.StackUnderflow;
+        } else {
+            @branchHint(.likely);
+        }
         std.debug.assert(@intFromPtr(self.current) > @intFromPtr(self.base));
         std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
     }
@@ -242,71 +228,52 @@ pub inline fn pop_unsafe(self: *Stack) u256 {
     return value;
 }
 
-/// Peek at the top value without removing it (unsafe version).
-///
-/// Caller must ensure stack is not empty.
-///
-/// @param self The stack to peek at
-/// @return Pointer to the top value
-pub inline fn peek_unsafe(self: *const Stack) *const u256 {
-    @branchHint(.likely);
-    return &(self.current - 1)[0];
-}
+// Removed: pop_unsafe. Use pop().
 
-/// Duplicate the nth element onto the top of stack (unsafe version).
-///
-/// Caller must ensure preconditions are met.
-///
-/// @param self The stack to operate on
-/// @param n Position to duplicate from (1-16)
-pub inline fn dup_unsafe(self: *Stack, n: usize) void {
+// Removed: peek_unsafe. Use peek() to get the value.
+
+/// Duplicate the nth element onto the top of stack (1-16)
+pub inline fn dup(self: *Stack, n: usize) Error!void {
     @branchHint(.likely);
-    @setRuntimeSafety(false);
-    if (comptime CLEAR_ON_POP) {
-        std.debug.assert(n >= 1);
+    if (SAFE_STACK) {
+        if (n < 1) return Error.StackUnderflow;
         const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        std.debug.assert(cur_size >= n);
-        std.debug.assert(@intFromPtr(self.current) < @intFromPtr(self.limit));
+        if (cur_size < n) return Error.StackUnderflow;
+        if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) return Error.StackOverflow;
     }
     const value = (self.current - n)[0];
-    self.append_unsafe(value);
+    try self.append(value);
 }
 
-/// Pop 2 values without pushing (unsafe version)
-pub inline fn pop2_unsafe(self: *Stack) struct { a: u256, b: u256 } {
+/// Pop 2 values without pushing
+pub inline fn pop2(self: *Stack) Error!struct { a: u256, b: u256 } {
     @branchHint(.likely);
-    @setRuntimeSafety(false);
-    if (comptime CLEAR_ON_POP) {
+    if (SAFE_STACK) {
         const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        std.debug.assert(cur_size >= 2);
-        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+        if (cur_size < 2) return Error.StackUnderflow;
     }
     self.current -= 2;
     const a = self.current[0];
     const b = self.current[1];
     if (comptime CLEAR_ON_POP) {
-        // Clear for security
         self.current[0] = 0;
         self.current[1] = 0;
     }
     return .{ .a = a, .b = b };
 }
 
-/// Pop 3 values without pushing (unsafe version)
-pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
+/// Pop 3 values without pushing
+pub inline fn pop3(self: *Stack) Error!struct { a: u256, b: u256, c: u256 } {
     @branchHint(.likely);
-    @setRuntimeSafety(false);
-    if (comptime CLEAR_ON_POP) {
+    if (SAFE_STACK) {
         const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        std.debug.assert(cur_size >= 3);
-        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+        if (cur_size < 3) return Error.StackUnderflow;
     }
     self.current -= 3;
     const a = self.current[0];
     const b = self.current[1];
     const c = self.current[2];
     if (comptime CLEAR_ON_POP) {
-        // Clear for security
         self.current[0] = 0;
         self.current[1] = 0;
         self.current[2] = 0;
@@ -314,17 +281,17 @@ pub inline fn pop3_unsafe(self: *Stack) struct { a: u256, b: u256, c: u256 } {
     return .{ .a = a, .b = b, .c = c };
 }
 
-/// Set the top element (unsafe version)
-pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
+/// Set the top element
+pub inline fn set_top(self: *Stack, value: u256) Error!void {
     @branchHint(.likely);
-    if (comptime CLEAR_ON_POP) {
-        std.debug.assert(@intFromPtr(self.current) > @intFromPtr(self.base));
+    if (SAFE_STACK) {
+        if (@intFromPtr(self.current) <= @intFromPtr(self.base)) return Error.StackUnderflow;
         std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
     }
     (self.current - 1)[0] = value;
 }
 
-/// Swap the top element with the nth element below it (unsafe version).
+/// Swap the top element with the nth element below it.
 ///
 /// Swaps the top stack element with the element n positions below it.
 /// For SWAP1, n=1 swaps top with second element.
@@ -332,12 +299,12 @@ pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
 ///
 /// @param self The stack to operate on
 /// @param n Position below top to swap with (1-16)
-pub inline fn swap_unsafe(self: *Stack, n: usize) void {
+pub inline fn swap(self: *Stack, n: usize) Error!void {
     @branchHint(.likely);
-    if (comptime CLEAR_ON_POP) {
-        std.debug.assert(n >= 1);
+    if (SAFE_STACK) {
+        if (n < 1) return Error.StackUnderflow;
         const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        std.debug.assert(cur_size >= n + 1);
+        if (cur_size < n + 1) return Error.StackUnderflow;
         std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
     }
     std.mem.swap(u256, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
@@ -354,8 +321,10 @@ pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
 }
 
 /// Unsafe setter to adjust stack size for tests
-pub inline fn set_size_unsafe(self: *Stack, n: usize) void {
-    // Caller must ensure 0 <= n <= CAPACITY
+pub inline fn set_size(self: *Stack, n: usize) Error!void {
+    if (SAFE_STACK) {
+        if (n > CAPACITY) return Error.StackOverflow;
+    }
     self.current = self.base + n;
 }
 
@@ -363,7 +332,7 @@ pub inline fn set_size_unsafe(self: *Stack, n: usize) void {
 
 /// Peek at the top value (for test compatibility)
 pub fn peek(self: *const Stack) Error!u256 {
-    if (self.current <= self.base) {
+    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
