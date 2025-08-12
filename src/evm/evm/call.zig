@@ -396,6 +396,11 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     if (host_output.len > 0) {
         output = self.allocator.dupe(u8, host_output) catch &.{};
         Log.debug("[call] Output length: {}", .{output.len});
+    } else {
+        // Warn when a top-level call produced no return data to help diagnose ERC20/snailtracer failures
+        if (is_top_level_call) {
+            Log.warn("[call] Top-level call returned empty output (code_len={}, input_len={})", .{ call_info.code_size, call_info.input.len });
+        }
     }
 
     // Save gas remaining for return
