@@ -47,7 +47,7 @@ pub fn call_dynamic_gas(frame: *Frame) ExecutionError.Error!u64 {
     // EIP-2929: Add cold/warm access costs
     if (frame.is_at_least(.BERLIN)) {
         const to_address = primitives.Address.from_u256(to);
-        const access_cost = try frame.access_list.get_call_cost(to_address);
+        const access_cost = try frame.access_address(to_address);
         total_gas += access_cost;
     }
     
@@ -100,7 +100,7 @@ pub fn delegatecall_dynamic_gas(frame: *Frame) ExecutionError.Error!u64 {
     // EIP-2929: Add cold/warm access costs
     if (frame.is_at_least(.BERLIN)) {
         const to_address = primitives.Address.from_u256(to);
-        const access_cost = try frame.access_list.get_call_cost(to_address);
+        const access_cost = try frame.access_address(to_address);
         total_gas += access_cost;
     }
     

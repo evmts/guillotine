@@ -108,6 +108,9 @@ journal: CallJournal = undefined,
 /// Current snapshot ID for the frame being executed
 current_snapshot_id: u32 = 0,
 
+/// Output buffer for the current frame
+current_output: []const u8 = &.{},
+
 /// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
 /// Signed accumulator: EIP-2200 allows negative deltas during execution.
 /// Applied at transaction end with EIP-3529 cap.
@@ -407,6 +410,26 @@ pub fn get_original_storage(self: *Evm, address: primitives.Address.Address, slo
     return self.journal.get_original_storage(address, slot);
 }
 
+/// Set the output buffer for the current frame (Host interface)
+pub fn set_output(self: *Evm, output: []const u8) !void {
+    self.current_output = output;
+}
+
+/// Get the output buffer for the current frame (Host interface)
+pub fn get_output(self: *Evm) []const u8 {
+    return self.current_output;
+}
+
+/// Access an address and return the gas cost (Host interface)
+pub fn access_address(self: *Evm, address: primitives.Address.Address) !u64 {
+    return self.access_list.access_address(address);
+}
+
+/// Access a storage slot and return the gas cost (Host interface)
+pub fn access_storage_slot(self: *Evm, contract_address: primitives.Address.Address, slot: u256) !u64 {
+    return self.access_list.access_storage_slot(contract_address, slot);
+}
+
 // The actual call implementation is in evm/call.zig
 // Import it with usingnamespace below
 
@@ -517,7 +540,6 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         caller,
         value,
         analysis_ptr,
-        &self.access_list,
         host,
         self.state.database,
         ChainRules.DEFAULT,
@@ -539,13 +561,14 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     if (exec_err) |e| {
         switch (e) {
             ExecutionError.Error.REVERT => {
-                std.debug.print("[create_contract] REVERT with output_len={}\n", .{frame.output.len});
+                const output = host.get_output();
+                std.debug.print("[create_contract] REVERT with output_len={}\n", .{output.len});
                 // Revert state changes since snapshot
                 host.revert_to_snapshot(snapshot_id);
                 // Duplicate revert data for return
                 var out: ?[]u8 = null;
-                if (frame.output.len > 0) {
-                    out = try self.allocator.dupe(u8, frame.output);
+                if (output.len > 0) {
+                    out = try self.allocator.dupe(u8, output);
                 }
                 const gas_left = frame.gas_remaining;
                 frame.deinit();
@@ -589,10 +612,11 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     }
 
     // Success (STOP or fell off end): deploy runtime code if any
-    if (frame.output.len > 0) {
-        std.debug.print("[create_contract] Success STOP, deploying runtime code len={}\n", .{frame.output.len});
+    const output = host.get_output();
+    if (output.len > 0) {
+        std.debug.print("[create_contract] Success STOP, deploying runtime code len={}\n", .{output.len});
         // Store code at the new address (MemoryDatabase copies the slice)
-        self.state.set_code(new_address, frame.output) catch {};
+        self.state.set_code(new_address, output) catch {};
     } else {
         std.debug.print("[create_contract] Success STOP, empty runtime code\n", .{});
     }

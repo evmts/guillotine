@@ -199,7 +199,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_caller, // caller
             call_value, // value
             analysis_ptr, // analysis
-            &self.access_list,
             host,
             self.state.database,
             ChainRules{},
@@ -263,7 +262,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             call_caller, // caller
             call_value, // value
             analysis_ptr, // analysis
-            &self.access_list,
             host,
             self.state.database,
             ChainRules{},
@@ -380,14 +378,14 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
     // Copy output before frame cleanup
     var output: []const u8 = &.{};
-    const executed_frame = &self.frame_stack.?[self.current_frame_depth];
-    if (executed_frame.output.len > 0) {
-        output = self.allocator.dupe(u8, executed_frame.output) catch &.{};
+    const host_output = host.get_output();
+    if (host_output.len > 0) {
+        output = self.allocator.dupe(u8, host_output) catch &.{};
         Log.debug("[call] Output length: {}", .{output.len});
     }
 
     // Save gas remaining for return
-    const gas_remaining = executed_frame.gas_remaining;
+    const gas_remaining = current_frame.gas_remaining;
 
     // For nested calls, capture parent pointers before deinit
     var parent_stack_ptr_before_deinit: usize = 0;
@@ -404,7 +402,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     }
 
     // Release frame resources
-    executed_frame.deinit();
+    current_frame.deinit();
     
     // For nested calls, verify parent pointers after deinit
     if (self.current_frame_depth > 0) {

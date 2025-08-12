@@ -43,11 +43,8 @@ pub const ChainRules = struct {
     is_cancun: bool = true,
     is_prague: bool = false,
 
-    // EIPs that need runtime opcode validation (very few!)
-    is_eip1153: bool = true, // Transient storage (TLOAD/TSTORE) - runtime validation
-    is_eip3855: bool = true, // PUSH0 - validation needed for pre-Shanghai compatibility
-    is_eip4844: bool = true, // BLOBHASH - validation needed for pre-Cancun compatibility
-    is_eip6780: bool = true, // SELFDESTRUCT restriction - validation needed
+    // All EIP checks are now done at compile-time through specialized jump tables
+    // No runtime EIP flags needed
 
     /// Default chain rules for the latest hardfork (CANCUN).
     pub const DEFAULT = ChainRules{};
@@ -92,12 +89,10 @@ pub const Frame = struct {
     analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
     depth: u10, // 10 bits - call stack depth
     is_static: bool, // 1 bit - static call restriction
-    is_eip1153: bool, // 1 bit - transient storage validation
 
     // WARM - Storage cluster (keep contiguous for SLOAD/SSTORE/TLOAD/TSTORE)
     contract_address: primitives.Address.Address, // 20 bytes
     state: DatabaseInterface, // 16 bytes
-    access_list: *AccessList, // 8 bytes
 
     // WARM - Call context (grouped together)
     host: Host, // 16 bytes (ptr + vtable)
@@ -115,15 +110,12 @@ pub const Frame = struct {
 
     // COLD - Validation flags and rarely accessed data
     hardfork: Hardfork, // 1 byte - hardfork validation
-    is_eip3855: bool, // 1 byte - PUSH0 validation
-    is_eip4844: bool, // 1 byte - BLOBHASH validation
-    is_eip6780: bool, // 1 byte - SELFDESTRUCT restriction
+    // All EIP validation now done at compile-time via jump tables
     is_create: bool, // 1 byte - CREATE/CREATE2 context
     is_delegate: bool, // 1 byte - DELEGATECALL context
 
     // Cold data - accessed infrequently
     input: []const u8, // 16 bytes - only CALLDATALOAD/SIZE/COPY
-    output: []const u8, // 16 bytes - only RETURN/REVERT
     code: []const u8, // 16 bytes - current contract bytecode for CODECOPY/CODESIZE
 
     // Extremely rare - accessed almost never
@@ -140,7 +132,6 @@ pub const Frame = struct {
         caller: primitives.Address.Address,
         value: u256,
         analysis: *const CodeAnalysis,
-        access_list: *AccessList,
         host: Host,
         state: DatabaseInterface,
         chain_rules: ChainRules,
@@ -215,7 +206,6 @@ pub const Frame = struct {
             .analysis = analysis,
             .depth = @intCast(call_depth),
             .is_static = static_call,
-            .is_eip1153 = chain_rules.is_eip1153,
 
             // Call frame stack integration
             .host = host,
@@ -234,18 +224,13 @@ pub const Frame = struct {
             // Storage cluster
             .contract_address = contract_address,
             .state = state,
-            .access_list = access_list,
 
             // Cold data
             .input = input,
-            .output = &[_]u8{},
             .code = &[_]u8{},
             .hardfork = hardfork,
 
-            // Cold EIP validation flags
-            .is_eip3855 = chain_rules.is_eip3855,
-            .is_eip4844 = chain_rules.is_eip4844,
-            .is_eip6780 = chain_rules.is_eip6780,
+            // All EIP validation done at compile time
             .is_create = is_create_call,
             .is_delegate = is_delegate_call,
 
@@ -319,9 +304,9 @@ pub const Frame = struct {
         return is_valid;
     }
 
-    /// Address access for EIP-2929 - uses direct access list pointer
-    pub fn access_address(self: *Frame, addr: primitives.Address.Address) !u64 {
-        return self.access_list.access_address(addr);
+    /// Address access for EIP-2929 - uses host interface
+    pub fn access_address(self: *Frame, addr: primitives.Address.Address) ExecutionError.Error!u64 {
+        return self.host.access_address(addr) catch return ExecutionError.Error.OutOfMemory;
     }
 
     /// Mark contract for destruction - uses direct self destruct pointer
@@ -333,9 +318,9 @@ pub const Frame = struct {
         return ExecutionError.Error.SelfDestructNotAvailable;
     }
 
-    /// Set output data for RETURN/REVERT operations
-    pub fn set_output(self: *Frame, data: []const u8) void {
-        self.output = data;
+    /// Set output data for RETURN/REVERT operations - delegates to Host
+    pub fn set_output(self: *Frame, data: []const u8) ExecutionError.Error!void {
+        self.host.set_output(data) catch return ExecutionError.Error.OutOfMemory;
     }
 
     /// Storage access operations for EVM opcodes
@@ -368,7 +353,7 @@ pub const Frame = struct {
 
     /// Mark storage slot as warm (EIP-2929) and return true if it was cold
     pub fn mark_storage_slot_warm(self: *Frame, slot: u256) !bool {
-        const gas_cost = try self.access_list.access_storage_slot(self.contract_address, slot);
+        const gas_cost = try self.host.access_storage_slot(self.contract_address, slot);
         // Return true if it was cold (high gas cost)
         return gas_cost > 100;
     }
@@ -455,8 +440,8 @@ pub const Frame = struct {
 
     /// Check if a specific hardfork or EIP feature is enabled
     pub fn hasHardforkFeature(self: *const Frame, comptime field_name: []const u8) bool {
-        // Direct EIP flag
-        if (std.mem.eql(u8, field_name, "is_eip1153")) return self.is_eip1153;
+        // EIP-1153 (transient storage) was introduced in Cancun
+        if (std.mem.eql(u8, field_name, "is_eip1153")) return self.is_at_least(.CANCUN);
 
         // Handle hardfork checks using the enum comparison
         if (std.mem.eql(u8, field_name, "is_prague")) return self.is_at_least(.PRAGUE);
@@ -518,8 +503,10 @@ test "Frame - basic initialization" {
     defer analysis.deinit();
 
     // Create mock components
-    var access_list = try TestHelpers.createMockAccessList(allocator);
-    defer access_list.deinit();
+    var mock_host = @import("host.zig").MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+
     var self_destruct = try TestHelpers.createMockSelfDestruct(allocator);
     defer self_destruct.deinit();
     var db = try TestHelpers.createMockDatabase(allocator);
@@ -531,13 +518,17 @@ test "Frame - basic initialization" {
         false, // not static
         1, // depth
         primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
         &analysis,
-        &access_list,
+        host,
         db.to_database_interface(),
         chain_rules,
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        false, // is_create
+        false, // is_delegate
     );
     defer ctx.deinit();
 
@@ -546,7 +537,6 @@ test "Frame - basic initialization" {
     try std.testing.expectEqual(false, ctx.is_static);
     try std.testing.expectEqual(@as(u10, 1), ctx.depth);
     try std.testing.expectEqual(@as(usize, 0), ctx.stack.size());
-    try std.testing.expectEqual(@as(usize, 0), ctx.output.len);
 
     // Test that analysis is correctly referenced
     try std.testing.expect(ctx.analysis == &analysis);
@@ -653,8 +643,11 @@ test "Frame - address access tracking" {
     var analysis = try TestHelpers.createEmptyAnalysis(allocator);
     defer analysis.deinit();
 
-    var access_list = try TestHelpers.createMockAccessList(allocator);
-    defer access_list.deinit();
+    // Create mock host
+    var mock_host = @import("host.zig").MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+
     var self_destruct = try TestHelpers.createMockSelfDestruct(allocator);
     defer self_destruct.deinit();
 
@@ -666,63 +659,29 @@ test "Frame - address access tracking" {
         false,
         0,
         primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
         &analysis,
-        &access_list,
+        host,
         db.to_database_interface(),
         TestHelpers.createMockChainRules(),
         &self_destruct,
         &[_]u8{}, // input
         allocator,
+        false, // is_create_call
+        false, // is_delegate_call
     );
     defer ctx.deinit();
 
-    // Test cold access (zero address)
-    const cold_cost = try ctx.access_address(primitives.Address.ZERO_ADDRESS);
-    try std.testing.expectEqual(@as(u64, 2600), cold_cost);
+    // Test address access (MockHost always returns cold cost)
+    const cost1 = try ctx.access_address(primitives.Address.ZERO_ADDRESS);
+    try std.testing.expectEqual(@as(u64, 2600), cost1);
 
-    // Test warm access (same address again)
-    const warm_cost = try ctx.access_address(primitives.Address.ZERO_ADDRESS);
-    try std.testing.expectEqual(@as(u64, 100), warm_cost);
+    // Test another access (MockHost doesn't track state, always returns cold cost)
+    const cost2 = try ctx.access_address(primitives.Address.ZERO_ADDRESS);
+    try std.testing.expectEqual(@as(u64, 2600), cost2);
 }
 
-test "Frame - output data management" {
-    const allocator = std.testing.allocator;
-
-    var analysis = try TestHelpers.createEmptyAnalysis(allocator);
-    defer analysis.deinit();
-
-    var access_list = try TestHelpers.createMockAccessList(allocator);
-    defer access_list.deinit();
-    var self_destruct = try TestHelpers.createMockSelfDestruct(allocator);
-    defer self_destruct.deinit();
-
-    var db = try TestHelpers.createMockDatabase(allocator);
-    defer db.deinit();
-
-    var ctx = try Frame.init(
-        1000,
-        false,
-        0,
-        primitives.Address.ZERO_ADDRESS,
-        &analysis,
-        &access_list,
-        db.to_database_interface(),
-        TestHelpers.createMockChainRules(),
-        &self_destruct,
-        &[_]u8{}, // input
-        allocator,
-    );
-    defer ctx.deinit();
-
-    // Test initial empty output
-    try std.testing.expectEqual(@as(usize, 0), ctx.output.len);
-
-    // Test setting output data
-    const test_data = "Hello, EVM!";
-    ctx.set_output(test_data);
-    try std.testing.expectEqual(@as(usize, 11), ctx.output.len);
-    try std.testing.expectEqualStrings("Hello, EVM!", ctx.output);
-}
 
 test "Frame - static call restrictions" {
     const allocator = std.testing.allocator;

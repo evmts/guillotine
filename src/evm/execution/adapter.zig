@@ -26,7 +26,7 @@ pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void 
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    try frame.stack.append(@as(u256, @intCast(frame.output.len)));
+    try frame.stack.append(@as(u256, @intCast(frame.host.get_output().len)));
 }
 
 /// Adapter for op_returndatacopy - copy return data to memory
@@ -59,7 +59,8 @@ pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void 
     const size_usize = @as(usize, @intCast(size));
 
     // Check bounds
-    if (data_offset_usize + size_usize > frame.output.len) {
+    const output = frame.host.get_output();
+    if (data_offset_usize + size_usize > output.len) {
         @branchHint(.unlikely);
         return ExecutionError.Error.ReturnDataOutOfBounds;
     }
@@ -78,5 +79,5 @@ pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void 
     _ = try frame.memory.ensure_context_capacity(new_size);
 
     // Copy return data to memory
-    try frame.memory.set_data(mem_offset_usize, frame.output[data_offset_usize .. data_offset_usize + size_usize]);
+    try frame.memory.set_data(mem_offset_usize, output[data_offset_usize .. data_offset_usize + size_usize]);
 }

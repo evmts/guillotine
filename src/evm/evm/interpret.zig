@@ -727,23 +727,19 @@ test "dynamic jump returns 32-byte true" {
         Address.ZERO,
         0,
         &analysis,
-        &access_list,
-        &journal,
         host,
-        0,
         db_interface,
         Frame.ChainRules.DEFAULT,
         &self_destruct,
-        &created_contracts,
         &[_]u8{},
         allocator,
-        null,
         false,
         false,
     );
     defer frame.deinit();
 
     try interpret(&vm, &frame);
-    try std.testing.expect(frame.output.len == 32);
-    try std.testing.expect(frame.output[31] == 1);
+    const output = host.get_output();
+    try std.testing.expect(output.len == 32);
+    try std.testing.expect(output[31] == 1);
 }

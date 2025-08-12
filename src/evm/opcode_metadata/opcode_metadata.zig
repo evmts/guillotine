@@ -76,6 +76,39 @@ pub const CANCUN = init_from_hardfork(.CANCUN);
 /// This is what gets used when no opcode metadata is specified.
 pub const DEFAULT = CANCUN;
 
+/// Compile-time hardfork configuration
+/// This allows generating specialized jump tables for specific hardforks
+/// at compile time, eliminating runtime branching for feature detection.
+pub fn ComptimeJumpTable(comptime hardfork: Hardfork) type {
+    return struct {
+        /// Pre-generated jump table for this hardfork
+        pub const table = init_from_hardfork(hardfork);
+        
+        /// Check if a specific EIP is enabled in this hardfork
+        pub fn hasEIP(comptime eip: u32) bool {
+            return switch (eip) {
+                3855 => @intFromEnum(hardfork) >= @intFromEnum(Hardfork.SHANGHAI), // PUSH0
+                4844 => @intFromEnum(hardfork) >= @intFromEnum(Hardfork.CANCUN),   // BLOBHASH
+                1153 => @intFromEnum(hardfork) >= @intFromEnum(Hardfork.CANCUN),   // Transient storage
+                6780 => @intFromEnum(hardfork) >= @intFromEnum(Hardfork.CANCUN),   // SELFDESTRUCT restriction
+                5656 => @intFromEnum(hardfork) >= @intFromEnum(Hardfork.CANCUN),   // MCOPY
+                else => @compileError("Unknown EIP"),
+            };
+        }
+    };
+}
+
+/// Pre-generated jump tables for common hardforks
+pub const FRONTIER_TABLE = ComptimeJumpTable(.FRONTIER).table;
+pub const HOMESTEAD_TABLE = ComptimeJumpTable(.HOMESTEAD).table;
+pub const BYZANTIUM_TABLE = ComptimeJumpTable(.BYZANTIUM).table;
+pub const CONSTANTINOPLE_TABLE = ComptimeJumpTable(.CONSTANTINOPLE).table;
+pub const ISTANBUL_TABLE = ComptimeJumpTable(.ISTANBUL).table;
+pub const BERLIN_TABLE = ComptimeJumpTable(.BERLIN).table;
+pub const LONDON_TABLE = ComptimeJumpTable(.LONDON).table;
+pub const SHANGHAI_TABLE = ComptimeJumpTable(.SHANGHAI).table;
+pub const CANCUN_TABLE = ComptimeJumpTable(.CANCUN).table;
+
 /// Create an empty opcode metadata with all entries set to defaults.
 ///
 /// This creates a blank opcode metadata that must be populated with

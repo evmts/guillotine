@@ -105,6 +105,14 @@ pub const Host = struct {
         record_storage_change: *const fn (ptr: *anyopaque, address: Address, slot: u256, original_value: u256) anyerror!void,
         /// Get the original storage value from the journal
         get_original_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) ?u256,
+        /// Set the output buffer for the current frame
+        set_output: *const fn (ptr: *anyopaque, output: []const u8) anyerror!void,
+        /// Get the output buffer for the current frame
+        get_output: *const fn (ptr: *anyopaque) []const u8,
+        /// Access an address and return the gas cost (EIP-2929)
+        access_address: *const fn (ptr: *anyopaque, address: Address) anyerror!u64,
+        /// Access a storage slot and return the gas cost (EIP-2929)
+        access_storage_slot: *const fn (ptr: *anyopaque, contract_address: Address, slot: u256) anyerror!u64,
     };
 
     /// Initialize a Host interface from any implementation
@@ -177,6 +185,26 @@ pub const Host = struct {
                 return self.get_original_storage(address, slot);
             }
 
+            fn vtable_set_output(ptr: *anyopaque, output: []const u8) anyerror!void {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.set_output(output);
+            }
+
+            fn vtable_get_output(ptr: *anyopaque) []const u8 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_output();
+            }
+
+            fn vtable_access_address(ptr: *anyopaque, address: Address) anyerror!u64 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.access_address(address);
+            }
+
+            fn vtable_access_storage_slot(ptr: *anyopaque, contract_address: Address, slot: u256) anyerror!u64 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.access_storage_slot(contract_address, slot);
+            }
+
             const vtable = VTable{
                 .get_balance = vtable_get_balance,
                 .account_exists = vtable_account_exists,
@@ -190,6 +218,10 @@ pub const Host = struct {
                 .revert_to_snapshot = vtable_revert_to_snapshot,
                 .record_storage_change = vtable_record_storage_change,
                 .get_original_storage = vtable_get_original_storage,
+                .set_output = vtable_set_output,
+                .get_output = vtable_get_output,
+                .access_address = vtable_access_address,
+                .access_storage_slot = vtable_access_storage_slot,
             };
         };
 
@@ -257,6 +289,26 @@ pub const Host = struct {
     /// Get the original storage value from the journal
     pub fn get_original_storage(self: Host, address: Address, slot: u256) ?u256 {
         return self.vtable.get_original_storage(self.ptr, address, slot);
+    }
+
+    /// Set the output buffer for the current frame
+    pub fn set_output(self: Host, output: []const u8) !void {
+        return self.vtable.set_output(self.ptr, output);
+    }
+
+    /// Get the output buffer for the current frame
+    pub fn get_output(self: Host) []const u8 {
+        return self.vtable.get_output(self.ptr);
+    }
+
+    /// Access an address and return the gas cost (EIP-2929)
+    pub fn access_address(self: Host, address: Address) !u64 {
+        return self.vtable.access_address(self.ptr, address);
+    }
+
+    /// Access a storage slot and return the gas cost (EIP-2929)
+    pub fn access_storage_slot(self: Host, contract_address: Address, slot: u256) !u64 {
+        return self.vtable.access_storage_slot(self.ptr, contract_address, slot);
     }
 };
 
@@ -386,6 +438,33 @@ pub const MockHost = struct {
         _ = slot;
         // Mock implementation - return null
         return null;
+    }
+    
+    pub fn set_output(self: *MockHost, output: []const u8) !void {
+        _ = self;
+        _ = output;
+        // Mock implementation - do nothing
+    }
+    
+    pub fn get_output(self: *MockHost) []const u8 {
+        _ = self;
+        // Mock implementation - return empty
+        return &.{};
+    }
+    
+    pub fn access_address(self: *MockHost, address: Address) !u64 {
+        _ = self;
+        _ = address;
+        // Mock implementation - return cold access cost
+        return 2600;
+    }
+    
+    pub fn access_storage_slot(self: *MockHost, contract_address: Address, slot: u256) !u64 {
+        _ = self;
+        _ = contract_address;
+        _ = slot;
+        // Mock implementation - return cold storage access cost
+        return 2100;
     }
     
     pub fn to_host(self: *MockHost) Host {

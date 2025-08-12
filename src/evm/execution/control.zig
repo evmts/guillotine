@@ -2,7 +2,7 @@ const std = @import("std");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
-const AccessList = @import("../access_list/access_list.zig");
+// AccessList import removed - using Host interface instead
 const GasConstants = @import("primitives").GasConstants;
 const primitives = @import("primitives");
 const from_u256 = primitives.Address.from_u256;
@@ -62,7 +62,7 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
 
     if (size == 0) {
         @branchHint(.unlikely);
-        frame.output = &[_]u8{};
+        try frame.set_output(&[_]u8{});
     } else {
         if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
             @branchHint(.unlikely);
@@ -93,9 +93,9 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
 
         // Note: The memory gas cost already protects against excessive memory use.
         // Set the output data that will be returned to the caller
-        frame.output = data;
+        try frame.set_output(data);
 
-        Log.debug("RETURN data set to frame.output, size: {}", .{data.len});
+        Log.debug("RETURN data set to host output, size: {}", .{data.len});
     }
 
     Log.debug("RETURN opcode complete, about to return STOP error", .{});
@@ -116,7 +116,7 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
 
     if (size == 0) {
         @branchHint(.unlikely);
-        frame.output = &[_]u8{};
+        try frame.set_output(&[_]u8{});
     } else {
         if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
             @branchHint(.unlikely);
@@ -140,7 +140,7 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
 
         // Note: The memory gas cost already protects against excessive memory use.
         // Set the output data that will be returned to the caller
-        frame.output = data;
+        try frame.set_output(data);
     }
 
     return ExecutionError.Error.REVERT;
@@ -158,6 +158,41 @@ pub fn op_invalid(context: *anyopaque) ExecutionError.Error!void {
     return ExecutionError.Error.InvalidOpcode;
 }
 
+/// Pre-Cancun SELFDESTRUCT - destroys contract and transfers balance
+pub fn op_selfdestruct_legacy(context: *anyopaque) ExecutionError.Error!void {
+    const ctx = @as(*Frame, @ptrCast(@alignCast(context)));
+    const frame = ctx;
+
+    // Check if we're in a static call
+    if (frame.is_static) {
+        @branchHint(.unlikely);
+        return ExecutionError.Error.WriteProtection;
+    }
+
+    std.debug.assert(frame.stack.size() >= 1);
+
+    // Use unsafe pop since bounds checking is done by jump_table
+    const recipient_u256 = try frame.stack.pop();
+    const recipient = from_u256(recipient_u256);
+
+    // EIP-2929: Check if recipient address is cold and consume appropriate gas
+    // Note: Jump table already consumes base SELFDESTRUCT gas cost
+    const access_cost = try frame.access_address(recipient);
+    const is_cold = access_cost == GasConstants.ColdAccountAccessCost;
+    if (is_cold) {
+        @branchHint(.likely);
+        // Cold address access costs more (2600 gas)
+        try frame.consume_gas(GasConstants.ColdAccountAccessCost);
+    }
+
+    // Mark contract for destruction at end of transaction
+    try frame.mark_for_destruction(recipient);
+
+    // Halt execution
+    return ExecutionError.Error.STOP;
+}
+
+/// Cancun+ SELFDESTRUCT - only works on contracts created in same transaction (EIP-6780)
 pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const ctx = @as(*Frame, @ptrCast(@alignCast(context)));
     const frame = ctx;
@@ -176,10 +211,8 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if recipient address is cold and consume appropriate gas
     // Note: Jump table already consumes base SELFDESTRUCT gas cost
-    const access_cost = frame.access_list.access_address(recipient) catch |err| switch (err) {
-        error.OutOfMemory => return ExecutionError.Error.OutOfGas,
-    };
-    const is_cold = access_cost == AccessList.COLD_ACCOUNT_ACCESS_COST;
+    const access_cost = try frame.access_address(recipient);
+    const is_cold = access_cost == GasConstants.ColdAccountAccessCost;
     if (is_cold) {
         @branchHint(.likely);
         // Cold address access costs more (2600 gas)
@@ -187,13 +220,11 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // EIP-6780: Post-Cancun, SELFDESTRUCT only works on contracts created in same transaction
-    if (frame.is_eip6780) {
-        // Check if contract was created in the current transaction
-        if (!frame.host.was_created_in_tx(frame.contract_address)) {
-            // Contract not created in this tx - SELFDESTRUCT becomes no-op
-            // Still consumes gas but does nothing
-            return ExecutionError.Error.STOP;
-        }
+    // Check if contract was created in the current transaction
+    if (!frame.host.was_created_in_tx(frame.contract_address)) {
+        // Contract not created in this tx - SELFDESTRUCT becomes no-op
+        // Still consumes gas but does nothing
+        return ExecutionError.Error.STOP;
     }
 
     // Mark contract for destruction at end of transaction

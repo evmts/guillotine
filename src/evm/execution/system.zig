@@ -650,7 +650,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                 frame.host.register_created_contract(contract_address) catch {};
 
                 // EIP-2929: Mark newly created address as warm
-                _ = try frame.access_list.access_address(contract_address);
+                _ = try frame.access_address(contract_address);
 
                 try frame.stack.append(address_u256);
             } else {
@@ -790,7 +790,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                 frame.host.register_created_contract(contract_address) catch {};
 
                 // EIP-2929: Mark newly created address as warm
-                _ = try frame.access_list.access_address(contract_address);
+                _ = try frame.access_address(contract_address);
 
                 try frame.stack.append(address_u256);
             } else {
@@ -881,7 +881,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_list.get_call_cost(to_address);
+        const access_cost = try frame.access_address(to_address);
         total_gas_cost += access_cost;
     }
 
@@ -1138,7 +1138,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const to_address = from_u256(to);
 
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_list.get_call_cost(to_address);
+        const access_cost = try frame.access_address(to_address);
         total_gas_cost += access_cost;
     }
 
@@ -1269,7 +1269,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if address is cold and add extra gas cost
     if (frame.is_at_least(.BERLIN)) {
-        const access_cost = try frame.access_list.get_call_cost(to_address);
+        const access_cost = try frame.access_address(to_address);
         total_gas_cost += access_cost;
     }
 

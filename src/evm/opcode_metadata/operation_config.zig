@@ -162,8 +162,9 @@ pub const ALL_OPERATIONS = [_]OpSpec{
     .{ .name = "STATICCALL", .opcode = 0xfa, .execute = wrap_any(execution.system.op_staticcall), .gas = 700, .min_stack = 6, .max_stack = Stack.CAPACITY - 1, .variant = .BYZANTIUM },
     .{ .name = "REVERT", .opcode = 0xfd, .execute = wrap_any(execution.control.op_revert), .gas = 0, .min_stack = 2, .max_stack = Stack.CAPACITY, .variant = .BYZANTIUM },
     .{ .name = "INVALID", .opcode = 0xfe, .execute = wrap_any(execution.control.op_invalid), .gas = 0, .min_stack = 0, .max_stack = Stack.CAPACITY },
-    .{ .name = "SELFDESTRUCT_FRONTIER", .opcode = 0xff, .execute = wrap_any(execution.control.op_selfdestruct), .gas = 0, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .FRONTIER },
-    .{ .name = "SELFDESTRUCT", .opcode = 0xff, .execute = wrap_any(execution.control.op_selfdestruct), .gas = 5000, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .TANGERINE_WHISTLE },
+    .{ .name = "SELFDESTRUCT_FRONTIER", .opcode = 0xff, .execute = wrap_any(execution.control.op_selfdestruct_legacy), .gas = 0, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .FRONTIER },
+    .{ .name = "SELFDESTRUCT_TANGERINE", .opcode = 0xff, .execute = wrap_any(execution.control.op_selfdestruct_legacy), .gas = 5000, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .TANGERINE_WHISTLE },
+    .{ .name = "SELFDESTRUCT", .opcode = 0xff, .execute = wrap_any(execution.control.op_selfdestruct), .gas = 5000, .min_stack = 1, .max_stack = Stack.CAPACITY, .variant = .CANCUN },
 };
 
 /// Generate an Operation struct from an OpSpec.
