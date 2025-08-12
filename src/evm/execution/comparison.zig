@@ -19,10 +19,10 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand unsafely
-    const top = frame.stack.pop_unsafe();
-    // Peek the second from top operand unsafely
-    const second_from_top = frame.stack.peek_unsafe().*;
+    // Pop the top operand
+    const top = try frame.stack.pop();
+    // Peek the second from top operand
+    const second_from_top = try frame.stack.peek();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b < a
     // REVM computes: top < second_from_top
@@ -32,7 +32,7 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
     Log.debug("LT: top(b)={} second(a)={} -> {} (b < a)", .{ top, second_from_top, result });
 }
 
@@ -40,10 +40,10 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand unsafely
-    const top = frame.stack.pop_unsafe();
-    // Peek the second from top operand unsafely
-    const second_from_top = frame.stack.peek_unsafe().*;
+    // Pop the top operand
+    const top = try frame.stack.pop();
+    // Peek the second from top operand
+    const second_from_top = try frame.stack.peek();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b > a
     // REVM computes: top > second_from_top
@@ -54,17 +54,17 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
     Log.debug("GT: top(b)={} second(a)={} -> {} (b > a)", .{ top, second_from_top, result });
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand unsafely
-    const top = frame.stack.pop_unsafe();
-    // Peek the second from top operand unsafely
-    const second_from_top = frame.stack.peek_unsafe().*;
+    // Pop the top operand
+    const top = try frame.stack.pop();
+    // Peek the second from top operand
+    const second_from_top = try frame.stack.peek();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b < a (signed)
     // REVM computes: top < second_from_top
@@ -77,7 +77,7 @@ pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
     };
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
     Log.debug("SLT: top(b)={} second(a)={} -> {} (b < a signed)", .{ top_i256, second_from_top_i256, result });
 }
 
@@ -85,10 +85,10 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand unsafely
-    const top = frame.stack.pop_unsafe();
-    // Peek the second from top operand unsafely
-    const second_from_top = frame.stack.peek_unsafe().*;
+    // Pop the top operand
+    const top = try frame.stack.pop();
+    // Peek the second from top operand
+    const second_from_top = try frame.stack.peek();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b > a (signed)
     // REVM computes: top > second_from_top
@@ -99,37 +99,37 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
     Log.debug("SGT: top(b)={} second(a)={} -> {} (b > a signed)", .{ top_i256, second_from_top_i256, result });
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 pub fn op_eq(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop the top operand (b) unsafely
-    const b = frame.stack.pop_unsafe();
-    // Peek the new top operand (a) unsafely
-    const a = frame.stack.peek_unsafe().*;
+    // Pop the top operand (b)
+    const b = try frame.stack.pop();
+    // Peek the new top operand (a)
+    const a = try frame.stack.peek();
 
     const result: u256 = if (a == b) 1 else 0;
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 pub fn op_iszero(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
 
-    // Peek the operand unsafely
-    const value = frame.stack.peek_unsafe().*;
+    // Peek the operand
+    const value = try frame.stack.peek();
 
     // Optimized: Use @intFromBool for direct bool to int conversion
     // This should compile to more efficient assembly than if/else
     const result: u256 = @intFromBool(value == 0);
 
     // Modify the current top of the stack in-place with the result
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 // Fuzz testing functions for comparison operations

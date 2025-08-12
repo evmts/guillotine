@@ -11,7 +11,7 @@ const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 
 // Private inline functions for jump handling
 inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
-    const dest = frame.stack.pop_unsafe();
+    const dest = try frame.stack.pop();
     Log.debug("[interpret] JUMP requested to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
     if (!frame.valid_jumpdest(dest)) {
         Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
@@ -28,7 +28,7 @@ inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) Executio
 }
 
 inline fn handle_jumpi(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
-    const pops = frame.stack.pop2_unsafe();
+    const pops = try frame.stack.pop2();
     // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
     const dest = pops.b;
     const condition = pops.a;
@@ -63,7 +63,7 @@ inline fn handle_dynamic_jump(self: *Evm, frame: *Frame, current_index: *usize) 
         const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
         Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
     }
-    const dest = frame.stack.pop_unsafe();
+    const dest = try frame.stack.pop();
     Log.debug("[interpret] Dynamic JUMP to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
     if (!frame.valid_jumpdest(dest)) {
         Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, frame.analysis.code_len });
@@ -91,7 +91,7 @@ inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize)
         const opprev: u8 = if (pcprev < frame.analysis.code_len) frame.analysis.code[pcprev] else 0x00;
         Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
     }
-    const pops = frame.stack.pop2_unsafe();
+    const pops = try frame.stack.pop2();
     // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
     const dest = pops.b;
     const condition = pops.a;
@@ -239,31 +239,31 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Synthetic operations - fused instruction patterns
             .push_add_fusion => |immediate| {
                 current_index += 1;
-                const a = frame.stack.peek_unsafe().*;
+                const a = try frame.stack.peek();
                 const result = a +% immediate;
-                frame.stack.set_top_unsafe(result);
+                try frame.stack.set_top(result);
             },
             .push_sub_fusion => |immediate| {
                 current_index += 1;
-                const a = frame.stack.peek_unsafe().*;
+                const a = try frame.stack.peek();
                 const result = immediate -% a;
-                frame.stack.set_top_unsafe(result);
+                try frame.stack.set_top(result);
             },
             .push_mul_fusion => |immediate| {
                 current_index += 1;
-                const a = frame.stack.peek_unsafe().*;
+                const a = try frame.stack.peek();
                 const U256 = @import("primitives").Uint(256, 4);
                 const a_u256 = U256.from_u256_unsafe(a);
                 const b_u256 = U256.from_u256_unsafe(immediate);
                 const product_u256 = a_u256.wrapping_mul(b_u256);
                 const result = product_u256.to_u256_unsafe();
-                frame.stack.set_top_unsafe(result);
+                try frame.stack.set_top(result);
             },
             .push_div_fusion => |immediate| {
                 current_index += 1;
-                const a = frame.stack.peek_unsafe().*;
+                const a = try frame.stack.peek();
                 const result = if (a == 0) 0 else immediate / a;
-                frame.stack.set_top_unsafe(result);
+                try frame.stack.set_top(result);
             },
             .push_push_result => |result| {
                 current_index += 1;
@@ -279,35 +279,35 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     return ExecutionError.Error.OutOfGas;
                 }
                 frame.gas_remaining -= params.gas_cost;
-                
-                const size = frame.stack.pop_unsafe();
-                const offset = frame.stack.pop_unsafe();
-                
+
+                const size = try frame.stack.pop();
+                const offset = try frame.stack.pop();
+
                 // Bounds checking
                 if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                     @branchHint(.unlikely);
                     return ExecutionError.Error.OutOfOffset;
                 }
-                
+
                 const offset_usize = @as(usize, @intCast(offset));
                 const size_usize = @as(usize, @intCast(size));
-                
+
                 if (size == 0) {
                     @branchHint(.unlikely);
                     // Hash of empty data = keccak256("")
                     const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                    frame.stack.append_unsafe(empty_hash);
+                    try frame.stack.append(empty_hash);
                 } else {
                     // Memory expansion already handled, just get the data
                     _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
                     const data = try frame.memory.get_slice(offset_usize, size_usize);
-                    
+
                     // Hash using Keccak256
                     var hash: [32]u8 = undefined;
                     std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
-                    
+
                     const result = std.mem.readInt(u256, &hash, .big);
-                    frame.stack.append_unsafe(result);
+                    try frame.stack.append(result);
                 }
             },
             .keccak_immediate_size => |params| {
@@ -319,28 +319,28 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     return ExecutionError.Error.OutOfGas;
                 }
                 frame.gas_remaining -= params.gas_cost;
-                
-                const offset = frame.stack.pop_unsafe();
-                
+
+                const offset = try frame.stack.pop();
+
                 if (offset > std.math.maxInt(usize)) {
                     @branchHint(.unlikely);
                     return ExecutionError.Error.OutOfOffset;
                 }
-                
+
                 const offset_usize = @as(usize, @intCast(offset));
                 const size_usize = @as(usize, @intCast(params.size));
-                
+
                 if (params.size == 0) {
                     @branchHint(.unlikely);
                     const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                    frame.stack.append_unsafe(empty_hash);
+                    try frame.stack.append(empty_hash);
                 } else {
                     _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
                     const data = try frame.memory.get_slice(offset_usize, size_usize);
-                    
+
                     // Debug logging
                     Log.debug("[interpret] KECCAK256 immediate: offset={}, size={}, data={x}", .{ offset_usize, size_usize, std.fmt.fmtSliceHexLower(data[0..@min(16, data.len)]) });
-                    
+
                     // For small known sizes, we could use stack buffers
                     var hash: [32]u8 = undefined;
                     if (params.size <= 64) {
@@ -351,10 +351,10 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     } else {
                         std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
                     }
-                    
+
                     const result = std.mem.readInt(u256, &hash, .big);
                     Log.debug("[interpret] KECCAK256 immediate result: {x:0>64}", .{result});
-                    frame.stack.append_unsafe(result);
+                    try frame.stack.append(result);
                 }
             },
             .none => {

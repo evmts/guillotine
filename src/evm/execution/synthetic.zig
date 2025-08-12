@@ -23,7 +23,6 @@
 ///
 /// All synthetic operations maintain the same safety guarantees as their
 /// non-fused counterparts. Stack bounds are still checked by the jump table.
-
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../frame.zig").Frame;
@@ -63,10 +62,10 @@ pub fn op_push_div_fusion(context: *anyopaque) ExecutionError.Error!void {
 pub fn op_iszero_inline(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
-    
-    const value = frame.stack.peek_unsafe().*;
+
+    const value = try frame.stack.peek();
     const result: u256 = @intFromBool(value == 0);
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// Inline version of EQ for hot path optimization
@@ -75,10 +74,9 @@ pub fn op_iszero_inline(context: *anyopaque) ExecutionError.Error!void {
 pub fn op_eq_inline(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-    const result: u256 = @intFromBool(a == b);
-    frame.stack.set_top_unsafe(result);
-}
 
+    const b = try frame.stack.pop();
+    const a = try frame.stack.peek();
+    const result: u256 = @intFromBool(a == b);
+    try frame.stack.set_top(result);
+}

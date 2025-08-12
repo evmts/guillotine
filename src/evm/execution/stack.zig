@@ -38,7 +38,7 @@ fn dup_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
         return ExecutionError.Error.StackUnderflow;
     }
 
-    context.stack.dup_unsafe(n);
+    try context.stack.dup(n);
 }
 
 // ExecutionContext versions of DUP operations (new pattern)
@@ -140,7 +140,7 @@ fn swap_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
         return ExecutionError.Error.StackUnderflow;
     }
 
-    context.stack.swap_unsafe(n);
+    try context.stack.swap(n);
 }
 
 // ExecutionContext versions of SWAP operations (new pattern)

@@ -312,7 +312,7 @@ fn handle_call_result(frame: Frame, result: anytype, ret_offset: u256, ret_size:
     try frame.return_data.set(result.output orelse &[_]u8{});
 
     // Push success status (bounds checking already done by jump table)
-    frame.stack.append_unsafe(if (result.success) 1 else 0);
+    try frame.stack.append(if (result.success) 1 else 0);
 }
 
 // ============================================================================
@@ -389,14 +389,14 @@ fn handle_create_result(frame: Frame, vm: *Vm, result: anytype, gas_for_call: u6
 
     if (!result.success) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         try frame.return_data.set(result.output orelse &[_]u8{});
         return;
     }
 
     // EIP-2929: Mark the newly created address as warm
     _ = try vm.access_list.access_address(result.address);
-    frame.stack.append_unsafe(to_u256(result.address));
+    try frame.stack.append(to_u256(result.address));
 
     // Clear old return data before setting new data to reduce memory pressure
     frame.return_data.clear();
@@ -477,7 +477,7 @@ pub fn calculate_call_gas(
 
 // Gas opcode handler
 pub fn gas_op(context: *Frame) ExecutionError.Error!void {
-    context.stack.append_unsafe(@as(u256, @intCast(context.gas_remaining)));
+    try context.stack.append(@as(u256, @intCast(context.gas_remaining)));
 }
 
 // Helper to check if u256 fits in usize
@@ -542,7 +542,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     // Pop parameters from stack using optimized pop3
     // Stack order: [value, offset, size] with size on top
     // pop3 returns: a=bottom, b=middle, c=top
-    const params = frame.stack.pop3_unsafe();
+    const params = try frame.stack.pop3();
     const value = params.a; // bottom = value
     const init_offset = params.b; // middle = offset
     const init_size = params.c; // top = size
@@ -556,7 +556,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     // Check call depth limit
     if (frame.depth >= 1024) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -588,7 +588,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     // EIP-3860: Check init code size limit (49,152 bytes max)
     if (init_size > 49152) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -623,7 +623,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.journal.revert_to_snapshot(snapshot);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     };
 
@@ -656,12 +656,12 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                 @memcpy(&contract_address, address_bytes);
                 _ = try frame.access_list.access_address(contract_address);
 
-                frame.stack.append_unsafe(address_u256);
+                try frame.stack.append(address_u256);
             } else {
-                frame.stack.append_unsafe(0);
+                try frame.stack.append(0);
             }
         } else {
-            frame.stack.append_unsafe(0);
+            try frame.stack.append(0);
         }
     } else {
         // Revert the snapshot on failure
@@ -670,7 +670,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
         // Handle gas accounting after failed CREATE
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
     }
 }
 
@@ -680,9 +680,9 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
 
     // Pop parameters from stack using optimized pop3 + pop
     // Stack order: [value, offset, size, salt] with salt on top
-    const salt = frame.stack.pop_unsafe(); // Pop salt first (top)
+    const salt = try frame.stack.pop(); // Pop salt first (top)
     // Now pop3 for [value, offset, size]
-    const params = frame.stack.pop3_unsafe();
+    const params = try frame.stack.pop3();
     const value = params.a; // bottom = value
     const init_offset = params.b; // middle = offset
     const init_size = params.c; // top = size
@@ -696,7 +696,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     // Check call depth limit
     if (frame.depth >= 1024) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -731,7 +731,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     // EIP-3860: Check init code size limit (49,152 bytes max)
     if (init_size > 49152) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -767,7 +767,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.journal.revert_to_snapshot(snapshot);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     };
 
@@ -800,12 +800,12 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                 @memcpy(&contract_address, address_bytes);
                 _ = try frame.access_list.access_address(contract_address);
 
-                frame.stack.append_unsafe(address_u256);
+                try frame.stack.append(address_u256);
             } else {
-                frame.stack.append_unsafe(0);
+                try frame.stack.append(0);
             }
         } else {
-            frame.stack.append_unsafe(0);
+            try frame.stack.append(0);
         }
     } else {
         // Revert the snapshot on failure
@@ -814,7 +814,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
         // Handle gas accounting after failed CREATE2
         frame.gas_remaining = gas_reserved + call_result.gas_left;
 
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
     }
 }
 
@@ -822,14 +822,14 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack using optimized methods
-    const params1 = frame.stack.pop3_unsafe();
+    const params1 = try frame.stack.pop3();
     const gas = params1.a;
     const to = params1.b;
     const value = params1.c;
-    const params2 = frame.stack.pop2_unsafe();
+    const params2 = try frame.stack.pop2();
     const args_offset = params2.a;
     const args_size = params2.b;
-    const params3 = frame.stack.pop2_unsafe();
+    const params3 = try frame.stack.pop2();
     const ret_offset = params3.a;
     const ret_size = params3.b;
 
@@ -841,7 +841,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // Check depth limit
     if (validate_call_depth(frame)) {
         // Depth limit exceeded, push failure
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -947,7 +947,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     const call_result = host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.journal.revert_to_snapshot(snapshot);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     };
 
@@ -978,21 +978,21 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Push result (1 for success, 0 for failure)
-    frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
     // Pop parameters from stack (same layout as CALL) using optimized methods
-    const params1 = frame.stack.pop3_unsafe();
+    const params1 = try frame.stack.pop3();
     const gas = params1.a;
     const to = params1.b;
     const value = params1.c;
-    const params2 = frame.stack.pop2_unsafe();
+    const params2 = try frame.stack.pop2();
     const args_offset = params2.a;
     const args_size = params2.b;
-    const params3 = frame.stack.pop2_unsafe();
+    const params3 = try frame.stack.pop2();
     const ret_offset = params3.a;
     const ret_size = params3.b;
 
@@ -1003,7 +1003,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
 
     // Depth limit
     if (validate_call_depth(frame)) {
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -1076,7 +1076,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
 
     const call_result = frame.host.call(call_params) catch {
         frame.journal.revert_to_snapshot(snapshot);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     };
 
@@ -1101,19 +1101,19 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Push success flag
-    frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
 
-    const params1 = frame.stack.pop2_unsafe();
+    const params1 = try frame.stack.pop2();
     const gas = params1.a;
     const to = params1.b;
-    const params2 = frame.stack.pop2_unsafe();
+    const params2 = try frame.stack.pop2();
     const args_offset = params2.a;
     const args_size = params2.b;
-    const params3 = frame.stack.pop2_unsafe();
+    const params3 = try frame.stack.pop2();
     const ret_offset = params3.a;
     const ret_size = params3.b;
 
@@ -1154,7 +1154,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     if (frame.depth >= 1024) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -1187,7 +1187,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.journal.revert_to_snapshot(snapshot);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     };
 
@@ -1211,21 +1211,33 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Push success flag (1 for success, 0 for failure)
-    frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+    
+    // Debug: Capture original frame pointer
+    const original_frame_ptr = @intFromPtr(frame);
 
-    const params1 = frame.stack.pop2_unsafe();
+    // Debug: Log stack size before pops
+    const stack_size_before = frame.stack.size();
+    Log.debug("[STATICCALL] Stack size before pops: {}", .{stack_size_before});
+
+    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+        // STATICCALL requires 6 stack elements
+        std.debug.assert(stack_size_before >= 6);
+    }
+
+    const params1 = try frame.stack.pop2();
     const gas = params1.b; // gas was on top of stack
     const to = params1.a; // address was second from top
     Log.debug("[STATICCALL] Popped params1: gas={x}, to={x}", .{ gas, to });
-    const params2 = frame.stack.pop2_unsafe();
+    const params2 = try frame.stack.pop2();
     const args_offset = params2.a;
     const args_size = params2.b;
     Log.debug("[STATICCALL] Popped params2: args_offset={x}, args_size={x}", .{ args_offset, args_size });
-    const params3 = frame.stack.pop2_unsafe();
+    const params3 = try frame.stack.pop2();
     const ret_offset = params3.a;
     const ret_size = params3.b;
     Log.debug("[STATICCALL] Popped params3: ret_offset={x}, ret_size={x}", .{ ret_offset, ret_size });
@@ -1275,7 +1287,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Check call depth limit
     if (frame.depth >= 1024) {
         @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     }
 
@@ -1307,13 +1319,20 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 
     // Execute the staticcall through the host
     // Debug: capture stack/frame state before call
+    // Get the EVM to check current state
+    const Evm = @import("../evm.zig");
+    const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+    const evm_depth_before = evm_ptr.current_frame_depth;
+    
     const pre_stack_ptr_u = @intFromPtr(frame.stack);
     const pre_stack_base_u = @intFromPtr(frame.stack.base);
     const pre_stack_limit_u = @intFromPtr(frame.stack.limit);
+    const pre_depth = frame.depth;
     Log.debug(
-        "[STATICCALL] pre-call: frame={x}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
+        "[STATICCALL] pre-call: frame={x}, depth={}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
         .{
             @intFromPtr(frame),
+            pre_depth,
             @intFromPtr(frame.stack),
             @intFromPtr(frame.stack.base),
             @intFromPtr(frame.stack.current),
@@ -1326,15 +1345,19 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.journal.revert_to_snapshot(snapshot);
-        frame.stack.append_unsafe(0);
+        try frame.stack.append(0);
         return;
     };
 
     // Debug: capture stack/frame state after call
+    const evm_depth_after = evm_ptr.current_frame_depth;
     Log.debug(
-        "[STATICCALL] post-call: frame={x}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
+        "[STATICCALL] post-call: frame={x}, depth={}, evm_depth_before={}, evm_depth_after={}, stack_ptr={x}, base={x}, current={x}, limit={x}, data_ptr={x}, len={}",
         .{
             @intFromPtr(frame),
+            frame.depth,
+            evm_depth_before,
+            evm_depth_after,
             @intFromPtr(frame.stack),
             @intFromPtr(frame.stack.base),
             @intFromPtr(frame.stack.current),
@@ -1345,6 +1368,9 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     );
 
     if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
+        // Verify frame pointer hasn't changed
+        std.debug.assert(@intFromPtr(frame) == original_frame_ptr);
+        
         // The parent frame's stack object and its data allocation must not change across nested calls
         std.debug.assert(@intFromPtr(frame.stack) == pre_stack_ptr_u);
         std.debug.assert(@intFromPtr(frame.stack.base) == pre_stack_base_u);
@@ -1371,7 +1397,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Push success flag (1 for success, 0 for failure)
-    frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+    try frame.stack.append(if (call_result.success) 1 else 0);
 }
 
 /// SELFDESTRUCT opcode (0xFF): Destroy the current contract and send balance to recipient
@@ -1404,7 +1430,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Pop recipient address from stack
-    const recipient = frame.stack.pop_unsafe();
+    const recipient = try frame.stack.pop();
     const recipient_address = from_u256(recipient);
 
     // Calculate gas cost

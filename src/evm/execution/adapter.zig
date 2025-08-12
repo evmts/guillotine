@@ -19,20 +19,20 @@ pub fn call_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void,
 /// Adapter for op_returndatasize - push the size of return data to stack
 pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    
+
     if (frame.stack.size() >= Stack.CAPACITY) {
         @branchHint(.cold);
         unreachable;
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(frame.output.len)));
+    try frame.stack.append(@as(u256, @intCast(frame.output.len)));
 }
 
 /// Adapter for op_returndatacopy - copy return data to memory
 pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    
+
     if (frame.stack.size() < 3) {
         @branchHint(.cold);
         unreachable;
@@ -40,9 +40,9 @@ pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void 
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order: [..., size, data_offset, mem_offset] (top to bottom)
-    const mem_offset = frame.stack.pop_unsafe();
-    const data_offset = frame.stack.pop_unsafe();
-    const size = frame.stack.pop_unsafe();
+    const mem_offset = try frame.stack.pop();
+    const data_offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
 
     if (size == 0) {
         @branchHint(.unlikely);

@@ -48,13 +48,13 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
 
     // Debug: show what's on stack before popping
     if (frame.stack.size() >= 2) {
-        const top = frame.stack.data[frame.stack.size() - 1];
-        const second = frame.stack.data[frame.stack.size() - 2];
+        const top = try frame.stack.peek();
+        const second = try frame.stack.peek_n(1);
         Log.debug("KECCAK256 stack before pop: top={}, second={}", .{ top, second });
     }
 
-    const offset = frame.stack.pop_unsafe();
-    const size = frame.stack.pop_unsafe();
+    const offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
 
     Log.debug("KECCAK256 opcode: offset={}, size={} (stack_size={})", .{ offset, size, frame.stack.size() });
 
@@ -68,7 +68,7 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
         @branchHint(.unlikely);
         // Hash of empty data = keccak256("") independent of offset
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        frame.stack.append_unsafe(empty_hash);
+        try frame.stack.append(empty_hash);
         return;
     }
 
@@ -110,7 +110,7 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
 
     Log.debug("KECCAK256: hash result={x:0>64}", .{result});
 
-    frame.stack.append_unsafe(result);
+    try frame.stack.append(result);
 }
 
 // Alias for backwards compatibility

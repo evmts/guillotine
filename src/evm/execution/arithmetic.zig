@@ -82,10 +82,10 @@ pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe(); // top
-    const top_minus_1 = frame.stack.peek_unsafe().*; // second from top
+    const top = try frame.stack.pop(); // top
+    const top_minus_1 = try frame.stack.peek(); // second from top
     const result = top_minus_1 +% top;
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// MUL opcode (0x02) - Multiplication operation
@@ -116,8 +116,8 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();
-    const top_minus_1 = frame.stack.peek_unsafe().*;
+    const top = try frame.stack.pop();
+    const top_minus_1 = try frame.stack.peek();
 
     // Use optimized U256 multiplication
     const a_u256 = U256.from_u256_unsafe(top_minus_1);
@@ -125,7 +125,7 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
     const product_u256 = a_u256.wrapping_mul(b_u256);
     const product = product_u256.to_u256_unsafe();
 
-    frame.stack.set_top_unsafe(product);
+    try frame.stack.set_top(product);
 }
 
 /// SUB opcode (0x03) - Subtraction operation
@@ -156,11 +156,11 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const a = frame.stack.pop_unsafe();
-    const b = frame.stack.peek_unsafe().*;
+    const a = try frame.stack.pop();
+    const b = try frame.stack.peek();
     const result = a -% b;
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// DIV opcode (0x04) - Unsigned integer division
@@ -198,8 +198,8 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe(); // divisor (top)
-    const a = frame.stack.peek_unsafe().*; // dividend (second from top)
+    const b = try frame.stack.pop(); // divisor (top)
+    const a = try frame.stack.peek(); // dividend (second from top)
 
     // EVM semantics: b / a (top / second_from_top)
     // REVM computes: top / second_from_top
@@ -210,7 +210,7 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
         break :blk result_u256.to_u256_unsafe();
     };
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// SDIV opcode (0x05) - Signed integer division
@@ -252,8 +252,8 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe(); // top (dividend)
-    const a = frame.stack.peek_unsafe().*; // second from top (divisor)
+    const b = try frame.stack.pop(); // top (dividend)
+    const a = try frame.stack.peek(); // second from top (divisor)
 
     // EVM semantics: b / a (top / second_from_top) - signed division
     // REVM computes: top / second_from_top
@@ -276,7 +276,7 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
         }
     }
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// MOD opcode (0x06) - Modulo remainder operation
@@ -313,8 +313,8 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe(); // top
-    const a = frame.stack.peek_unsafe().*; // second from top
+    const b = try frame.stack.pop(); // top
+    const a = try frame.stack.peek(); // second from top
 
     // EVM semantics: b % a (top % second_from_top)
     // REVM computes: top % second_from_top
@@ -329,7 +329,7 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
         break :blk div_rem_result.remainder.to_u256_unsafe();
     };
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// SMOD opcode (0x07) - Signed modulo remainder operation
@@ -370,8 +370,8 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe(); // top (dividend)
-    const a = frame.stack.peek_unsafe().*; // second from top (divisor)
+    const b = try frame.stack.pop(); // top (dividend)
+    const a = try frame.stack.peek(); // second from top (divisor)
 
     // EVM semantics: b % a (top % second_from_top) - signed modulo
     // REVM computes: top % second_from_top
@@ -386,7 +386,7 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
         result = @as(u256, @bitCast(result_i256));
     }
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// ADDMOD opcode (0x08) - Addition modulo n
@@ -427,9 +427,9 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
-    const top = frame.stack.pop_unsafe();
-    const second = frame.stack.pop_unsafe();
-    const third = frame.stack.peek_unsafe().*;
+    const top = try frame.stack.pop();
+    const second = try frame.stack.pop();
+    const third = try frame.stack.peek();
 
     // REVM pattern: for ADDMOD with stack [7, 10, 5], computes (5 + 10) % 7 = 1
     // So: top (5) + second (10) % third (7)
@@ -449,7 +449,7 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
         result = result_u256.to_u256_unsafe();
     }
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// MULMOD opcode (0x09) - Multiplication modulo n
@@ -495,9 +495,9 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 3);
 
-    const top = frame.stack.pop_unsafe();
-    const second = frame.stack.pop_unsafe();
-    const third = frame.stack.peek_unsafe().*;
+    const top = try frame.stack.pop();
+    const second = try frame.stack.pop();
+    const third = try frame.stack.peek();
 
     // REVM pattern: same as ADDMOD
     const a = top;
@@ -516,7 +516,7 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
         result = result_u256.to_u256_unsafe();
     }
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// EXP opcode (0x0A) - Exponentiation
@@ -565,8 +565,8 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe(); // top (will be base)
-    const a = frame.stack.peek_unsafe().*; // second from top (will be exponent)
+    const b = try frame.stack.pop(); // top (will be base)
+    const a = try frame.stack.peek(); // second from top (will be exponent)
 
     // EVM semantics: b^a (top ^ second_from_top)
     // REVM computes: top ^ second_from_top
@@ -588,22 +588,22 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     // Early exit optimizations
     if (exponent == 0) {
         Log.debug("EXP: base={x:0>64} exp=0 -> 1", .{base});
-        frame.stack.set_top_unsafe(1);
+        try frame.stack.set_top(1);
         return;
     }
     if (base == 0) {
         Log.debug("EXP: base=0 exp={x:0>64} -> 0", .{exponent});
-        frame.stack.set_top_unsafe(0);
+        try frame.stack.set_top(0);
         return;
     }
     if (base == 1) {
         Log.debug("EXP: base=1 exp={x:0>64} -> 1", .{exponent});
-        frame.stack.set_top_unsafe(1);
+        try frame.stack.set_top(1);
         return;
     }
     if (exponent == 1) {
         Log.debug("EXP: base={x:0>64} exp=1 -> base", .{base});
-        frame.stack.set_top_unsafe(base);
+        try frame.stack.set_top(base);
         return;
     }
 
@@ -625,7 +625,7 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
     }
 
     Log.debug("EXP: base={x:0>64} exp={x:0>64} -> res={x:0>64}", .{ base, exponent, result });
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 /// SIGNEXTEND opcode (0x0B) - Sign extension
@@ -672,8 +672,8 @@ pub fn op_signextend(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const byte_num = frame.stack.pop_unsafe();
-    const x = frame.stack.peek_unsafe().*;
+    const byte_num = try frame.stack.pop();
+    const x = try frame.stack.peek();
 
     var result: u256 = undefined;
 
@@ -707,7 +707,7 @@ pub fn op_signextend(context: *anyopaque) ExecutionError.Error!void {
         }
     }
 
-    frame.stack.set_top_unsafe(result);
+    try frame.stack.set_top(result);
 }
 
 // FIXME: Function temporarily disabled due to compilation issues during refactor

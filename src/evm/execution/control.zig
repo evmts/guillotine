@@ -54,7 +54,7 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
-    const values = frame.stack.pop2_unsafe();
+    const values = try frame.stack.pop2();
     const offset = values.b; // Top
     const size = values.a; // Second from top
 
@@ -110,7 +110,7 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
-    const values = frame.stack.pop2_unsafe();
+    const values = try frame.stack.pop2();
     const offset = values.b; // Top
     const size = values.a; // Second from top
 
@@ -171,7 +171,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 1);
 
     // Use unsafe pop since bounds checking is done by jump_table
-    const recipient_u256 = frame.stack.pop_unsafe();
+    const recipient_u256 = try frame.stack.pop();
     const recipient = from_u256(recipient_u256);
 
     // EIP-2929: Check if recipient address is cold and consume appropriate gas
