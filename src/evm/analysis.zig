@@ -611,20 +611,43 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Close current block
                 instructions[block.begin_block_index].arg.block_info = block.close();
 
-                // Skip dead code until next JUMPDEST - but if we've reached the end, stop
-                if (pc >= code.len) {
-                    Log.debug("[analysis] Reached end of code after terminating instruction", .{});
-                    break;
+                // Skip dead code until next JUMPDEST or code end (like evmone)
+                // This prevents creating executable blocks for unreachable code after RETURN
+                while (pc < code.len) {
+                    const skip_op = code[pc];
+                    
+                    // If we hit a JUMPDEST, stop skipping - it's a potential jump target
+                    if (skip_op == @intFromEnum(Opcode.Enum.JUMPDEST)) {
+                        Log.debug("[analysis] Found JUMPDEST at pc={} after terminating instruction", .{pc});
+                        break;
+                    }
+                    
+                    // Skip PUSH data bytes properly
+                    if (Opcode.is_push(skip_op)) {
+                        const push_bytes = Opcode.get_push_size(skip_op);
+                        pc += 1 + push_bytes;
+                    } else {
+                        pc += 1;
+                    }
                 }
 
-                // Start new block for any code after the terminator
-                instructions[instruction_count] = Instruction{
-                    .opcode_fn = BeginBlockHandler,
-                    .arg = .{ .block_info = BlockInfo{} },
-                };
-                block = BlockAnalysis.init(instruction_count);
-                instruction_count += 1;
-                if (builtin.mode == .Debug) stats.total_blocks += 1;
+                // Only create new block if we found a JUMPDEST (reachable code)
+                if (pc < code.len and code[pc] == @intFromEnum(Opcode.Enum.JUMPDEST)) {
+                    Log.debug("[analysis] Creating new block at JUMPDEST pc={}", .{pc});
+                    
+                    // Start new block for the JUMPDEST
+                    instructions[instruction_count] = Instruction{
+                        .opcode_fn = BeginBlockHandler,
+                        .arg = .{ .block_info = BlockInfo{} },
+                    };
+                    block = BlockAnalysis.init(instruction_count);
+                    instruction_count += 1;
+                    if (builtin.mode == .Debug) stats.total_blocks += 1;
+                } else {
+                    Log.debug("[analysis] No more reachable code after terminating instruction", .{});
+                    // No JUMPDEST found - all remaining code is unreachable
+                    break;
+                }
             },
 
             .JUMPI => {

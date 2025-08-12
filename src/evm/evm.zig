@@ -524,6 +524,26 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     // Simple constructor execution: run initcode and deploy returned runtime code
     // Compute a deterministic test address (tests only assert code at returned address)
     const new_address: primitives_internal.Address.Address = [_]u8{0x22} ** 20;
+    
+    // Check if this is a top-level call and charge base transaction cost
+    const is_top_level = !self.is_executing;
+    var remaining_gas = gas;
+    if (is_top_level) {
+        const base_cost = GasConstants.TxGas;
+        
+        if (remaining_gas < base_cost) {
+            return InterprResult{
+                .status = .OutOfGas,
+                .output = null,
+                .gas_left = 0,
+                .gas_used = 0,
+                .address = new_address,
+                .success = false,
+            };
+        }
+        
+        remaining_gas -= base_cost;
+    }
 
     // Analyze initcode (use cache if available)
     // Use analysis cache (always initialized in Evm.init)
@@ -533,7 +553,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
                 return InterprResult{
                     .status = .Failure,
                     .output = null,
-                    .gas_left = gas,
+                    .gas_left = remaining_gas,
                     .gas_used = 0,
                     .address = new_address,
                     .success = false,
@@ -544,7 +564,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
             return InterprResult{
                 .status = .Failure,
                 .output = null,
-                .gas_left = gas,
+                .gas_left = remaining_gas,
                 .gas_used = 0,
                 .address = new_address,
                 .success = false,
@@ -556,7 +576,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     const GasC = @import("primitives").GasConstants;
     const word_count: u64 = GasC.wordCount(bytecode.len);
     const precharge: u64 = GasC.CreateGas + (word_count * GasC.InitcodeWordGas) + (@as(u64, @intCast(bytecode.len)) * GasC.CreateDataGas);
-    if (gas <= precharge) {
+    if (remaining_gas <= precharge) {
         // Not enough gas to even pay creation overhead
         return InterprResult{
             .status = .OutOfGas,
@@ -567,7 +587,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
             .success = false,
         };
     }
-    const frame_gas: u64 = gas - precharge;
+    const frame_gas: u64 = remaining_gas - precharge;
 
     // Prepare a standalone frame for constructor execution
     const host = @import("host.zig").Host.init(self);

@@ -32,7 +32,7 @@ pub const MAX_INPUT_SIZE: u18 = 128 * 1024; // 128 kb
 
 pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
-    Log.debug("[call] Starting call execution", .{});
+    Log.debug("[call] Starting call execution, is_executing={}", .{self.is_executing});
 
     // Create host interface from self
     const host = Host.init(self);
@@ -81,13 +81,33 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
         },
     }
+    
+    // For top-level calls, charge the base transaction cost
+    var remaining_gas = call_gas;
+    if (is_top_level_call) {
+        const GasConstants = @import("primitives").GasConstants;
+        const base_cost = GasConstants.TxGas;
+        
+        Log.debug("[call] Top-level call detected, charging base cost: {}", .{base_cost});
+        
+        // Check if we have enough gas for the base cost
+        if (remaining_gas < base_cost) {
+            Log.debug("[call] Insufficient gas for base transaction cost: {} < {}", .{ remaining_gas, base_cost });
+            return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+        }
+        
+        remaining_gas -= base_cost;
+        Log.debug("[call] Charged base transaction cost: {}, remaining: {}", .{ base_cost, remaining_gas });
+    } else {
+        Log.debug("[call] Nested call, no base cost charged", .{});
+    }
 
     const call_info = .{
         .address = call_address,
         .code = call_code,
         .code_size = call_code.len,
         .input = call_input,
-        .gas = call_gas,
+        .gas = remaining_gas,
         .is_static = call_is_static,
     };
 
@@ -170,6 +190,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         self.access_list.clear(); // Reset access list for fresh per-call state
         self.self_destruct = SelfDestruct.init(self.allocator); // Fresh self-destruct tracker
         self.created_contracts = CreatedContracts.init(self.allocator); // Fresh created contracts tracker for EIP-6780
+        self.current_output = &.{}; // Clear output buffer from previous calls
 
         // MEMORY ALLOCATION: Frame stack array (preallocated to max)
         // Expected size: 1024 * sizeof(Frame) ≈ 1024 * ~500 bytes = ~512KB
@@ -336,6 +357,11 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     interpret(self, current_frame) catch |err| {
         Log.debug("[call] Interpret ended with error: {}", .{err});
         exec_err = err;
+        
+        // CRITICAL DEBUG: Log specific errors that should stop execution
+        if (err == ExecutionError.Error.STOP) {
+            Log.debug("[call] CRITICAL: Received STOP error from interpret, execution should halt", .{});
+        }
     };
     // Restore executing flag
     self.is_executing = was_executing;
@@ -425,6 +451,9 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     } else true;
 
     Log.debug("[call] Returning with success={}, gas_left={}, output_len={}", .{ success, gas_remaining, output.len });
+    if (!success) {
+        Log.debug("[call] Call failed with error: {?}", .{exec_err});
+    }
     return CallResult{
         .success = success,
         .gas_left = gas_remaining,

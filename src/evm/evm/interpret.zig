@@ -409,6 +409,19 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                                 frame.gas_remaining = 0;
                             }
 
+                            // CRITICAL DEBUG: Log when STOP error is returned (which RETURN uses)
+                            if (err == ExecutionError.Error.STOP) {
+                                const pc_for_debug = if (current_index - 1 < analysis.inst_to_pc.len) 
+                                    analysis.inst_to_pc[current_index - 1] 
+                                    else std.math.maxInt(u16);
+                                const opcode_for_debug = if (pc_for_debug != std.math.maxInt(u16) and pc_for_debug < analysis.code_len) 
+                                    analysis.code[pc_for_debug] 
+                                    else 0xFF;
+                                Log.debug("[interpret] STOP error from opcode 0x{x} at PC={}, depth={}, should halt execution", .{ 
+                                    opcode_for_debug, pc_for_debug, self.depth 
+                                });
+                            }
+
                             return err;
                         };
                     },
@@ -480,6 +493,18 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
     }
 
     Log.debug("[interpret] Reached end of instructions without STOP/RETURN, current_index={}, len={}", .{ current_index, instructions.len });
+    
+    // CRITICAL DEBUG: This should rarely happen - most contracts end with STOP/RETURN/REVERT
+    // If we're seeing this during contract deployment, it likely means RETURN didn't halt execution
+    if (current_index < analysis.inst_to_pc.len) {
+        const last_pc = if (current_index > 0 and current_index - 1 < analysis.inst_to_pc.len)
+            analysis.inst_to_pc[current_index - 1]
+            else std.math.maxInt(u16);
+        if (last_pc != std.math.maxInt(u16) and last_pc < analysis.code_len) {
+            const last_opcode = analysis.code[last_pc];
+            Log.debug("[interpret] WARNING: Last executed opcode was 0x{x} at PC={}, but execution continued!", .{ last_opcode, last_pc });
+        }
+    }
 }
 
 test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
