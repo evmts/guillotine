@@ -575,12 +575,12 @@ pub fn build(b: *std.Build) void {
         simple_crash_test_step.dependOn(&run_simple_crash_test_cmd.step);
     }
 
-    // EVM Benchmark Runner executable (always optimized for benchmarks)
+    // EVM Benchmark Runner executable (ReleaseFast)
     const evm_runner_exe = b.addExecutable(.{
         .name = "evm-runner",
         .root_source_file = b.path("bench/official/evms/zig/src/main.zig"),
         .target = target,
-        .optimize = .ReleaseFast, // Always use ReleaseFast for benchmarks
+        .optimize = .ReleaseFast,
     });
     evm_runner_exe.root_module.addImport("evm", evm_mod);
     evm_runner_exe.root_module.addImport("primitives", primitives_mod);
@@ -595,8 +595,23 @@ pub fn build(b: *std.Build) void {
     const evm_runner_step = b.step("evm-runner", "Run the EVM benchmark runner");
     evm_runner_step.dependOn(&run_evm_runner_cmd.step);
 
-    const build_evm_runner_step = b.step("build-evm-runner", "Build the EVM benchmark runner");
+    const build_evm_runner_step = b.step("build-evm-runner", "Build the EVM benchmark runner (ReleaseFast)");
     build_evm_runner_step.dependOn(&b.addInstallArtifact(evm_runner_exe, .{}).step);
+
+    // EVM Benchmark Runner executable (ReleaseSmall)
+    const evm_runner_small_exe = b.addExecutable(.{
+        .name = "evm-runner-small",
+        .root_source_file = b.path("bench/official/evms/zig/src/main.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    evm_runner_small_exe.root_module.addImport("evm", evm_mod);
+    evm_runner_small_exe.root_module.addImport("primitives", primitives_mod);
+
+    b.installArtifact(evm_runner_small_exe);
+
+    const build_evm_runner_small_step = b.step("build-evm-runner-small", "Build the EVM benchmark runner (ReleaseSmall)");
+    build_evm_runner_small_step.dependOn(&b.addInstallArtifact(evm_runner_small_exe, .{}).step);
 
     // Benchmark Orchestrator executable
     const clap_dep = b.dependency("clap", .{
@@ -1577,6 +1592,20 @@ pub fn build(b: *std.Build) void {
     const return_opcode_bug_test_step = b.step("test-return-opcode-bug", "Run RETURN opcode bug test");
     return_opcode_bug_test_step.dependOn(&run_return_opcode_bug_test.step);
 
+    // Add RETURN stops execution test
+    const test_return_stops_execution = b.addTest(.{
+        .name = "test-return-stops-execution",
+        .root_source_file = b.path("test/evm/test_return_stops_execution.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+    });
+    test_return_stops_execution.root_module.addImport("primitives", primitives_mod);
+    test_return_stops_execution.root_module.addImport("evm", evm_mod);
+    const run_test_return_stops_execution = b.addRunArtifact(test_return_stops_execution);
+    const test_return_stops_execution_step = b.step("test-return-stops-execution", "Run RETURN stops execution test");
+    test_return_stops_execution_step.dependOn(&run_test_return_stops_execution.step);
+
     const contract_call_test = b.addTest(.{
         .name = "contract-call-test",
         .root_source_file = b.path("test/evm/contract_call_test.zig"),
@@ -1798,6 +1827,7 @@ pub fn build(b: *std.Build) void {
     }
 
     test_step.dependOn(&run_return_opcode_bug_test.step);
+    test_step.dependOn(&run_test_return_stops_execution.step);
     // Hardfork tests removed completely
 
     // Add all BN254 tests to main test step
