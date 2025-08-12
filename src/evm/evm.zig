@@ -180,11 +180,9 @@ pub fn init(
     // Preallocate memory to avoid frequent allocations during execution
     const arena_buffer = try internal_arena.allocator().alloc(u8, ARENA_INITIAL_CAPACITY);
 
-    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        // Verify arena allocation is exactly what we expect
-        std.debug.assert(arena_buffer.len == ARENA_INITIAL_CAPACITY);
-        std.debug.assert(ARENA_INITIAL_CAPACITY == 256 * 1024); // 256KB
-    }
+    // Verify arena allocation is exactly what we expect
+    std.debug.assert(arena_buffer.len == ARENA_INITIAL_CAPACITY);
+    std.debug.assert(ARENA_INITIAL_CAPACITY == 256 * 1024); // 256KB
 
     _ = internal_arena.reset(.retain_capacity);
 
