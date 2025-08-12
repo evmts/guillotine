@@ -105,6 +105,9 @@ analysis_cache: ?AnalysisCache = null,
 /// Call journal for transaction revertibility
 journal: CallJournal = undefined,
 
+/// Current snapshot ID for the frame being executed
+current_snapshot_id: u32 = 0,
+
 /// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
 /// Signed accumulator: EIP-2200 allows negative deltas during execution.
 /// Applied at transaction end with EIP-3529 cap.
@@ -385,7 +388,8 @@ pub fn was_created_in_tx(self: *Evm, address: primitives.Address.Address) bool {
 
 /// Create a new journal snapshot for reverting state changes (Host interface)
 pub fn create_snapshot(self: *Evm) u32 {
-    return self.journal.create_snapshot();
+    self.current_snapshot_id = self.journal.create_snapshot();
+    return self.current_snapshot_id;
 }
 
 /// Revert state changes to a previous snapshot (Host interface)
@@ -394,8 +398,8 @@ pub fn revert_to_snapshot(self: *Evm, snapshot_id: u32) void {
 }
 
 /// Record a storage change in the journal (Host interface)
-pub fn record_storage_change(self: *Evm, snapshot_id: u32, address: primitives.Address.Address, slot: u256, original_value: u256) !void {
-    return self.journal.record_storage_change(snapshot_id, address, slot, original_value);
+pub fn record_storage_change(self: *Evm, address: primitives.Address.Address, slot: u256, original_value: u256) !void {
+    return self.journal.record_storage_change(self.current_snapshot_id, address, slot, original_value);
 }
 
 /// Get the original storage value from the journal (Host interface)
@@ -515,7 +519,6 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         analysis_ptr,
         &self.access_list,
         host,
-        snapshot_id,
         self.state.database,
         ChainRules.DEFAULT,
         &self.self_destruct,

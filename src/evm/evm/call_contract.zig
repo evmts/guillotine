@@ -122,6 +122,9 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
     var frame_access_list = CallFrameAccessList.init(self.allocator, access_context);
     defer frame_access_list.deinit();
 
+    // Create snapshot before creating the frame
+    const snapshot_id = host.create_snapshot();
+    
     // Create execution context for the contract
     var context = Frame.init(
         execution_gas, // gas remaining
@@ -133,7 +136,6 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         &analysis, // code analysis
         &frame_access_list, // access list
         host, // host interface from self
-        host.create_snapshot(), // create new snapshot id
         self.state.database, // database interface
         self.chain_rules, // chain rules
         null, // self_destruct (not supported in this context)
@@ -159,6 +161,7 @@ pub inline fn call_contract(self: *Vm, caller: primitives.Address.Address, to: p
         // This error handling block is now a placeholder
         // When actual execution is implemented, this will handle real errors
         _ = ExecutionError.Error.REVERT;
+        host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     }
 

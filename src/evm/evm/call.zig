@@ -201,7 +201,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             analysis_ptr, // analysis
             &self.access_list,
             host,
-            0, // snapshot_id
             self.state.database,
             ChainRules{},
             &self.self_destruct,
@@ -266,7 +265,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             analysis_ptr, // analysis
             &self.access_list,
             host,
-            snapshot_id, // use pre-created snapshot
             self.state.database,
             ChainRules{},
             &self.self_destruct,

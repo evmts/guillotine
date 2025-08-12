@@ -102,7 +102,7 @@ pub const Host = struct {
         /// Revert state changes to a previous snapshot
         revert_to_snapshot: *const fn (ptr: *anyopaque, snapshot_id: u32) void,
         /// Record a storage change in the journal
-        record_storage_change: *const fn (ptr: *anyopaque, snapshot_id: u32, address: Address, slot: u256, original_value: u256) anyerror!void,
+        record_storage_change: *const fn (ptr: *anyopaque, address: Address, slot: u256, original_value: u256) anyerror!void,
         /// Get the original storage value from the journal
         get_original_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) ?u256,
     };
@@ -167,9 +167,9 @@ pub const Host = struct {
                 return self.revert_to_snapshot(snapshot_id);
             }
 
-            fn vtable_record_storage_change(ptr: *anyopaque, snapshot_id: u32, address: Address, slot: u256, original_value: u256) anyerror!void {
+            fn vtable_record_storage_change(ptr: *anyopaque, address: Address, slot: u256, original_value: u256) anyerror!void {
                 const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.record_storage_change(snapshot_id, address, slot, original_value);
+                return self.record_storage_change(address, slot, original_value);
             }
 
             fn vtable_get_original_storage(ptr: *anyopaque, address: Address, slot: u256) ?u256 {
@@ -250,8 +250,8 @@ pub const Host = struct {
     }
 
     /// Record a storage change in the journal
-    pub fn record_storage_change(self: Host, snapshot_id: u32, address: Address, slot: u256, original_value: u256) !void {
-        return self.vtable.record_storage_change(self.ptr, snapshot_id, address, slot, original_value);
+    pub fn record_storage_change(self: Host, address: Address, slot: u256, original_value: u256) !void {
+        return self.vtable.record_storage_change(self.ptr, address, slot, original_value);
     }
 
     /// Get the original storage value from the journal
@@ -372,9 +372,8 @@ pub const MockHost = struct {
         // Mock implementation - do nothing
     }
     
-    pub fn record_storage_change(self: *MockHost, snapshot_id: u32, address: Address, slot: u256, original_value: u256) !void {
+    pub fn record_storage_change(self: *MockHost, address: Address, slot: u256, original_value: u256) !void {
         _ = self;
-        _ = snapshot_id;
         _ = address;
         _ = slot;
         _ = original_value;

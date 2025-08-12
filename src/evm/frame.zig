@@ -101,7 +101,6 @@ pub const Frame = struct {
 
     // WARM - Call context (grouped together)
     host: Host, // 16 bytes (ptr + vtable)
-    snapshot_id: u32, // 4 bytes
     caller: primitives.Address.Address, // 20 bytes
     value: u256, // 32 bytes
 
@@ -143,7 +142,6 @@ pub const Frame = struct {
         analysis: *const CodeAnalysis,
         access_list: *AccessList,
         host: Host,
-        snapshot_id: u32,
         state: DatabaseInterface,
         chain_rules: ChainRules,
         self_destruct: ?*SelfDestruct,
@@ -221,7 +219,6 @@ pub const Frame = struct {
 
             // Call frame stack integration
             .host = host,
-            .snapshot_id = snapshot_id,
             .caller = caller,
             .value = value,
 
@@ -350,7 +347,7 @@ pub const Frame = struct {
         // Record the original value in journal before changing
         const original_value = self.state.get_storage(self.contract_address, slot) catch 0;
         if (original_value != value) {
-            try self.host.record_storage_change(self.snapshot_id, self.contract_address, slot, original_value);
+            try self.host.record_storage_change(self.contract_address, slot, original_value);
         }
         try self.state.set_storage(self.contract_address, slot, value);
     }
