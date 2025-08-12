@@ -954,8 +954,8 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // The gas_left from the call should be added back
     frame.gas_remaining += call_result.gas_left;
 
-    // Write return data if successful and there's output
-    if (call_result.success and call_result.output != null and ret_size > 0) {
+    // Write return data regardless of success (EVM spec requirement)
+    if (call_result.output != null and ret_size > 0) {
         const output = call_result.output.?;
         const ret_offset_usize = @as(usize, @intCast(ret_offset));
         const ret_size_usize = @as(usize, @intCast(ret_size));
@@ -963,6 +963,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
         // Copy output to return memory area
         if (copy_size > 0) {
+            Log.debug("CALL copying {} bytes of return data to memory[{}], success={}", .{ copy_size, ret_offset_usize, call_result.success });
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
@@ -1198,6 +1199,9 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
+            if (copy_size > 0) {
+                Log.debug("DELEGATECALL copying {} bytes of return data to memory[{}], success={}", .{ copy_size, ret_offset_usize, call_result.success });
+            }
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
@@ -1313,6 +1317,9 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             const ret_offset_usize = @as(usize, @intCast(ret_offset));
             const ret_size_usize = @as(usize, @intCast(ret_size));
             const copy_size = @min(ret_size_usize, output.len);
+            if (copy_size > 0) {
+                Log.debug("STATICCALL copying {} bytes of return data to memory[{}], success={}", .{ copy_size, ret_offset_usize, call_result.success });
+            }
             try frame.memory.set_data_bounded(ret_offset_usize, output, 0, copy_size);
         }
     }
