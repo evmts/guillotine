@@ -156,14 +156,9 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = frame.stack.pop_unsafe();
-    const a = frame.stack.peek_unsafe().*;
-
-    // EVM semantics: b - a (top - second)
-    // REVM computes: top - second_from_top
-    const result = b -% a;
-
-    Log.debug("SUB: top(b)={x:0>64} second(a)={x:0>64} -> res={x:0>64} (b - a)", .{ b, a, result });
+    const a = frame.stack.pop_unsafe();
+    const b = frame.stack.peek_unsafe().*;
+    const result = a -% b;
 
     frame.stack.set_top_unsafe(result);
 }
