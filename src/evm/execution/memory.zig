@@ -60,9 +60,11 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    if (frame.stack.size() < 2) {
-        @branchHint(.cold);
-        unreachable;
+    if (SAFE_STACK_CHECKS) {
+        if (frame.stack.size() < 2) {
+            @branchHint(.cold);
+            unreachable;
+        }
     }
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
@@ -86,7 +88,12 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
 
     // Ensure memory is available - expand to word boundary to match gas calculation
     const aligned_size = std.mem.alignForward(usize, new_size, 32);
-    _ = try frame.memory.ensure_context_capacity(aligned_size);
+    if (SAFE_MEMORY_EXPANSION) {
+        _ = try frame.memory.ensure_context_capacity(aligned_size);
+    } else {
+        // In fast modes, we trust that gas charging validated the expansion
+        _ = frame.memory.ensure_context_capacity(aligned_size) catch unreachable;
+    }
 
     // Write 32 bytes to memory (big-endian)
     var bytes: [32]u8 = undefined;
@@ -95,7 +102,12 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
     // Debug logging
     Log.debug("MSTORE: offset={}, value={x:0>64}, first_few_bytes={x}", .{ offset_usize, value, std.fmt.fmtSliceHexLower(bytes[0..@min(16, bytes.len)]) });
 
-    try frame.memory.set_data(offset_usize, &bytes);
+    // Use unsafe write since we just ensured capacity
+    if (SAFE_MEMORY_EXPANSION) {
+        try frame.memory.set_data(offset_usize, &bytes);
+    } else {
+        frame.memory.set_data_unsafe(offset_usize, &bytes);
+    }
 }
 
 pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
