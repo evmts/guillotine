@@ -521,6 +521,213 @@ pub unsafe extern "C" fn revm_execute(
     1
 }
 
+/// Execute a transaction with tracing
+#[no_mangle]
+pub unsafe extern "C" fn revm_execute_with_trace(
+    vm: *mut RevmVm,
+    from: *const u8,
+    to: *const u8,
+    value_hex: *const c_char,
+    input_data: *const u8,
+    input_len: usize,
+    gas_limit: u64,
+    trace_path: *const c_char,
+    out_result: *mut *mut ExecutionResult,
+    out_error: *mut *mut RevmError,
+) -> i32 {
+    use revm::{inspector_handle_register, inspectors::TracerEip3155};
+    use std::fs::File;
+    use std::io::Write;
+    
+    *out_error = ptr::null_mut();
+    *out_result = ptr::null_mut();
+
+    if vm.is_null() || from.is_null() || trace_path.is_null() {
+        *out_error = RevmError::new(
+            RevmErrorCode::InvalidInput,
+            "Invalid input parameters".to_string(),
+        );
+        return 0;
+    }
+
+    // Get trace file path
+    let trace_path_str = match CStr::from_ptr(trace_path).to_str() {
+        Ok(s) => s,
+        Err(_) => {
+            *out_error = RevmError::new(
+                RevmErrorCode::InvalidInput,
+                "Invalid trace path encoding".to_string(),
+            );
+            return 0;
+        }
+    };
+
+    // Create trace file
+    let mut trace_file = match File::create(trace_path_str) {
+        Ok(f) => f,
+        Err(e) => {
+            *out_error = RevmError::new(
+                RevmErrorCode::StateError,
+                format!("Failed to create trace file: {}", e),
+            );
+            return 0;
+        }
+    };
+
+    let vm = &mut *vm;
+    let from_bytes = std::slice::from_raw_parts(from, 20);
+    let from_addr = Address::from_slice(from_bytes);
+
+    let to_addr = if to.is_null() {
+        None
+    } else {
+        let to_bytes = std::slice::from_raw_parts(to, 20);
+        Some(Address::from_slice(to_bytes))
+    };
+
+    let value = if value_hex.is_null() {
+        U256::ZERO
+    } else {
+        let value_str = match CStr::from_ptr(value_hex).to_str() {
+            Ok(s) => s.trim_start_matches("0x"),
+            Err(_) => {
+                *out_error = RevmError::new(
+                    RevmErrorCode::InvalidInput,
+                    "Invalid value string encoding".to_string(),
+                );
+                return 0;
+            }
+        };
+
+        match U256::from_str_radix(value_str, 16) {
+            Ok(v) => v,
+            Err(_) => {
+                *out_error = RevmError::new(
+                    RevmErrorCode::InvalidInput,
+                    "Invalid value".to_string(),
+                );
+                return 0;
+            }
+        }
+    };
+
+    let input = if input_data.is_null() || input_len == 0 {
+        Bytes::new()
+    } else {
+        let data = std::slice::from_raw_parts(input_data, input_len);
+        Bytes::from(data.to_vec())
+    };
+    
+    // Create tracer
+    let mut tracer = TracerEip3155::new(Box::new(trace_file.try_clone().unwrap()));
+    
+    // Build and execute EVM with tracer
+    let mut evm = Evm::builder()
+        .with_db(&mut vm.db)
+        .with_external_context(&mut tracer)
+        .append_handler_register(inspector_handle_register)
+        .modify_block_env(|block| {
+            block.number = U256::from(vm.settings.block_number);
+            block.timestamp = U256::from(vm.settings.block_timestamp);
+            block.gas_limit = U256::from(vm.settings.block_gas_limit);
+            block.difficulty = U256::from(vm.settings.block_difficulty);
+            block.basefee = U256::from(vm.settings.block_basefee);
+            block.coinbase = Address::from_slice(&vm.settings.coinbase);
+        })
+        .modify_cfg_env(|cfg| {
+            cfg.chain_id = vm.settings.chain_id;
+        })
+        .modify_tx_env(|tx| {
+            tx.caller = from_addr;
+            tx.transact_to = if let Some(to) = to_addr {
+                revm::primitives::TxKind::Call(to)
+            } else {
+                revm::primitives::TxKind::Create
+            };
+            tx.value = value;
+            tx.data = input.clone();
+            tx.gas_limit = gas_limit;
+            tx.gas_price = if to_addr.is_some() { 
+                U256::ZERO
+            } else { 
+                U256::from(1u64)
+            };
+        })
+        .build();
+    
+    let result = match evm.transact_commit() {
+        Ok(res) => res,
+        Err(e) => {
+            // Write error to trace file
+            let _ = writeln!(trace_file, "# Execution failed: {:?}", e);
+            *out_error = RevmError::new(
+                RevmErrorCode::ExecutionError,
+                format!("Execution failed: {:?}", e),
+            );
+            return 0;
+        }
+    };
+
+    // Ensure trace is flushed
+    let _ = trace_file.flush();
+
+    // Convert result (same as regular execute)
+    let (success, gas_used, gas_refunded, output, revert_reason) = match result {
+        RevmExecutionResult::Success {
+            gas_used,
+            gas_refunded,
+            output,
+            ..
+        } => {
+            let output_bytes = match output {
+                revm::primitives::Output::Call(bytes) => bytes,
+                revm::primitives::Output::Create(bytes, _) => bytes,
+            };
+            (true, gas_used, gas_refunded, output_bytes, None)
+        }
+        RevmExecutionResult::Revert { gas_used, output } => {
+            let reason = if output.len() > 4 {
+                String::from_utf8_lossy(&output[4..]).to_string()
+            } else {
+                "Execution reverted".to_string()
+            };
+            (false, gas_used, 0, output, Some(reason))
+        }
+        RevmExecutionResult::Halt { reason, gas_used } => {
+            let reason = format!("Execution halted: {:?}", reason);
+            (false, gas_used, 0, Bytes::new(), Some(reason))
+        }
+    };
+
+    // Create result
+    let mut output_vec = output.to_vec();
+    let output_ptr = if output_vec.is_empty() {
+        ptr::null_mut()
+    } else {
+        let ptr = output_vec.as_mut_ptr();
+        std::mem::forget(output_vec);
+        ptr
+    };
+
+    let revert_ptr = revert_reason
+        .and_then(|r| CString::new(r).ok())
+        .map(|cstr| cstr.into_raw())
+        .unwrap_or(ptr::null_mut());
+
+    let exec_result = Box::new(ExecutionResult {
+        success,
+        gas_used,
+        gas_refunded,
+        output_data: output_ptr,
+        output_len: output.len(),
+        logs_count: 0,
+        revert_reason: revert_ptr,
+    });
+
+    *out_result = Box::into_raw(exec_result);
+    1
+}
+
 /// Get error message
 #[no_mangle]
 pub unsafe extern "C" fn revm_get_error_message(error: *const RevmError) -> *const c_char {

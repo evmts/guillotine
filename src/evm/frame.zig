@@ -361,7 +361,6 @@ pub const Frame = struct {
         .{ .field_name = "is_merge", .introduced_in = .MERGE },
         .{ .field_name = "is_shanghai", .introduced_in = .SHANGHAI },
         .{ .field_name = "is_cancun", .introduced_in = .CANCUN },
-        .{ .field_name = "is_eip1153", .introduced_in = .CANCUN },
     };
 
     /// Create ChainRules for a specific hardfork

@@ -307,6 +307,87 @@ pub const Revm = struct {
     ) !ExecutionResult {
         return self.execute(from, null, value, init_code, gas_limit);
     }
+
+    /// Execute a transaction with tracing
+    pub fn executeWithTrace(
+        self: *Revm,
+        from: Address,
+        to: ?Address,
+        value: u256,
+        input: []const u8,
+        gas_limit: u64,
+        trace_path: []const u8,
+    ) !ExecutionResult {
+        const value_hex = try std.fmt.allocPrintZ(self.allocator, "0x{x}", .{value});
+        defer self.allocator.free(value_hex);
+
+        const trace_path_z = try std.fmt.allocPrintZ(self.allocator, "{s}", .{trace_path});
+        defer self.allocator.free(trace_path_z);
+
+        var result_ptr: ?*c.ExecutionResult = null;
+        var error_ptr: ?*c.RevmError = null;
+
+        const from_bytes = from;
+        const to_ptr: [*c]const u8 = if (to) |t| &t else null;
+
+        const input_ptr = if (input.len > 0) input.ptr else null;
+
+        const success = c.revm_execute_with_trace(
+            self.ptr,
+            &from_bytes,
+            to_ptr,
+            value_hex.ptr,
+            input_ptr,
+            input.len,
+            gas_limit,
+            trace_path_z.ptr,
+            &result_ptr,
+            &error_ptr,
+        );
+
+        if (success != 1) {
+            defer c.revm_free_error(error_ptr);
+            return error.ExecutionFailed;
+        }
+
+        defer c.revm_free_result(result_ptr);
+        const result = result_ptr.?.*;
+
+        // Copy output data
+        const output = if (result.outputData != null and result.outputLen > 0) blk: {
+            const data = try self.allocator.alloc(u8, result.outputLen);
+            @memcpy(data, @as([*]u8, @ptrCast(result.outputData))[0..result.outputLen]);
+            break :blk data;
+        } else try self.allocator.alloc(u8, 0);
+
+        // Copy revert reason if present
+        const revert_reason = if (result.revertReason != null) blk: {
+            const reason = std.mem.span(result.revertReason);
+            break :blk try self.allocator.dupe(u8, reason);
+        } else null;
+
+        return ExecutionResult{
+            .success = result.success,
+            .gas_used = result.gasUsed,
+            .gas_refunded = result.gasRefunded,
+            .output = output,
+            .revert_reason = revert_reason,
+            .allocator = self.allocator,
+        };
+    }
+
+    /// Execute a call with tracing (convenience method)
+    pub fn callWithTrace(
+        self: *Revm,
+        from: Address,
+        to: Address,
+        value: u256,
+        input: []const u8,
+        gas_limit: u64,
+        trace_path: []const u8,
+    ) !ExecutionResult {
+        return self.executeWithTrace(from, to, value, input, gas_limit, trace_path);
+    }
 };
 
 // Enable debug logging for tests

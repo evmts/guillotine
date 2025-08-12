@@ -364,7 +364,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         }
     }
 
-    // Copy output before frame cleanup
+    // Copy output before frame cleanup; tests expect ownership of returned output
     var output: []const u8 = &.{};
     const host_output = host.get_output();
     if (host_output.len > 0) {

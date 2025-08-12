@@ -48,7 +48,7 @@ test "Stack validation: PUSH operations" {
     // Fill stack to capacity
     var i: usize = 0;
     while (i < Stack.CAPACITY) : (i += 1) {
-        _ = stack.append(i);
+        try stack.append(i);
     }
 
     // Should fail due to overflow
@@ -75,7 +75,7 @@ test "Stack validation: DUP operations" {
 
     // Test overflow - fill stack to capacity
     while (stack.size() < Stack.CAPACITY) {
-        _ = stack.append(1);
+        try stack.append(1);
     }
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, dup1_op));
 }
@@ -160,7 +160,7 @@ test "Stack validation: opcode metadata stack requirements verification" {
     try testing.expectEqual(@as(u32, Stack.CAPACITY - 1), push1_op.max_stack);
 
     // Test at capacity
-    _ = stack.set_size(Stack.CAPACITY);
+    try stack.set_size(Stack.CAPACITY);
     try testing.expectError(ExecutionError.Error.StackOverflow, stack_validation.validate_stack_requirements(&stack, push1_op));
 }
 

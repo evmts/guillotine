@@ -98,6 +98,20 @@ int32_t revm_execute(struct RevmVm *vm,
                      struct RevmError **outError);
 
 /**
+ * Execute a transaction with tracing
+ */
+int32_t revm_execute_with_trace(struct RevmVm *vm,
+                                const uint8_t *from,
+                                const uint8_t *to,
+                                const char *valueHex,
+                                const uint8_t *inputData,
+                                uintptr_t inputLen,
+                                uint64_t gasLimit,
+                                const char *tracePath,
+                                struct ExecutionResult **outResult,
+                                struct RevmError **outError);
+
+/**
  * Get error message
  */
 const char *revm_get_error_message(const struct RevmError *error);

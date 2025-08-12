@@ -60,8 +60,8 @@ table: OpcodeMetadata,
 depth: u11 = 0,
 /// Whether the current context is read-only (STATICCALL)
 read_only: bool = false,
-  /// Whether the VM is currently executing a call (used to detect nested calls)
-  is_executing: bool = false,
+/// Whether the VM is currently executing a call (used to detect nested calls)
+is_executing: bool = false,
 
 // Configuration fields (set at initialization)
 /// Protocol rules for the current hardfork
@@ -72,6 +72,8 @@ context: Context,
 // Data fields (moderate access frequency)
 /// Optional tracer for capturing execution traces
 tracer: ?std.io.AnyWriter = null,
+/// Open file handle used by tracer when tracing to file
+trace_file: ?std.fs.File = null,
 
 // Large state structures (placed last to minimize offset impact)
 /// World state including accounts, storage, and code
@@ -110,7 +112,7 @@ journal: CallJournal = undefined,
 /// Current snapshot ID for the frame being executed
 current_snapshot_id: u32 = 0,
 
-/// Output buffer for the current frame
+/// Output buffer for the current frame (set via Host.set_output)
 current_output: []const u8 = &.{},
 
 /// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
@@ -237,6 +239,11 @@ pub fn init(
 /// Free all VM resources.
 /// Must be called when finished with the VM to prevent memory leaks.
 pub fn deinit(self: *Evm) void {
+    if (self.trace_file) |f| {
+        // Best-effort close
+        f.close();
+        self.trace_file = null;
+    }
     self.state.deinit();
     self.access_list.deinit();
     self.internal_arena.deinit();
@@ -260,6 +267,33 @@ pub fn deinit(self: *Evm) void {
     }
 
     // created_contracts is initialized in init(); single deinit above is sufficient
+}
+
+/// Enable instruction tracing to a file. If append is true, appends to existing file.
+pub fn enable_tracing_to_path(self: *Evm, path: []const u8, append: bool) !void {
+    // Close previous file if any
+    if (self.trace_file) |f| {
+        f.close();
+        self.trace_file = null;
+    }
+    // Open file
+    var file = try std.fs.cwd().createFile(path, .{ .truncate = !append, .read = false });
+    if (append) {
+        // Seek to end for appending
+        try file.seekFromEnd(0);
+    }
+    self.trace_file = file;
+    // Set tracer writer
+    self.tracer = file.writer().any();
+}
+
+/// Disable tracing and close any open trace file.
+pub fn disable_tracing(self: *Evm) void {
+    self.tracer = null;
+    if (self.trace_file) |f| {
+        f.close();
+        self.trace_file = null;
+    }
 }
 
 /// Reset the EVM for reuse without deallocating memory.
@@ -533,21 +567,10 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
     // Prepare a standalone frame for constructor execution
     const host = @import("host.zig").Host.init(self);
     const snapshot_id: u32 = host.create_snapshot();
-    var frame = try Frame.init(
-        frame_gas,
-        false, // not static
-        @intCast(self.depth),
-        new_address, // contract address being created
-        caller,
-        value,
-        analysis_ptr,
-        host,
-        self.state.database,
-        ChainRules.DEFAULT,
-        &self.self_destruct,
-        &[_]u8{}, // constructor input (none for tests)
-        self.allocator
-    );
+    var frame = try Frame.init(frame_gas, false, // not static
+        @intCast(self.depth), new_address, // contract address being created
+        caller, value, analysis_ptr, host, self.state.database, ChainRules.DEFAULT, &self.self_destruct, &[_]u8{}, // constructor input (none for tests)
+        self.allocator);
 
     var exec_err: ?ExecutionError.Error = null;
     @import("evm/interpret.zig").interpret(self, &frame) catch |err| {

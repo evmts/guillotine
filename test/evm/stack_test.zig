@@ -42,7 +42,7 @@ test "Stack: basic push and pop operations" {
     try testing.expectError(Stack.Error.StackUnderflow, stack.pop());
 }
 
-test "Stack: push_unsafe and pop_unsafe" {
+test "Stack: push and pop (safe variants)" {
     var stack = try Stack.init(testing.allocator);
     defer stack.deinit();
 
@@ -50,11 +50,11 @@ test "Stack: push_unsafe and pop_unsafe" {
     try stack.append(100);
     try stack.append(200);
 
-    // Use unsafe operations (requires validation they're safe to use)
-    stack.append_unsafe(300);
+    // Push using safe API
+    try stack.append(300);
     try testing.expectEqual(@as(usize, 3), stack.size());
 
-    const value = stack.pop_unsafe();
+    const value = try stack.pop();
     try testing.expectEqual(@as(u256, 300), value);
     try testing.expectEqual(@as(usize, 2), stack.size());
 }
@@ -63,9 +63,9 @@ test "Stack: peek operations" {
     var stack = try setup_stack(testing.allocator, &[_]u256{ 1, 2, 3, 4, 5 });
     defer stack.deinit();
 
-    // Test peek_unsafe (top element)
-    const top = stack.peek_unsafe();
-    try testing.expectEqual(@as(u256, 5), top.*);
+    // Test peek (top element)
+    const top = try stack.peek();
+    try testing.expectEqual(@as(u256, 5), top);
     try testing.expectEqual(@as(usize, 5), stack.size()); // Size unchanged
 
     // Test peek_n (nth element from top)
@@ -77,27 +77,27 @@ test "Stack: peek operations" {
     try testing.expectError(Stack.Error.StackUnderflow, stack.peek_n(5));
 }
 
-test "Stack: dup_unsafe operation" {
+test "Stack: dup operation" {
     var stack = try setup_stack(testing.allocator, &[_]u256{ 10, 20, 30 });
     defer stack.deinit();
 
     // Duplicate top element (n=1)
-    stack.dup_unsafe(1);
+    try stack.dup(1);
     try testing.expectEqual(@as(usize, 4), stack.size());
     try testing.expectEqual(@as(u256, 30), try stack.pop()); // Duplicated top
     try testing.expectEqual(@as(u256, 30), try stack.pop()); // Original top
 
     // Test duplicating deeper element
-    stack.dup_unsafe(2); // Should duplicate 10 (2nd from top)
+    try stack.dup(2); // Should duplicate 10 (2nd from top)
     try testing.expectEqual(@as(u256, 10), try stack.pop());
 }
 
-test "Stack: swap_unsafe operation" {
+test "Stack: swap operation" {
     var stack = try setup_stack(testing.allocator, &[_]u256{ 1, 2, 3, 4, 5 });
     defer stack.deinit();
 
     // Swap top with second element (n=1)
-    stack.swap_unsafe(1);
+    try stack.swap(1);
     try testing.expectEqual(@as(u256, 4), try stack.pop()); // Was second, now top
     try testing.expectEqual(@as(u256, 5), try stack.pop()); // Was top, now second
 
@@ -107,11 +107,11 @@ test "Stack: swap_unsafe operation" {
     try testing.expectEqual(@as(u256, 1), try stack.pop());
 }
 
-test "Stack: pop2_unsafe operation" {
+test "Stack: pop2 operation" {
     var stack = try setup_stack(testing.allocator, &[_]u256{ 1, 2, 3, 4, 5 });
     defer stack.deinit();
 
-    const popped = stack.pop2_unsafe();
+    const popped = try stack.pop2();
     try testing.expectEqual(@as(u256, 4), popped.a); // Second from top
     try testing.expectEqual(@as(u256, 5), popped.b); // Top
     try testing.expectEqual(@as(usize, 3), stack.size());
@@ -120,11 +120,11 @@ test "Stack: pop2_unsafe operation" {
     try testing.expectEqual(@as(u256, 3), try stack.pop());
 }
 
-test "Stack: pop3_unsafe operation" {
+test "Stack: pop3 operation" {
     var stack = try setup_stack(testing.allocator, &[_]u256{ 1, 2, 3, 4, 5 });
     defer stack.deinit();
 
-    const popped = stack.pop3_unsafe();
+    const popped = try stack.pop3();
     try testing.expectEqual(@as(u256, 3), popped.a); // Third from top
     try testing.expectEqual(@as(u256, 4), popped.b); // Second from top
     try testing.expectEqual(@as(u256, 5), popped.c); // Top
@@ -135,11 +135,11 @@ test "Stack: pop3_unsafe operation" {
     try testing.expectEqual(@as(u256, 1), try stack.pop());
 }
 
-test "Stack: set_top_unsafe operation" {
+test "Stack: set_top operation" {
     var stack = try setup_stack(testing.allocator, &[_]u256{ 1, 2, 3 });
     defer stack.deinit();
 
-    stack.set_top_unsafe(999);
+    try stack.set_top(999);
     try testing.expectEqual(@as(u256, 999), try stack.pop());
     try testing.expectEqual(@as(u256, 2), try stack.pop());
     try testing.expectEqual(@as(u256, 1), try stack.pop());
