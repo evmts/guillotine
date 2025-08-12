@@ -3,6 +3,11 @@ const Fp2Mont = @import("Fp2Mont.zig");
 const Fp6Mont = @import("Fp6Mont.zig");
 const curve_parameters = @import("curve_parameters.zig");
 
+//
+// Field extension: F_p12 = F_p6[w] / (w^2 - v)
+// Elements: a = a0 + a1*w, where a0, a1 ∈ F_p6 and w^2 = v
+//
+
 pub const Fp12Mont = @This();
 
 w0: Fp6Mont,
@@ -57,22 +62,21 @@ pub fn subAssign(self: *Fp12Mont, other: *const Fp12Mont) void {
     self.* = self.sub(other);
 }
 
-// using the Karatsuba algorithm
+/// Karatsuba multiplication: (a0 + a1*w)(b0 + b1*w) mod (w² - v)
 pub fn mul(self: *const Fp12Mont, other: *const Fp12Mont) Fp12Mont {
-    //const v = curve_parameters.V;
+    // a = a0 + a1*w, b = b0 + b1*w, where w² = v
+    const a0_b0 = self.w0.mul(&other.w0);
+    const a1_b1 = self.w1.mul(&other.w1);
 
-    const w0_mul_w0 = self.w0.mul(&other.w0);
-    const w1_mul_w1 = self.w1.mul(&other.w1);
+    const a0_plus_a1 = self.w0.add(&self.w1);
+    const b0_plus_b1 = other.w0.add(&other.w1);
 
-    const self_w0_add_w1 = self.w0.add(&self.w1);
-    const other_w0_add_w1 = other.w0.add(&other.w1);
-
-    const result_w0 = w0_mul_w0.add(&w1_mul_w1.mulByV());
-    const result_w1 = self_w0_add_w1.mul(&other_w0_add_w1).sub(&w0_mul_w0).sub(&w1_mul_w1);
+    const c0 = a0_b0.add(&a1_b1.mulByV()); // a0*b0 + v*a1*b1
+    const c1 = a0_plus_a1.mul(&b0_plus_b1).sub(&a0_b0).sub(&a1_b1); // (a0+a1)(b0+b1) - a0*b0 - a1*b1 = a0*b1 + a1*b0
 
     return Fp12Mont{
-        .w0 = result_w0,
-        .w1 = result_w1,
+        .w0 = c0,
+        .w1 = c1,
     };
 }
 
@@ -98,19 +102,19 @@ pub fn mulBySmallIntAssign(self: *Fp12Mont, other: u8) void {
     self.* = self.mulBySmallInt(other);
 }
 
-// complex square
+/// Complex squaring: (a0 + a1*w)² = (a0 + a1)(a0 + v*a1) - a0*a1 - v*a0*a1 + 2*a0*a1*w
 pub fn square(self: *const Fp12Mont) Fp12Mont {
-    // const v = curve_parameters.V;
-    const w0_mul_w1 = self.w0.mul(&self.w1);
-    const w0_plus_w1 = self.w0.add(&self.w1);
-    const w0_plus_v_w1 = self.w0.add(&self.w1.mulByV());
+    // a = a0 + a1*w, where w² = v
+    const a0_a1 = self.w0.mul(&self.w1);
+    const a0_plus_a1 = self.w0.add(&self.w1);
+    const a0_plus_v_a1 = self.w0.add(&self.w1.mulByV());
 
-    const result_w0 = w0_plus_w1.mul(&w0_plus_v_w1).sub(&w0_mul_w1).sub(&w0_mul_w1.mulByV());
-    const result_w1 = w0_mul_w1.mulBySmallInt(2);
+    const c0 = a0_plus_a1.mul(&a0_plus_v_a1).sub(&a0_a1).sub(&a0_a1.mulByV()); // (a0+a1)(a0+v*a1) - a0*a1 - v*a0*a1
+    const c1 = a0_a1.mulBySmallInt(2); // 2*a0*a1
 
     return Fp12Mont{
-        .w0 = result_w0,
-        .w1 = result_w1,
+        .w0 = c0,
+        .w1 = c1,
     };
 }
 
