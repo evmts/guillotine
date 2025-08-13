@@ -10,7 +10,7 @@ pub const JumpType = enum {
 };
 
 pub const JumpTarget = struct {
-    instruction: *const Instruction,
+    instruction_index: usize,
     jump_type: JumpType,
 };
 

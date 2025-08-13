@@ -13,22 +13,49 @@ pub fn op_stop(context: *anyopaque) ExecutionError.Error!void {
     return ExecutionError.Error.STOP;
 }
 
-// DEPRECATED: JUMP is now handled directly in interpret.zig via .jump_target instruction type
-// This function is no longer called and should be deleted
 pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
-    _ = context;
-    // JUMP is handled inline by the interpreter based on pre-resolved targets
-    // in the instruction stream; this function must never be called.
-    unreachable;
+    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+    const analysis = frame.analysis;
+
+    // Pop destination from stack
+    const dest = frame.stack.pop_unsafe();
+    if (!frame.valid_jumpdest(dest)) {
+        return ExecutionError.Error.InvalidJump;
+    }
+
+    const dest_usize: usize = @intCast(dest);
+    const idx = analysis.pc_to_block_start[dest_usize];
+    if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
+        return ExecutionError.Error.InvalidJump;
+    }
+
+    // Transfer control
+    frame.instruction_index = idx;
 }
 
-// DEPRECATED: JUMPI is now handled directly in interpret.zig via .jump_target instruction type
-// This function is no longer called and should be deleted
 pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
-    _ = context;
-    // JUMPI is handled inline by the interpreter based on pre-resolved targets
-    // in the instruction stream; this function must never be called.
-    unreachable;
+    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+    const analysis = frame.analysis;
+
+    // pop2_unsafe returns { a = second-from-top, b = top }
+    const pops = frame.stack.pop2_unsafe();
+    const dest = pops.b;
+    const condition = pops.a;
+
+    if (condition != 0) {
+        if (!frame.valid_jumpdest(dest)) {
+            return ExecutionError.Error.InvalidJump;
+        }
+        const dest_usize: usize = @intCast(dest);
+        const idx = analysis.pc_to_block_start[dest_usize];
+        if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
+            return ExecutionError.Error.InvalidJump;
+        }
+        frame.instruction_index = idx;
+    } else {
+        // Fallthrough to next instruction
+        frame.instruction_index += 1;
+    }
 }
 
 pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {

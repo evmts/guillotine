@@ -1379,7 +1379,7 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
                             const opcode_byte = code[pc];
                             const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
                             inst.arg = .{ .jump_target = JumpTarget{
-                                .instruction = &instructions[block_idx],
+                                .instruction_index = @intCast(block_idx),
                                 .jump_type = jump_type,
                             } };
                         }
@@ -1462,7 +1462,7 @@ test "jump target resolution with BEGINBLOCK injections" {
             jump_found = true;
             if (inst.arg.jump_target.jump_type == .jump) {
                 // Verify the target points to a BEGINBLOCK instruction
-                if (inst.arg.jump_target.instruction.opcode_fn == BeginBlockHandler) {
+                if (analysis.instructions[inst.arg.jump_target.instruction_index].opcode_fn == BeginBlockHandler) {
                     jump_target_valid = true;
                 }
             }
@@ -1510,7 +1510,7 @@ test "conditional jump (JUMPI) target resolution" {
             if (inst.arg.jump_target.jump_type == .jumpi) {
                 jumpi_found = true;
                 // Verify the target points to a BEGINBLOCK instruction
-                if (inst.arg.jump_target.instruction.opcode_fn == BeginBlockHandler) {
+                if (analysis.instructions[inst.arg.jump_target.instruction_index].opcode_fn == BeginBlockHandler) {
                     jumpi_target_valid = true;
                 }
             }

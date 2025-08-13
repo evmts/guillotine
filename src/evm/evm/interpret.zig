@@ -222,15 +222,13 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // 3. Handle normal jump
             .jump_target => |jump_target| {
                 switch (jump_target.jump_type) {
-                    .jump => try handle_jump(self, frame, &current_index),
-                    .jumpi => try handle_jumpi(self, frame, &current_index),
+                    .jump => try @import("../execution/control.zig").op_jump(frame_opaque),
+                    .jumpi => try @import("../execution/control.zig").op_jumpi(frame_opaque),
                     .other => {
-                        Log.debug("[interpret] Jump target type .other redirecting flow (inst_idx from {} to target)", .{current_index});
-                        // Fallback: advance to next instruction if mapping is not applicable
                         current_index += 1;
+                        frame.instruction_index = current_index;
                     },
                 }
-                frame.instruction_index = current_index;
             },
             .word => |value| {
                 const pc_dbg: usize = if (current_index < analysis.inst_to_pc.len) blk: {
@@ -253,7 +251,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Fusion cases are no longer needed; handled via `.word` + opcode_fn
             .keccak => |params| {
                 current_index += 1;
-                frame.instruction = &instructions[current_index];
+                frame.instruction_index = current_index;
                 // Consume precomputed gas cost
                 if (frame.gas_remaining < params.gas_cost) {
                     @branchHint(.cold);
@@ -307,14 +305,12 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 const jt = analysis.inst_jump_type[current_index];
                 switch (jt) {
                     .jump => {
-                        try handle_dynamic_jump(self, frame, &current_index);
-                        frame.instruction_index = current_index;
-                        continue; // proceed to next loop iteration of the while-loop
+                        try @import("../execution/control.zig").op_jump(frame_opaque);
+                        continue;
                     },
                     .jumpi => {
-                        try handle_dynamic_jumpi(self, frame, &current_index);
-                        frame.instruction_index = current_index;
-                        continue; // handled; proceed to next while-loop iteration
+                        try @import("../execution/control.zig").op_jumpi(frame_opaque);
+                        continue;
                     },
                     .other => {
                         // Most opcodes now have .none - no individual gas/stack validation needed
