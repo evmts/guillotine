@@ -11,15 +11,15 @@ const StorageKey = primitives.StorageKey;
 const testing = std.testing;
 const debug_state = @import("debug_state.zig");
 
-// Default EVM configuration for devtool
-const DefaultConfig = Evm.EvmConfig.init(.CANCUN);
-const DefaultEvm = Evm.Evm(DefaultConfig);
+// Default EVM configuration for devtool (currently unused)
+const config = Evm.EvmConfig.init(.CANCUN);
+const EvmType = Evm.Evm;
 
 const DevtoolEvm = @This();
 
 allocator: std.mem.Allocator,
 database: MemoryDatabase,
-evm: DefaultEvm,
+evm: EvmType,
 host: Host,
 bytecode: []u8,
 
@@ -55,7 +55,7 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
     errdefer database.deinit();
 
     const db_interface = database.to_database_interface();
-    var evm = try DefaultEvm.init(allocator, db_interface, null, 0, false, null);
+    var evm = try EvmType.init(allocator, db_interface, null, null, null, 0, false, null);
     errdefer evm.deinit();
 
     // Host must outlive frames; store on struct
@@ -172,6 +172,12 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
         self.allocator.destroy(frame);
         self.current_frame = null;
     }
+    // Clean up previous analysis if present before creating a new one
+    if (self.analysis) |a| {
+        a.deinit();
+        self.allocator.destroy(a);
+        self.analysis = null;
+    }
 
     // Clear storage tracking
     self.storage_changes.clearRetainingCapacity();
@@ -204,7 +210,6 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
     self.analysis = analysis_ptr;
 
     // Prepare frame dependencies from the VM
-    const snapshot_id: u32 = self.evm.journal.create_snapshot();
     const frame_val = try Evm.Frame.init(
         1_000_000, // gas_remaining
         false, // static_call
@@ -213,19 +218,12 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
         contract.caller, // caller
         0, // value
         analysis_ptr, // analysis
-        &self.evm.access_list,
-        &self.evm.journal,
-        &self.host,
-        snapshot_id,
-        self.evm.state.database,
-        DefaultEvm.convertToFrameChainRules(self.evm.chain_rules),
-        &self.evm.self_destruct,
-        &self.evm.created_contracts,
+        self.host, // host
+        self.evm.state.database, // state
+        self.evm.chain_rules, // chain_rules
+        &self.evm.self_destruct, // self_destruct
         &[_]u8{}, // input
-        self.allocator,
-        null, // next_frame
-        false, // is_create_call
-        false, // is_delegate_call
+        self.allocator, // allocator
     );
     const frame_ptr = try self.allocator.create(Evm.Frame);
     frame_ptr.* = frame_val;
@@ -295,12 +293,12 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
         .pc = if (self.is_completed) 0 else pc_now,
         .opcode = try self.allocator.dupe(u8, shown_opcode),
         .gasLeft = frame.gas_remaining,
-        .depth = frame.depth(),
-        .stack = try debug_state.serializeStack(self.allocator, frame.stack),
-        .memory = try debug_state.serializeMemory(self.allocator, frame.memory),
+        .depth = frame.depth,
+        .stack = try debug_state.serializeStack(self.allocator, &frame.stack),
+        .memory = try debug_state.serializeMemory(self.allocator, &frame.memory),
         .storage = try storage_entries.toOwnedSlice(),
         .logs = try self.allocator.alloc([]const u8, 0),
-        .returnData = try debug_state.formatBytesHex(self.allocator, frame.output),
+        .returnData = try debug_state.formatBytesHex(self.allocator, self.host.get_output()),
     };
 
     // Serialize to JSON and clean up
@@ -391,47 +389,25 @@ pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
                 self.instr_index += 1;
                 continue;
             },
-            .jump_target => |jt| {
-                // Handle resolved jump target inline and count as a visible step
-                switch (jt.jump_type) {
-                    .jump => {
-                        const dest = frame.stack.pop_unsafe();
-                        if (!frame.valid_jumpdest(dest)) {
-                            exec_err = Evm.ExecutionError.Error.InvalidJump;
-                            self.is_completed = true;
-                            break;
-                        }
-                        self.instr_index = @intFromPtr(jt.instruction) - @intFromPtr(instructions.ptr);
-                        new_pc = @intCast(dest);
-                    },
-                    .jumpi => {
-                        const pops = frame.stack.pop2_unsafe();
-                        const dest = pops.a;
-                        const cond = pops.b;
-                        if (cond != 0) {
-                            if (!frame.valid_jumpdest(dest)) {
-                                exec_err = Evm.ExecutionError.Error.InvalidJump;
-                                self.is_completed = true;
-                                break;
-                            }
-                            self.instr_index = @intFromPtr(jt.instruction) - @intFromPtr(instructions.ptr);
-                            new_pc = @intCast(dest);
-                        } else {
-                            self.instr_index += 1;
-                            // fall through to next byte after JUMPI opcode
-                            if (pc_before < self.bytecode.len) new_pc = pc_before + 1;
-                        }
-                    },
-                    .other => {
-                        self.instr_index = @intFromPtr(jt.instruction) - @intFromPtr(instructions.ptr);
-                        // other jump target: treat as control-flow change to target instruction
-                        // We don't know exact PC here; keep current new_pc unless it's a known jump
-                    },
+            .conditional_jump => |true_target| {
+                // Optimized JUMPI: destination resolved at analysis time
+                const cond = frame.stack.pop_unsafe();
+                if (cond != 0) {
+                    const base: [*]const @TypeOf(inst) = instructions.ptr;
+                    const idx = (@intFromPtr(true_target) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst));
+                    self.instr_index = idx;
+                    // Map instruction index to PC for debugger view
+                    if (self.findPcForInstructionIndex(idx)) |pc_val| {
+                        new_pc = pc_val;
+                    }
+                } else {
+                    self.instr_index += 1;
+                    if (pc_before < self.bytecode.len) new_pc = pc_before + 1;
                 }
                 made_visible_progress = true;
                 continue;
             },
-            .push_value => |value| {
+            .word => |value| {
                 // PUSH value onto stack (visible)
                 self.instr_index += 1;
                 frame.stack.append(value) catch |err| {
@@ -443,6 +419,44 @@ pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
                     const imm_len: usize = if (op == 0x5f) 0 else if (op >= 0x60 and op <= 0x7f) @intCast(op - 0x5f) else 0;
                     new_pc = pc_before + 1 + imm_len;
                 }
+                made_visible_progress = true;
+            },
+            .keccak => |params| {
+                // Charge static gas
+                if (frame.gas_remaining < params.gas_cost) {
+                    frame.gas_remaining = 0;
+                    exec_err = Evm.ExecutionError.Error.OutOfGas;
+                    self.is_completed = true;
+                    break;
+                }
+                frame.gas_remaining -= params.gas_cost;
+                // Resolve size: immediate if present, else from stack
+                const size: u256 = if (params.size) |imm| @as(u256, @intCast(imm)) else frame.stack.pop_unsafe();
+                const offset = frame.stack.pop_unsafe();
+                if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+                    exec_err = Evm.ExecutionError.Error.OutOfOffset;
+                    self.is_completed = true;
+                    break;
+                }
+                const offset_usize: usize = @intCast(offset);
+                const size_usize: usize = @intCast(size);
+                if (size == 0) {
+                    const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+                    frame.stack.append_unsafe(empty_hash);
+                } else {
+                    const data = frame.memory.get_slice(offset_usize, size_usize) catch |err| {
+                        exec_err = err;
+                        self.is_completed = true;
+                        break;
+                    };
+                    var hash: [32]u8 = undefined;
+                    std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
+                    const result = std.mem.readInt(u256, &hash, .big);
+                    frame.stack.append_unsafe(result);
+                }
+                // Advance one opcode byte
+                self.instr_index += 1;
+                if (pc_before < self.bytecode.len) new_pc = pc_before + 1;
                 made_visible_progress = true;
             },
             .none => {
