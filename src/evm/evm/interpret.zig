@@ -6,120 +6,13 @@ const Frame = @import("../frame.zig").Frame;
 const Log = @import("../log.zig");
 const Evm = @import("../evm.zig");
 const builtin = @import("builtin");
+const UnreachableHandler = @import("../analysis.zig").UnreachableHandler;
 
 // Hoist U256 type alias used by fused arithmetic ops
 const U256 = @import("primitives").Uint(256, 4);
 
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
-
-// Private inline functions for jump handling
-inline fn handle_jump(frame: *Frame) ExecutionError.Error!void {
-    const dest = frame.stack.pop_unsafe();
-    const analysis = frame.analysis;
-    if (!frame.valid_jumpdest(dest)) {
-        Log.debug("[interpret] JUMP invalid destination: dest={} (code_len={})", .{ dest, analysis.code_len });
-        return ExecutionError.Error.InvalidJump;
-    }
-    Log.debug("[interpret] JUMP valid destination: dest={} -> jumping", .{dest});
-    const dest_usize: usize = @intCast(dest);
-    const idx = analysis.pc_to_block_start[dest_usize];
-    if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
-        Log.debug("[interpret] JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
-        return ExecutionError.Error.InvalidJump;
-    }
-    frame.instruction_index = idx;
-}
-
-inline fn handle_jumpi(frame: *Frame) ExecutionError.Error!void {
-    const pops = frame.stack.pop2_unsafe();
-    const analysis = frame.analysis;
-    // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
-    const dest = pops.b;
-    const condition = pops.a;
-    if (condition != 0) {
-        if (!frame.valid_jumpdest(dest)) {
-            Log.debug("[interpret] JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, analysis.code_len });
-            return ExecutionError.Error.InvalidJump;
-        }
-        Log.debug("[interpret] JUMPI condition true, jumping to dest {}", .{dest});
-        const dest_usize: usize = @intCast(dest);
-        const idx = analysis.pc_to_block_start[dest_usize];
-        if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
-            Log.debug("[interpret] JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
-            return ExecutionError.Error.InvalidJump;
-        }
-        frame.instruction_index = idx;
-    } else {
-        Log.debug("[interpret] JUMPI condition false, fallthrough to next instruction", .{});
-        frame.instruction_index += 1;
-    }
-}
-
-inline fn handle_dynamic_jump(frame: *Frame) ExecutionError.Error!void {
-    // Backtrace last few original PCs/opcodes to understand control flow
-    var bt: usize = 1;
-    const analysis = frame.analysis;
-    while (bt <= 4 and frame.instruction_index >= bt) : (bt += 1) {
-        const iprev = frame.instruction_index - bt;
-        const pcprev16 = analysis.inst_to_pc[iprev];
-        if (pcprev16 == std.math.maxInt(u16)) break;
-        const pcprev: usize = pcprev16;
-        const opprev: u8 = if (pcprev < analysis.code_len) analysis.code[pcprev] else 0x00;
-        Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
-    }
-    const dest = frame.stack.pop_unsafe();
-    if (!frame.valid_jumpdest(dest)) {
-        Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, analysis.code_len });
-        return ExecutionError.Error.InvalidJump;
-    }
-    const dest_usize: usize = @intCast(dest);
-    const idx = analysis.pc_to_block_start[dest_usize];
-    if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
-        Log.debug("[interpret] Dynamic JUMP pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
-        return ExecutionError.Error.InvalidJump;
-    }
-    Log.debug("[interpret] Dynamic JUMP mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
-    Log.debug("[interpret] Dynamic JUMP resolved to instruction index {} for dest {}", .{ idx, dest });
-    frame.instruction_index = idx;
-}
-
-inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame) ExecutionError.Error!void {
-    const analysis = frame.analysis;
-    // Backtrace before conditional jump as well
-    var bt: usize = 1;
-    while (bt <= 4 and frame.instruction_index >= bt) : (bt += 1) {
-        const iprev = frame.instruction_index - bt;
-        const pcprev16 = analysis.inst_to_pc[iprev];
-        if (pcprev16 == std.math.maxInt(u16)) break;
-        const pcprev: usize = pcprev16;
-        const opprev: u8 = if (pcprev < analysis.code_len) analysis.code[pcprev] else 0x00;
-        Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
-    }
-    const pops = frame.stack.pop2_unsafe();
-    // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
-    const dest = pops.b;
-    const condition = pops.a;
-    Log.debug("[interpret] Dynamic JUMPI to dest={} cond={} (inst_idx={}, depth={}, gas={})", .{ dest, condition, frame.instruction_index, self.depth, frame.gas_remaining });
-    if (condition != 0) {
-        if (!frame.valid_jumpdest(dest)) {
-            Log.debug("[interpret] Dynamic JUMPI invalid destination on true branch: dest={} (code_len={})", .{ dest, analysis.code_len });
-            return ExecutionError.Error.InvalidJump;
-        }
-        const dest_usize: usize = @intCast(dest);
-        const idx = analysis.pc_to_block_start[dest_usize];
-        if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
-            Log.debug("[interpret] Dynamic JUMPI pc_to_block_start invalid mapping: dest={} idx={} inst_len={}", .{ dest, idx, analysis.instructions.len });
-            return ExecutionError.Error.InvalidJump;
-        }
-        Log.debug("[interpret] Dynamic JUMPI mapping: dest_pc={} -> beginblock_inst_idx={}", .{ dest_usize, idx });
-        Log.debug("[interpret] Dynamic JUMPI condition true, jumping to instruction index {} for dest {}", .{ idx, dest });
-        frame.instruction_index = idx;
-    } else {
-        Log.debug("[interpret] Dynamic JUMPI condition false, fallthrough", .{});
-        frame.instruction_index += 1;
-    }
-}
 
 /// Execute contract bytecode using block-based execution.
 ///
@@ -137,121 +30,103 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
     const analysis = frame.analysis;
     const instructions = analysis.instructions;
-    Log.debug("[interpret] Starting with {} instructions (incl. sentinel), gas={}", .{ instructions.len, frame.gas_remaining });
     const frame_opaque: *anyopaque = @ptrCast(frame);
 
-    var current_index: usize = 0;
     frame.instruction_index = 0;
     var loop_iterations: usize = 0;
     while (true) {
-        if (comptime SAFE) {
-            loop_iterations += 1;
-            if (loop_iterations > MAX_ITERATIONS) {
-                unreachable;
+        {
+            if (comptime SAFE) {
+                loop_iterations += 1;
+                if (loop_iterations > MAX_ITERATIONS) {
+                    unreachable;
+                }
             }
         }
 
         const inst = &instructions[frame.instruction_index];
+        const arg = inst.arg;
+        const op_fn = inst.opcode_fn;
 
-        // Optional tracing hook (compile-time gated; zero runtime overhead when disabled)
-        if (comptime build_options.enable_tracing) {
-            if (self.tracer) |writer| {
-                if (current_index < analysis.inst_to_pc.len) {
-                    const pc_u16 = analysis.inst_to_pc[current_index];
-                    if (pc_u16 != std.math.maxInt(u16)) {
-                        const pc: usize = pc_u16;
-                        const opcode: u8 = if (pc < analysis.code_len) analysis.code[pc] else 0x00;
-                        const stack_len: usize = frame.stack.size();
-                        const stack_view: []const u256 = frame.stack.data[0..stack_len];
-                        const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
-                        const mem_size: usize = frame.memory.size();
-                        var tr = Tracer.init(writer);
-                        _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
+        {
+            if (comptime build_options.enable_tracing) {
+                if (self.tracer) |writer| {
+                    if (frame.instruction_index < analysis.inst_to_pc.len) {
+                        const pc_u16 = analysis.inst_to_pc[frame.instruction_index];
+                        if (pc_u16 != std.math.maxInt(u16)) {
+                            const pc: usize = pc_u16;
+                            const opcode: u8 = if (pc < analysis.code_len) analysis.code[pc] else 0x00;
+                            const stack_len: usize = frame.stack.size();
+                            const stack_view: []const u256 = frame.stack.data[0..stack_len];
+                            const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
+                            const mem_size: usize = frame.memory.size();
+                            var tr = Tracer.init(writer);
+                            _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
+                        }
                     }
                 }
             }
         }
-        switch (inst.arg) {
-            // BEGINBLOCK instructions - validate entire basic block upfront
-            // This eliminates per-instruction gas and stack validation for the entire block
+
+        switch (arg) {
             .block_info => |block| {
-                // Compute current stack size once for logging and validation
                 const current_stack_size: u16 = @intCast(frame.stack.size());
-                // Debug: show block-level validation details
-                const dbg_pc: usize = if (current_index < analysis.inst_to_pc.len) blk: {
-                    const pc16 = analysis.inst_to_pc[current_index];
-                    break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
-                } else 0;
-                Log.debug("[interpret] BEGINBLOCK at inst_idx={} pc={} gas_cost={} stack_req={} max_growth={} curr_stack={}", .{
-                    current_index,
-                    dbg_pc,
-                    block.gas_cost,
-                    block.stack_req,
-                    block.stack_max_growth,
-                    current_stack_size,
-                });
-                // Validate gas for the entire block up-front
                 if (frame.gas_remaining < block.gas_cost) {
-                    @branchHint(.cold);
+                    @branchHint(.unlikely);
                     frame.gas_remaining = 0;
                     return ExecutionError.Error.OutOfGas;
                 }
                 frame.gas_remaining -= block.gas_cost;
-
-                // Validate stack requirements for this block
                 if (current_stack_size < block.stack_req) {
-                    Log.debug("[interpret] StackUnderflow at block entry: need {} have {}", .{ block.stack_req, current_stack_size });
+                    @branchHint(.cold);
                     return ExecutionError.Error.StackUnderflow;
                 }
-                // EVM stack limit is 1024
                 if (current_stack_size + block.stack_max_growth > 1024) {
+                    @branchHint(.cold);
                     return ExecutionError.Error.StackOverflow;
                 }
-
-                // Advance to the next instruction in the block
-                // Keep a reference to the opcode function pointer to avoid warnings
-                const op_fn_dbg = inst.opcode_fn;
-                current_index += 1;
-                frame.instruction_index = current_index;
-                // Note: The opcode_fn for BEGINBLOCK is a no-op; validation is handled here
-                _ = op_fn_dbg;
+                // BEGINBLOCK has no opcode function to run; advance and continue
+                frame.instruction_index += 1;
+                continue;
             },
-            // For jumps we handle them inline as they are preprocessed by analysis
-            // 1. Handle dynamic jumps validating it is a valid jumpdest
-            // 2. Handle optional jump
-            // 3. Handle normal jump
-            .jump_target => |jump_target| {
-                switch (jump_target.jump_type) {
-                    .jump => try @import("../execution/control.zig").op_jump(frame_opaque),
-                    .jumpi => try @import("../execution/control.zig").op_jumpi(frame_opaque),
+            .jump_target => |target| {
+                switch (target.jump_type) {
+                    .jump => {
+                        frame.instruction_index = target.instruction_index;
+                        continue;
+                    },
+                    .jumpi => {
+                        const condition = frame.stack.pop();
+                        if (condition != 0) {
+                            frame.instruction_index = target.instruction_index;
+                            continue;
+                        }
+                        // Not taken: advance one and skip opcode function
+                        frame.instruction_index += 1;
+                        continue;
+                    },
                     .other => {
-                        current_index += 1;
-                        frame.instruction_index = current_index;
+                        frame.instruction_index += 1;
+                        continue;
                     },
                 }
             },
             .word => |value| {
-                const pc_dbg: usize = if (current_index < analysis.inst_to_pc.len) blk: {
-                    const pc16 = analysis.inst_to_pc[current_index];
-                    break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
-                } else 0;
-                const op_dbg: u8 = if (pc_dbg < analysis.code_len) analysis.code[pc_dbg] else 0x00;
-                Log.debug("[interpret] PUSH at pc={} op=0x{x} value={x}", .{ pc_dbg, op_dbg, value });
-                current_index += 1;
-                frame.instruction_index = current_index;
                 frame.stack.append_unsafe(value);
-                try inst.opcode_fn(frame_opaque);
+                // Pure PUSH has UnreachableHandler; skip calling and advance
+                if (op_fn == UnreachableHandler) {
+                    frame.instruction_index += 1;
+                    continue;
+                }
             },
             .pc_value => |pc| {
-                Log.debug("[interpret] PC at pc={} pushing value={}", .{ pc, pc });
-                current_index += 1;
-                frame.instruction_index = current_index;
                 frame.stack.append_unsafe(@as(u256, pc));
+                // PC is handled inline; do not call opcode_fn
+                frame.instruction_index += 1;
+                continue;
             },
             // Fusion cases are no longer needed; handled via `.word` + opcode_fn
             .keccak => |params| {
-                current_index += 1;
-                frame.instruction_index = current_index;
                 // Consume precomputed gas cost
                 if (frame.gas_remaining < params.gas_cost) {
                     @branchHint(.cold);
@@ -289,92 +164,24 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     const result = std.mem.readInt(u256, &hash, .big);
                     frame.stack.append_unsafe(result);
                 }
+                // KECCAK handled inline; advance and continue
+                frame.instruction_index += 1;
+                continue;
             },
             .none => {
                 @branchHint(.likely);
-                // Debug logging for all instructions
-                const pc_val = if (current_index < analysis.inst_to_pc.len) analysis.inst_to_pc[current_index] else std.math.maxInt(u16);
-                const opcode_at_pc = if (pc_val != std.math.maxInt(u16) and pc_val < analysis.code_len) analysis.code[pc_val] else 0xFF;
-                Log.debug("[interpret] Executing instruction at index {} (pc={}, opcode=0x{x})", .{ current_index, pc_val, opcode_at_pc });
-                // Handle dynamic JUMP/JUMPI at runtime if needed
-                Log.debug("[interpret] inst_jump_type.len={}, current_index={}", .{ analysis.inst_jump_type.len, current_index });
-                if (current_index >= analysis.inst_jump_type.len) {
-                    Log.err("[interpret] ERROR: current_index {} >= inst_jump_type.len {}", .{ current_index, analysis.inst_jump_type.len });
-                    return ExecutionError.Error.InvalidOpcode;
-                }
-                const jt = analysis.inst_jump_type[current_index];
-                switch (jt) {
-                    .jump => {
-                        try @import("../execution/control.zig").op_jump(frame_opaque);
-                        continue;
-                    },
-                    .jumpi => {
-                        try @import("../execution/control.zig").op_jumpi(frame_opaque);
-                        continue;
-                    },
-                    .other => {
-                        // Most opcodes now have .none - no individual gas/stack validation needed
-                        // Gas and stack validation is handled by BEGINBLOCK instructions
-                        // Cache function pointer before advancing index
-                        const op_fn = inst.opcode_fn;
-                        current_index += 1;
-                        frame.instruction_index = current_index;
-                        op_fn(frame_opaque) catch |err| {
-                            // Frame already manages its own output, no need to copy
-                            Log.debug("[interpret] Opcode at index {} returned error: {}", .{ current_index - 1, err });
-
-                            // Handle gas exhaustion for InvalidOpcode specifically
-                            if (err == ExecutionError.Error.InvalidOpcode) {
-                                frame.gas_remaining = 0;
-                            }
-
-                            // CRITICAL DEBUG: Log when STOP error is returned (which RETURN uses)
-                            if (err == ExecutionError.Error.STOP) {
-                                const pc_for_debug = if (current_index - 1 < analysis.inst_to_pc.len)
-                                    analysis.inst_to_pc[current_index - 1]
-                                else
-                                    std.math.maxInt(u16);
-                                const opcode_for_debug = if (pc_for_debug != std.math.maxInt(u16) and pc_for_debug < analysis.code_len)
-                                    analysis.code[pc_for_debug]
-                                else
-                                    0xFF;
-                                Log.debug("[interpret] STOP error from opcode 0x{x} at PC={}, depth={}, should halt execution", .{ opcode_for_debug, pc_for_debug, self.depth });
-                            }
-
-                            return err;
-                        };
-                    },
-                }
+                // Fall through to call opcode function outside the switch
             },
             .gas_cost => |cost| {
-                // Legacy path - kept for compatibility
-                // Cache function pointer before advancing index
-                const op_fn = inst.opcode_fn;
-                current_index += 1;
-                frame.instruction_index = current_index;
                 if (frame.gas_remaining < cost) {
                     @branchHint(.cold);
                     frame.gas_remaining = 0;
                     return ExecutionError.Error.OutOfGas;
                 }
                 frame.gas_remaining -= cost;
-
-                // Execute the opcode after charging gas
-                op_fn(frame_opaque) catch |err| {
-                    if (err == ExecutionError.Error.InvalidOpcode) {
-                        frame.gas_remaining = 0;
-                    }
-                    return err;
-                };
+                // Fall through to call opcode function outside the switch
             },
             .dynamic_gas => |dyn_gas| {
-                // New path for opcodes with dynamic gas
-                // Cache function pointer before advancing index
-                const op_fn = inst.opcode_fn;
-                current_index += 1;
-                frame.instruction_index = current_index;
-
-                // Charge static gas first
                 if (frame.gas_remaining < dyn_gas.static_cost) {
                     @branchHint(.cold);
                     frame.gas_remaining = 0;
@@ -382,14 +189,11 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
                 frame.gas_remaining -= dyn_gas.static_cost;
 
-                // Calculate and charge dynamic gas if function exists
                 if (dyn_gas.gas_fn) |gas_fn| {
                     const additional_gas = gas_fn(frame) catch |err| {
-                        // If dynamic gas calculation fails, it's usually OutOfOffset
                         if (err == ExecutionError.Error.OutOfOffset) {
                             return err;
                         }
-                        // For other errors, treat as out of gas
                         frame.gas_remaining = 0;
                         return ExecutionError.Error.OutOfGas;
                     };
@@ -401,31 +205,13 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     }
                     frame.gas_remaining -= additional_gas;
                 }
-
-                // Execute the opcode after all gas is charged
-                op_fn(frame_opaque) catch |err| {
-                    if (err == ExecutionError.Error.InvalidOpcode) {
-                        frame.gas_remaining = 0;
-                    }
-                    return err;
-                };
+                // Fall through to call opcode function outside the switch
             },
         }
-    }
-
-    Log.debug("[interpret] Reached end of instructions without STOP/RETURN, current_index={}, len={}", .{ current_index, instructions.len });
-
-    // CRITICAL DEBUG: This should rarely happen - most contracts end with STOP/RETURN/REVERT
-    // If we're seeing this during contract deployment, it likely means RETURN didn't halt execution
-    if (current_index < analysis.inst_to_pc.len) {
-        const last_pc = if (current_index > 0 and current_index - 1 < analysis.inst_to_pc.len)
-            analysis.inst_to_pc[current_index - 1]
-        else
-            std.math.maxInt(u16);
-        if (last_pc != std.math.maxInt(u16) and last_pc < analysis.code_len) {
-            const last_opcode = analysis.code[last_pc];
-            Log.debug("[interpret] WARNING: Last executed opcode was 0x{x} at PC={}, but execution continued!", .{ last_opcode, last_pc });
-        }
+        // Execute opcode function (for cases that didn't continue above)
+        try op_fn(frame_opaque);
+        // Then advance to the next instruction
+        frame.instruction_index += 1;
     }
 }
 

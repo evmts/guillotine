@@ -1,12 +1,10 @@
 const std = @import("std");
 const ExecutionError = @import("execution/execution_error.zig");
-const Frame = @import("frame.zig").Frame;
 const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 
 pub const JumpType = enum {
     jump, // Unconditional jump (JUMP)
     jumpi, // Conditional jump (JUMPI)
-    other, // Other jump targets (for future use)
 };
 
 pub const JumpTarget = struct {
@@ -45,7 +43,7 @@ pub const BlockInfo = struct {
 /// Function signature for dynamic gas calculation.
 /// Takes a frame and returns the additional gas cost to charge.
 /// This is used for opcodes with runtime-dependent gas costs.
-pub const DynamicGasFunc = *const fn (frame: *Frame) ExecutionError.Error!u64;
+pub const DynamicGasFunc = *const fn (frame: *anyopaque) ExecutionError.Error!u64;
 
 /// Information for opcodes that have dynamic gas costs
 pub const DynamicGas = struct {

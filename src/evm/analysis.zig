@@ -599,9 +599,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
                 if (opcode == .JUMP) {
+                    const ctrl = @import("execution/control.zig");
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = UnreachableHandler, // Handled inline by interpreter
-                        .arg = .none, // May be filled by resolveJumpTargets; runtime resolution otherwise
+                        .opcode_fn = ctrl.op_jump,
+                        .arg = .none,
                     };
                     inst_jump_type[instruction_count] = .jump;
                 } else {
@@ -642,9 +643,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Record PC to instruction mapping for JUMPI
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
+                const ctrl = @import("execution/control.zig");
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = UnreachableHandler, // Handled inline by interpreter
-                    .arg = .none, // May be filled by resolveJumpTargets; runtime resolution otherwise
+                    .opcode_fn = ctrl.op_jumpi,
+                    .arg = .none,
                 };
                 inst_jump_type[instruction_count] = .jumpi;
                 instruction_count += 1;
@@ -1354,29 +1356,27 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
 
     // Now resolve JUMP and JUMPI targets
     for (instructions, 0..) |*inst, idx| {
-        // Check if this is a JUMP or JUMPI by looking for UnreachableHandler with no arg yet
-        if (inst.opcode_fn == UnreachableHandler and inst.arg == .none) {
-            // Look at the previous instruction for a PUSH value
-            if (idx > 0 and instructions[idx - 1].arg == .word) {
-                const target_pc = instructions[idx - 1].arg.word;
+        // Determine original bytecode opcode for this instruction index
+        var original_pc: ?usize = null;
+        for (pc_to_instruction, 0..) |mapped_idx, pc| {
+            if (mapped_idx == idx) {
+                original_pc = pc;
+                break;
+            }
+        }
 
-                // Validate the jump target is a valid JUMPDEST
-                if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {
-                    // Find the BEGINBLOCK for this target PC
-                    const block_idx = pc_to_block_start[@intCast(target_pc)];
-                    if (block_idx != std.math.maxInt(u16) and block_idx < instructions.len) {
-                        // Determine if this is JUMP or JUMPI by checking the original bytecode
-                        // We need to find the PC for this instruction
-                        var original_pc: ?usize = null;
-                        for (pc_to_instruction, 0..) |mapped_idx, pc| {
-                            if (mapped_idx == idx) {
-                                original_pc = pc;
-                                break;
-                            }
-                        }
+        if (original_pc) |pc| {
+            const opcode_byte = code[pc];
+            if (opcode_byte == 0x56 or opcode_byte == 0x57) { // JUMP or JUMPI
+                // Look at the previous instruction for a PUSH value
+                if (idx > 0 and instructions[idx - 1].arg == .word) {
+                    const target_pc = instructions[idx - 1].arg.word;
 
-                        if (original_pc) |pc| {
-                            const opcode_byte = code[pc];
+                    // Validate the jump target is a valid JUMPDEST
+                    if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {
+                        // Find the BEGINBLOCK for this target PC
+                        const block_idx = pc_to_block_start[@intCast(target_pc)];
+                        if (block_idx != std.math.maxInt(u16) and block_idx < instructions.len) {
                             const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
                             inst.arg = .{ .jump_target = JumpTarget{
                                 .instruction_index = @intCast(block_idx),
