@@ -386,14 +386,14 @@ pub fn deinit(self: *CodeAnalysis) void {
 /// Get the dynamic gas function for a specific opcode
 fn getDynamicGasFunction(opcode: Opcode.Enum) ?DynamicGasFunc {
     return switch (opcode) {
-        .CALL => dynamic_gas.call_dynamic_gas,
-        .CALLCODE => dynamic_gas.callcode_dynamic_gas,
-        .DELEGATECALL => dynamic_gas.delegatecall_dynamic_gas,
-        .STATICCALL => dynamic_gas.staticcall_dynamic_gas,
-        .CREATE => dynamic_gas.create_dynamic_gas,
-        .CREATE2 => dynamic_gas.create2_dynamic_gas,
-        .SSTORE => dynamic_gas.sstore_dynamic_gas,
-        .GAS => dynamic_gas.gas_dynamic_gas,
+        .CALL => @ptrCast(&dynamic_gas.call_dynamic_gas),
+        .CALLCODE => @ptrCast(&dynamic_gas.callcode_dynamic_gas),
+        .DELEGATECALL => @ptrCast(&dynamic_gas.delegatecall_dynamic_gas),
+        .STATICCALL => @ptrCast(&dynamic_gas.staticcall_dynamic_gas),
+        .CREATE => @ptrCast(&dynamic_gas.create_dynamic_gas),
+        .CREATE2 => @ptrCast(&dynamic_gas.create2_dynamic_gas),
+        .SSTORE => @ptrCast(&dynamic_gas.sstore_dynamic_gas),
+        .GAS => @ptrCast(&dynamic_gas.gas_dynamic_gas),
         else => null,
     };
 }
@@ -599,16 +599,17 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
                 if (opcode == .JUMP) {
-                    const ctrl = @import("execution/control.zig");
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = ctrl.op_jump,
-                        .arg = .none,
+                        .opcode_fn = UnreachableHandler, // control handled in interpreter via next_instruction
+                        .arg = .{ .jump_target = .{ .jump_type = .jump } },
+                        .next_instruction = undefined, // set later
                     };
                     inst_jump_type[instruction_count] = .jump;
                 } else {
                     instructions[instruction_count] = Instruction{
                         .opcode_fn = operation.execute,
                         .arg = .none,
+                        .next_instruction = undefined, // set later
                     };
                 }
                 instruction_count += 1;
@@ -643,10 +644,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Record PC to instruction mapping for JUMPI
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
-                const ctrl = @import("execution/control.zig");
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = ctrl.op_jumpi,
-                    .arg = .none,
+                    .opcode_fn = UnreachableHandler, // control handled in interpreter via next_instruction
+                    .arg = .{ .jump_target = .{ .jump_type = .jumpi } },
+                    .next_instruction = undefined, // set later
                 };
                 inst_jump_type[instruction_count] = .jumpi;
                 instruction_count += 1;
@@ -944,9 +945,10 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     .arg = .{
                         .dynamic_gas = DynamicGas{
                             .static_cost = @intCast(operation.constant_gas),
-                            .gas_fn = getDynamicGasFunction(opcode),
+                            .gas_fn = @ptrCast(getDynamicGasFunction(opcode)),
                         },
                     },
+                    .next_instruction = undefined,
                 };
                 instruction_count += 1;
                 pc += 1;
@@ -1171,7 +1173,13 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         Log.debug("[analysis] Added implicit STOP at end, total instructions: {}", .{instruction_count});
     }
 
-    // Append sentinel terminator after resolving jumps and before resize
+    // Initialize next_instruction pointers to sequential next by default
+    var ii: usize = 0;
+    while (ii < instruction_count) : (ii += 1) {
+        const next_idx = if (ii + 1 < instruction_count) ii + 1 else ii;
+        instructions[ii].next_instruction = &instructions[next_idx];
+    }
+
     // Resolve jump targets after initial translation, passing the PC to instruction mapping
     resolveJumpTargets(code, instructions[0..instruction_count], jumpdest_bitmap, pc_to_instruction) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
@@ -1378,10 +1386,9 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
                         const block_idx = pc_to_block_start[@intCast(target_pc)];
                         if (block_idx != std.math.maxInt(u16) and block_idx < instructions.len) {
                             const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
-                            inst.arg = .{ .jump_target = JumpTarget{
-                                .instruction_index = @intCast(block_idx),
-                                .jump_type = jump_type,
-                            } };
+                            inst.arg = .{ .jump_target = JumpTarget{ .jump_type = jump_type } };
+                            // Set next_instruction to resolved target. For JUMPI, interpreter uses this when condition is true
+                            inst.next_instruction = &instructions[block_idx];
                         }
                     }
                 }
@@ -1462,7 +1469,7 @@ test "jump target resolution with BEGINBLOCK injections" {
             jump_found = true;
             if (inst.arg.jump_target.jump_type == .jump) {
                 // Verify the target points to a BEGINBLOCK instruction
-                if (analysis.instructions[inst.arg.jump_target.instruction_index].opcode_fn == BeginBlockHandler) {
+                if (inst.next_instruction.opcode_fn == BeginBlockHandler) {
                     jump_target_valid = true;
                 }
             }
@@ -1510,7 +1517,7 @@ test "conditional jump (JUMPI) target resolution" {
             if (inst.arg.jump_target.jump_type == .jumpi) {
                 jumpi_found = true;
                 // Verify the target points to a BEGINBLOCK instruction
-                if (analysis.instructions[inst.arg.jump_target.instruction_index].opcode_fn == BeginBlockHandler) {
+                if (inst.next_instruction.opcode_fn == BeginBlockHandler) {
                     jumpi_target_valid = true;
                 }
             }

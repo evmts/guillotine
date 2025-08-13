@@ -5,10 +5,10 @@ const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 pub const JumpType = enum {
     jump, // Unconditional jump (JUMP)
     jumpi, // Conditional jump (JUMPI)
+    other, // Non-jump/default
 };
 
 pub const JumpTarget = struct {
-    instruction_index: usize,
     jump_type: JumpType,
 };
 
@@ -56,6 +56,7 @@ pub const DynamicGas = struct {
 pub const Instruction = struct {
     opcode_fn: ExecutionFunc,
     arg: AnalysisArg,
+    next_instruction: *const Instruction = undefined,
 
     pub const STOP: Instruction = .{ .opcode_fn = StopHandler, .arg = .none };
 };

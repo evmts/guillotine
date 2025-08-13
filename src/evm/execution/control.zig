@@ -28,9 +28,7 @@ pub fn op_jump(context: *anyopaque) ExecutionError.Error!void {
     if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
         return ExecutionError.Error.InvalidJump;
     }
-
-    // Transfer control
-    frame.instruction_index = idx;
+    frame.instruction = &analysis.instructions[idx];
 }
 
 pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
@@ -51,10 +49,12 @@ pub fn op_jumpi(context: *anyopaque) ExecutionError.Error!void {
         if (idx == std.math.maxInt(u16) or idx >= analysis.instructions.len) {
             return ExecutionError.Error.InvalidJump;
         }
-        frame.instruction_index = idx;
+        frame.instruction = &analysis.instructions[idx];
     } else {
         // Fallthrough to next instruction
-        frame.instruction_index += 1;
+        const base: [*]const @TypeOf((frame.instruction).*) = analysis.instructions.ptr;
+        const idx = (@intFromPtr(frame.instruction) - @intFromPtr(base)) / @sizeOf(@TypeOf((frame.instruction).*));
+        frame.instruction = if (idx + 1 < analysis.instructions.len) &analysis.instructions[idx + 1] else frame.instruction;
     }
 }
 

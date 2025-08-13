@@ -231,7 +231,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
         );
         self.frame_stack.?[0].code = call_info.code;
         // Initialize instruction pointer to first instruction
-        self.frame_stack.?[0].instruction_index = 0;
+        self.frame_stack.?[0].instruction = &analysis.instructions[0];
         // Frame resources will be released after execution completes
 
         // Mark that we've allocated the first frame
@@ -289,7 +289,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         self.frame_stack.?[new_depth].code = call_info.code;
-        self.frame_stack.?[new_depth].instruction_index = 0;
+        self.frame_stack.?[new_depth].instruction = &analysis.instructions[0];
 
         // Update tracking
         self.current_frame_depth = new_depth;

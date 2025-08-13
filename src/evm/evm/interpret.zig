@@ -32,7 +32,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
     const instructions = analysis.instructions;
     const frame_opaque: *anyopaque = @ptrCast(frame);
 
-    frame.instruction_index = 0;
+    frame.instruction = &instructions[0];
     var loop_iterations: usize = 0;
     while (true) {
         {
@@ -44,15 +44,18 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             }
         }
 
-        const inst = &instructions[frame.instruction_index];
+        const inst = frame.instruction;
         const arg = inst.arg;
         const op_fn = inst.opcode_fn;
 
         {
             if (comptime build_options.enable_tracing) {
                 if (self.tracer) |writer| {
-                    if (frame.instruction_index < analysis.inst_to_pc.len) {
-                        const pc_u16 = analysis.inst_to_pc[frame.instruction_index];
+                    // Derive index of current instruction for tracing
+                    const base: [*]const @TypeOf((frame.instruction).*) = instructions.ptr;
+                    const idx = (@intFromPtr(frame.instruction) - @intFromPtr(base)) / @sizeOf(@TypeOf((frame.instruction).*));
+                    if (idx < analysis.inst_to_pc.len) {
+                        const pc_u16 = analysis.inst_to_pc[idx];
                         if (pc_u16 != std.math.maxInt(u16)) {
                             const pc: usize = pc_u16;
                             const opcode: u8 = if (pc < analysis.code_len) analysis.code[pc] else 0x00;
@@ -86,27 +89,31 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     return ExecutionError.Error.StackOverflow;
                 }
                 // BEGINBLOCK has no opcode function to run; advance and continue
-                frame.instruction_index += 1;
+                frame.instruction = inst.next_instruction;
                 continue;
             },
             .jump_target => |target| {
                 switch (target.jump_type) {
                     .jump => {
-                        frame.instruction_index = target.instruction_index;
+                        _ = frame.stack.pop_unsafe();
+                        frame.instruction = inst.next_instruction;
                         continue;
                     },
                     .jumpi => {
-                        const condition = frame.stack.pop();
+                        const pops = frame.stack.pop2_unsafe();
+                        const condition = pops.a;
                         if (condition != 0) {
-                            frame.instruction_index = target.instruction_index;
+                            frame.instruction = inst.next_instruction;
                             continue;
                         }
-                        // Not taken: advance one and skip opcode function
-                        frame.instruction_index += 1;
+                        // False branch: sequential fallthrough
+                        const base: [*]const @TypeOf(inst.*) = instructions.ptr;
+                        const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+                        frame.instruction = if (idx + 1 < instructions.len) &instructions[idx + 1] else inst;
                         continue;
                     },
                     .other => {
-                        frame.instruction_index += 1;
+                        frame.instruction = inst.next_instruction;
                         continue;
                     },
                 }
@@ -115,14 +122,14 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 frame.stack.append_unsafe(value);
                 // Pure PUSH has UnreachableHandler; skip calling and advance
                 if (op_fn == UnreachableHandler) {
-                    frame.instruction_index += 1;
+                    frame.instruction = inst.next_instruction;
                     continue;
                 }
             },
             .pc_value => |pc| {
                 frame.stack.append_unsafe(@as(u256, pc));
                 // PC is handled inline; do not call opcode_fn
-                frame.instruction_index += 1;
+                frame.instruction = inst.next_instruction;
                 continue;
             },
             // Fusion cases are no longer needed; handled via `.word` + opcode_fn
@@ -165,7 +172,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     frame.stack.append_unsafe(result);
                 }
                 // KECCAK handled inline; advance and continue
-                frame.instruction_index += 1;
+                frame.instruction = inst.next_instruction;
                 continue;
             },
             .none => {
@@ -211,7 +218,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         // Execute opcode function (for cases that didn't continue above)
         try op_fn(frame_opaque);
         // Then advance to the next instruction
-        frame.instruction_index += 1;
+        frame.instruction = inst.next_instruction;
     }
 }
 
