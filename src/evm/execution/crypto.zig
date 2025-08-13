@@ -122,8 +122,8 @@ pub fn op_sha3_precomputed(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const offset = frame.stack.pop_unsafe();
-    const size = frame.stack.pop_unsafe();
+    const offset = try frame.stack.pop();
+    const size = try frame.stack.pop();
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -145,7 +145,7 @@ pub fn op_sha3_precomputed(context: *anyopaque) ExecutionError.Error!void {
         }
         // Hash of empty data = keccak256("")
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        frame.stack.append_unsafe(empty_hash);
+        try frame.stack.append(empty_hash);
         return;
     }
 
@@ -178,7 +178,7 @@ pub fn op_sha3_precomputed(context: *anyopaque) ExecutionError.Error!void {
     // Convert hash to u256 using std.mem for efficiency
     const result = std.mem.readInt(u256, &hash, .big);
 
-    frame.stack.append_unsafe(result);
+    try frame.stack.append(result);
 }
 
 // FIXME: All test functions that used Frame/Contract have been removed
