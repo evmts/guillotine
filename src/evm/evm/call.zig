@@ -81,21 +81,21 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
         },
     }
-    
+
     // For top-level calls, charge the base transaction cost
     var remaining_gas = call_gas;
     if (is_top_level_call) {
         const GasConstants = @import("primitives").GasConstants;
         const base_cost = GasConstants.TxGas;
-        
+
         Log.debug("[call] Top-level call detected, charging base cost: {}", .{base_cost});
-        
+
         // Check if we have enough gas for the base cost
         if (remaining_gas < base_cost) {
             Log.debug("[call] Insufficient gas for base transaction cost: {} < {}", .{ remaining_gas, base_cost });
             return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
         }
-        
+
         remaining_gas -= base_cost;
         Log.debug("[call] Charged base transaction cost: {}, remaining: {}", .{ base_cost, remaining_gas });
     } else {
@@ -230,6 +230,8 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             self.allocator, // use general allocator for frame-owned allocations
         );
         self.frame_stack.?[0].code = call_info.code;
+        // Initialize instruction pointer to first instruction
+        self.frame_stack.?[0].instruction_index = 0;
         // Frame resources will be released after execution completes
 
         // Mark that we've allocated the first frame
@@ -287,6 +289,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             return CallResult{ .success = false, .gas_left = call_info.gas, .output = &.{} };
         };
         self.frame_stack.?[new_depth].code = call_info.code;
+        self.frame_stack.?[new_depth].instruction_index = 0;
 
         // Update tracking
         self.current_frame_depth = new_depth;
@@ -357,7 +360,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     interpret(self, current_frame) catch |err| {
         Log.debug("[call] Interpret ended with error: {}", .{err});
         exec_err = err;
-        
+
         // CRITICAL DEBUG: Log specific errors that should stop execution
         if (err == ExecutionError.Error.STOP) {
             Log.debug("[call] CRITICAL: Received STOP error from interpret, execution should halt", .{});

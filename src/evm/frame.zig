@@ -32,6 +32,7 @@ pub const ChainRules = @import("hardforks/chain_rules.zig").ChainRules;
 /// Layout optimized for actual opcode access patterns and cache performance
 pub const Frame = struct {
     // ULTRA HOT - First cache line priority (accessed by virtually every opcode)
+    instruction_index: usize,
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
     stack: Stack, // value - accessed by every opcode (heap-backed storage inside)
 
@@ -83,6 +84,7 @@ pub const Frame = struct {
         const hardfork = chain_rules.getHardfork();
 
         return Frame{
+            .instruction_index = 0,
             .gas_remaining = gas_remaining,
             // MEMORY ALLOCATION: Stack for EVM execution
             // Expected size: 32KB (1024 * 32 bytes)
@@ -353,7 +355,6 @@ const TestHelpers = struct {
     fn createMockDatabase(allocator: std.mem.Allocator) !MemoryDatabase {
         return MemoryDatabase.init(allocator);
     }
-
 };
 
 test "Frame - basic initialization" {
