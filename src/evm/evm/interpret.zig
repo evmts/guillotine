@@ -134,30 +134,27 @@ inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize)
 ///
 /// The caller is responsible for creating and managing the Frame and its components.
 pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
+    {
+        self.require_one_thread();
+    }
+
     const analysis = frame.analysis;
-    self.require_one_thread();
-
-    Log.debug("[interpret] Starting with {} instructions, gas={}", .{ analysis.instructions.len, frame.gas_remaining });
-
-    // Frame is provided by caller, get the analysis from it
     const instructions = analysis.instructions;
-    var current_index: usize = 0;
-    var loop_iterations: usize = 0;
-    // Precompute once for opcode thunks
+    Log.debug("[interpret] Starting with {} instructions (incl. sentinel), gas={}", .{ instructions.len, frame.gas_remaining });
     const frame_opaque: *anyopaque = @ptrCast(frame);
 
-    while (current_index < instructions.len) {
-        @branchHint(.likely);
-        const inst = &instructions[current_index];
-
-        // In safe mode we make sure we don't loop too much. If this happens
+    var current_index: usize = 0;
+    var next_instruction: *const @TypeOf(instructions[0]) = &instructions[0];
+    var loop_iterations: usize = 0;
+    while (true) {
         if (comptime SAFE) {
             loop_iterations += 1;
             if (loop_iterations > MAX_ITERATIONS) {
-                Log.err("interpret: Infinite loop detected after {} iterations at pc={}, depth={}, gas={}. This should never happen and indicates either the limit was set too low or a high severity bug has been found in EVM", .{ loop_iterations, current_index, self.depth, frame.gas_remaining });
                 unreachable;
             }
         }
+
+        const inst = next_instruction;
 
         // Optional tracing hook (compile-time gated; zero runtime overhead when disabled)
         if (comptime build_options.enable_tracing) {
@@ -218,6 +215,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 // Keep a reference to the opcode function pointer to avoid warnings
                 const op_fn_dbg = inst.opcode_fn;
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 // Note: The opcode_fn for BEGINBLOCK is a no-op; validation is handled here
                 _ = op_fn_dbg;
             },
@@ -235,6 +233,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                         current_index += 1;
                     },
                 }
+                next_instruction = &instructions[current_index];
             },
             .push_value => |value| {
                 @branchHint(.likely);
@@ -245,28 +244,33 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 const op_dbg: u8 = if (pc_dbg < analysis.code_len) analysis.code[pc_dbg] else 0x00;
                 Log.debug("[interpret] PUSH at pc={} op=0x{x} value={x}", .{ pc_dbg, op_dbg, value });
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 frame.stack.append_unsafe(value);
             },
             .pc_value => |pc| {
                 Log.debug("[interpret] PC at pc={} pushing value={}", .{ pc, pc });
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 frame.stack.append_unsafe(@as(u256, pc));
             },
             // Synthetic operations - fused instruction patterns
             .push_add_fusion => |immediate| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 const top_value = try frame.stack.peek_unsafe();
                 const result = top_value +% immediate;
                 frame.stack.set_top_unsafe(result);
             },
             .push_sub_fusion => |immediate| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 const top_value = try frame.stack.peek_unsafe();
                 const result = immediate -% top_value;
                 frame.stack.set_top_unsafe(result);
             },
             .push_mul_fusion => |immediate| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 const top_value = try frame.stack.peek_unsafe();
                 const top_value_u256 = U256.from_u256_unsafe(top_value);
                 const immediate_u256 = U256.from_u256_unsafe(immediate);
@@ -276,17 +280,20 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             },
             .push_div_fusion => |immediate| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 const top_value = try frame.stack.peek_unsafe();
                 const result = if (top_value == 0) 0 else immediate / top_value;
                 frame.stack.set_top_unsafe(result);
             },
             .push_push_result => |result| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 // Directly push the precomputed result
                 frame.stack.append_unsafe(result);
             },
             .keccak_precomputed => |params| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 // Consume precomputed gas cost
                 if (frame.gas_remaining < params.gas_cost) {
                     @branchHint(.cold);
@@ -327,6 +334,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             },
             .keccak_immediate_size => |params| {
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 // Consume precomputed gas cost
                 if (frame.gas_remaining < params.gas_cost) {
                     @branchHint(.cold);
@@ -388,10 +396,12 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 switch (jt) {
                     .jump => {
                         try handle_dynamic_jump(self, frame, &current_index);
+                        next_instruction = &instructions[current_index];
                         continue; // proceed to next loop iteration of the while-loop
                     },
                     .jumpi => {
                         try handle_dynamic_jumpi(self, frame, &current_index);
+                        next_instruction = &instructions[current_index];
                         continue; // handled; proceed to next while-loop iteration
                     },
                     .other => {
@@ -400,6 +410,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                         // Cache function pointer before advancing index
                         const op_fn = inst.opcode_fn;
                         current_index += 1;
+                        next_instruction = &instructions[current_index];
                         op_fn(frame_opaque) catch |err| {
                             // Frame already manages its own output, no need to copy
                             Log.debug("[interpret] Opcode at index {} returned error: {}", .{ current_index - 1, err });
@@ -432,6 +443,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 // Cache function pointer before advancing index
                 const op_fn = inst.opcode_fn;
                 current_index += 1;
+                next_instruction = &instructions[current_index];
                 if (frame.gas_remaining < cost) {
                     @branchHint(.cold);
                     frame.gas_remaining = 0;
@@ -452,6 +464,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 // Cache function pointer before advancing index
                 const op_fn = inst.opcode_fn;
                 current_index += 1;
+                next_instruction = &instructions[current_index];
 
                 // Charge static gas first
                 if (frame.gas_remaining < dyn_gas.static_cost) {

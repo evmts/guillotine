@@ -112,6 +112,7 @@ pub const JumpdestArray = struct {
 pub const CodeAnalysis = @This();
 
 /// Heap-allocated instruction stream for execution.
+/// Regular slice; analysis appends a STOP instruction as the final element.
 /// Must be freed by caller using deinit().
 instructions: []Instruction,
 
@@ -248,11 +249,12 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
 
     if (code.len == 0) {
         Log.debug("[analysis] Empty code, returning empty analysis", .{});
-        // For empty code, convert empty bitmap to empty array and create empty instruction array
+        // For empty code, convert empty bitmap to empty array and create 1-element array with sentinel
         const jumpdest_array = try JumpdestArray.from_bitmap(allocator, &jumpdest_bitmap, code.len);
         jumpdest_bitmap.deinit(); // Free the temporary bitmap
 
-        const empty_instructions = try allocator.alloc(Instruction, 0);
+        const empty_instructions = try allocator.alloc(Instruction, 1);
+        empty_instructions[0] = Instruction.STOP;
         const empty_jump_types = try allocator.alloc(JumpType, 0);
         const empty_pc_map = try allocator.alloc(u16, 0);
         const empty_inst_to_pc = try allocator.alloc(u16, 0);
@@ -1167,12 +1169,13 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         Log.debug("[analysis] Added implicit STOP at end, total instructions: {}", .{instruction_count});
     }
 
-    // No terminator needed for slices
-
+    // Append sentinel terminator after resolving jumps and before resize
     // Resolve jump targets after initial translation, passing the PC to instruction mapping
     resolveJumpTargets(code, instructions[0..instruction_count], jumpdest_bitmap, pc_to_instruction) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
     };
+
+    // No extra sentinel past-the-end when using a regular slice
 
     // MEMORY ALLOCATION: PC to block start mapping
     // Expected size: code_len * 2 bytes
@@ -1202,7 +1205,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         }
     }
 
-    // Resize arrays to actual sizes
+    // Resize arrays to actual sizes (final instruction stream already includes STOP when needed)
     Log.debug("[analysis] Resizing arrays: instruction_count={}, inst_jump_type.len={}", .{ instruction_count, inst_jump_type.len });
     const final_instructions = try allocator.realloc(instructions, instruction_count);
     const final_jump_types = try allocator.realloc(inst_jump_type, instruction_count);
@@ -1265,16 +1268,18 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 /// This includes precomputing values for operations like SHA3 when inputs are known at analysis time.
 fn applyPatternOptimizations(instructions: []Instruction, code: []const u8) !void {
     _ = code; // Will be used for more complex patterns later
-    
+
     // Look for patterns where we can precompute values
     var i: usize = 0;
     while (i < instructions.len) : (i += 1) {
         // Skip if not an executable instruction
         const inst = &instructions[i];
-        if (inst.opcode_fn == UnreachableHandler or inst.opcode_fn == BeginBlockHandler) {
+        if ((inst.opcode_fn == UnreachableHandler) or
+            (inst.opcode_fn == BeginBlockHandler))
+        {
             continue;
         }
-        
+
         // Check for SHA3/KECCAK256 pattern: PUSH size, PUSH offset, SHA3
         if (i >= 2) {
             const crypto = @import("execution/crypto.zig");
@@ -1282,30 +1287,32 @@ fn applyPatternOptimizations(instructions: []Instruction, code: []const u8) !voi
                 // Check if the previous two instructions are PUSH values
                 const offset_inst = &instructions[i - 1];
                 const size_inst = &instructions[i - 2];
-                
+
                 if (size_inst.arg == .push_value and offset_inst.arg == .push_value) {
                     // We have PUSH size, PUSH offset, SHA3 pattern
                     const size = size_inst.arg.push_value;
                     const offset = offset_inst.arg.push_value;
-                    
+
                     // Precompute gas costs
                     const word_count = (size + 31) / 32;
                     const sha3_dynamic_gas = 6 * word_count;
-                    
+
                     // Calculate memory expansion cost
                     const new_mem_size = offset + size;
                     const new_mem_words = (new_mem_size + 31) / 32;
                     const memory_cost = if (new_mem_size == 0) 0 else (new_mem_words * new_mem_words) / 512 + (3 * new_mem_words);
-                    
+
                     // Total gas cost: base SHA3 cost (30) + dynamic cost + memory expansion
                     const total_gas = 30 + sha3_dynamic_gas + memory_cost;
-                    
+
                     // Update the instruction with precomputed gas and optimized handler
-                    inst.arg = .{ .dynamic_gas = DynamicGas{
-                        .static_cost = @intCast(total_gas),
-                        .gas_fn = null, // No dynamic calculation needed
-                    } };
-                    
+                    inst.arg = .{
+                        .dynamic_gas = DynamicGas{
+                            .static_cost = @intCast(total_gas),
+                            .gas_fn = null, // No dynamic calculation needed
+                        },
+                    };
+
                     // Use the optimized handler that skips gas calculations
                     inst.opcode_fn = crypto.op_sha3_precomputed;
                 }
@@ -1614,29 +1621,28 @@ test "invalid jump target handling" {
 
 test "SHA3 precomputation - detect PUSH followed by SHA3" {
     const allocator = std.testing.allocator;
-    
+
     // Bytecode: PUSH1 0x20 PUSH1 0x00 SHA3
     // This should compute keccak256 of 32 bytes starting at offset 0
     const code = &[_]u8{
-        0x60, 0x20,  // PUSH1 32 (size)
-        0x60, 0x00,  // PUSH1 0 (offset)
-        0x20,        // SHA3/KECCAK256
+        0x60, 0x20, // PUSH1 32 (size)
+        0x60, 0x00, // PUSH1 0 (offset)
+        0x20, // SHA3/KECCAK256
     };
-    
+
     const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
-    
+
     // The SHA3 instruction should have precomputed values
     try std.testing.expectEqual(@as(usize, 6), analysis.instructions.len); // 5 opcodes + 1 STOP
-    
+
     // Check that the SHA3 instruction has precomputed values
     const sha3_inst = &analysis.instructions[4];
-    
-    
+
     // Should have precomputed gas cost
     try std.testing.expect(sha3_inst.arg == .dynamic_gas);
-    
+
     // Word count should be precomputed: (32 + 31) / 32 = 1
     const expected_word_count: u32 = 1;
     const expected_gas_cost: u32 = 30 + (6 * expected_word_count); // SHA3 base cost + dynamic
@@ -1645,32 +1651,32 @@ test "SHA3 precomputation - detect PUSH followed by SHA3" {
 
 test "SHA3 precomputation - various sizes" {
     const allocator = std.testing.allocator;
-    
+
     const test_cases = [_]struct { size: u16, word_count: u32, gas: u32 }{
-        .{ .size = 0, .word_count = 0, .gas = 30 },     // Empty data
-        .{ .size = 1, .word_count = 1, .gas = 36 },     // 1 byte = 1 word
-        .{ .size = 32, .word_count = 1, .gas = 36 },    // 32 bytes = 1 word
-        .{ .size = 33, .word_count = 2, .gas = 42 },    // 33 bytes = 2 words
-        .{ .size = 64, .word_count = 2, .gas = 42 },    // 64 bytes = 2 words
-        .{ .size = 96, .word_count = 3, .gas = 48 },    // 96 bytes = 3 words
+        .{ .size = 0, .word_count = 0, .gas = 30 }, // Empty data
+        .{ .size = 1, .word_count = 1, .gas = 36 }, // 1 byte = 1 word
+        .{ .size = 32, .word_count = 1, .gas = 36 }, // 32 bytes = 1 word
+        .{ .size = 33, .word_count = 2, .gas = 42 }, // 33 bytes = 2 words
+        .{ .size = 64, .word_count = 2, .gas = 42 }, // 64 bytes = 2 words
+        .{ .size = 96, .word_count = 3, .gas = 48 }, // 96 bytes = 3 words
         .{ .size = 1024, .word_count = 32, .gas = 222 }, // 1024 bytes = 32 words
     };
-    
+
     inline for (test_cases) |tc| {
         const code = if (tc.size <= 255) &[_]u8{
-            0x60, @intCast(tc.size),  // PUSH1 size
-            0x60, 0x00,  // PUSH1 0 (offset)
-            0x20,        // SHA3/KECCAK256
+            0x60, @intCast(tc.size), // PUSH1 size
+            0x60, 0x00, // PUSH1 0 (offset)
+            0x20, // SHA3/KECCAK256
         } else &[_]u8{
-            0x61, @intCast(tc.size >> 8), @intCast(tc.size & 0xFF),  // PUSH2 size
-            0x60, 0x00,  // PUSH1 0 (offset)
-            0x20,        // SHA3/KECCAK256
+            0x61, @intCast(tc.size >> 8), @intCast(tc.size & 0xFF), // PUSH2 size
+            0x60, 0x00, // PUSH1 0 (offset)
+            0x20, // SHA3/KECCAK256
         };
-        
+
         const table = OpcodeMetadata.DEFAULT;
         var analysis = try CodeAnalysis.from_code(allocator, code, &table);
         defer analysis.deinit();
-        
+
         const sha3_idx = if (tc.size <= 255) 4 else 5;
         const sha3_inst = &analysis.instructions[sha3_idx];
         try std.testing.expect(sha3_inst.arg == .dynamic_gas);
@@ -1680,55 +1686,55 @@ test "SHA3 precomputation - various sizes" {
 
 test "SHA3 precomputation - with memory expansion" {
     const allocator = std.testing.allocator;
-    
+
     // Bytecode: PUSH2 0x0100 PUSH2 0x1000 SHA3
     // This should compute keccak256 of 256 bytes starting at offset 4096
     // Memory expansion: from 0 to 4096+256 = 4352 bytes = 136 words
     const code = &[_]u8{
-        0x61, 0x01, 0x00,  // PUSH2 256 (size)
-        0x61, 0x10, 0x00,  // PUSH2 4096 (offset) 
-        0x20,              // SHA3/KECCAK256
+        0x61, 0x01, 0x00, // PUSH2 256 (size)
+        0x61, 0x10, 0x00, // PUSH2 4096 (offset)
+        0x20, // SHA3/KECCAK256
     };
-    
+
     const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
-    
+
     const sha3_inst = &analysis.instructions[5];
     try std.testing.expect(sha3_inst.arg == .dynamic_gas);
-    
+
     // Calculate expected costs
     const size: u32 = 256;
     const offset: u32 = 4096;
     const word_count: u32 = (size + 31) / 32; // 8 words
     const sha3_dynamic_gas: u32 = 6 * word_count; // 48
-    
+
     // Memory expansion cost calculation
     const new_mem_size: u32 = offset + size; // 4352
     const new_mem_words: u32 = (new_mem_size + 31) / 32; // 136 words
     const memory_cost: u32 = (new_mem_words * new_mem_words) / 512 + (3 * new_mem_words);
-    
+
     const total_gas: u32 = 30 + sha3_dynamic_gas + memory_cost;
     try std.testing.expectEqual(total_gas, sha3_inst.arg.dynamic_gas.static_cost);
 }
 
 test "SHA3 precomputation - not applied when size unknown" {
     const allocator = std.testing.allocator;
-    
+
     // Bytecode: DUP1 DUP1 SHA3 (size comes from stack, not PUSH)
     const code = &[_]u8{
-        0x80,  // DUP1
-        0x80,  // DUP1
-        0x20,  // SHA3/KECCAK256
+        0x80, // DUP1
+        0x80, // DUP1
+        0x20, // SHA3/KECCAK256
     };
-    
+
     const table = OpcodeMetadata.DEFAULT;
     var analysis = try CodeAnalysis.from_code(allocator, code, &table);
     defer analysis.deinit();
-    
+
     // The SHA3 instruction should NOT have precomputed values
     const sha3_inst = &analysis.instructions[3]; // BEGINBLOCK + DUP1 + DUP1 + SHA3
-    
+
     // Should not have dynamic_gas with precomputed values
     try std.testing.expect(sha3_inst.arg != .dynamic_gas or sha3_inst.arg.dynamic_gas.gas_fn != null);
 }
