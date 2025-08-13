@@ -1,50 +1,51 @@
 
-[2025-08-12 12:06:24] Starting perf-fastest.sh
-[2025-08-12 12:06:24] ROOT_DIR=/Users/williamcory/guillotine
-[2025-08-12 12:06:24] System: Darwin Williams-Mac-mini.local 24.3.0 Darwin Kernel Version 24.3.0: Thu Jan  2 20:24:22 PST 2025; root:xnu-11215.81.4~3/RELEASE_ARM64_T6041 arm64
-[2025-08-12 12:06:24] zig: 0.14.1
-[2025-08-12 12:06:24] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
-[2025-08-12 12:06:24] cargo: cargo 1.88.0 (873a06493 2025-05-10)
-[2025-08-12 12:06:24] bun: 1.2.20
-[2025-08-12 12:06:24] hyperfine: hyperfine 1.19.0
-[2025-08-12 12:06:24] git: branch=review commit=20afed7 dirty=yes
-[2025-08-12 12:06:24] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
-[2025-08-12 12:06:24] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
-[2025-08-12 12:06:24] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
-[2025-08-12 12:06:24] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
-[2025-08-12 12:06:24] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner
-[2025-08-12 12:06:24] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner-small
-[2025-08-12 12:06:24] Building Zig runners (ReleaseFast and ReleaseSmall)
+[2025-08-13 03:11:24] Starting perf-fastest.sh
+[2025-08-13 03:11:24] ROOT_DIR=/Users/williamcory/guillotine
+[2025-08-13 03:11:24] System: Darwin Williams-MacBook-Pro-2.local 24.5.0 Darwin Kernel Version 24.5.0: Tue Apr 22 19:52:00 PDT 2025; root:xnu-11417.121.6~2/RELEASE_ARM64_T6031 arm64
+[2025-08-13 03:11:24] zig: 0.14.1
+[2025-08-13 03:11:25] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
+[2025-08-13 03:11:25] cargo: cargo 1.88.0 (873a06493 2025-05-10)
+[2025-08-13 03:11:25] bun: 1.2.19
+[2025-08-13 03:11:25] hyperfine: hyperfine 1.19.0
+[2025-08-13 03:11:25] git: branch=review commit=3207d424 dirty=yes
+[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
+[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
+[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
+[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
+[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner
+[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner-small
+[2025-08-13 03:11:25] Building Zig runners (ReleaseFast and ReleaseSmall)
 info: Downloading blst library...
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/williamcory/guillotine/src/compilers/Cargo.toml
-workspace: /Users/williamcory/guillotine/Cargo.toml
+package:   /Users/williamcory/Guillotine/src/compilers/Cargo.toml
+workspace: /Users/williamcory/Guillotine/Cargo.toml
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml
-workspace: /Users/williamcory/guillotine/Cargo.toml
-warning: /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
-    Finished `release` profile [optimized] target(s) in 0.18s
+package:   /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml
+workspace: /Users/williamcory/Guillotine/Cargo.toml
+warning: /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
+   Compiling revm_wrapper v0.1.0 (/Users/williamcory/Guillotine/src/revm_wrapper)
+    Finished `release` profile [optimized] target(s) in 21.77s
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100  583k    0  583k    0     0   712k      0 --:--:-- --:--:-- --:--:-- 1325k
+100  583k    0  583k    0     0   818k      0 --:--:-- --:--:-- --:--:--  818k
 info: Downloading blst library...
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/williamcory/guillotine/src/compilers/Cargo.toml
-workspace: /Users/williamcory/guillotine/Cargo.toml
+package:   /Users/williamcory/Guillotine/src/compilers/Cargo.toml
+workspace: /Users/williamcory/Guillotine/Cargo.toml
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml
-workspace: /Users/williamcory/guillotine/Cargo.toml
-warning: /Users/williamcory/guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
-    Finished `release` profile [optimized] target(s) in 0.12s
+package:   /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml
+workspace: /Users/williamcory/Guillotine/Cargo.toml
+warning: /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
+    Finished `release` profile [optimized] target(s) in 0.14s
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100   839    0   839    0     0   1934      0 --:--:-- --:--:-- --:--:--  1934100  583k    0  583k    0     0   940k      0 --:--:-- --:--:-- --:--:-- 3131k
-[2025-08-12 12:06:34] Building orchestrator (ReleaseFast)
+100 44231    0 44231    0     0   103k      0 --:--:-- --:--:-- --:--:--  103k100  583k    0  583k    0     0  1099k      0 --:--:-- --:--:-- --:--:-- 4778k
+[2025-08-13 03:11:58] Building orchestrator (ReleaseFast)
 info: Downloading blst library...
 -- CPM: adding package evmone@0.9.1 (v0.9.1)
-CMake Warning (dev) at /opt/homebrew/share/cmake/Modules/FetchContent.cmake:1953 (message):
+CMake Warning (dev) at /opt/homebrew/Cellar/cmake/3.30.5/share/cmake/Modules/FetchContent.cmake:1953 (message):
   Calling FetchContent_Populate(evmone) is deprecated, call
   FetchContent_MakeAvailable(evmone) instead.  Policy CMP0169 can be set to
   OLD to allow FetchContent_Populate(evmone) to be called directly for now,
@@ -59,12 +60,11 @@ This warning is for project developers.  Use -Wno-dev to suppress it.
 -- [cable ] Cable 0.5.0 initialized
 -- Build type: Release
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -75,12 +75,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -92,12 +91,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -110,12 +108,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -128,12 +125,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
@@ -147,12 +143,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -164,12 +159,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -182,12 +176,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -200,12 +193,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
@@ -219,12 +211,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -236,12 +227,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -252,12 +242,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_private_data.cmake:12 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:35 (include)
@@ -267,12 +256,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_initialize.cmake:4 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:36 (include)
@@ -283,24 +271,22 @@ Call Stack (most recent call first):
 
 -- [hunter] Calculating Toolchain-SHA1
 CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 
 
 -- [hunter] Calculating Config-SHA1
 -- [hunter] HUNTER_ROOT: /Users/williamcory/.hunter
 -- [hunter] [ Hunter-ID: d7279c1 | Toolchain-ID: 093c2f0 | Config-ID: 7ad575f ]
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -312,12 +298,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -330,12 +315,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -349,12 +333,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -368,12 +351,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
@@ -388,12 +370,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -406,12 +387,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -425,12 +405,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -444,12 +423,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
@@ -464,12 +442,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -482,12 +459,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -499,12 +475,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -517,12 +492,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -536,12 +510,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -556,12 +529,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -576,12 +548,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
@@ -597,12 +568,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -616,12 +586,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -636,12 +605,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -656,12 +624,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
@@ -677,12 +644,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -696,12 +662,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -714,12 +679,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:6 (include)
@@ -730,12 +694,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
@@ -747,12 +710,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:4 (include)
@@ -763,12 +725,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
@@ -780,12 +741,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
@@ -795,12 +755,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
@@ -810,12 +769,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
@@ -844,12 +802,11 @@ CMake Warning (dev) at build/_deps/evmone-src/CMakeLists.txt:40 (find_package):
 This warning is for project developers.  Use -Wno-dev to suppress it.
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -861,12 +818,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -879,12 +835,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -898,12 +853,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -917,12 +871,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
@@ -937,12 +890,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -955,12 +907,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -974,12 +925,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -993,12 +943,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
@@ -1013,12 +962,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -1031,12 +979,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -1048,12 +995,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -1066,12 +1012,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -1085,12 +1030,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -1105,12 +1049,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
@@ -1125,12 +1068,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
@@ -1146,12 +1088,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -1165,12 +1106,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -1185,12 +1125,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
@@ -1205,12 +1144,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
@@ -1226,12 +1164,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
@@ -1245,12 +1182,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
@@ -1263,12 +1199,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:6 (include)
@@ -1279,12 +1214,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
@@ -1296,12 +1230,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:4 (include)
@@ -1312,12 +1245,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
@@ -1329,12 +1261,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
@@ -1344,12 +1275,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
@@ -1359,12 +1289,11 @@ Call Stack (most recent call first):
 
 
 CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.10 will be removed from a future version of
+  Compatibility with CMake < 3.5 will be removed from a future version of
   CMake.
 
-  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
-  to tell CMake that the project requires at least <min> but has been updated
-  to work with policies introduced by <max> or earlier.
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
 Call Stack (most recent call first):
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
   /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
@@ -1394,15 +1323,39 @@ This warning is for project developers.  Use -Wno-dev to suppress it.
 
 -- Configuring done (1.2s)
 -- Generating done (0.0s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_POLICY_VERSION_MINIMUM
+
+
 -- Build files have been written to: /Users/williamcory/guillotine/bench/official/evms/evmone/build
+[ 12%] Building C object _deps/evmone-build/evmc/lib/instructions/CMakeFiles/instructions.dir/instruction_metrics.c.o
+[ 12%] Building C object _deps/evmone-build/evmc/lib/instructions/CMakeFiles/instructions.dir/instruction_names.c.o
+[ 18%] Linking C static library libevmc-instructions.a
 [ 18%] Built target instructions
+[ 25%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_analysis.cpp.o
+[ 31%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/baseline_instruction_table.cpp.o
+[ 37%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_execution.cpp.o
+[ 50%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_instructions.cpp.o
+[ 50%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/instructions_calls.cpp.o
+[ 56%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/eof.cpp.o
+[ 68%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/instructions_storage.cpp.o
+[ 68%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/baseline.cpp.o
+[ 75%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/tracing.cpp.o
+[ 81%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/vm.cpp.o
+[ 87%] Linking CXX shared library ../../../../lib/libevmone.dylib
 [ 87%] Built target evmone
+[ 93%] Building CXX object CMakeFiles/evmone-runner.dir/runner.cpp.o
+[100%] Linking CXX executable evmone-runner
 [100%] Built target evmone-runner
-[2025-08-12 12:06:39] Running orchestrator with compare mode (single run per case)
-[2025-08-12 12:06:39] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
+[2025-08-13 03:12:05] Running orchestrator with compare mode (single run per case)
+[2025-08-13 03:12:05] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
 
 === Running benchmarks for zig ===
 
 === Benchmarking erc20-approval-transfer ===
+Errors:
+Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
 error: SyntaxError
-[2025-08-12 12:06:39] ERROR: Command failed (exit=1) at line 87: tee -a "${LOG_FILE}"
+[2025-08-13 03:12:06] ERROR: Command failed (exit=1) at line 87: tee -a "${LOG_FILE}"
