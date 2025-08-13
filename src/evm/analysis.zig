@@ -672,7 +672,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = UnreachableHandler,
-                    .arg = .{ .push_value = 0 },
+                    .arg = .{ .word = 0 },
                 };
                 instruction_count += 1;
                 pc += 1;
@@ -717,7 +717,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = UnreachableHandler,
-                    .arg = .{ .push_value = value },
+                    .arg = .{ .word = value },
                 };
                 Log.debug("[analysis] PUSH at pc={} size={} value={x}, instruction_count={}", .{ original_pc, push_size, value, instruction_count });
                 instruction_count += 1;
@@ -753,7 +753,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                     // Replace our PUSH with the precomputed result
                                     instructions[instruction_count - 1] = Instruction{
                                         .opcode_fn = UnreachableHandler,
-                                        .arg = .{ .push_value = result },
+                                        .arg = .{ .word = result },
                                     };
                                     // Update gas and stack tracking
                                     block.gas_cost += 3 + 3; // Two PUSHes (already counted one) + ADD
@@ -768,7 +768,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                     // Replace our PUSH with the precomputed result
                                     instructions[instruction_count - 1] = Instruction{
                                         .opcode_fn = UnreachableHandler,
-                                        .arg = .{ .push_value = result },
+                                        .arg = .{ .word = result },
                                     };
                                     // Update gas and stack tracking
                                     block.gas_cost += 3 + 5; // Two PUSHes (already counted one) + MUL
@@ -783,7 +783,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                     // Replace our PUSH with the precomputed result
                                     instructions[instruction_count - 1] = Instruction{
                                         .opcode_fn = UnreachableHandler,
-                                        .arg = .{ .push_value = result },
+                                        .arg = .{ .word = result },
                                     };
                                     // Update gas and stack tracking
                                     block.gas_cost += 3 + 3; // Two PUSHes (already counted one) + SUB
@@ -798,7 +798,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                     // Replace our PUSH with the precomputed result
                                     instructions[instruction_count - 1] = Instruction{
                                         .opcode_fn = UnreachableHandler,
-                                        .arg = .{ .push_value = result },
+                                        .arg = .{ .word = result },
                                     };
                                     // Update gas and stack tracking
                                     block.gas_cost += 3 + 5; // Two PUSHes (already counted one) + DIV
@@ -824,7 +824,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                             // Replace PUSH with fused PUSH+ADD
                             instructions[instruction_count - 1] = Instruction{
                                 .opcode_fn = synthetic.op_push_add_fusion,
-                                .arg = .{ .push_add_fusion = value },
+                                .arg = .{ .word = value },
                             };
                             block.gas_cost += 3; // ADD gas
                             block.updateStackTracking(0x01, 1); // ADD with 1 input (other is immediate)
@@ -837,7 +837,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                             // Replace PUSH with fused PUSH+SUB
                             instructions[instruction_count - 1] = Instruction{
                                 .opcode_fn = synthetic.op_push_sub_fusion,
-                                .arg = .{ .push_sub_fusion = value },
+                                .arg = .{ .word = value },
                             };
                             block.gas_cost += 3; // SUB gas
                             block.updateStackTracking(0x03, 1);
@@ -863,7 +863,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                             // Replace PUSH with fused PUSH+MUL
                             instructions[instruction_count - 1] = Instruction{
                                 .opcode_fn = synthetic.op_push_mul_fusion,
-                                .arg = .{ .push_mul_fusion = value },
+                                .arg = .{ .word = value },
                             };
                             block.gas_cost += 5; // MUL gas
                             block.updateStackTracking(0x02, 1);
@@ -883,7 +883,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                             // Replace PUSH with fused PUSH+DIV
                             instructions[instruction_count - 1] = Instruction{
                                 .opcode_fn = synthetic.op_push_div_fusion,
-                                .arg = .{ .push_div_fusion = value },
+                                .arg = .{ .word = value },
                             };
                             block.gas_cost += 5; // DIV gas
                             block.updateStackTracking(0x04, 1);
@@ -1074,7 +1074,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
                     // Check if it was a push by looking at the arg type
                     switch (prev_instruction.arg) {
-                        .push_value => {
+                        .word => {
                             // PUSH+POP = NOP, remove the PUSH
                             instruction_count -= 1;
                             pc += 1; // Skip POP
@@ -1288,10 +1288,10 @@ fn applyPatternOptimizations(instructions: []Instruction, code: []const u8) !voi
                 const offset_inst = &instructions[i - 1];
                 const size_inst = &instructions[i - 2];
 
-                if (size_inst.arg == .push_value and offset_inst.arg == .push_value) {
+                if (size_inst.arg == .word and offset_inst.arg == .word) {
                     // We have PUSH size, PUSH offset, SHA3 pattern
-                    const size = size_inst.arg.push_value;
-                    const offset = offset_inst.arg.push_value;
+                    const size = size_inst.arg.word;
+                    const offset = offset_inst.arg.word;
 
                     // Precompute gas costs
                     const word_count = (size + 31) / 32;
@@ -1357,8 +1357,8 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
         // Check if this is a JUMP or JUMPI by looking for UnreachableHandler with no arg yet
         if (inst.opcode_fn == UnreachableHandler and inst.arg == .none) {
             // Look at the previous instruction for a PUSH value
-            if (idx > 0 and instructions[idx - 1].arg == .push_value) {
-                const target_pc = instructions[idx - 1].arg.push_value;
+            if (idx > 0 and instructions[idx - 1].arg == .word) {
+                const target_pc = instructions[idx - 1].arg.word;
 
                 // Validate the jump target is a valid JUMPDEST
                 if (target_pc < code.len and jumpdest_bitmap.isSet(@intCast(target_pc))) {

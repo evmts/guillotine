@@ -235,8 +235,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
                 next_instruction = &instructions[current_index];
             },
-            .push_value => |value| {
-                @branchHint(.likely);
+            .word => |value| {
                 const pc_dbg: usize = if (current_index < analysis.inst_to_pc.len) blk: {
                     const pc16 = analysis.inst_to_pc[current_index];
                     break :blk if (pc16 == std.math.maxInt(u16)) 0 else pc16;
@@ -246,6 +245,14 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 current_index += 1;
                 next_instruction = &instructions[current_index];
                 frame.stack.append_unsafe(value);
+                // After pushing the word, run the associated op (e.g., ADD/SUB/etc.)
+                const op_fn = inst.opcode_fn;
+                op_fn(frame_opaque) catch |err| {
+                    if (err == ExecutionError.Error.InvalidOpcode) {
+                        frame.gas_remaining = 0;
+                    }
+                    return err;
+                };
             },
             .pc_value => |pc| {
                 Log.debug("[interpret] PC at pc={} pushing value={}", .{ pc, pc });
@@ -253,45 +260,8 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 next_instruction = &instructions[current_index];
                 frame.stack.append_unsafe(@as(u256, pc));
             },
-            // Synthetic operations - fused instruction patterns
-            .push_add_fusion => |immediate| {
-                current_index += 1;
-                next_instruction = &instructions[current_index];
-                const top_value = try frame.stack.peek_unsafe();
-                const result = top_value +% immediate;
-                frame.stack.set_top_unsafe(result);
-            },
-            .push_sub_fusion => |immediate| {
-                current_index += 1;
-                next_instruction = &instructions[current_index];
-                const top_value = try frame.stack.peek_unsafe();
-                const result = immediate -% top_value;
-                frame.stack.set_top_unsafe(result);
-            },
-            .push_mul_fusion => |immediate| {
-                current_index += 1;
-                next_instruction = &instructions[current_index];
-                const top_value = try frame.stack.peek_unsafe();
-                const top_value_u256 = U256.from_u256_unsafe(top_value);
-                const immediate_u256 = U256.from_u256_unsafe(immediate);
-                const product_u256 = top_value_u256.wrapping_mul(immediate_u256);
-                const result = product_u256.to_u256_unsafe();
-                frame.stack.set_top_unsafe(result);
-            },
-            .push_div_fusion => |immediate| {
-                current_index += 1;
-                next_instruction = &instructions[current_index];
-                const top_value = try frame.stack.peek_unsafe();
-                const result = if (top_value == 0) 0 else immediate / top_value;
-                frame.stack.set_top_unsafe(result);
-            },
-            .push_push_result => |result| {
-                current_index += 1;
-                next_instruction = &instructions[current_index];
-                // Directly push the precomputed result
-                frame.stack.append_unsafe(result);
-            },
-            .keccak_precomputed => |params| {
+            // Fusion cases are no longer needed; handled via `.word` + opcode_fn
+            .keccak => |params| {
                 current_index += 1;
                 next_instruction = &instructions[current_index];
                 // Consume precomputed gas cost
@@ -301,8 +271,8 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     return ExecutionError.Error.OutOfGas;
                 }
                 frame.gas_remaining -= params.gas_cost;
-
-                const size = frame.stack.pop_unsafe();
+                // If size provided at analysis time, use it; otherwise pop from stack
+                const size = if (params.size) |imm| @as(u256, @intCast(imm)) else frame.stack.pop_unsafe();
                 const offset = frame.stack.pop_unsafe();
 
                 // Bounds checking
@@ -329,54 +299,6 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
 
                     const result = std.mem.readInt(u256, &hash, .big);
-                    frame.stack.append_unsafe(result);
-                }
-            },
-            .keccak_immediate_size => |params| {
-                current_index += 1;
-                next_instruction = &instructions[current_index];
-                // Consume precomputed gas cost
-                if (frame.gas_remaining < params.gas_cost) {
-                    @branchHint(.cold);
-                    frame.gas_remaining = 0;
-                    return ExecutionError.Error.OutOfGas;
-                }
-                frame.gas_remaining -= params.gas_cost;
-
-                const offset = frame.stack.pop_unsafe();
-
-                if (offset > std.math.maxInt(usize)) {
-                    @branchHint(.unlikely);
-                    return ExecutionError.Error.OutOfOffset;
-                }
-
-                const offset_usize = @as(usize, @intCast(offset));
-                const size_usize = @as(usize, @intCast(params.size));
-
-                if (params.size == 0) {
-                    @branchHint(.unlikely);
-                    const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                    frame.stack.append_unsafe(empty_hash);
-                } else {
-                    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
-                    const data = try frame.memory.get_slice(offset_usize, size_usize);
-
-                    // Debug logging
-                    Log.debug("[interpret] KECCAK256 immediate: offset={}, size={}, data={x}", .{ offset_usize, size_usize, std.fmt.fmtSliceHexLower(data[0..@min(16, data.len)]) });
-
-                    // For small known sizes, we could use stack buffers
-                    var hash: [32]u8 = undefined;
-                    if (params.size <= 64) {
-                        @branchHint(.likely);
-                        var buffer: [64]u8 = undefined;
-                        @memcpy(buffer[0..size_usize], data);
-                        std.crypto.hash.sha3.Keccak256.hash(buffer[0..size_usize], &hash, .{});
-                    } else {
-                        std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
-                    }
-
-                    const result = std.mem.readInt(u256, &hash, .big);
-                    Log.debug("[interpret] KECCAK256 immediate result: {x:0>64}", .{result});
                     frame.stack.append_unsafe(result);
                 }
             },

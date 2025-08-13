@@ -1,7 +1,7 @@
 const std = @import("std");
-const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 const ExecutionError = @import("execution/execution_error.zig");
 const Frame = @import("frame.zig").Frame;
+const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 
 pub const JumpType = enum {
     jump, // Unconditional jump (JUMP)
@@ -12,6 +12,23 @@ pub const JumpType = enum {
 pub const JumpTarget = struct {
     instruction: *const Instruction,
     jump_type: JumpType,
+};
+
+/// Analysis-time argument carried alongside each instruction in the stream.
+/// This drives optimized execution without per-opcode decoding.
+pub const AnalysisArg = union(enum) {
+    none,
+    word: u256,
+    jump_target: JumpTarget,
+    gas_cost: u32,
+    block_info: BlockInfo,
+    dynamic_gas: DynamicGas,
+    pc_value: u16,
+    keccak: struct {
+        word_count: u64,
+        gas_cost: u64,
+        size: ?u64 = null,
+    },
 };
 
 /// Block information for BEGINBLOCK instructions.
@@ -40,36 +57,12 @@ pub const DynamicGas = struct {
 
 pub const Instruction = struct {
     opcode_fn: ExecutionFunc,
-    arg: union(enum) {
-        none,
-        push_value: u256,
-        jump_target: JumpTarget,
-        gas_cost: u32,
-        block_info: BlockInfo,
-        dynamic_gas: DynamicGas,
-        pc_value: u16, // For PC opcode - stores the program counter value
-
-        // Synthetic operation variants for pattern fusion
-        push_add_fusion: u256, // immediate for PUSH+ADD
-        push_sub_fusion: u256, // immediate for PUSH+SUB
-        push_mul_fusion: u256, // immediate for PUSH+MUL
-        push_div_fusion: u256, // immediate for PUSH+DIV
-        push_push_result: u256, // precomputed PUSH+PUSH+op result
-        keccak_precomputed: struct {
-            word_count: u64,
-            gas_cost: u64,
-        },
-        keccak_immediate_size: struct {
-            size: u64,
-            word_count: u64,
-            gas_cost: u64,
-        },
-    },
+    arg: AnalysisArg,
 
     pub const STOP: Instruction = .{ .opcode_fn = StopHandler, .arg = .none };
 };
 
-pub fn StopHandler(context: *anyopaque) ExecutionError.Error!void {
+fn StopHandler(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
     return ExecutionError.Error.STOP;
 }
