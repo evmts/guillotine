@@ -5,20 +5,20 @@ const primitives = @import("primitives");
 
 pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const block_number = try context.stack.pop();
+    const block_number = context.stack.pop_unsafe();
 
     const block_info = context.host.get_block_info();
     const current_block = block_info.number;
 
     if (block_number >= current_block) {
         @branchHint(.unlikely);
-        try context.stack.append(0);
+        context.stack.append_unsafe(0);
     } else if (current_block > block_number + 256) {
         @branchHint(.unlikely);
-        try context.stack.append(0);
+        context.stack.append_unsafe(0);
     } else if (block_number == 0) {
         @branchHint(.unlikely);
-        try context.stack.append(0);
+        context.stack.append_unsafe(0);
     } else {
         // TODO: In production, this would retrieve the actual block hash from chain history
         // For now, return a pseudo-hash based on block number for testing
@@ -35,19 +35,19 @@ pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
     // before execution begins if EIP-3651 is enabled.
 
     const block_info = context.host.get_block_info();
-    try context.stack.append(primitives.Address.to_u256(block_info.coinbase));
+    context.stack.append_unsafe(primitives.Address.to_u256(block_info.coinbase));
 }
 
 pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     const block_info = context.host.get_block_info();
-    try context.stack.append(@as(u256, @intCast(block_info.timestamp)));
+    context.stack.append_unsafe(@as(u256, @intCast(block_info.timestamp)));
 }
 
 pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     const block_info = context.host.get_block_info();
-    try context.stack.append(@as(u256, @intCast(block_info.number)));
+    context.stack.append_unsafe(@as(u256, @intCast(block_info.number)));
 }
 
 pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -55,7 +55,7 @@ pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
     // Post-merge this returns PREVRANDAO, pre-merge it returns difficulty
     // The host is responsible for providing the correct value based on hardfork
     const block_info = context.host.get_block_info();
-    try context.stack.append(block_info.difficulty);
+    context.stack.append_unsafe(block_info.difficulty);
 }
 
 pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -66,7 +66,7 @@ pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
 pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
     const block_info = context.host.get_block_info();
-    try context.stack.append(@as(u256, @intCast(block_info.gas_limit)));
+    context.stack.append_unsafe(@as(u256, @intCast(block_info.gas_limit)));
 }
 
 pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -81,12 +81,12 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     // The EVM only needs to expose the base fee value via this opcode.
 
     const block_info = context.host.get_block_info();
-    try context.stack.append(block_info.base_fee);
+    context.stack.append_unsafe(block_info.base_fee);
 }
 
 pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
     const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const index = try context.stack.pop();
+    const index = context.stack.pop_unsafe();
 
     // TODO: Need blob_hashes field in ExecutionContext
     // EIP-4844: Get blob hash at index
@@ -100,7 +100,7 @@ pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
 
     // Placeholder implementation - always return zero
     _ = index;
-    try context.stack.append(0);
+    context.stack.append_unsafe(0);
 }
 
 pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
@@ -108,7 +108,7 @@ pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     // Push blob base fee (EIP-4844, Cancun+)
     // If not available (pre-Cancun), should be handled by jump table gating
     // TODO: Add blob_base_fee to BlockInfo - for now return 0 as REVM likely does
-    try context.stack.append(0);
+    context.stack.append_unsafe(0);
 }
 
 // Tests
@@ -121,11 +121,11 @@ const BlockInfo = @import("../host.zig").BlockInfo;
 // Mock host implementation for testing block opcodes
 const TestBlockHost = struct {
     block_info: BlockInfo,
-    
+
     pub fn get_block_info(self: *TestBlockHost) BlockInfo {
         return self.block_info;
     }
-    
+
     pub fn to_host(self: *TestBlockHost) Host {
         return Host.init(self);
     }
@@ -162,7 +162,7 @@ test "COINBASE returns block coinbase address" {
     try op_coinbase(&context);
 
     // Verify coinbase address was pushed to stack
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(Address.to_u256(test_coinbase), result);
 }
 
@@ -196,7 +196,7 @@ test "TIMESTAMP returns block timestamp" {
     try op_timestamp(&context);
 
     // Verify timestamp was pushed to stack
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(@as(primitives.u256, test_timestamp), result);
 }
 
@@ -230,7 +230,7 @@ test "NUMBER returns block number" {
     try op_number(&context);
 
     // Verify block number was pushed to stack
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(@as(primitives.u256, test_block_number), result);
 }
 
@@ -264,7 +264,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
     try op_difficulty(&context);
 
     // Verify difficulty was pushed to stack
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(test_difficulty, result);
 }
 
@@ -298,7 +298,7 @@ test "GASLIMIT returns block gas limit" {
     try op_gaslimit(&context);
 
     // Verify gas limit was pushed to stack
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(@as(primitives.u256, test_gas_limit), result);
 }
 
@@ -332,7 +332,7 @@ test "BASEFEE returns block base fee" {
     try op_basefee(&context);
 
     // Verify base fee was pushed to stack
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(test_base_fee, result);
 }
 
@@ -364,10 +364,9 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
     try op_blobbasefee(&context);
 
     // Verify 0 was pushed to stack (not yet implemented in BlockInfo)
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(@as(primitives.u256, 0), result);
 }
-
 
 test "BLOCKHASH returns 0 for future blocks" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
@@ -394,13 +393,13 @@ test "BLOCKHASH returns 0 for future blocks" {
     };
 
     // Push future block number
-    try stack.append(1001);
+    stack.append_unsafe(1001);
 
     // Execute BLOCKHASH opcode
     try op_blockhash(&context);
 
     // Verify 0 was pushed for future block
-    const result = try stack.pop();
+    const result = stack.pop_unsafe();
     try testing.expectEqual(@as(primitives.u256, 0), result);
 }
 
@@ -429,7 +428,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
     };
 
     // Push block number more than 256 blocks in past
-    try stack.append(700);
+    stack.append_unsafe(700);
 
     // Execute BLOCKHASH opcode
     try op_blockhash(&context);

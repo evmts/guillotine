@@ -11,12 +11,12 @@ pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Push contract address as u256
     const addr = to_u256(frame.contract_address);
-    try frame.stack.append(addr);
+    frame.stack.append_unsafe(addr);
 }
 
 pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    const address_u256 = try frame.stack.peek();
+    const address_u256 = try frame.stack.peek_unsafe();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -25,7 +25,7 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
 
     // Get balance from state database
     const balance = try frame.state.get_balance(address);
-    try frame.stack.set_top(balance);
+    frame.stack.set_top_unsafe(balance);
 }
 
 pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
@@ -36,18 +36,18 @@ pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
     // try frame.stack.append(origin);
 
     // Placeholder implementation - push zero for now
-    try frame.stack.append(0);
+    frame.stack.append_unsafe(0);
 }
 
 pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     const caller = to_u256(frame.caller);
-    try frame.stack.append(caller);
+    frame.stack.append_unsafe(caller);
 }
 
 pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    try frame.stack.append(frame.value);
+    frame.stack.append_unsafe(frame.value);
 }
 
 pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
@@ -57,12 +57,12 @@ pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
     // try frame.stack.append(frame.gas_price);
 
     // Placeholder implementation - push zero for now
-    try frame.stack.append(0);
+    frame.stack.append_unsafe(0);
 }
 
 pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    const address_u256 = try frame.stack.pop();
+    const address_u256 = frame.stack.pop_unsafe();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -71,17 +71,17 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
 
     // Get code size from state database
     const code = try frame.state.get_code_by_address(address);
-    try frame.stack.append(@as(u256, @intCast(code.len)));
+    frame.stack.append_unsafe(@as(u256, @intCast(code.len)));
 }
 
 pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // EVM stack order (top -> bottom): address, destOffset, offset, length
     // So we pop in reverse: length, offset, destOffset, address
-    const address_u256 = try frame.stack.pop();
-    const mem_offset = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const address_u256 = frame.stack.pop_unsafe();
+    const mem_offset = frame.stack.pop_unsafe();
+    const code_offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     log.debug("EXTCODECOPY: address={x}, mem_offset={}, code_offset={}, size={}", .{ address_u256, mem_offset, code_offset, size });
 
@@ -123,7 +123,7 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
 
 pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    const address_u256 = try frame.stack.pop();
+    const address_u256 = frame.stack.pop_unsafe();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas
@@ -134,7 +134,7 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     const exists = frame.state.account_exists(address);
     if (!exists) {
         // Non-existent account per EIP-1052 returns 0
-        try frame.stack.append(0);
+        frame.stack.append_unsafe(0);
         return;
     }
 
@@ -142,7 +142,7 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
     if (code.len == 0) {
         // Existing account with empty code returns keccak256("") constant
         const empty_hash_u256: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        try frame.stack.append(empty_hash_u256);
+        frame.stack.append_unsafe(empty_hash_u256);
         return;
     }
 
@@ -152,7 +152,7 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
 
     // Convert hash to u256 using std.mem for efficiency
     const hash_u256 = std.mem.readInt(u256, &hash, .big);
-    try frame.stack.append(hash_u256);
+    frame.stack.append_unsafe(hash_u256);
 }
 
 pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
@@ -160,7 +160,7 @@ pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
     // Get balance of current executing contract
     const self_address = frame.contract_address;
     const balance = try frame.state.get_balance(self_address);
-    try frame.stack.append(balance);
+    frame.stack.append_unsafe(balance);
 }
 
 pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
@@ -170,32 +170,32 @@ pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
     // try frame.stack.append(frame.chain_id);
 
     // Placeholder implementation - push mainnet chain ID
-    try frame.stack.append(1);
+    frame.stack.append_unsafe(1);
 }
 
 pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    try frame.stack.append(@as(u256, @intCast(frame.input.len)));
+    frame.stack.append_unsafe(@as(u256, @intCast(frame.input.len)));
 }
 
 pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Push size of current contract's code
-    try frame.stack.append(@as(u256, @intCast(frame.analysis.code_len)));
+    frame.stack.append_unsafe(@as(u256, @intCast(frame.analysis.code_len)));
 }
 
 pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
-    const offset = try frame.stack.pop();
+    const offset = frame.stack.pop_unsafe();
     if (offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
-        try frame.stack.append(0);
+        frame.stack.append_unsafe(0);
         return;
     }
     const offset_usize: usize = @intCast(offset);
     const calldata = frame.input;
     if (offset_usize >= calldata.len) {
-        try frame.stack.append(0);
+        frame.stack.append_unsafe(0);
         return;
     }
     var buf: [32]u8 = [_]u8{0} ** 32;
@@ -203,16 +203,16 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
     // Copy contiguous bytes starting at offset into the start of the buffer
     @memcpy(buf[0..available], calldata[offset_usize .. offset_usize + available]);
     const word = std.mem.readInt(u256, &buf, .big);
-    try frame.stack.append(word);
+    frame.stack.append_unsafe(word);
 }
 
 pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Stack (top -> bottom): mem_offset, data_offset, size
     // EVM pops top-first
-    const mem_offset = try frame.stack.pop();
-    const data_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const mem_offset = frame.stack.pop_unsafe();
+    const data_offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -242,9 +242,9 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // Stack (top -> bottom): mem_offset, code_offset, size
     // EVM pops top-first
-    const mem_offset = try frame.stack.pop();
-    const code_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const mem_offset = frame.stack.pop_unsafe();
+    const code_offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     if (size == 0) {
         @branchHint(.unlikely);
@@ -286,7 +286,7 @@ pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     // TODO: Need return_data field in ExecutionContext
     // Pop offset from stack
-    const offset = try frame.stack.pop();
+    const offset = frame.stack.pop_unsafe();
 
     // Check if offset is within bounds
     if (offset > std.math.maxInt(usize)) {
@@ -299,7 +299,7 @@ pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
     // const return_data = frame.return_data;
     // ... load logic ...
 
-    try frame.stack.append(0);
+    frame.stack.append_unsafe(0);
 }
 
 // TODO: Update fuzz testing functions for new ExecutionContext pattern

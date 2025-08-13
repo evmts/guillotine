@@ -15,7 +15,7 @@ const MAX_ITERATIONS = 10_000_000; // TODO set this to a real problem
 
 // Private inline functions for jump handling
 inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
-    const dest = try frame.stack.pop();
+    const dest = frame.stack.pop_unsafe();
     const analysis = frame.analysis;
     Log.debug("[interpret] JUMP requested to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
     if (!frame.valid_jumpdest(dest)) {
@@ -33,7 +33,7 @@ inline fn handle_jump(self: *Evm, frame: *Frame, current_index: *usize) Executio
 }
 
 inline fn handle_jumpi(self: *Evm, frame: *Frame, current_index: *usize) ExecutionError.Error!void {
-    const pops = try frame.stack.pop2();
+    const pops = frame.stack.pop2_unsafe();
     const analysis = frame.analysis;
     // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
     const dest = pops.b;
@@ -70,7 +70,7 @@ inline fn handle_dynamic_jump(self: *Evm, frame: *Frame, current_index: *usize) 
         const opprev: u8 = if (pcprev < analysis.code_len) analysis.code[pcprev] else 0x00;
         Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
     }
-    const dest = try frame.stack.pop();
+    const dest = frame.stack.pop_unsafe();
     Log.debug("[interpret] Dynamic JUMP to dest={} (inst_idx={}, depth={}, gas={})", .{ dest, current_index.*, self.depth, frame.gas_remaining });
     if (!frame.valid_jumpdest(dest)) {
         Log.debug("[interpret] Dynamic JUMP invalid destination: dest={} (code_len={})", .{ dest, analysis.code_len });
@@ -99,7 +99,7 @@ inline fn handle_dynamic_jumpi(self: *Evm, frame: *Frame, current_index: *usize)
         const opprev: u8 = if (pcprev < analysis.code_len) analysis.code[pcprev] else 0x00;
         Log.debug("[interpret] backtrace[-{}]: inst_idx={} pc={} op=0x{x}", .{ bt, iprev, pcprev, opprev });
     }
-    const pops = try frame.stack.pop2();
+    const pops = frame.stack.pop2_unsafe();
     // EVM JUMPI consumes (dest, cond) with dest on top. pop2_unsafe returns {a=second, b=top}.
     const dest = pops.b;
     const condition = pops.a;
@@ -245,45 +245,45 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 const op_dbg: u8 = if (pc_dbg < analysis.code_len) analysis.code[pc_dbg] else 0x00;
                 Log.debug("[interpret] PUSH at pc={} op=0x{x} value={x}", .{ pc_dbg, op_dbg, value });
                 current_index += 1;
-                try frame.stack.append(value);
+                frame.stack.append_unsafe(value);
             },
             .pc_value => |pc| {
                 Log.debug("[interpret] PC at pc={} pushing value={}", .{ pc, pc });
                 current_index += 1;
-                try frame.stack.append(@as(u256, pc));
+                frame.stack.append_unsafe(@as(u256, pc));
             },
             // Synthetic operations - fused instruction patterns
             .push_add_fusion => |immediate| {
                 current_index += 1;
-                const a = try frame.stack.peek();
-                const result = a +% immediate;
-                try frame.stack.set_top(result);
+                const top_value = try frame.stack.peek_unsafe();
+                const result = top_value +% immediate;
+                frame.stack.set_top_unsafe(result);
             },
             .push_sub_fusion => |immediate| {
                 current_index += 1;
-                const a = try frame.stack.peek();
-                const result = immediate -% a;
-                try frame.stack.set_top(result);
+                const top_value = try frame.stack.peek_unsafe();
+                const result = immediate -% top_value;
+                frame.stack.set_top_unsafe(result);
             },
             .push_mul_fusion => |immediate| {
                 current_index += 1;
-                const a = try frame.stack.peek();
-                const a_u256 = U256.from_u256_unsafe(a);
-                const b_u256 = U256.from_u256_unsafe(immediate);
-                const product_u256 = a_u256.wrapping_mul(b_u256);
+                const top_value = try frame.stack.peek_unsafe();
+                const top_value_u256 = U256.from_u256_unsafe(top_value);
+                const immediate_u256 = U256.from_u256_unsafe(immediate);
+                const product_u256 = top_value_u256.wrapping_mul(immediate_u256);
                 const result = product_u256.to_u256_unsafe();
-                try frame.stack.set_top(result);
+                frame.stack.set_top_unsafe(result);
             },
             .push_div_fusion => |immediate| {
                 current_index += 1;
-                const a = try frame.stack.peek();
-                const result = if (a == 0) 0 else immediate / a;
-                try frame.stack.set_top(result);
+                const top_value = try frame.stack.peek_unsafe();
+                const result = if (top_value == 0) 0 else immediate / top_value;
+                frame.stack.set_top_unsafe(result);
             },
             .push_push_result => |result| {
                 current_index += 1;
                 // Directly push the precomputed result
-                try frame.stack.append(result);
+                frame.stack.append_unsafe(result);
             },
             .keccak_precomputed => |params| {
                 current_index += 1;
@@ -295,8 +295,8 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
                 frame.gas_remaining -= params.gas_cost;
 
-                const size = try frame.stack.pop();
-                const offset = try frame.stack.pop();
+                const size = frame.stack.pop_unsafe();
+                const offset = frame.stack.pop_unsafe();
 
                 // Bounds checking
                 if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -311,7 +311,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     @branchHint(.unlikely);
                     // Hash of empty data = keccak256("")
                     const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                    try frame.stack.append(empty_hash);
+                    frame.stack.append_unsafe(empty_hash);
                 } else {
                     // Memory expansion already handled, just get the data
                     _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
@@ -322,7 +322,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
 
                     const result = std.mem.readInt(u256, &hash, .big);
-                    try frame.stack.append(result);
+                    frame.stack.append_unsafe(result);
                 }
             },
             .keccak_immediate_size => |params| {
@@ -335,7 +335,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 }
                 frame.gas_remaining -= params.gas_cost;
 
-                const offset = try frame.stack.pop();
+                const offset = frame.stack.pop_unsafe();
 
                 if (offset > std.math.maxInt(usize)) {
                     @branchHint(.unlikely);
@@ -348,7 +348,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 if (params.size == 0) {
                     @branchHint(.unlikely);
                     const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                    try frame.stack.append(empty_hash);
+                    frame.stack.append_unsafe(empty_hash);
                 } else {
                     _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
                     const data = try frame.memory.get_slice(offset_usize, size_usize);
@@ -369,7 +369,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
                     const result = std.mem.readInt(u256, &hash, .big);
                     Log.debug("[interpret] KECCAK256 immediate result: {x:0>64}", .{result});
-                    try frame.stack.append(result);
+                    frame.stack.append_unsafe(result);
                 }
             },
             .none => {
@@ -411,15 +411,15 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
                             // CRITICAL DEBUG: Log when STOP error is returned (which RETURN uses)
                             if (err == ExecutionError.Error.STOP) {
-                                const pc_for_debug = if (current_index - 1 < analysis.inst_to_pc.len) 
-                                    analysis.inst_to_pc[current_index - 1] 
-                                    else std.math.maxInt(u16);
-                                const opcode_for_debug = if (pc_for_debug != std.math.maxInt(u16) and pc_for_debug < analysis.code_len) 
-                                    analysis.code[pc_for_debug] 
-                                    else 0xFF;
-                                Log.debug("[interpret] STOP error from opcode 0x{x} at PC={}, depth={}, should halt execution", .{ 
-                                    opcode_for_debug, pc_for_debug, self.depth 
-                                });
+                                const pc_for_debug = if (current_index - 1 < analysis.inst_to_pc.len)
+                                    analysis.inst_to_pc[current_index - 1]
+                                else
+                                    std.math.maxInt(u16);
+                                const opcode_for_debug = if (pc_for_debug != std.math.maxInt(u16) and pc_for_debug < analysis.code_len)
+                                    analysis.code[pc_for_debug]
+                                else
+                                    0xFF;
+                                Log.debug("[interpret] STOP error from opcode 0x{x} at PC={}, depth={}, should halt execution", .{ opcode_for_debug, pc_for_debug, self.depth });
                             }
 
                             return err;
@@ -493,13 +493,14 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
     }
 
     Log.debug("[interpret] Reached end of instructions without STOP/RETURN, current_index={}, len={}", .{ current_index, instructions.len });
-    
+
     // CRITICAL DEBUG: This should rarely happen - most contracts end with STOP/RETURN/REVERT
     // If we're seeing this during contract deployment, it likely means RETURN didn't halt execution
     if (current_index < analysis.inst_to_pc.len) {
         const last_pc = if (current_index > 0 and current_index - 1 < analysis.inst_to_pc.len)
             analysis.inst_to_pc[current_index - 1]
-            else std.math.maxInt(u16);
+        else
+            std.math.maxInt(u16);
         if (last_pc != std.math.maxInt(u16) and last_pc < analysis.code_len) {
             const last_opcode = analysis.code[last_pc];
             Log.debug("[interpret] WARNING: Last executed opcode was 0x{x} at PC={}, but execution continued!", .{ last_opcode, last_pc });

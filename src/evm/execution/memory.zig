@@ -22,7 +22,7 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
-    const offset = try frame.stack.peek();
+    const offset = try frame.stack.peek_unsafe();
 
     // Check offset bounds
     if (offset > std.math.maxInt(usize)) {
@@ -37,15 +37,15 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
     try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(aligned_size)));
 
     // Read 32 bytes from memory - use unsafe variant since we just ensured capacity
-    const value = if (SAFE_MEMORY_EXPANSION) 
+    const value = if (SAFE_MEMORY_EXPANSION)
         try frame.memory.get_u256(offset_usize)
-    else 
+    else
         frame.memory.get_u256_unsafe(offset_usize);
-    
+
     Log.debug("MLOAD: offset={} -> value={x:0>64}", .{ offset_usize, value });
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
-    try frame.stack.set_top(value);
+    frame.stack.set_top_unsafe(value);
 }
 
 pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
@@ -59,7 +59,7 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // EVM Stack: [..., value, offset] where offset is on top
-    const popped = try frame.stack.pop2();
+    const popped = frame.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
@@ -101,7 +101,7 @@ pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // EVM Stack: [..., value, offset] where offset is on top
-    const popped = try frame.stack.pop2();
+    const popped = frame.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
 
@@ -142,7 +142,7 @@ pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
     const aligned_size = std.mem.alignForward(usize, size, 32);
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    try frame.stack.append(@as(u256, @intCast(aligned_size)));
+    frame.stack.append_unsafe(@as(u256, @intCast(aligned_size)));
 }
 
 pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
@@ -159,9 +159,9 @@ pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order per EIP-5656: [dst, src, length] (top to bottom)
-    const dest = try frame.stack.pop();
-    const src = try frame.stack.pop();
-    const length = try frame.stack.pop();
+    const dest = frame.stack.pop_unsafe();
+    const src = frame.stack.pop_unsafe();
+    const length = frame.stack.pop_unsafe();
 
     if (length == 0) {
         @branchHint(.unlikely);
@@ -179,7 +179,7 @@ pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
 
     // Calculate max memory address needed
     const max_addr = @max(dest_usize + length_usize, src_usize + length_usize);
-    
+
     // Charge gas and ensure memory is available
     try frame.memory.charge_and_ensure(frame, @as(u64, @intCast(max_addr)));
 

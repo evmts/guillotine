@@ -18,7 +18,7 @@ pub fn block_jump(
     const frame = state;
 
     // Pop the destination from stack (still needed for validation)
-    const dest = try frame.stack.pop();
+    const dest = frame.stack.pop_unsafe();
 
     // Validate that the jump destination matches what we expect
     // This ensures the jump target hasn't been manipulated
@@ -45,8 +45,8 @@ pub fn block_jumpi(
     const frame = state;
 
     // Pop destination and condition
-    const dest = try frame.stack.pop();
-    const condition = try frame.stack.pop();
+    const dest = frame.stack.pop_unsafe();
+    const condition = frame.stack.pop_unsafe();
 
     // If condition is false, continue to next instruction
     if (condition == 0) {

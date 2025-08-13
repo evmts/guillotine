@@ -26,7 +26,7 @@ pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void 
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    try frame.stack.append(@as(u256, @intCast(frame.host.get_output().len)));
+    frame.stack.append_unsafe(@as(u256, @intCast(frame.host.get_output().len)));
 }
 
 /// Adapter for op_returndatacopy - copy return data to memory
@@ -40,9 +40,9 @@ pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void 
 
     // Pop three values unsafely - bounds checking is done in jump_table.zig
     // EVM stack order: [..., size, data_offset, mem_offset] (top to bottom)
-    const mem_offset = try frame.stack.pop();
-    const data_offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const mem_offset = frame.stack.pop_unsafe();
+    const data_offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     if (size == 0) {
         @branchHint(.unlikely);

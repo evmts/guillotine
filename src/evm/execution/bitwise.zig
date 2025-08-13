@@ -6,39 +6,39 @@ const primitives = @import("primitives");
 pub fn op_and(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const b = try frame.stack.pop();
-    const a = try frame.stack.peek();
-    try frame.stack.set_top(a & b);
+    const b = frame.stack.pop_unsafe();
+    const a = try frame.stack.peek_unsafe();
+    frame.stack.set_top_unsafe(a & b);
 }
 
 pub fn op_or(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const b = try frame.stack.pop();
-    const a = try frame.stack.peek();
-    try frame.stack.set_top(a | b);
+    const b = frame.stack.pop_unsafe();
+    const a = try frame.stack.peek_unsafe();
+    frame.stack.set_top_unsafe(a | b);
 }
 
 pub fn op_xor(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const b = try frame.stack.pop();
-    const a = try frame.stack.peek();
-    try frame.stack.set_top(a ^ b);
+    const b = frame.stack.pop_unsafe();
+    const a = try frame.stack.peek_unsafe();
+    frame.stack.set_top_unsafe(a ^ b);
 }
 
 pub fn op_not(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
-    const a = try frame.stack.peek();
-    try frame.stack.set_top(~a);
+    const a = try frame.stack.peek_unsafe();
+    frame.stack.set_top_unsafe(~a);
 }
 
 pub fn op_byte(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const i = try frame.stack.pop();
-    const val = try frame.stack.peek();
+    const i = frame.stack.pop_unsafe();
+    const val = try frame.stack.peek_unsafe();
 
     const result = if (i >= 32) 0 else blk: {
         const i_usize = @as(usize, @intCast(i));
@@ -46,36 +46,36 @@ pub fn op_byte(context: *anyopaque) ExecutionError.Error!void {
         break :blk (val >> @intCast(shift_amount)) & 0xFF;
     };
 
-    try frame.stack.set_top(result);
+    frame.stack.set_top_unsafe(result);
 }
 
 pub fn op_shl(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const shift = try frame.stack.pop();
-    const value = try frame.stack.peek();
+    const shift = frame.stack.pop_unsafe();
+    const value = try frame.stack.peek_unsafe();
 
     const result = if (shift >= 256) 0 else value << @intCast(shift);
 
-    try frame.stack.set_top(result);
+    frame.stack.set_top_unsafe(result);
 }
 
 pub fn op_shr(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const shift = try frame.stack.pop();
-    const value = try frame.stack.peek();
+    const shift = frame.stack.pop_unsafe();
+    const value = try frame.stack.peek_unsafe();
 
     const result = if (shift >= 256) 0 else value >> @intCast(shift);
 
-    try frame.stack.set_top(result);
+    frame.stack.set_top_unsafe(result);
 }
 
 pub fn op_sar(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
-    const shift = try frame.stack.pop();
-    const value = try frame.stack.peek();
+    const shift = frame.stack.pop_unsafe();
+    const value = try frame.stack.peek_unsafe();
 
     const result = if (shift >= 256) blk: {
         const sign_bit = value >> 255;
@@ -87,5 +87,5 @@ pub fn op_sar(context: *anyopaque) ExecutionError.Error!void {
         break :blk @as(u256, @bitCast(result_i256));
     };
 
-    try frame.stack.set_top(result);
+    frame.stack.set_top_unsafe(result);
 }

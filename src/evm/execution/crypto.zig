@@ -48,13 +48,13 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
 
     // Debug: show what's on stack before popping
     if (frame.stack.size() >= 2) {
-        const top = try frame.stack.peek();
+        const top = try frame.stack.peek_unsafe();
         const second = try frame.stack.peek_n(1);
         Log.debug("KECCAK256 stack before pop: top={}, second={}", .{ top, second });
     }
 
-    const offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     Log.debug("KECCAK256 opcode: offset={}, size={} (stack_size={})", .{ offset, size, frame.stack.size() });
 
@@ -68,7 +68,7 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
         @branchHint(.unlikely);
         // Hash of empty data = keccak256("") independent of offset
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        try frame.stack.append(empty_hash);
+        frame.stack.append_unsafe(empty_hash);
         return;
     }
 
@@ -110,7 +110,7 @@ pub fn op_sha3(context: *anyopaque) ExecutionError.Error!void {
 
     Log.debug("KECCAK256: hash result={x:0>64}", .{result});
 
-    try frame.stack.append(result);
+    frame.stack.append_unsafe(result);
 }
 
 // Alias for backwards compatibility
@@ -122,8 +122,8 @@ pub fn op_sha3_precomputed(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     // Check bounds before anything else
     if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -145,7 +145,7 @@ pub fn op_sha3_precomputed(context: *anyopaque) ExecutionError.Error!void {
         }
         // Hash of empty data = keccak256("")
         const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-        try frame.stack.append(empty_hash);
+        frame.stack.append_unsafe(empty_hash);
         return;
     }
 
@@ -178,7 +178,7 @@ pub fn op_sha3_precomputed(context: *anyopaque) ExecutionError.Error!void {
     // Convert hash to u256 using std.mem for efficiency
     const result = std.mem.readInt(u256, &hash, .big);
 
-    try frame.stack.append(result);
+    frame.stack.append_unsafe(result);
 }
 
 // FIXME: All test functions that used Frame/Contract have been removed

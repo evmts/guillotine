@@ -14,11 +14,11 @@ pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     if (SAFE_STACK_CHECKS) {
         if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 1);
-    }
+            std.debug.assert(frame.stack.size() >= 1);
+        }
     }
 
-    const slot = try frame.stack.peek();
+    const slot = try frame.stack.peek_unsafe();
 
     if (frame.is_at_least(.BERLIN)) {
         const is_cold = frame.mark_storage_slot_warm(slot) catch {
@@ -33,7 +33,7 @@ pub fn op_sload(context: *anyopaque) ExecutionError.Error!void {
 
     const value = frame.get_storage(slot);
 
-    try frame.stack.set_top(value);
+    frame.stack.set_top_unsafe(value);
 }
 
 /// SSTORE opcode - Store value in persistent storage
@@ -56,7 +56,7 @@ pub fn op_sstore(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Stack order: [..., value, slot] where slot is on top
-    const popped = try frame.stack.pop2();
+    const popped = frame.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const slot = popped.b; // Second popped (was top)
 
@@ -99,12 +99,12 @@ pub fn op_tload(context: *anyopaque) ExecutionError.Error!void {
     }
 
     // Get slot from top of stack unsafely - bounds checking is done in jump_table.zig
-    const slot = try frame.stack.peek();
+    const slot = try frame.stack.peek_unsafe();
 
     const value = frame.get_transient_storage(slot);
 
     // Replace top of stack with loaded value unsafely - bounds checking is done in jump_table.zig
-    try frame.stack.set_top(value);
+    frame.stack.set_top_unsafe(value);
 }
 
 pub fn op_tstore(context: *anyopaque) ExecutionError.Error!void {
@@ -127,7 +127,7 @@ pub fn op_tstore(context: *anyopaque) ExecutionError.Error!void {
 
     // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
     // Stack order: [..., value, slot] where slot is on top
-    const popped = try frame.stack.pop2();
+    const popped = frame.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const slot = popped.b; // Second popped (was top)
 

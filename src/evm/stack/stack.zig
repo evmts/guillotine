@@ -3,347 +3,239 @@ const builtin = @import("builtin");
 const stack_constants = @import("../constants/stack_constants.zig");
 
 const CLEAR_ON_POP = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
-// For now, determine safety behavior directly from builtin. TODO: move to EvmConfig and
-// make `Stack` generic over word size and safety features.
-const SAFE_STACK = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
-
-/// High-performance EVM stack implementation using pointer arithmetic.
-///
-/// The Stack is a core component of the EVM execution model, providing a
-/// Last-In-First-Out (LIFO) data structure for 256-bit values. All EVM
-/// computations operate on this stack, making its performance critical.
-///
-/// ## Design Rationale
-/// - Fixed capacity of 1024 elements (per EVM specification)
-/// - Stack-allocated storage for direct memory access
-/// - 32-byte alignment for optimal memory access on modern CPUs
-/// - Pointer arithmetic eliminates integer operations on hot path
-/// - Unsafe variants skip bounds checking in hot paths for performance
-///
-/// ## Performance Optimizations
-/// - Pointer arithmetic instead of array indexing (2-3x faster)
-/// - Direct stack allocation eliminates pointer indirection
-/// - Aligned memory for optimal access patterns
-/// - Unsafe variants used after jump table validation
-/// - Hot path annotations for critical operations
-/// - Hot data (pointers) placed first for cache efficiency
-///
-/// ## SIZE OPTIMIZATION SAFETY MODEL
-///
-/// This stack provides two operation variants:
-/// 1. **Safe operations** (`append()`, `pop()`) - Include bounds checking
-/// 2. **Unsafe operations** (`append_unsafe()`, `pop_unsafe()`) - No bounds checking
-///
-/// The unsafe variants are used in opcode implementations after the jump table
-/// performs comprehensive validation via `validate_stack_requirements()`. This
-/// centralized validation approach:
-///
-/// - Eliminates redundant checks in individual opcodes (smaller binary)
-/// - Maintains safety by validating ALL operations before execution
-/// - Enables maximum performance in the hot path
-///
-/// **SAFETY GUARANTEE**: All unsafe operations assume preconditions are met:
-/// - `pop_unsafe()`: Stack must not be empty
-/// - `append_unsafe()`: Stack must have capacity
-/// - `dup_unsafe(n)`: Stack must have >= n items and capacity for +1
-/// - `swap_unsafe(n)`: Stack must have >= n+1 items
-///
-/// These preconditions are enforced by jump table validation.
-///
-/// Example:
-/// ```zig
-/// var stack = Stack{};
-/// try stack.append(100); // Safe variant (for error_mapping)
-/// stack.append_unsafe(200); // Unsafe variant (for opcodes)
-/// ```
-pub const Stack = @This();
-
-/// Maximum stack capacity as defined by the EVM specification.
-/// This limit prevents stack-based DoS attacks.
 pub const CAPACITY: usize = stack_constants.CAPACITY;
 
-/// Error types for stack operations.
-/// These map directly to EVM execution errors.
+pub const Stack = @This();
+
+const Pop2 = struct { a: u256, b: u256 };
+const Pop3 = struct { a: u256, b: u256, c: u256 };
+
 pub const Error = error{
-    /// Stack would exceed 1024 elements
     StackOverflow,
-    /// Attempted to pop from empty stack
     StackUnderflow,
 };
 
-// ============================================================================
-// Hot data - accessed on every stack operation (cache-friendly)
-// ============================================================================
-
-/// Points to the next free slot (top of stack + 1)
 current: [*]u256,
-
-/// Points to the base of the stack (data[0])
 base: [*]u256,
-
-/// Points to the limit (data[1024]) for bounds checking
 limit: [*]u256,
 
-// ============================================================================
-// Cold data - allocator for memory management
-// ============================================================================
-
-/// Allocator used for heap allocation
+data: *[CAPACITY]u256,
 allocator: std.mem.Allocator,
 
-/// Heap-allocated storage for stack data
-/// This is now a pointer to heap memory instead of inline array
-data: []u256,
-
-// Compile-time validations for stack design assumptions
-comptime {
-    // Ensure stack capacity matches EVM specification
-    std.debug.assert(CAPACITY == 1024);
-}
-
-/// Initialize a new stack with heap allocation
 pub fn init(allocator: std.mem.Allocator) !Stack {
-    // MEMORY ALLOCATION: Stack data array
-    // Expected size: 1024 * 32 bytes = 32KB exactly
-    // Lifetime: Per Stack instance (freed on deinit)
-    // Frequency: Once per frame
-    const data = try allocator.alloc(u256, CAPACITY);
+    const data: *[CAPACITY]u256 = try allocator.create([CAPACITY]u256);
     errdefer allocator.free(data);
-
-    if (comptime builtin.mode == .Debug or builtin.mode == .ReleaseSafe) {
-        // Stack must be exactly 32KB (1024 * 32 bytes) per EVM spec
-        std.debug.assert(data.len == CAPACITY);
-        std.debug.assert(CAPACITY == 1024); // EVM specification
-        const stack_size = data.len * @sizeOf(u256);
-        std.debug.assert(stack_size == 32768); // Exactly 32KB
-    }
-
-    var stack = Stack{
+    const base: [*]u256 = @ptrCast(&data[0]);
+    return Stack{
         .allocator = allocator,
         .data = data,
-        .current = undefined,
-        .base = undefined,
-        .limit = undefined,
+        .current = base,
+        .base = base,
+        .limit = base + CAPACITY,
     };
-
-    stack.base = @ptrCast(&stack.data[0]);
-    stack.current = stack.base; // Empty stack: current == base
-    stack.limit = stack.base + CAPACITY;
-
-    return stack;
 }
 
-/// Deinitialize the stack and free heap memory
 pub fn deinit(self: *Stack) void {
     self.allocator.free(self.data);
 }
 
-/// Clear the stack without deallocating memory - resets to initial empty state
 pub fn clear(self: *Stack) void {
-    // Reset current pointer to base (empty stack)
+    self.debug_is_in_bounds();
     self.current = self.base;
-
-    // In debug/safe modes, zero out all values for security
     if (comptime CLEAR_ON_POP) {
         @memset(std.mem.sliceAsBytes(self.data), 0);
     }
+    self.debug_is_in_bounds();
 }
 
-/// Get current stack size using pointer arithmetic
 pub inline fn size(self: *const Stack) usize {
+    self.debug_is_in_bounds();
     return (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
 }
 
-/// Check if stack is empty
 pub inline fn is_empty(self: *const Stack) bool {
+    self.debug_is_in_bounds();
     return self.current == self.base;
 }
 
-/// Check if stack is at capacity
 pub inline fn is_full(self: *const Stack) bool {
+    self.debug_is_in_bounds();
     return self.current >= self.limit;
 }
 
-/// Push a value onto the stack (single unified API).
-///
-/// @param self The stack to push onto
-/// @param value The 256-bit value to push
-/// @throws Overflow if stack is at capacity
-///
-/// Example:
-/// ```zig
-/// try stack.append(0x1234);
-/// ```
-pub fn append(self: *Stack, value: u256) Error!void {
-    if (SAFE_STACK) {
-        if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
-            @branchHint(.cold);
-            return Error.StackOverflow;
-        }
-    }
-    // Direct push
-    if (SAFE_STACK) {
-        // Minimal invariants in checked modes
-        std.debug.assert(@intFromPtr(self.current) >= @intFromPtr(self.base));
-        std.debug.assert(@intFromPtr(self.current) < @intFromPtr(self.limit));
-    }
-    self.current[0] = value;
-    self.current += 1;
-    if (SAFE_STACK) {
-        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
-    }
+pub inline fn debug_is_in_bounds(self: *const Stack) void {
+    std.debug.assert(@intFromPtr(self.current) >= @intFromPtr(self.base));
+    std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
 }
 
-// Removed: append_unsafe. Use append().
-
-/// Pop a value from the stack (safe version).
-///
-/// Removes and returns the top element. Clears the popped
-/// slot to prevent information leakage.
-///
-/// @param self The stack to pop from
-/// @return The popped value
-/// @throws Underflow if stack is empty
-///
-/// Example:
-/// ```zig
-/// const value = try stack.pop();
-/// ```
-pub fn pop(self: *Stack) Error!u256 {
-    if (SAFE_STACK) {
-        if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
-            @branchHint(.cold);
-            return Error.StackUnderflow;
-        } else {
-            @branchHint(.likely);
-        }
-        std.debug.assert(@intFromPtr(self.current) > @intFromPtr(self.base));
-        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+pub fn append(self: *Stack, value: u256) Error!void {
+    if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
+        @branchHint(.cold);
+        return Error.StackOverflow;
     }
+    self.append_unsafe(value);
+}
+pub fn append_unsafe(self: *Stack, value: u256) void {
+    self.debug_is_in_bounds();
+    self.current[0] = value;
+    self.current += 1;
+    self.debug_is_in_bounds();
+}
+
+pub fn pop(self: *Stack) Error!u256 {
+    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
+        @branchHint(.cold);
+        return Error.StackUnderflow;
+    }
+    return self.pop_unsafe();
+}
+pub fn pop_unsafe(self: *Stack) u256 {
+    self.debug_is_in_bounds();
     self.current -= 1;
     const value = self.current[0];
-    if (comptime CLEAR_ON_POP) {
-        self.current[0] = 0; // Clear for security
-    }
+    if (comptime CLEAR_ON_POP) self.current[0] = 0;
+    self.debug_is_in_bounds();
     return value;
 }
 
-// Removed: pop_unsafe. Use pop().
-
-// Removed: peek_unsafe. Use peek() to get the value.
-
-/// Duplicate the nth element onto the top of stack (1-16)
 pub inline fn dup(self: *Stack, n: usize) Error!void {
-    @branchHint(.likely);
-    if (SAFE_STACK) {
-        if (n < 1) return Error.StackUnderflow;
-        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        if (cur_size < n) return Error.StackUnderflow;
-        if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) return Error.StackOverflow;
+    if (n == 0) {
+        @branchHint(.cold);
+        return Error.StackUnderflow;
     }
+    if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
+        @branchHint(.cold);
+        return Error.StackOverflow;
+    }
+    self.dup_unsafe(n);
+}
+pub inline fn dup_unsafe(self: *Stack, n: usize) void {
+    self.debug_is_in_bounds();
     const value = (self.current - n)[0];
-    try self.append(value);
+    self.append_unsafe(value);
+    self.debug_is_in_bounds();
 }
 
-/// Pop 2 values without pushing
-pub inline fn pop2(self: *Stack) Error!struct { a: u256, b: u256 } {
-    @branchHint(.likely);
-    if (SAFE_STACK) {
-        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        if (cur_size < 2) return Error.StackUnderflow;
+pub inline fn pop2(self: *Stack) Error!Pop2 {
+    const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+    if (cur_size < 2) {
+        @branchHint(.cold);
+        return Error.StackUnderflow;
     }
+    return self.pop2_unsafe();
+}
+pub inline fn pop2_unsafe(self: *Stack) Pop2 {
+    self.debug_is_in_bounds();
     self.current -= 2;
-    const a = self.current[0];
-    const b = self.current[1];
+    const top_minus_1 = self.current[0];
+    const top = self.current[1];
     if (comptime CLEAR_ON_POP) {
         self.current[0] = 0;
         self.current[1] = 0;
     }
-    return .{ .a = a, .b = b };
+    return .{ .a = top_minus_1, .b = top };
 }
 
-/// Pop 3 values without pushing
-pub inline fn pop3(self: *Stack) Error!struct { a: u256, b: u256, c: u256 } {
-    @branchHint(.likely);
-    if (SAFE_STACK) {
-        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        if (cur_size < 3) return Error.StackUnderflow;
+pub inline fn pop3(self: *Stack) Error!Pop3 {
+    self.debug_is_in_bounds();
+    const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+    if (cur_size < 3) {
+        @branchHint(.cold);
+        return Error.StackUnderflow;
     }
+    return self.pop3_unsafe();
+}
+pub inline fn pop3_unsafe(self: *Stack) Pop3 {
+    self.debug_is_in_bounds();
     self.current -= 3;
-    const a = self.current[0];
-    const b = self.current[1];
-    const c = self.current[2];
+    const top_minus_2 = self.current[0];
+    const top_minus_1 = self.current[1];
+    const top = self.current[2];
     if (comptime CLEAR_ON_POP) {
         self.current[0] = 0;
         self.current[1] = 0;
         self.current[2] = 0;
     }
-    return .{ .a = a, .b = b, .c = c };
+    return .{ .a = top_minus_2, .b = top_minus_1, .c = top };
 }
 
-/// Set the top element
 pub inline fn set_top(self: *Stack, value: u256) Error!void {
-    @branchHint(.likely);
-    if (SAFE_STACK) {
-        if (@intFromPtr(self.current) <= @intFromPtr(self.base)) return Error.StackUnderflow;
-        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
+        @branchHint(.cold);
+        return Error.StackUnderflow;
     }
     (self.current - 1)[0] = value;
 }
+pub inline fn set_top_unsafe(self: *Stack, value: u256) void {
+    self.debug_is_in_bounds();
+    (self.current - 1)[0] = value;
+}
 
-/// Swap the top element with the nth element below it.
-///
-/// Swaps the top stack element with the element n positions below it.
-/// For SWAP1, n=1 swaps top with second element.
-/// For SWAP2, n=2 swaps top with third element, etc.
-///
-/// @param self The stack to operate on
-/// @param n Position below top to swap with (1-16)
-pub inline fn swap(self: *Stack, n: usize) Error!void {
-    @branchHint(.likely);
-    if (SAFE_STACK) {
-        if (n < 1) return Error.StackUnderflow;
-        const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-        if (cur_size < n + 1) return Error.StackUnderflow;
-        std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+/// Safely set the logical size of the stack to `new_size` elements.
+/// Returns StackOverflow if `new_size` exceeds capacity.
+pub inline fn set_size(self: *Stack, new_size: usize) Error!void {
+    if (new_size > CAPACITY) {
+        @branchHint(.cold);
+        return Error.StackOverflow;
     }
+    self.set_size_unsafe(new_size);
+}
+
+/// Unsafely set the logical size of the stack to `new_size` elements.
+/// Preconditions: new_size <= CAPACITY
+pub inline fn set_size_unsafe(self: *Stack, new_size: usize) void {
+    // Clamp to capacity in debug builds
+    if (comptime builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall) {
+        std.debug.assert(new_size <= CAPACITY);
+    }
+
+    const previous_size = self.size();
+    const new_current: [*]u256 = self.base + new_size;
+
+    // If we're shrinking and clearing is enabled, zero the removed slots
+    if (comptime CLEAR_ON_POP) {
+        if (new_size < previous_size) {
+            const start = self.base + new_size;
+            const count = previous_size - new_size;
+            @memset(std.mem.sliceAsBytes(start[0..count]), 0);
+        }
+    }
+
+    self.current = new_current;
+}
+
+pub inline fn swap(self: *Stack, n: usize) Error!void {
+    if (n < 1) {
+        @branchHint(.cold);
+        return Error.StackUnderflow;
+    }
+    self.swap_unsafe(n);
+}
+pub inline fn swap_unsafe(self: *Stack, n: usize) void {
+    self.debug_is_in_bounds();
     std.mem.swap(u256, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
 }
 
-/// Peek at the nth element from the top (for test compatibility)
 pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
     const stack_size = self.size();
     if (n >= stack_size) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
+    return self.peek_n_unsafe(n);
+}
+pub fn peek_n_unsafe(self: *const Stack, n: usize) u256 {
+    self.debug_is_in_bounds();
     return (self.current - 1 - n)[0];
 }
 
-/// Unsafe setter to adjust stack size for tests
-pub inline fn set_size(self: *Stack, n: usize) Error!void {
-    if (SAFE_STACK) {
-        if (n > CAPACITY) return Error.StackOverflow;
-    }
-    self.current = self.base + n;
-}
-
-// Note: test-compatibility clear consolidated with main clear() above
-
-/// Peek at the top value (for test compatibility)
 pub fn peek(self: *const Stack) Error!u256 {
-    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
-        @branchHint(.cold);
-        return Error.StackUnderflow;
-    }
-    return (self.current - 1)[0];
+    return self.peek_n(0);
+}
+pub fn peek_unsafe(self: *const Stack) Error!u256 {
+    return self.peek_n_unsafe(0);
 }
 
-// ============================================================================
-// Test and compatibility functions
-// ============================================================================
-
-// Fuzz testing functions
 pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const FuzzOperation) !void {
     var stack = try Stack.init(allocator);
     defer stack.deinit();

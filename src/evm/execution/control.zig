@@ -54,7 +54,7 @@ pub fn op_return(context: *anyopaque) ExecutionError.Error!void {
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
-    const values = try frame.stack.pop2();
+    const values = frame.stack.pop2_unsafe();
     const offset = values.b; // Top
     const size = values.a; // Second from top
 
@@ -107,7 +107,7 @@ pub fn op_revert(context: *anyopaque) ExecutionError.Error!void {
 
     // Use batch pop for performance - pop 2 values at once
     // Stack order (top to bottom): [offset, size] with offset on top
-    const values = try frame.stack.pop2();
+    const values = frame.stack.pop2_unsafe();
     const offset = values.b; // Top
     const size = values.a; // Second from top
 

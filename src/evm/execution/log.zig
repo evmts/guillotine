@@ -26,8 +26,8 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
             }
 
             // REVM EXACT MATCH: Pop offset first, then len (revm: popn!([offset, len]))
-            const offset = try frame.stack.pop();
-            const size = try frame.stack.pop();
+            const offset = frame.stack.pop_unsafe();
+            const size = frame.stack.pop_unsafe();
 
             // Early bounds checking to avoid unnecessary topic pops on invalid input
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -39,7 +39,7 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
             var topics: [4]u256 = undefined;
             // Pop N topics in reverse order (LIFO stack order) for efficient processing
             for (0..num_topics) |i| {
-                topics[num_topics - 1 - i] = try frame.stack.pop();
+                topics[num_topics - 1 - i] = frame.stack.pop_unsafe();
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -110,8 +110,8 @@ fn log_impl(num_topics: u8, frame: *Frame) ExecutionError.Error!void {
     }
 
     // Pop offset and size
-    const offset = try frame.stack.pop();
-    const size = try frame.stack.pop();
+    const offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
 
     // Early bounds checking for better error handling
     const offset_usize = std.math.cast(usize, offset) orelse return ExecutionError.Error.InvalidOffset;
@@ -121,7 +121,7 @@ fn log_impl(num_topics: u8, frame: *Frame) ExecutionError.Error!void {
     var topics: [4]u256 = undefined;
     // Pop N topics in reverse order for efficient processing
     for (0..num_topics) |i| {
-        topics[num_topics - 1 - i] = try frame.stack.pop();
+        topics[num_topics - 1 - i] = frame.stack.pop_unsafe();
     }
 
     if (size_usize == 0) {

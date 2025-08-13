@@ -63,9 +63,9 @@ pub fn op_iszero_inline(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 1);
 
-    const value = try frame.stack.peek();
+    const value = try frame.stack.peek_unsafe();
     const result: u256 = @intFromBool(value == 0);
-    try frame.stack.set_top(result);
+    frame.stack.set_top_unsafe(result);
 }
 
 /// Inline version of EQ for hot path optimization
@@ -75,8 +75,8 @@ pub fn op_eq_inline(context: *anyopaque) ExecutionError.Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(context)));
     std.debug.assert(frame.stack.size() >= 2);
 
-    const b = try frame.stack.pop();
-    const a = try frame.stack.peek();
+    const b = frame.stack.pop_unsafe();
+    const a = try frame.stack.peek_unsafe();
     const result: u256 = @intFromBool(a == b);
-    try frame.stack.set_top(result);
+    frame.stack.set_top_unsafe(result);
 }
