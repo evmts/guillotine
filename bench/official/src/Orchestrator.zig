@@ -69,6 +69,46 @@ pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, i
     };
 }
 
+fn getProjectRoot(allocator: std.mem.Allocator) ![]const u8 {
+    var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe_dir = try std.fs.selfExeDirPath(&exe_dir_buf);
+
+    // Helper to get parent directory slice without allocating
+    const parentOf = struct {
+        fn get(path: []const u8) []const u8 {
+            if (std.mem.lastIndexOfScalar(u8, path, std.fs.path.sep)) |idx| {
+                if (idx == 0) return path[0..1];
+                return path[0..idx];
+            }
+            return path;
+        }
+    };
+
+    // Try candidates: exe_dir, parent, grandparent, cwd, cwd parent
+    var candidates: [5][]const u8 = .{ exe_dir, parentOf.get(exe_dir), parentOf.get(parentOf.get(exe_dir)), "", "" };
+
+    var cwd_buf: [std.fs.max_path_bytes]u8 = undefined;
+    if (std.fs.cwd().realpathZ(".", &cwd_buf)) |cwd_path| {
+        candidates[3] = cwd_path;
+        candidates[4] = parentOf.get(cwd_path);
+    } else |_| {}
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    for (candidates) |cand| {
+        if (cand.len == 0) continue;
+        const build_path = std.fmt.bufPrint(&path_buf, "{s}{c}build.zig", .{ cand, std.fs.path.sep }) catch continue;
+        if (std.fs.openFileAbsolute(build_path, .{})) |f| {
+            f.close();
+            // Return owned copy of the candidate path
+            return try allocator.dupe(u8, cand);
+        } else |_| {}
+    }
+
+    // Fallback: assume two levels up from exe_dir
+    const fallback = parentOf.get(parentOf.get(exe_dir));
+    return try allocator.dupe(u8, fallback);
+}
+
 pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir: []const u8) !void {
     print("\n=== Running differential trace for {s} ===\n", .{test_case.name});
 
@@ -88,7 +128,11 @@ pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir
     const revm_trace_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_revm_trace.json", .{ output_dir, test_case.name });
     defer self.allocator.free(revm_trace_path);
 
-    const revm_runner_path = "/Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner";
+    const project_root = try getProjectRoot(self.allocator);
+    defer self.allocator.free(project_root);
+
+    const revm_runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "revm", "target", "release", "revm-runner" });
+    defer self.allocator.free(revm_runner_path);
 
     var revm_argv = std.ArrayList([]const u8).init(self.allocator);
     defer revm_argv.deinit();
@@ -120,7 +164,8 @@ pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir
     const zig_trace_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_zig_trace.json", .{ output_dir, test_case.name });
     defer self.allocator.free(zig_trace_path);
 
-    const zig_runner_path = "/Users/williamcory/guillotine/zig-out/bin/evm-runner";
+    const zig_runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+    defer self.allocator.free(zig_runner_path);
 
     var zig_argv = std.ArrayList([]const u8).init(self.allocator);
     defer zig_argv.deinit();
@@ -670,9 +715,11 @@ pub fn deinit(self: *Orchestrator) void {
 }
 
 pub fn discoverTestCases(self: *Orchestrator) !void {
-    // Get the absolute path to cases directory
-    // This works whether we're in zig-out/bin or running from project root
-    const cases_path = "/Users/williamcory/guillotine/bench/official/cases";
+    // Resolve cases directory relative to the installed executable
+    const project_root = try getProjectRoot(self.allocator);
+    defer self.allocator.free(project_root);
+    const cases_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "cases" });
+    defer self.allocator.free(cases_path);
 
     const cases_dir = try std.fs.openDirAbsolute(cases_path, .{ .iterate = true });
 
@@ -775,44 +822,55 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     // Trim whitespace
     const trimmed_calldata = std.mem.trim(u8, calldata, " \t\n\r");
 
-    // Build the runner path
-    const runner_path = if (std.mem.eql(u8, self.evm_name, "zig"))
-        "/Users/williamcory/guillotine/zig-out/bin/evm-runner"
-    else if (std.mem.eql(u8, self.evm_name, "zig-small"))
-        "/Users/williamcory/guillotine/zig-out/bin/evm-runner-small"
-    else if (std.mem.eql(u8, self.evm_name, "ethereumjs"))
-        "/Users/williamcory/Guillotine/bench/official/evms/ethereumjs/runner.js"
-    else if (std.mem.eql(u8, self.evm_name, "geth"))
-        "/Users/williamcory/Guillotine/bench/official/evms/geth/runner"
-    else if (std.mem.eql(u8, self.evm_name, "evmone"))
-        "/Users/williamcory/Guillotine/bench/official/evms/evmone/build/evmone-runner"
-    else blk: {
+    // Resolve project root and build the runner path relative to it
+    const project_root = try getProjectRoot(self.allocator);
+    defer self.allocator.free(project_root);
+
+    var runner_path: []const u8 = undefined;
+    if (std.mem.eql(u8, self.evm_name, "zig")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+    } else if (std.mem.eql(u8, self.evm_name, "zig-small")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-small" });
+    } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "ethereumjs", "runner.js" });
+    } else if (std.mem.eql(u8, self.evm_name, "geth")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "geth", "runner" });
+    } else if (std.mem.eql(u8, self.evm_name, "evmone")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "evmone", "build", "evmone-runner" });
+    } else {
         const runner_name = try std.fmt.allocPrint(self.allocator, "{s}-runner", .{self.evm_name});
         defer self.allocator.free(runner_name);
-        const path = try std.fmt.allocPrint(self.allocator, "/Users/williamcory/Guillotine/bench/official/evms/{s}/target/release/{s}", .{ self.evm_name, runner_name });
-        break :blk path;
-    };
-    defer if (!std.mem.eql(u8, self.evm_name, "zig") and !std.mem.eql(u8, self.evm_name, "zig-small") and !std.mem.eql(u8, self.evm_name, "ethereumjs") and !std.mem.eql(u8, self.evm_name, "geth") and !std.mem.eql(u8, self.evm_name, "evmone")) self.allocator.free(runner_path);
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", self.evm_name, "target", "release", runner_name });
+    }
+    defer self.allocator.free(runner_path);
 
     const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{runs_to_use});
     defer self.allocator.free(num_runs_str);
 
     // Build hyperfine command
     const next_flag = if (self.use_next and std.mem.eql(u8, self.evm_name, "zig")) " --next" else "";
-    const hyperfine_cmd = try std.fmt.allocPrint(self.allocator, "{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}", .{ runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag });
+    // For EthereumJS, invoke via bun explicitly to avoid shebang/exec issues
+    const js_prefix = if (std.mem.eql(u8, self.evm_name, "ethereumjs")) "bun " else "";
+    const hyperfine_cmd = try std.fmt.allocPrint(self.allocator, "{s}{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}", .{ js_prefix, runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag });
     defer self.allocator.free(hyperfine_cmd);
+
+    // Prepare export file path to avoid mixing JSON with other output
+    const project_root2 = try getProjectRoot(self.allocator);
+    defer self.allocator.free(project_root2);
+    const tmp_dir = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root2, "bench", "official", ".orchestrator_tmp" });
+    defer self.allocator.free(tmp_dir);
+    std.fs.cwd().makePath(tmp_dir) catch {};
+    const export_file = try std.fmt.allocPrint(self.allocator, "{s}/{s}_{s}.json", .{ tmp_dir, test_case.name, self.evm_name });
+    defer self.allocator.free(export_file);
 
     var argv = std.ArrayList([]const u8).init(self.allocator);
     defer argv.deinit();
     try argv.append("hyperfine");
-    try argv.appendSlice(&[_][]const u8{ "--runs", num_runs_str, "--warmup", "3", "--shell=none" });
+    try argv.appendSlice(&[_][]const u8{ "--runs", num_runs_str, "--warmup", "3", "--ignore-failure", "--style", "basic" });
     if (self.show_output) try argv.append("--show-output");
-    try argv.appendSlice(&[_][]const u8{ "--export-json", "-", hyperfine_cmd });
+    try argv.appendSlice(&[_][]const u8{ "--export-json", export_file, hyperfine_cmd });
 
-    const result = try std.process.Child.run(.{
-        .allocator = self.allocator,
-        .argv = argv.items,
-    });
+    const result = try std.process.Child.run(.{ .allocator = self.allocator, .argv = argv.items });
     defer self.allocator.free(result.stdout);
     defer self.allocator.free(result.stderr);
 
@@ -820,10 +878,17 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
         print("Errors:\n{s}", .{result.stderr});
     }
 
-    // Parse JSON results
-    if (result.stdout.len > 0) {
-        try self.parseHyperfineJson(test_case.name, result.stdout, runs_to_use, internal_runs_to_use);
-    }
+    // Read and parse export JSON
+    const json_bytes = std.fs.cwd().readFileAlloc(self.allocator, export_file, 1024 * 1024) catch |err| {
+        print("Failed to read hyperfine JSON for {s}: {}\n", .{ test_case.name, err });
+        return;
+    };
+    defer self.allocator.free(json_bytes);
+
+    self.parseHyperfineJson(test_case.name, json_bytes, runs_to_use, internal_runs_to_use) catch |err| {
+        print("Failed to parse hyperfine output for {s}: {}\n", .{ test_case.name, err });
+        return;
+    };
 }
 
 const TimeUnit = enum {

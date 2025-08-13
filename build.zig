@@ -636,6 +636,8 @@ pub fn build(b: *std.Build) void {
 
     const orchestrator_step = b.step("orchestrator", "Run the benchmark orchestrator");
     orchestrator_step.dependOn(&run_orchestrator_cmd.step);
+    // Ensure Zig runner exists for Zig benchmarks
+    orchestrator_step.dependOn(build_evm_runner_step);
 
     const build_orchestrator_step = b.step("build-orchestrator", "Build the benchmark orchestrator");
     build_orchestrator_step.dependOn(&b.addInstallArtifact(orchestrator_exe, .{}).step);
@@ -687,11 +689,8 @@ pub fn build(b: *std.Build) void {
     evmone_cmake_build.setCwd(b.path(""));
     evmone_cmake_build.step.dependOn(&evmone_cmake_configure.step);
 
-    // Make benchmark targets depend on runner builds
-    orchestrator_step.dependOn(&geth_runner_build.step);
-    orchestrator_step.dependOn(&evmone_cmake_build.step);
-    build_orchestrator_step.dependOn(&geth_runner_build.step);
-    build_orchestrator_step.dependOn(&evmone_cmake_build.step);
+    // Make benchmark comparison target depend on external runner builds
+    // Allow building/running orchestrator without external toolchains
     compare_step.dependOn(&geth_runner_build.step);
     compare_step.dependOn(&evmone_cmake_build.step);
 

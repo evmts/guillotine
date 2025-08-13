@@ -135,27 +135,9 @@ pub fn main() !void {
     // Set up caller account with max balance
     try vm.state.set_balance(caller_address, std.math.maxInt(u256));
 
-    const contract_address = blk: {
-        // Try deploy as initcode to extract runtime code, else set as runtime
-        const create_result = vm.create_contract(caller_address, 0, contract_code, 10_000_000) catch null;
-        if (create_result) |res| {
-            if (res.success) {
-                if (trace_path != null) {
-                    // During tracing, silence debug output
-                    if (res.output) |out| allocator.free(out);
-                } else {
-                    std.debug.print("[create_contract] Success {s}, deploying runtime code len={}\n", .{ @tagName(res.status), if (res.output) |out| out.len else 0 });
-                    if (res.output) |out| allocator.free(out);
-                }
-                break :blk res.address;
-            } else if (res.output) |out| {
-                allocator.free(out);
-            }
-        }
-        const addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
-        try vm.state.set_code(addr, contract_code);
-        break :blk addr;
-    };
+    // Install provided bytecode as runtime code at a deterministic address (no create path)
+    const contract_address = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+    try vm.state.set_code(contract_address, contract_code);
     const deployed = vm.state.get_code(contract_address);
     if (trace_path == null) {
         std.debug.print("[zig-runner] deployed code len={} at {any}\n", .{ deployed.len, contract_address });
@@ -178,7 +160,6 @@ pub fn main() !void {
         const result = vm.call(call_params) catch |err| {
             std.debug.print("Contract execution error: {}\n", .{err});
             if (err == error.InvalidJump) {
-                // Get the deployed code to debug
                 const deployed_code = vm.state.get_code(contract_address);
                 std.debug.print("Deployed code length: {}\n", .{deployed_code.len});
                 std.debug.print("First 100 bytes: {X}\n", .{std.fmt.fmtSliceHexLower(deployed_code[0..@min(100, deployed_code.len)])});
@@ -195,20 +176,16 @@ pub fn main() !void {
             std.process.exit(1);
         }
 
-        // Sanity: ensure we actually consumed gas
         const gas_used: u64 = 1_000_000_000 - result.gas_left;
         if (gas_used == 0) {
             std.debug.print("Sanity check failed: gas_used == 0 (likely no execution)\n", .{});
             std.process.exit(1);
         }
 
-        // Skip output validation when tracing
         if (trace_path != null) continue;
-        
-        // Sanity: lightly validate outputs by selector when available
+
         const selector: u32 = if (calldata.len >= 4) std.mem.readInt(u32, calldata[0..4], .big) else 0;
         switch (selector) {
-            // transfer(address,uint256)
             0xa9059cbb => {
                 if (result.output) |out| {
                     if (!(out.len >= 32 and out[out.len - 1] == 1)) {
@@ -220,7 +197,6 @@ pub fn main() !void {
                     std.process.exit(1);
                 }
             },
-            // approve(address,uint256)
             0x095ea7b3 => {
                 if (result.output) |out| {
                     if (!(out.len >= 32 and out[out.len - 1] == 1)) {
@@ -232,7 +208,6 @@ pub fn main() !void {
                     std.process.exit(1);
                 }
             },
-            // mint(address,uint256) (OpenZeppelin style returns bool)
             0x40c10f19 => {
                 if (result.output) |out| {
                     if (!(out.len >= 32 and out[out.len - 1] == 1)) {
@@ -241,7 +216,6 @@ pub fn main() !void {
                     }
                 }
             },
-            // TenThousandHashes.Benchmark() selector
             0x30627b7c => {
                 if (result.output) |out| {
                     if (out.len != 0) {
@@ -249,18 +223,14 @@ pub fn main() !void {
                         std.process.exit(1);
                     }
                 }
-                // Also require non-trivial gas use
                 if (gas_used < 1000) {
                     std.debug.print("Benchmark() gas_used too small: {}\n", .{gas_used});
                     std.process.exit(1);
                 }
             },
-            else => {
-                // No-op for other selectors
-            },
+            else => {},
         }
 
-        // Note: output ownership is transferred to us, free if present
         if (result.output) |output| {
             allocator.free(output);
         }

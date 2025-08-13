@@ -1,34 +1,20 @@
 
-[2025-08-13 03:11:24] Starting perf-fastest.sh
-[2025-08-13 03:11:24] ROOT_DIR=/Users/williamcory/guillotine
-[2025-08-13 03:11:24] System: Darwin Williams-MacBook-Pro-2.local 24.5.0 Darwin Kernel Version 24.5.0: Tue Apr 22 19:52:00 PDT 2025; root:xnu-11417.121.6~2/RELEASE_ARM64_T6031 arm64
-[2025-08-13 03:11:24] zig: 0.14.1
-[2025-08-13 03:11:25] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
-[2025-08-13 03:11:25] cargo: cargo 1.88.0 (873a06493 2025-05-10)
-[2025-08-13 03:11:25] bun: 1.2.19
-[2025-08-13 03:11:25] hyperfine: hyperfine 1.19.0
-[2025-08-13 03:11:25] git: branch=review commit=3207d424 dirty=yes
-[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
-[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
-[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
-[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
-[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner
-[2025-08-13 03:11:25] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner-small
-[2025-08-13 03:11:25] Building Zig runners (ReleaseFast and ReleaseSmall)
-info: Downloading blst library...
-warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/williamcory/Guillotine/src/compilers/Cargo.toml
-workspace: /Users/williamcory/Guillotine/Cargo.toml
-warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml
-workspace: /Users/williamcory/Guillotine/Cargo.toml
-warning: /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
-   Compiling revm_wrapper v0.1.0 (/Users/williamcory/Guillotine/src/revm_wrapper)
-    Finished `release` profile [optimized] target(s) in 21.77s
-  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
-                                 Dload  Upload   Total   Spent    Left  Speed
-  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100  583k    0  583k    0     0   818k      0 --:--:-- --:--:-- --:--:--  818k
+[2025-08-13 03:59:35] Starting perf-fastest.sh
+[2025-08-13 03:59:35] ROOT_DIR=/Users/williamcory/guillotine
+[2025-08-13 03:59:35] System: Darwin Williams-MacBook-Pro-2.local 24.5.0 Darwin Kernel Version 24.5.0: Tue Apr 22 19:52:00 PDT 2025; root:xnu-11417.121.6~2/RELEASE_ARM64_T6031 arm64
+[2025-08-13 03:59:35] zig: 0.14.1
+[2025-08-13 03:59:35] rustc: rustc 1.88.0 (6b00bc388 2025-06-23)
+[2025-08-13 03:59:35] cargo: cargo 1.88.0 (873a06493 2025-05-10)
+[2025-08-13 03:59:35] bun: 1.2.19
+[2025-08-13 03:59:35] hyperfine: hyperfine 1.19.0
+[2025-08-13 03:59:35] git: branch=review commit=41261088 dirty=yes
+[2025-08-13 03:59:35] Found runner: /Users/williamcory/guillotine/bench/official/evms/revm/target/release/revm-runner
+[2025-08-13 03:59:35] Found runner: /Users/williamcory/guillotine/bench/official/evms/geth/runner
+[2025-08-13 03:59:35] Found runner: /Users/williamcory/guillotine/bench/official/evms/evmone/build/evmone-runner
+[2025-08-13 03:59:35] Found runner: /Users/williamcory/guillotine/bench/official/evms/ethereumjs/runner.js
+[2025-08-13 03:59:35] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner
+[2025-08-13 03:59:35] Found runner: /Users/williamcory/guillotine/zig-out/bin/evm-runner-small
+[2025-08-13 03:59:35] Building Zig runners (ReleaseFast and ReleaseSmall)
 info: Downloading blst library...
 warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
 package:   /Users/williamcory/Guillotine/src/compilers/Cargo.toml
@@ -41,1321 +27,194 @@ warning: /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml: `panic` sett
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
-100 44231    0 44231    0     0   103k      0 --:--:-- --:--:-- --:--:--  103k100  583k    0  583k    0     0  1099k      0 --:--:-- --:--:-- --:--:-- 4778k
-[2025-08-13 03:11:58] Building orchestrator (ReleaseFast)
+  0  583k    0   833    0     0   2252      0  0:04:25 --:--:--  0:04:25  2252100  583k  100  583k    0     0  1096k      0 --:--:-- --:--:-- --:--:-- 3595k
 info: Downloading blst library...
--- CPM: adding package evmone@0.9.1 (v0.9.1)
-CMake Warning (dev) at /opt/homebrew/Cellar/cmake/3.30.5/share/cmake/Modules/FetchContent.cmake:1953 (message):
-  Calling FetchContent_Populate(evmone) is deprecated, call
-  FetchContent_MakeAvailable(evmone) instead.  Policy CMP0169 can be set to
-  OLD to allow FetchContent_Populate(evmone) to be called directly for now,
-  but the ability to call it with declared details will be removed completely
-  in a future version.
-Call Stack (most recent call first):
-  build/cmake/CPM.cmake:967 (FetchContent_Populate)
-  build/cmake/CPM.cmake:773 (cpm_fetch_package)
-  CMakeLists.txt:6 (CPMAddPackage)
-This warning is for project developers.  Use -Wno-dev to suppress it.
-
--- [cable ] Cable 0.5.0 initialized
--- Build type: Release
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:34 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_private_data.cmake:12 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:35 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_initialize.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/Hunter:36 (include)
-  build/_deps/evmone-src/cmake/cable/HunterGate.cmake:525 (include)
-  build/_deps/evmone-src/cmake/Hunter/init.cmake:9 (HunterGate)
-  build/_deps/evmone-src/CMakeLists.txt:25 (include)
-
-
--- [hunter] Calculating Toolchain-SHA1
-CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-
-
--- [hunter] Calculating Config-SHA1
--- [hunter] HUNTER_ROOT: /Users/williamcory/.hunter
--- [hunter] [ Hunter-ID: d7279c1 | Toolchain-ID: 093c2f0 | Config-ID: 7ad575f ]
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/ethash/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/CMakeLists.txt:39 (hunter_add_package)
-
-
--- [hunter] ETHASH_ROOT: /Users/williamcory/.hunter/_Base/d7279c1/093c2f0/7ad575f/Install (ver.: 1.0.0)
-CMake Warning (dev) at build/_deps/evmone-src/CMakeLists.txt:40 (find_package):
-  Policy CMP0144 is not set: find_package uses upper-case <PACKAGENAME>_ROOT
-  variables.  Run "cmake --help-policy CMP0144" for policy details.  Use the
-  cmake_policy command to set the policy and suppress this warning.
-
-  CMake variable ETHASH_ROOT is set to:
-
-    /Users/williamcory/.hunter/_Base/d7279c1/093c2f0/7ad575f/Install
-
-  Environment variable ETHASH_ROOT is set to:
-
-    /Users/williamcory/.hunter/_Base/d7279c1/093c2f0/7ad575f/Install
-
-  For compatibility, find_package is ignoring the variable, but code in a
-  .cmake module might still use it.
-This warning is for project developers.  Use -Wno-dev to suppress it.
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_config_sha1.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:9 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_toolchain_sha1.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:10 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_set_config_location.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_apply_gate_settings.cmake:13 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_calculate_self.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_finalize.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_cache_run.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_load_from_cache.cmake:6 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:22 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_create_cache_meta_directory.cmake:5 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:4 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
-CMake Deprecation Warning at /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_lock_directory.cmake:4 (cmake_minimum_required):
-  Compatibility with CMake < 3.5 will be removed from a future version of
-  CMake.
-
-  Update the VERSION argument <min> value or use a ...<max> suffix to tell
-  CMake that the project does not need compatibility with older versions.
-Call Stack (most recent call first):
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_make_directory.cmake:7 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_save_to_cache.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_download.cmake:26 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/projects/intx/hunter.cmake:8 (include)
-  /Users/williamcory/.hunter/_Base/Download/Hunter/0.24.5/d7279c1/Unpacked/cmake/modules/hunter_add_package.cmake:62 (include)
-  build/_deps/evmone-src/lib/evmone/CMakeLists.txt:7 (hunter_add_package)
-
-
--- [hunter] INTX_ROOT: /Users/williamcory/.hunter/_Base/d7279c1/093c2f0/7ad575f/Install (ver.: 0.8.0)
-CMake Warning (dev) at build/_deps/evmone-src/lib/evmone/CMakeLists.txt:8 (find_package):
-  Policy CMP0144 is not set: find_package uses upper-case <PACKAGENAME>_ROOT
-  variables.  Run "cmake --help-policy CMP0144" for policy details.  Use the
-  cmake_policy command to set the policy and suppress this warning.
-
-  CMake variable INTX_ROOT is set to:
-
-    /Users/williamcory/.hunter/_Base/d7279c1/093c2f0/7ad575f/Install
-
-  Environment variable INTX_ROOT is set to:
-
-    /Users/williamcory/.hunter/_Base/d7279c1/093c2f0/7ad575f/Install
-
-  For compatibility, find_package is ignoring the variable, but code in a
-  .cmake module might still use it.
-This warning is for project developers.  Use -Wno-dev to suppress it.
-
--- Configuring done (1.2s)
--- Generating done (0.0s)
-CMake Warning:
-  Manually-specified variables were not used by the project:
-
-    CMAKE_POLICY_VERSION_MINIMUM
-
-
--- Build files have been written to: /Users/williamcory/guillotine/bench/official/evms/evmone/build
-[ 12%] Building C object _deps/evmone-build/evmc/lib/instructions/CMakeFiles/instructions.dir/instruction_metrics.c.o
-[ 12%] Building C object _deps/evmone-build/evmc/lib/instructions/CMakeFiles/instructions.dir/instruction_names.c.o
-[ 18%] Linking C static library libevmc-instructions.a
-[ 18%] Built target instructions
-[ 25%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_analysis.cpp.o
-[ 31%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/baseline_instruction_table.cpp.o
-[ 37%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_execution.cpp.o
-[ 50%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/advanced_instructions.cpp.o
-[ 50%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/instructions_calls.cpp.o
-[ 56%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/eof.cpp.o
-[ 68%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/instructions_storage.cpp.o
-[ 68%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/baseline.cpp.o
-[ 75%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/tracing.cpp.o
-[ 81%] Building CXX object _deps/evmone-build/lib/evmone/CMakeFiles/evmone.dir/vm.cpp.o
-[ 87%] Linking CXX shared library ../../../../lib/libevmone.dylib
-[ 87%] Built target evmone
-[ 93%] Building CXX object CMakeFiles/evmone-runner.dir/runner.cpp.o
-[100%] Linking CXX executable evmone-runner
-[100%] Built target evmone-runner
-[2025-08-13 03:12:05] Running orchestrator with compare mode (single run per case)
-[2025-08-13 03:12:05] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/williamcory/Guillotine/src/compilers/Cargo.toml
+workspace: /Users/williamcory/Guillotine/Cargo.toml
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml
+workspace: /Users/williamcory/Guillotine/Cargo.toml
+warning: /Users/williamcory/Guillotine/src/revm_wrapper/Cargo.toml: `panic` setting is ignored for `bench` profile
+    Finished `release` profile [optimized] target(s) in 0.14s
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+100  583k  100  583k    0     0  1150k      0 --:--:-- --:--:-- --:--:-- 1150k
+[2025-08-13 03:59:46] Building orchestrator (ReleaseFast)
+info: Downloading blst library...
+[2025-08-13 03:59:46] Running orchestrator with compare mode (single run per case)
+[2025-08-13 03:59:46] Command: /Users/williamcory/guillotine/zig-out/bin/orchestrator --compare --export markdown --num-runs 1 --js-runs 1 --internal-runs 1 --js-internal-runs 1 --snailtracer-internal-runs 1 --js-snailtracer-internal-runs 1
 
 === Running benchmarks for zig ===
 
 === Benchmarking erc20-approval-transfer ===
 Errors:
-Error: Command terminated with non-zero exit code 1 in the first warmup run. Use the '-i'/'--ignore-failure' option if you want to ignore this. Alternatively, use the '--show-output' option to debug what went wrong.
-error: SyntaxError
-[2025-08-13 03:12:06] ERROR: Command failed (exit=1) at line 87: tee -a "${LOG_FILE}"
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 2.85 ms, Min: 2.85 ms, Max: 2.85 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 2.79 ms, Min: 2.79 ms, Max: 2.79 ms (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 1.46 ms, Min: 1.46 ms, Max: 1.46 ms (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 43.79 ms, Min: 43.79 ms, Max: 43.79 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 2.94 ms, Min: 2.94 ms, Max: 2.94 ms (per run, 1 internal runs)
+
+=== Running benchmarks for zig-small ===
+
+=== Benchmarking erc20-approval-transfer ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 2.76 ms, Min: 2.76 ms, Max: 2.76 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 2.54 ms, Min: 2.54 ms, Max: 2.54 ms (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 1.70 ms, Min: 1.70 ms, Max: 1.70 ms (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 43.93 ms, Min: 43.93 ms, Max: 43.93 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Warning: Ignoring non-zero exit code.
+  Mean: 3.55 ms, Min: 3.55 ms, Max: 3.55 ms (per run, 1 internal runs)
+
+=== Running benchmarks for revm ===
+
+=== Benchmarking erc20-approval-transfer ===
+  Mean: 7.09 ms, Min: 7.09 ms, Max: 7.09 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+  Mean: 6.53 ms, Min: 6.53 ms, Max: 6.53 ms (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Mean: 3.41 ms, Min: 3.41 ms, Max: 3.41 ms (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+  Mean: 39.63 ms, Min: 39.63 ms, Max: 39.63 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+  Mean: 8.55 ms, Min: 8.55 ms, Max: 8.55 ms (per run, 1 internal runs)
+
+=== Running benchmarks for ethereumjs ===
+
+=== Benchmarking erc20-approval-transfer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 45.45 ms, Min: 45.45 ms, Max: 45.45 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 43.58 ms, Min: 43.58 ms, Max: 43.58 ms (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 46.89 ms, Min: 46.89 ms, Max: 46.89 ms (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 45.09 ms, Min: 45.09 ms, Max: 45.09 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 44.34 ms, Min: 44.34 ms, Max: 44.34 ms (per run, 1 internal runs)
+
+=== Running benchmarks for geth ===
+
+=== Benchmarking erc20-approval-transfer ===
+  Mean: 14.48 ms, Min: 14.48 ms, Max: 14.48 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+  Mean: 13.09 ms, Min: 13.09 ms, Max: 13.09 ms (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+  Mean: 9.71 ms, Min: 9.71 ms, Max: 9.71 ms (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 93.54 ms, Min: 93.54 ms, Max: 93.54 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+  Mean: 18.44 ms, Min: 18.44 ms, Max: 18.44 ms (per run, 1 internal runs)
+
+=== Running benchmarks for evmone ===
+
+=== Benchmarking erc20-approval-transfer ===
+  Mean: 5.83 ms, Min: 5.83 ms, Max: 5.83 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-mint ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Mean: 4.31 ms, Min: 4.31 ms, Max: 4.31 ms (per run, 1 internal runs)
+
+=== Benchmarking ten-thousand-hashes ===
+Errors:
+ 
+  Warning: Command took less than 5 ms to complete. Note that the results might be inaccurate because hyperfine can not calibrate the shell startup time much more precise than this limit. You can try to use the `-N`/`--shell=none` option to disable the shell completely.
+  Mean: 2.94 ms, Min: 2.94 ms, Max: 2.94 ms (per run, 1 internal runs)
+
+=== Benchmarking snailtracer ===
+Errors:
+ 
+  Warning: Ignoring non-zero exit code.
+  Mean: 28.79 ms, Min: 28.79 ms, Max: 28.79 ms (per run, 1 internal runs)
+
+=== Benchmarking erc20-transfer ===
+  Mean: 6.92 ms, Min: 6.92 ms, Max: 6.92 ms (per run, 1 internal runs)
+Comparison results exported to bench/official/results.md
+[2025-08-13 03:59:54] Benchmark results written to: /Users/williamcory/guillotine/bench/official/results.md
+[2025-08-13 03:59:54] Opening results in browser...
