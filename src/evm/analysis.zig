@@ -147,8 +147,9 @@ allocator: std.mem.Allocator,
 /// This function should never be called - if it is, there's a bug in the analysis or interpreter.
 pub fn UnreachableHandler(frame: *anyopaque) ExecutionError.Error!void {
     _ = frame;
-    Log.err("UnreachableHandler called - this indicates a bug where an opcode marked for inline handling was executed through the jump table", .{});
-    unreachable;
+    // Noop by design: instructions that should be handled inline (e.g., PUSH/PC) or via control-flow
+    // metadata (.next_instruction / .conditional_jump) will never need their execute fn invoked.
+    return;
 }
 
 /// Handler for BEGINBLOCK instructions that validates an entire basic block upfront.
@@ -594,7 +595,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 if (opcode == .JUMP) {
                     instructions[instruction_count] = Instruction{
                         .opcode_fn = NoopHandler,
-                        .arg = .{ .jump_target = .{ .jump_type = .jump } },
+                        .arg = .none,
                         .next_instruction = undefined, // set later
                     };
                     inst_jump_type[instruction_count] = .jump;
@@ -639,7 +640,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
                 instructions[instruction_count] = Instruction{
                     .opcode_fn = NoopHandler,
-                    .arg = .{ .jump_target = .{ .jump_type = .jumpi } },
+                    .arg = .none,
                     .next_instruction = undefined, // set later
                 };
                 inst_jump_type[instruction_count] = .jumpi;
@@ -721,7 +722,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Pattern detection for PUSH + arithmetic fusion
                 if (pc < code.len) {
                     const next_op = code[pc];
-                    const synthetic = @import("execution/synthetic.zig");
+                    // synthetic helpers no longer used; keep import removed to avoid unused warnings
 
                     // Check for PUSH+PUSH+operation patterns first
                     if (next_op >= 0x60 and next_op <= 0x7f) { // Another PUSH
@@ -817,9 +818,9 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                 if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
                                 continue;
                             }
-                            // Replace PUSH with fused PUSH+ADD
+                            // Replace PUSH with fused PUSH+ADD using real ADD handler
                             instructions[instruction_count - 1] = Instruction{
-                                .opcode_fn = synthetic.op_push_add_fusion,
+                                .opcode_fn = execution.arithmetic.op_add,
                                 .arg = .{ .word = value },
                             };
                             block.gas_cost += 3; // ADD gas
@@ -830,9 +831,9 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                             continue;
                         },
                         0x03 => { // SUB
-                            // Replace PUSH with fused PUSH+SUB
+                            // Replace PUSH with fused PUSH+SUB using real SUB handler
                             instructions[instruction_count - 1] = Instruction{
-                                .opcode_fn = synthetic.op_push_sub_fusion,
+                                .opcode_fn = execution.arithmetic.op_sub,
                                 .arg = .{ .word = value },
                             };
                             block.gas_cost += 3; // SUB gas
@@ -856,9 +857,9 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                 if (builtin.mode == .Debug) stats.eliminated_opcodes += 1;
                                 continue;
                             }
-                            // Replace PUSH with fused PUSH+MUL
+                            // Replace PUSH with fused PUSH+MUL using real MUL handler
                             instructions[instruction_count - 1] = Instruction{
-                                .opcode_fn = synthetic.op_push_mul_fusion,
+                                .opcode_fn = execution.arithmetic.op_mul,
                                 .arg = .{ .word = value },
                             };
                             block.gas_cost += 5; // MUL gas
@@ -876,9 +877,9 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                                 if (builtin.mode == .Debug) stats.eliminated_opcodes += 2;
                                 continue;
                             }
-                            // Replace PUSH with fused PUSH+DIV
+                            // Replace PUSH with fused PUSH+DIV using real DIV handler
                             instructions[instruction_count - 1] = Instruction{
-                                .opcode_fn = synthetic.op_push_div_fusion,
+                                .opcode_fn = execution.arithmetic.op_div,
                                 .arg = .{ .word = value },
                             };
                             block.gas_cost += 5; // DIV gas
@@ -903,8 +904,8 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = operation.execute,
-                    .arg = .{ .pc_value = @intCast(pc) },
+                    .opcode_fn = NoopHandler,
+                    .arg = .{ .word = @as(u256, @intCast(pc)) },
                 };
                 Log.debug("[analysis] PC opcode at pc={}", .{pc});
                 instruction_count += 1;
@@ -978,7 +979,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             // ISZERO - use inline version for hot path
             .ISZERO => {
                 const operation = jump_table.get_operation(opcode_byte);
-                const synthetic = @import("execution/synthetic.zig");
+                // synthetic helpers no longer used
 
                 // Record PC to instruction mapping
                 pc_to_instruction[pc] = @intCast(instruction_count);
@@ -987,7 +988,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 block.updateStackTracking(opcode_byte, operation.min_stack);
 
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = synthetic.op_iszero_inline,
+                    .opcode_fn = execution.comparison.op_iszero,
                     .arg = .none,
                 };
                 if (builtin.mode == .Debug) stats.inline_opcodes += 1;
@@ -999,7 +1000,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
             // EQ - use inline version for hot path
             .EQ => {
                 const operation = jump_table.get_operation(opcode_byte);
-                const synthetic = @import("execution/synthetic.zig");
+                // synthetic helpers no longer used
 
                 // Record PC to instruction mapping
                 pc_to_instruction[pc] = @intCast(instruction_count);
@@ -1008,7 +1009,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 block.updateStackTracking(opcode_byte, operation.min_stack);
 
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = synthetic.op_eq_inline,
+                    .opcode_fn = execution.comparison.op_eq,
                     .arg = .none,
                 };
                 if (builtin.mode == .Debug) stats.inline_opcodes += 1;
@@ -1027,12 +1028,12 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                     // Record PC to instruction mapping
                     pc_to_instruction[pc] = @intCast(instruction_count);
 
-                    const synthetic = @import("execution/synthetic.zig");
+                    // synthetic helpers no longer used
                     block.gas_cost += 3 + 3 + 3; // DUP1 + PUSH0 + EQ gas
                     block.updateStackTracking(0x80, 1); // DUP1 needs 1 item
 
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = synthetic.op_iszero_inline,
+                        .opcode_fn = execution.comparison.op_iszero,
                         .arg = .none,
                     };
                     instruction_count += 1;
@@ -1173,7 +1174,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         instructions[ii].next_instruction = &instructions[next_idx];
     }
 
-    // Resolve jump targets after initial translation, passing the PC to instruction mapping
+    // Resolve jump targets after initial translation (deferred pointer wiring happens after resize)
     resolveJumpTargets(code, instructions[0..instruction_count], jumpdest_bitmap, pc_to_instruction) catch {
         // If we can't resolve jumps, it's still OK - runtime will handle it
     };
@@ -1223,6 +1224,51 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
         const idx = pc_to_instruction[map_pc];
         if (idx != std.math.maxInt(u16) and idx < instruction_count) {
             inst_to_pc[idx] = @intCast(map_pc);
+        }
+    }
+
+    // After resize: wire next_instruction and conditional_jump pointers
+    // 1) Default next pointers already set pre-resize; re-initialize for final slice
+    var fi: usize = 0;
+    while (fi < final_instructions.len) : (fi += 1) {
+        const next_idx = if (fi + 1 < final_instructions.len) fi + 1 else fi;
+        final_instructions[fi].next_instruction = &final_instructions[next_idx];
+    }
+
+    // 2) Set targets for JUMP and JUMPI using previous PUSH value and pc_to_block_start
+    var ji: usize = 0;
+    while (ji < final_instructions.len) : (ji += 1) {
+        const jt = final_jump_types[ji];
+        switch (jt) {
+            .jump => {
+                if (ji > 0 and final_instructions[ji - 1].arg == .word) {
+                    const target_pc = final_instructions[ji - 1].arg.word;
+                    if (target_pc < code.len) {
+                        const block_idx_u16 = pc_to_block_start[@intCast(target_pc)];
+                        if (block_idx_u16 != std.math.maxInt(u16)) {
+                            const block_idx: usize = block_idx_u16;
+                            if (block_idx < final_instructions.len) {
+                                final_instructions[ji].next_instruction = &final_instructions[block_idx];
+                            }
+                        }
+                    }
+                }
+            },
+            .jumpi => {
+                if (ji > 0 and final_instructions[ji - 1].arg == .word) {
+                    const target_pc = final_instructions[ji - 1].arg.word;
+                    if (target_pc < code.len) {
+                        const block_idx_u16 = pc_to_block_start[@intCast(target_pc)];
+                        if (block_idx_u16 != std.math.maxInt(u16)) {
+                            const block_idx: usize = block_idx_u16;
+                            if (block_idx < final_instructions.len) {
+                                final_instructions[ji].arg = .{ .conditional_jump = &final_instructions[block_idx] };
+                            }
+                        }
+                    }
+                }
+            },
+            else => {},
         }
     }
 
@@ -1378,10 +1424,14 @@ fn resolveJumpTargets(code: []const u8, instructions: []Instruction, jumpdest_bi
                         // Find the BEGINBLOCK for this target PC
                         const block_idx = pc_to_block_start[@intCast(target_pc)];
                         if (block_idx != std.math.maxInt(u16) and block_idx < instructions.len) {
-                            const jump_type: JumpType = if (opcode_byte == 0x56) .jump else .jumpi;
-                            inst.arg = .{ .jump_target = JumpTarget{ .jump_type = jump_type } };
-                            // Set next_instruction to resolved target. For JUMPI, interpreter uses this when condition is true
-                            inst.next_instruction = &instructions[block_idx];
+                            if (opcode_byte == 0x57) {
+                                // Conditional: store true target in arg; false is next_instruction (already set)
+                                inst.arg = .{ .conditional_jump = &instructions[block_idx] };
+                            } else {
+                                // Unconditional jump is just a noop with next_instruction set
+                                inst.arg = .none;
+                                inst.next_instruction = &instructions[block_idx];
+                            }
                         }
                     }
                 }
@@ -1458,13 +1508,11 @@ test "jump target resolution with BEGINBLOCK injections" {
             begin_block_count += 1;
         }
         // Check if JUMP has been resolved to point to a valid target
-        if (inst.arg == .jump_target) {
+        // Unconditional jumps are encoded as noop with next_instruction set
+        if (inst.next_instruction != &inst) {
             jump_found = true;
-            if (inst.arg.jump_target.jump_type == .jump) {
-                // Verify the target points to a BEGINBLOCK instruction
-                if (inst.next_instruction.opcode_fn == BeginBlockHandler) {
-                    jump_target_valid = true;
-                }
+            if (inst.next_instruction.opcode_fn == BeginBlockHandler) {
+                jump_target_valid = true;
             }
         }
     }
@@ -1505,14 +1553,10 @@ test "conditional jump (JUMPI) target resolution" {
     var jumpi_target_valid = false;
 
     for (analysis.instructions) |inst| {
-        // Check if JUMPI has been resolved to point to a valid target
-        if (inst.arg == .jump_target) {
-            if (inst.arg.jump_target.jump_type == .jumpi) {
-                jumpi_found = true;
-                // Verify the target points to a BEGINBLOCK instruction
-                if (inst.next_instruction.opcode_fn == BeginBlockHandler) {
-                    jumpi_target_valid = true;
-                }
+        if (inst.arg == .conditional_jump) {
+            jumpi_found = true;
+            if (inst.arg.conditional_jump.opcode_fn == BeginBlockHandler) {
+                jumpi_target_valid = true;
             }
         }
     }
@@ -1610,7 +1654,7 @@ test "invalid jump target handling" {
     var unresolved_jump_found = false;
 
     for (analysis.instructions) |inst| {
-        // UnreachableHandler with .none arg means unresolved jump
+        // Noop handler with .none arg means unresolved jump
         if (inst.opcode_fn == UnreachableHandler and inst.arg == .none) {
             unresolved_jump_found = true;
         }

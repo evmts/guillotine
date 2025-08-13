@@ -17,11 +17,10 @@ pub const JumpTarget = struct {
 pub const AnalysisArg = union(enum) {
     none,
     word: u256,
-    jump_target: JumpTarget,
+    conditional_jump: *const Instruction,
     gas_cost: u32,
     block_info: BlockInfo,
     dynamic_gas: DynamicGas,
-    pc_value: u16,
     keccak: struct {
         word_count: u64,
         gas_cost: u64,

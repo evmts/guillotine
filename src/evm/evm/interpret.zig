@@ -45,6 +45,7 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         }
 
         const inst = frame.instruction;
+        const next_instruction = inst.next_instruction;
         const arg = inst.arg;
         const op_fn = inst.opcode_fn;
 
@@ -72,6 +73,10 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         }
 
         switch (arg) {
+            .none => {
+                @branchHint(.likely);
+            },
+            // Analysis will batch calculate stack requirements and gas requirements for series of bytecode
             .block_info => |block| {
                 const current_stack_size: u16 = @intCast(frame.stack.size());
                 if (frame.gas_remaining < block.gas_cost) {
@@ -88,88 +93,6 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     @branchHint(.cold);
                     return ExecutionError.Error.StackOverflow;
                 }
-                // BEGINBLOCK has no opcode function to run; advance and continue
-                frame.instruction = inst.next_instruction;
-                continue;
-            },
-            .jump_target => |target| {
-                switch (target.jump_type) {
-                    .jump => {
-                        // Noop handler; fallthrough to auto-advance via next_instruction at end
-                    },
-                    .jumpi => {
-                        const condition = frame.stack.pop_unsafe();
-                        if (condition != 0) {
-                            // Noop handler; fallthrough to auto-advance via next_instruction at end
-                            // but condition true means we should take next_instruction now
-                            frame.instruction = inst.next_instruction;
-                            continue;
-                        }
-                        // False branch: sequential fallthrough
-                        const base: [*]const @TypeOf(inst.*) = instructions.ptr;
-                        const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
-                        frame.instruction = if (idx + 1 < instructions.len) &instructions[idx + 1] else inst;
-                        continue;
-                    },
-                    .other => {
-                        // Noop handler; fallthrough to auto-advance via next_instruction at end
-                    },
-                }
-            },
-            .word => |value| {
-                frame.stack.append_unsafe(value);
-            },
-            .pc_value => |pc| {
-                frame.stack.append_unsafe(@as(u256, pc));
-                // PC is handled inline; do not call opcode_fn
-                frame.instruction = inst.next_instruction;
-                continue;
-            },
-            .keccak => |params| {
-                // Consume precomputed gas cost
-                if (frame.gas_remaining < params.gas_cost) {
-                    @branchHint(.cold);
-                    frame.gas_remaining = 0;
-                    return ExecutionError.Error.OutOfGas;
-                }
-                frame.gas_remaining -= params.gas_cost;
-                // If size provided at analysis time, use it; otherwise pop from stack
-                const size = if (params.size) |imm| @as(u256, @intCast(imm)) else frame.stack.pop_unsafe();
-                const offset = frame.stack.pop_unsafe();
-
-                // Bounds checking
-                if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                    @branchHint(.unlikely);
-                    return ExecutionError.Error.OutOfOffset;
-                }
-
-                const offset_usize = @as(usize, @intCast(offset));
-                const size_usize = @as(usize, @intCast(size));
-
-                if (size == 0) {
-                    @branchHint(.unlikely);
-                    // Hash of empty data = keccak256("")
-                    const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                    frame.stack.append_unsafe(empty_hash);
-                } else {
-                    // Memory expansion already handled, just get the data
-                    _ = try frame.memory.ensure_context_capacity(offset_usize + size_usize);
-                    const data = try frame.memory.get_slice(offset_usize, size_usize);
-
-                    // Hash using Keccak256
-                    var hash: [32]u8 = undefined;
-                    std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
-
-                    const result = std.mem.readInt(u256, &hash, .big);
-                    frame.stack.append_unsafe(result);
-                }
-                // KECCAK handled inline; advance and continue
-                frame.instruction = inst.next_instruction;
-                continue;
-            },
-            .none => {
-                @branchHint(.likely);
-                // Fall through to call opcode function outside the switch
             },
             .gas_cost => |cost| {
                 if (frame.gas_remaining < cost) {
@@ -204,13 +127,54 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     }
                     frame.gas_remaining -= additional_gas;
                 }
-                // Fall through to call opcode function outside the switch
+            },
+            .conditional_jump => |true_target| {
+                @branchHint(.unlikely);
+                const condition = frame.stack.pop_unsafe();
+                if (condition != 0) {
+                    frame.instruction = true_target;
+                    continue;
+                }
+            },
+            .word => |value| {
+                frame.stack.append_unsafe(value);
+            },
+            .keccak => |params| {
+                if (frame.gas_remaining < params.gas_cost) {
+                    @branchHint(.cold);
+                    frame.gas_remaining = 0;
+                    return ExecutionError.Error.OutOfGas;
+                }
+                frame.gas_remaining -= params.gas_cost;
+                const size = if (params.size) |imm| @as(u256, @intCast(imm)) else frame.stack.pop_unsafe();
+                const offset = frame.stack.pop_unsafe();
+
+                if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
+                    @branchHint(.unlikely);
+                    return ExecutionError.Error.OutOfOffset;
+                }
+
+                const offset_usize = @as(usize, @intCast(offset));
+                const size_usize = @as(usize, @intCast(size));
+
+                if (size == 0) {
+                    const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+                    frame.stack.append_unsafe(empty_hash);
+                } else {
+                    @branchHint(.likely);
+                    const data = try frame.memory.get_slice(offset_usize, size_usize);
+
+                    var hash: [32]u8 = undefined;
+                    std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
+
+                    const result = std.mem.readInt(u256, &hash, .big);
+                    frame.stack.append_unsafe(result);
+                }
             },
         }
-        // Execute opcode function (for cases that didn't continue above)
+
         try op_fn(frame_opaque);
-        // Then advance to the next instruction
-        frame.instruction = inst.next_instruction;
+        frame.instruction = next_instruction;
     }
 }
 
