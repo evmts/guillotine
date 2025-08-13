@@ -65,3 +65,8 @@ fn StopHandler(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
     return ExecutionError.Error.STOP;
 }
+
+pub fn NoopHandler(context: *anyopaque) ExecutionError.Error!void {
+    _ = context;
+    return;
+}

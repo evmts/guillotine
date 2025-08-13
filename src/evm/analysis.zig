@@ -7,6 +7,7 @@ const Instruction = @import("instruction.zig").Instruction;
 const BlockInfo = @import("instruction.zig").BlockInfo;
 const JumpType = @import("instruction.zig").JumpType;
 const JumpTarget = @import("instruction.zig").JumpTarget;
+const NoopHandler = @import("instruction.zig").NoopHandler;
 const DynamicGas = @import("instruction.zig").DynamicGas;
 const DynamicGasFunc = @import("instruction.zig").DynamicGasFunc;
 const Opcode = @import("opcodes/opcode.zig");
@@ -156,15 +157,7 @@ pub fn UnreachableHandler(frame: *anyopaque) ExecutionError.Error!void {
 ///
 /// The block information (gas cost, stack requirements) is stored in the instruction's arg.block_info.
 /// This handler must be called before executing any instructions in the basic block.
-pub fn BeginBlockHandler(frame: *anyopaque) ExecutionError.Error!void {
-    // BEGINBLOCK validation is intentionally handled in the interpreter
-    // (see evm/interpret.zig under the `.block_info` case). The opcode_fn
-    // for BEGINBLOCK is a no-op to avoid double-charging gas or duplicating
-    // stack validation. Keeping this as a no-op also prevents accidental
-    // misuse if called directly.
-    _ = frame;
-    return;
-}
+pub const BeginBlockHandler = NoopHandler;
 
 /// Block analysis structure used during instruction stream generation.
 /// Tracks the accumulated requirements for a basic block during analysis.
@@ -517,7 +510,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
     // Start first block with BEGINBLOCK instruction
     instructions[instruction_count] = Instruction{
-        .opcode_fn = BeginBlockHandler,
+        .opcode_fn = NoopHandler,
         .arg = .{ .block_info = BlockInfo{} }, // Will be filled when block closes
     };
     var block = BlockAnalysis.init(instruction_count);
@@ -563,7 +556,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
                 // Start new block with BEGINBLOCK
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = BeginBlockHandler,
+                    .opcode_fn = NoopHandler,
                     .arg = .{ .block_info = BlockInfo{} },
                 };
                 block = BlockAnalysis.init(instruction_count);
@@ -600,7 +593,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
 
                 if (opcode == .JUMP) {
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = UnreachableHandler, // control handled in interpreter via next_instruction
+                        .opcode_fn = NoopHandler,
                         .arg = .{ .jump_target = .{ .jump_type = .jump } },
                         .next_instruction = undefined, // set later
                     };
@@ -624,7 +617,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // continue analysis instead of skipping until a JUMPDEST.
                 if (pc < code.len) {
                     instructions[instruction_count] = Instruction{
-                        .opcode_fn = BeginBlockHandler,
+                        .opcode_fn = NoopHandler,
                         .arg = .{ .block_info = BlockInfo{} },
                     };
                     block = BlockAnalysis.init(instruction_count);
@@ -645,7 +638,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = UnreachableHandler, // control handled in interpreter via next_instruction
+                    .opcode_fn = NoopHandler,
                     .arg = .{ .jump_target = .{ .jump_type = .jumpi } },
                     .next_instruction = undefined, // set later
                 };
@@ -656,7 +649,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // Close current block and start new one (for fall-through path)
                 instructions[block.begin_block_index].arg.block_info = block.close();
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = BeginBlockHandler,
+                    .opcode_fn = NoopHandler,
                     .arg = .{ .block_info = BlockInfo{} },
                 };
                 block = BlockAnalysis.init(instruction_count);
@@ -926,7 +919,7 @@ fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_table
                 // makes the validator underestimate the required stack height.
                 instructions[block.begin_block_index].arg.block_info = block.close();
                 instructions[instruction_count] = Instruction{
-                    .opcode_fn = BeginBlockHandler,
+                    .opcode_fn = NoopHandler,
                     .arg = .{ .block_info = BlockInfo{} },
                 };
                 block = BlockAnalysis.init(instruction_count);

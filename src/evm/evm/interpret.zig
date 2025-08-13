@@ -95,14 +95,13 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             .jump_target => |target| {
                 switch (target.jump_type) {
                     .jump => {
-                        _ = frame.stack.pop_unsafe();
-                        frame.instruction = inst.next_instruction;
-                        continue;
+                        // Noop handler; fallthrough to auto-advance via next_instruction at end
                     },
                     .jumpi => {
-                        const pops = frame.stack.pop2_unsafe();
-                        const condition = pops.a;
+                        const condition = frame.stack.pop_unsafe();
                         if (condition != 0) {
+                            // Noop handler; fallthrough to auto-advance via next_instruction at end
+                            // but condition true means we should take next_instruction now
                             frame.instruction = inst.next_instruction;
                             continue;
                         }
@@ -113,18 +112,12 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                         continue;
                     },
                     .other => {
-                        frame.instruction = inst.next_instruction;
-                        continue;
+                        // Noop handler; fallthrough to auto-advance via next_instruction at end
                     },
                 }
             },
             .word => |value| {
                 frame.stack.append_unsafe(value);
-                // Pure PUSH has UnreachableHandler; skip calling and advance
-                if (op_fn == UnreachableHandler) {
-                    frame.instruction = inst.next_instruction;
-                    continue;
-                }
             },
             .pc_value => |pc| {
                 frame.stack.append_unsafe(@as(u256, pc));
@@ -132,7 +125,6 @@ pub inline fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                 frame.instruction = inst.next_instruction;
                 continue;
             },
-            // Fusion cases are no longer needed; handled via `.word` + opcode_fn
             .keccak => |params| {
                 // Consume precomputed gas cost
                 if (frame.gas_remaining < params.gas_cost) {
