@@ -78,20 +78,20 @@ export async function getEvmState(): Promise<EvmState> {
 				throw new Error(parsed.error)
 			}
 
-            // Map fields from Zig JSON to frontend state
-            return {
-                gasLeft: parsed.gasLeft,
-                depth: parsed.depth,
-                stack: parsed.stack || [],
-                memory: parsed.memory || '0x',
-                storage: parsed.storage || [],
-                logs: parsed.logs || [],
-                returnData: parsed.returnData || '0x',
-                completed: parsed.completed || false,
-                currentInstructionIndex: parsed.currentInstructionIndex || 0,
-                currentBlockStartIndex: parsed.currentBlockStartIndex || 0,
-                blocks: parsed.blocks || [],
-            }
+			// Map fields from Zig JSON to frontend state
+			return {
+				gasLeft: parsed.gasLeft,
+				depth: parsed.depth,
+				stack: parsed.stack || [],
+				memory: parsed.memory || '0x',
+				storage: parsed.storage || [],
+				logs: parsed.logs || [],
+				returnData: parsed.returnData || '0x',
+				completed: parsed.completed || false,
+				currentInstructionIndex: parsed.currentInstructionIndex || 0,
+				currentBlockStartIndex: parsed.currentBlockStartIndex || 0,
+				blocks: parsed.blocks || [],
+			}
 		}
 		return response
 	} catch (err) {

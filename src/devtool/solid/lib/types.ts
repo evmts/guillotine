@@ -1,26 +1,26 @@
 export interface BlockJson {
-    beginIndex: number
-    gasCost: number
-    stackReq: number
-    stackMaxGrowth: number
-    pcs: number[]
-    opcodes: string[]
-    hex: string[]
-    data: string[]
+	beginIndex: number
+	gasCost: number
+	stackReq: number
+	stackMaxGrowth: number
+	pcs: number[]
+	opcodes: string[]
+	hex: string[]
+	data: string[]
 }
 
 export interface EvmState {
-    gasLeft: number
-    depth: number
-    stack: string[]
-    memory: string
-    storage: Array<{ key: string; value: string }>
-    logs: string[]
-    returnData: string
-    completed: boolean
-    currentInstructionIndex: number
-    currentBlockStartIndex: number
-    blocks: BlockJson[]
+	gasLeft: number
+	depth: number
+	stack: string[]
+	memory: string
+	storage: Array<{ key: string; value: string }>
+	logs: string[]
+	returnData: string
+	completed: boolean
+	currentInstructionIndex: number
+	currentBlockStartIndex: number
+	blocks: BlockJson[]
 }
 
 export interface SampleContract {
