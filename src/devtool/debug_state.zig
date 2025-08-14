@@ -338,6 +338,9 @@ pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void 
         allocator.free(blk.hex);
         for (blk.data) |s| allocator.free(s);
         allocator.free(blk.data);
+        allocator.free(blk.opcodeBytes);
+        allocator.free(blk.dynamicGas);
+        allocator.free(blk.dynCandidate);
         allocator.free(blk.instIndices);
         allocator.free(blk.instMappedPcs);
     }
