@@ -1,5 +1,6 @@
 import { type Accessor, createEffect, createSignal, type Setter, Show } from 'solid-js'
 import Breakpoints from '~/components/evm-debugger/Breakpoints'
+import BytecodeBlocksMap from '~/components/evm-debugger/BytecodeBlocksMap'
 import BytecodeLoader from '~/components/evm-debugger/BytecodeLoader'
 import Controls from '~/components/evm-debugger/Controls'
 import ErrorAlert from '~/components/evm-debugger/ErrorAlert'
@@ -94,6 +95,11 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 					togglePcBreakpoint={togglePcBreakpoint}
 				/>
 				<Show when={activePanel() === 'all' || activePanel() === 'execution'}>
+					<BytecodeBlocksMap
+						codeHex={props.bytecode()}
+						blocks={props.state.preanalyzedBlocks}
+						currentBlockStartIndex={props.state.currentPreanalyzedBlockStartIndex}
+					/>
 					<ExecutionStepsView
 						preanalyzedBlocks={props.state.preanalyzedBlocks}
 						currentPreanalyzedBlockStartIndex={props.state.currentPreanalyzedBlockStartIndex}
