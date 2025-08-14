@@ -64,7 +64,10 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				setState={props.setState as Setter<EvmState>}
 			/>
 			<div class="mx-auto flex max-w-7xl flex-col gap-6 px-3 pb-6 sm:px-6">
-				<ErrorAlert error={props.error()} setError={props.setError} />
+				<ErrorAlert
+					error={props.error() || (props.state.errorOccurred ? props.state.errorName || 'Execution error' : '')}
+					setError={props.setError}
+				/>
 				<StateSummary state={props.state as EvmState} isUpdating={isUpdating()} />
 				<Show when={activePanel() === 'all' || activePanel() === 'bytecode'}>
 					<div class="flex flex-col gap-4">

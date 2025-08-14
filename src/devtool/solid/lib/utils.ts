@@ -87,6 +87,8 @@ export async function getEvmState(): Promise<EvmState> {
 				storage: parsed.storage || [],
 				logs: parsed.logs || [],
 				returnData: parsed.returnData || '0x',
+				errorName: parsed.errorName || '',
+				errorOccurred: parsed.errorOccurred || false,
 				completed: parsed.completed || false,
 				currentInstructionIndex: parsed.currentInstructionIndex || 0,
 				currentBlockStartIndex: parsed.currentBlockStartIndex || 0,
