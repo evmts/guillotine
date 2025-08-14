@@ -78,6 +78,9 @@ pub const EvmStateJson = struct {
     storage: []StorageEntry,
     logs: [][]const u8,
     returnData: []const u8,
+    // Execution error surfacing for UI
+    errorOccurred: bool,
+    errorName: []const u8,
     // Full original bytecode as 0x-hex for block visualization
     codeHex: []const u8,
     completed: bool,
@@ -298,6 +301,8 @@ pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
         .storage = try empty_storage.toOwnedSlice(),
         .logs = try empty_logs.toOwnedSlice(),
         .returnData = try allocator.dupe(u8, "0x"),
+        .errorOccurred = false,
+        .errorName = try allocator.dupe(u8, ""),
         .completed = false,
         .currentInstructionIndex = 0,
         .currentBlockStartIndex = 0,
@@ -328,6 +333,7 @@ pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void 
     allocator.free(state.logs);
 
     allocator.free(state.returnData);
+    allocator.free(state.errorName);
 
     // Free blocks
     for (state.blocks) |blk| {

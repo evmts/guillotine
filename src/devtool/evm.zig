@@ -31,6 +31,9 @@ instr_index: usize,
 is_paused: bool,
 is_initialized: bool,
 is_completed: bool,
+// last error for UI surfacing
+last_error_occurred: bool,
+last_error: ?Evm.ExecutionError.Error,
 
 // Storage tracking for debugging
 storage_changes: std.AutoHashMap(StorageKey, u256),
@@ -78,6 +81,8 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
         .is_completed = false,
         .storage_changes = storage_changes,
         .dynamic_gas_map = dynamic_gas_map,
+        .last_error_occurred = false,
+        .last_error = null,
     };
 }
 
@@ -185,6 +190,9 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
     self.storage_changes.clearRetainingCapacity();
     // Clear dynamic gas attribution table
     self.dynamic_gas_map.clearRetainingCapacity();
+    // Clear last error state
+    self.last_error_occurred = false;
+    self.last_error = null;
 
     if (self.bytecode.len == 0) {
         self.is_initialized = false;
@@ -463,6 +471,14 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
             const formatted = debug_state.formatBytesHex(self.allocator, out) catch
                 break :blk try self.allocator.dupe(u8, "0x");
             break :blk formatted;
+        },
+        .errorOccurred = self.last_error_occurred,
+        .errorName = blk_err: {
+            if (self.last_error) |e| {
+                const name = @errorName(e);
+                break :blk_err try self.allocator.dupe(u8, name);
+            }
+            break :blk_err try self.allocator.dupe(u8, "");
         },
         .codeHex = try debug_state.formatBytesHex(self.allocator, self.analysis.?.code),
         .completed = self.is_completed,
@@ -750,6 +766,8 @@ pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
 
     const had_error = exec_err != null and exec_err.? != Evm.ExecutionError.Error.STOP;
     const completed = self.is_completed;
+    self.last_error_occurred = had_error;
+    self.last_error = if (had_error) exec_err else null;
 
     return DebugStepResult{
         .gas_before = gas_before,
@@ -1067,4 +1085,56 @@ test "DevtoolEvm fused patterns step-by-step across blocks" {
     // Step 4: executes STOP in the same block; now completed
     const s4 = try devtool_evm.stepExecute();
     try testing.expectEqual(true, s4.completed);
+}
+
+test "sample with stack underflow at KECCAK due to missing offset produces error" {
+    const allocator = testing.allocator;
+
+    var devtool_evm = try DevtoolEvm.init(allocator);
+    defer devtool_evm.deinit();
+
+    // Stores "Hello" then pushes only size before KECCAK (missing offset)
+    // Expect: stack underflow detected at block entry or during KECCAK execution
+    try devtool_evm.loadBytecodeHex("0x7f48656c6c6f000000000000000000000000000000000000000000000000000000600052600520");
+
+    _ = devtool_evm.instr_index;
+    var step = try devtool_evm.stepExecute();
+    // Step until we observe an error or completion
+    var i: usize = 0;
+    var saw_error = step.error_occurred;
+    while (i < 50 and !devtool_evm.is_completed and !saw_error) : (i += 1) {
+        step = try devtool_evm.stepExecute();
+        saw_error = saw_error or step.error_occurred;
+    }
+    // Ensure we encountered an execution error at some point (invalid bytecode should fail)
+    try testing.expect(saw_error);
+}
+
+test "DevtoolEvm sample with hashing is executed correctly" {
+    const allocator = testing.allocator;
+
+    var devtool_evm = try DevtoolEvm.init(allocator);
+    defer devtool_evm.deinit();
+
+    // Advanced Storage Pattern from UI samples
+    try devtool_evm.loadBytecodeHex("0x6001600052600160005260406000209055600260015260026001526040600120905560016000526000600052604060002054600260015260006001526040600120545050");
+
+    const before_idx = devtool_evm.instr_index;
+    const s1 = try devtool_evm.stepExecute();
+    // Should consume some gas and advance instruction pointer
+    try testing.expect(s1.gas_after <= s1.gas_before);
+    if (!s1.completed) {
+        try testing.expect(devtool_evm.instr_index != before_idx);
+    }
+
+    // Execute a few more steps to ensure we keep making progress (not stalling)
+    var i: usize = 0;
+    while (i < 50 and !devtool_evm.is_completed) : (i += 1) {
+        _ = try devtool_evm.stepExecute();
+    }
+
+    // Expect the program to be completed
+    try testing.expect(devtool_evm.is_completed);
+    // Expect at least 1 instruction to be executed
+    try testing.expect(devtool_evm.instr_index > before_idx);
 }

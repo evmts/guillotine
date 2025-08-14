@@ -22,6 +22,9 @@ export interface EvmState {
 	storage: Array<{ key: string; value: string }>
 	logs: string[]
 	returnData: string
+	// New error fields surfaced from backend
+	errorOccurred?: boolean
+	errorName?: string
 	codeHex: string
 	completed: boolean
 	currentInstructionIndex: number
