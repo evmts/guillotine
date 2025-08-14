@@ -296,6 +296,8 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                 var datas = std.ArrayList([]const u8).init(self.allocator);
                 var dbg_inst_indices = std.ArrayList(u32).init(self.allocator);
                 var dbg_inst_mapped_pcs = std.ArrayList(u32).init(self.allocator);
+                var block_min_pc: u32 = std.math.maxInt(u32);
+                var block_max_end_pc: u32 = 0;
                 defer pcs.deinit();
                 defer opcodes.deinit();
                 defer hexes.deinit();
@@ -342,8 +344,9 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                     const hex_str = try std.fmt.allocPrint(self.allocator, "0x{x:0>2}", .{op_byte});
                     const name = try self.allocator.dupe(u8, debug_state.opcodeToString(op_byte));
                     var data_str: []const u8 = &[_]u8{};
+                    var imm_len2: usize = 0;
                     if (op_byte >= 0x60 and op_byte <= 0x7f and pc + 1 <= a.code_len) {
-                        const imm_len2: usize = op_byte - 0x5f;
+                        imm_len2 = op_byte - 0x5f;
                         if (pc + 1 + imm_len2 <= a.code_len) {
                             const slice = a.code[pc + 1 .. pc + 1 + imm_len2];
                             data_str = try debug_state.formatBytesHex(self.allocator, slice);
@@ -358,6 +361,14 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                     opcodes.append(name) catch {};
                     hexes.append(hex_str) catch {};
                     datas.append(data_str) catch {};
+
+                    // Track block byte range [min, max_end)
+                    if (pc < a.code_len) {
+                        const start_pc_u32: u32 = @intCast(pc);
+                        if (start_pc_u32 < block_min_pc) block_min_pc = start_pc_u32;
+                        const end_pc_u32: u32 = @intCast(pc + 1 + imm_len2);
+                        if (end_pc_u32 > block_max_end_pc) block_max_end_pc = end_pc_u32;
+                    }
                 }
 
                 blocks.append(.{
@@ -365,6 +376,8 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                     .gasCost = instrs[i].arg.block_info.gas_cost,
                     .stackReq = instrs[i].arg.block_info.stack_req,
                     .stackMaxGrowth = instrs[i].arg.block_info.stack_max_growth,
+                    .blockStartPc = if (block_min_pc == std.math.maxInt(u32)) 0 else block_min_pc,
+                    .blockEndPcExclusive = block_max_end_pc,
                     .pcs = try pcs.toOwnedSlice(),
                     .opcodes = try opcodes.toOwnedSlice(),
                     .hex = try hexes.toOwnedSlice(),
@@ -390,6 +403,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                 break :blk try self.allocator.dupe(u8, "0x");
             break :blk formatted;
         },
+        .codeHex = try debug_state.formatBytesHex(self.allocator, self.analysis.?.code),
         .completed = self.is_completed,
         .currentInstructionIndex = self.instr_index,
         .currentBlockStartIndex = current_block_start_index,

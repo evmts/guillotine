@@ -53,6 +53,9 @@ pub const BlockJson = struct {
     gasCost: u32,
     stackReq: u16,
     stackMaxGrowth: u16,
+    // Original bytecode range covered by this block [startPc, endPc)
+    blockStartPc: u32,
+    blockEndPcExclusive: u32,
     pcs: []u32,
     opcodes: [][]const u8,
     hex: [][]const u8,
@@ -70,6 +73,8 @@ pub const EvmStateJson = struct {
     storage: []StorageEntry,
     logs: [][]const u8,
     returnData: []const u8,
+    // Full original bytecode as 0x-hex for block visualization
+    codeHex: []const u8,
     completed: bool,
     currentInstructionIndex: usize,
     currentBlockStartIndex: usize,
@@ -292,6 +297,7 @@ pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
         .currentInstructionIndex = 0,
         .currentBlockStartIndex = 0,
         .blocks = try allocator.alloc(BlockJson, 0),
+        .codeHex = try allocator.dupe(u8, "0x"),
     };
 }
 
@@ -331,6 +337,9 @@ pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void 
         allocator.free(blk.instMappedPcs);
     }
     allocator.free(state.blocks);
+
+    // Free code hex string
+    allocator.free(state.codeHex);
 }
 
 test "DebugState.capture works correctly" {
