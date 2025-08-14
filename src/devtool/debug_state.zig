@@ -33,7 +33,7 @@ pub const DebugState = struct {
             .gas_remaining = gas_remaining,
             .depth = depth,
             .is_static = is_static,
-            .stack_size = stack.size,
+            .stack_size = stack.size(),
             .memory_size = memory.size(),
             .has_error = err != null,
             .error_name = if (err) |e| @errorName(e) else null,
@@ -48,9 +48,21 @@ pub const StorageEntry = struct {
 };
 
 /// Simple JSON-serializable state for the frontend
+pub const BlockJson = struct {
+    beginIndex: usize,
+    gasCost: u32,
+    stackReq: u16,
+    stackMaxGrowth: u16,
+    pcs: []u32,
+    opcodes: [][]const u8,
+    hex: [][]const u8,
+    data: [][]const u8,
+    // debugging aids
+    instIndices: []u32,
+    instMappedPcs: []u32,
+};
+
 pub const EvmStateJson = struct {
-    pc: usize,
-    opcode: []const u8,
     gasLeft: u64,
     depth: u32,
     stack: [][]const u8,
@@ -58,6 +70,10 @@ pub const EvmStateJson = struct {
     storage: []StorageEntry,
     logs: [][]const u8,
     returnData: []const u8,
+    completed: bool,
+    currentInstructionIndex: usize,
+    currentBlockStartIndex: usize,
+    blocks: []BlockJson,
 };
 
 /// Convert opcode byte to human-readable string
@@ -265,8 +281,6 @@ pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
     defer empty_logs.deinit();
 
     return EvmStateJson{
-        .pc = 0,
-        .opcode = try allocator.dupe(u8, "-"),
         .gasLeft = 0,
         .depth = 0,
         .stack = try empty_stack.toOwnedSlice(),
@@ -274,13 +288,15 @@ pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
         .storage = try empty_storage.toOwnedSlice(),
         .logs = try empty_logs.toOwnedSlice(),
         .returnData = try allocator.dupe(u8, "0x"),
+        .completed = false,
+        .currentInstructionIndex = 0,
+        .currentBlockStartIndex = 0,
+        .blocks = try allocator.alloc(BlockJson, 0),
     };
 }
 
 /// Free allocated memory from EvmStateJson
 pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void {
-    allocator.free(state.opcode);
-
     for (state.stack) |stack_item| {
         allocator.free(stack_item);
     }
@@ -301,6 +317,20 @@ pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void 
     allocator.free(state.logs);
 
     allocator.free(state.returnData);
+
+    // Free blocks
+    for (state.blocks) |blk| {
+        allocator.free(blk.pcs);
+        for (blk.opcodes) |s| allocator.free(s);
+        allocator.free(blk.opcodes);
+        for (blk.hex) |s| allocator.free(s);
+        allocator.free(blk.hex);
+        for (blk.data) |s| allocator.free(s);
+        allocator.free(blk.data);
+        allocator.free(blk.instIndices);
+        allocator.free(blk.instMappedPcs);
+    }
+    allocator.free(state.blocks);
 }
 
 test "DebugState.capture works correctly" {
@@ -308,7 +338,8 @@ test "DebugState.capture works correctly" {
     // const Evm = @import("evm");
 
     // Create minimal stack and memory for testing
-    var stack = Stack{};
+    var stack = try Stack.init(testing.allocator);
+    defer stack.deinit();
     try stack.append(42);
     try stack.append(100);
 
@@ -379,7 +410,8 @@ test "serializeStack works correctly" {
     const testing = std.testing;
 
     // Test empty stack
-    var empty_stack = Stack{};
+    var empty_stack = try Stack.init(testing.allocator);
+    defer empty_stack.deinit();
     const empty_result = try serializeStack(testing.allocator, &empty_stack);
     defer {
         for (empty_result) |item| testing.allocator.free(item);
@@ -388,7 +420,8 @@ test "serializeStack works correctly" {
     try testing.expectEqual(@as(usize, 0), empty_result.len);
 
     // Test stack with values
-    var stack = Stack{};
+    var stack = try Stack.init(testing.allocator);
+    defer stack.deinit();
     try stack.append(42);
     try stack.append(255);
     try stack.append(1000);
@@ -437,8 +470,6 @@ test "createEmptyEvmStateJson works correctly" {
     const empty_state = try createEmptyEvmStateJson(testing.allocator);
     defer freeEvmStateJson(testing.allocator, empty_state);
 
-    try testing.expectEqual(@as(usize, 0), empty_state.pc);
-    try testing.expectEqualStrings("-", empty_state.opcode);
     try testing.expectEqual(@as(u64, 0), empty_state.gasLeft);
     try testing.expectEqual(@as(u32, 0), empty_state.depth);
     try testing.expectEqual(@as(usize, 0), empty_state.stack.len);
