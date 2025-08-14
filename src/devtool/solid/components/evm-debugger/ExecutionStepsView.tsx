@@ -1,5 +1,6 @@
 import { type Component, For, createMemo } from "solid-js";
 import Code from "~/components/Code";
+import InfoTooltip from "~/components/InfoTooltip";
 import { Badge } from "~/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import {
@@ -32,23 +33,31 @@ const ExecutionStepsView: Component<BlocksViewProps> = (props) => {
 			<CardHeader class="border-b p-3">
 				<div class="flex items-center justify-between">
 					<CardTitle class="text-sm">Execution Steps</CardTitle>
-					<div class="text-muted-foreground text-xs">
-						{props.blocks.length} blocks • {byteLen()} bytes
+					<div class="flex items-center gap-2">
+						<div class="text-muted-foreground text-xs">
+							{props.blocks.length} blocks • {byteLen()} bytes
+						</div>
+						<InfoTooltip>
+							Shows prenalyzed blocks and fused instructions. Columns: PC,
+							opcode, hex, and any push data. The highlighted row is the current
+							instruction.
+						</InfoTooltip>
 					</div>
 				</div>
 			</CardHeader>
 			<CardContent class="max-h-[400px] overflow-y-auto p-0">
-				<Table>
+				<Table class="relative">
 					<TableHeader class="sticky top-0 z-10 bg-background">
 						<TableRow>
 							<TableHead class="text-xs uppercase">Begin</TableHead>
 							<TableHead class="text-xs uppercase">Gas</TableHead>
 							<TableHead class="text-xs uppercase">
-								<div class="flex items-center gap-4 leading-tight">
-									<span>Instructions</span>
-									<span class="text-[10px] text-muted-foreground">
-										PC • Opcode • Hex • Data
-									</span>
+								<div class="grid gap-3 grid-cols-[100px_100px_140px_100px_auto]">
+									<span class="leading-tight">Instructions</span>
+									<span class="text-[10px] text-muted-foreground">PC</span>
+									<span class="text-[10px] text-muted-foreground">Opcode</span>
+									<span class="text-[10px] text-muted-foreground">Hex</span>
+									<span class="text-[10px] text-muted-foreground">Data</span>
 								</div>
 							</TableHead>
 						</TableRow>
@@ -69,7 +78,7 @@ const ExecutionStepsView: Component<BlocksViewProps> = (props) => {
 									<TableCell class="font-mono text-xs align-top">
 										<span class="py-2 inline-block">{blk.gasCost}</span>
 									</TableCell>
-									<TableCell class="p-2" colSpan={1}>
+									<TableCell class="py-2" colSpan={1}>
 										<div class="flex flex-col gap-1">
 											<For each={blk.pcs}>
 												{(pc, idx) => {
@@ -85,15 +94,12 @@ const ExecutionStepsView: Component<BlocksViewProps> = (props) => {
 													return (
 														<div
 															class={cn(
-																"grid items-center gap-3 px-2 py-1",
+																"grid gap-3 grid-cols-[100px_100px_140px_100px_auto] py-1",
 																idx() !== blk.pcs.length - 1 &&
 																	"border-b border-border/40 ",
 															)}
-															style={{
-																"grid-template-columns":
-																	"140px 120px 100px auto",
-															}}
 														>
+															<span />
 															<Code class="text-xs inline-block w-fit">
 																0x{pc.toString(16)}
 															</Code>
