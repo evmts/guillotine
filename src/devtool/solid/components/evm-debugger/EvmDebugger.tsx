@@ -24,6 +24,8 @@ interface EvmDebuggerProps {
 	setState: Setter<EvmState>
 	bytecode: Accessor<string>
 	setBytecode: Setter<string>
+	executionSpeed: Accessor<number>
+	setExecutionSpeed: Setter<number>
 	handleRunPause: () => void
 	handleStep: () => void
 	handleReset: () => void
@@ -32,7 +34,6 @@ interface EvmDebuggerProps {
 const EvmDebugger = (props: EvmDebuggerProps) => {
 	const [isUpdating, setIsUpdating] = createSignal(false)
 	const [activePanel, setActivePanel] = createSignal('all')
-	const [executionSpeed, setExecutionSpeed] = createSignal(100)
 
 	return (
 		<div class="min-h-screen bg-background text-foreground">
@@ -49,8 +50,8 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				setState={props.setState as Setter<EvmState>}
 				isUpdating={isUpdating()}
 				setIsUpdating={setIsUpdating}
-				executionSpeed={executionSpeed()}
-				setExecutionSpeed={setExecutionSpeed}
+				executionSpeed={props.executionSpeed()}
+				setExecutionSpeed={props.setExecutionSpeed}
 				handleRunPause={props.handleRunPause}
 				handleStep={props.handleStep}
 				handleReset={props.handleReset}

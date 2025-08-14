@@ -24,6 +24,7 @@ function App() {
 	const [isRunning, setIsRunning] = createSignal(false)
 	const [error, setError] = createSignal<string>('')
 	const [bytecode, setBytecode] = createSignal(sampleContracts[7].bytecode)
+	const [executionSpeed, setExecutionSpeed] = createSignal(200)
 	const [state, setState] = createStore<EvmState>({
 		gasLeft: 0,
 		depth: 0,
@@ -112,7 +113,7 @@ function App() {
 					setError(`${err}`)
 					setIsRunning(false)
 				}
-			}, 200)
+			}, executionSpeed())
 			onCleanup(() => {
 				clearInterval(intervalId)
 			})
@@ -140,6 +141,8 @@ function App() {
 				setState={setState}
 				bytecode={bytecode}
 				setBytecode={setBytecode}
+				executionSpeed={executionSpeed}
+				setExecutionSpeed={setExecutionSpeed}
 				handleRunPause={handleRunPause}
 				handleStep={handleStep}
 				handleReset={handleReset}
