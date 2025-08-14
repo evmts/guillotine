@@ -34,6 +34,8 @@ is_completed: bool,
 
 // Storage tracking for debugging
 storage_changes: std.AutoHashMap(StorageKey, u256),
+// Dynamic gas attribution table across steps: key = (beginIndex<<32)|offset
+dynamic_gas_map: std.AutoHashMap(u64, u32),
 
 /// Result of a single step execution
 pub const DebugStepResult = struct {
@@ -57,6 +59,9 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
 
     var storage_changes = std.AutoHashMap(StorageKey, u256).init(allocator);
     errdefer storage_changes.deinit();
+    var dynamic_gas_map = std.AutoHashMap(u64, u32).init(allocator);
+    errdefer dynamic_gas_map.deinit();
+    errdefer storage_changes.deinit();
 
     return DevtoolEvm{
         .allocator = allocator,
@@ -72,6 +77,7 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
         .is_initialized = false,
         .is_completed = false,
         .storage_changes = storage_changes,
+        .dynamic_gas_map = dynamic_gas_map,
     };
 }
 
@@ -93,6 +99,7 @@ pub fn deinit(self: *DevtoolEvm) void {
         self.allocator.free(self.bytecode);
     }
     self.storage_changes.deinit();
+    self.dynamic_gas_map.deinit();
     self.evm.deinit();
     self.database.deinit();
 }
@@ -176,6 +183,8 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
 
     // Clear storage tracking
     self.storage_changes.clearRetainingCapacity();
+    // Clear dynamic gas attribution table
+    self.dynamic_gas_map.clearRetainingCapacity();
 
     if (self.bytecode.len == 0) {
         self.is_initialized = false;
@@ -294,16 +303,22 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                 var opcodes = std.ArrayList([]const u8).init(self.allocator);
                 var hexes = std.ArrayList([]const u8).init(self.allocator);
                 var datas = std.ArrayList([]const u8).init(self.allocator);
+                var opcode_bytes = std.ArrayList(u8).init(self.allocator);
                 var dbg_inst_indices = std.ArrayList(u32).init(self.allocator);
                 var dbg_inst_mapped_pcs = std.ArrayList(u32).init(self.allocator);
+                var dynamic_gas = std.ArrayList(u32).init(self.allocator);
+                var dyn_candidate = std.ArrayList(bool).init(self.allocator);
                 var block_min_pc: u32 = std.math.maxInt(u32);
                 var block_max_end_pc: u32 = 0;
                 defer pcs.deinit();
                 defer opcodes.deinit();
                 defer hexes.deinit();
                 defer datas.deinit();
+                defer opcode_bytes.deinit();
                 defer dbg_inst_indices.deinit();
                 defer dbg_inst_mapped_pcs.deinit();
+                defer dynamic_gas.deinit();
+                defer dyn_candidate.deinit();
 
                 // Find the first PC that maps to this block as a fallback origin
                 var block_start_pc: ?usize = null;
@@ -317,6 +332,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
 
                 var j: usize = i + 1;
                 var last_pc_opt: ?usize = block_start_pc;
+                // We will also fill a parallel dynamic_gas list, defaulting to 0 for each instruction
                 while (j < instrs.len and instrs[j].arg != .block_info) : (j += 1) {
                     // Prefer direct mapping from instruction to PC when available
                     const mapped_u16: u16 = if (j < a.inst_to_pc.len) a.inst_to_pc[j] else std.math.maxInt(u16);
@@ -359,8 +375,41 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
 
                     pcs.append(@intCast(pc)) catch {};
                     opcodes.append(name) catch {};
+                    opcode_bytes.append(op_byte) catch {};
                     hexes.append(hex_str) catch {};
                     datas.append(data_str) catch {};
+                    dynamic_gas.append(0) catch {};
+                    // mark if opcode may incur dynamic gas
+                    const may_dyn: bool = switch (op_byte) {
+                        0x51, // MLOAD
+                        0x52, // MSTORE
+                        0x53, // MSTORE8
+                        0x5e, // MCOPY
+                        0x37, // CALLDATACOPY
+                        0x39, // CODECOPY
+                        0x3c, // EXTCODECOPY
+                        0x3e, // RETURNDATACOPY
+                        0x54, // SLOAD
+                        0x55, // SSTORE
+                        0x20, // KECCAK256
+                        0x31, // BALANCE
+                        0x3b, // EXTCODESIZE
+                        0x3f, // EXTCODEHASH
+                        0xa0, // LOG0
+                        0xa1, // LOG1
+                        0xa2, // LOG2
+                        0xa3, // LOG3
+                        0xa4, // LOG4
+                        0xf0, // CREATE
+                        0xf1, // CALL
+                        0xf2, // CALLCODE
+                        0xf4, // DELEGATECALL
+                        0xf5, // CREATE2
+                        0xfa, // STATICCALL
+                        => true,
+                        else => false,
+                    };
+                    dyn_candidate.append(may_dyn) catch {};
 
                     // Track block byte range [min, max_end)
                     if (pc < a.code_len) {
@@ -371,7 +420,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                     }
                 }
 
-                blocks.append(.{
+                var block_json = debug_state.BlockJson{
                     .beginIndex = i,
                     .gasCost = instrs[i].arg.block_info.gas_cost,
                     .stackReq = instrs[i].arg.block_info.stack_req,
@@ -380,11 +429,23 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
                     .blockEndPcExclusive = block_max_end_pc,
                     .pcs = try pcs.toOwnedSlice(),
                     .opcodes = try opcodes.toOwnedSlice(),
+                    .opcodeBytes = try opcode_bytes.toOwnedSlice(),
                     .hex = try hexes.toOwnedSlice(),
                     .data = try datas.toOwnedSlice(),
+                    .dynamicGas = try dynamic_gas.toOwnedSlice(),
+                    .dynCandidate = try dyn_candidate.toOwnedSlice(),
                     .instIndices = try dbg_inst_indices.toOwnedSlice(),
                     .instMappedPcs = try dbg_inst_mapped_pcs.toOwnedSlice(),
-                }) catch {};
+                };
+                // Fill dynamic gas for this block from the dynamic map
+                var di: usize = 0;
+                while (di < block_json.dynamicGas.len) : (di += 1) {
+                    const key: u64 = (@as(u64, @intCast(i)) << 32) | @as(u64, @intCast(di));
+                    if (self.dynamic_gas_map.get(key)) |val| {
+                        block_json.dynamicGas[di] = val;
+                    }
+                }
+                blocks.append(block_json) catch {};
             }
         }
     }
@@ -488,6 +549,8 @@ pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
 
             const next_ip = ip.next_instruction;
             const op_fn = ip.opcode_fn;
+            // Track gas before the visible operation for dynamic attribution
+            const pre_gas: u64 = frame.gas_remaining;
             switch (ip.arg) {
                 .block_info => break,
                 .conditional_jump => |true_target| {
@@ -633,6 +696,44 @@ pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
                     frame.instruction = next_ip;
                     executed_visible = true;
                 },
+            }
+            // Attribute dynamic gas to the instruction just executed
+            if (executed_visible and exec_err == null) {
+                const post_gas: u64 = frame.gas_remaining;
+                const consumed: u64 = if (pre_gas > post_gas) pre_gas - post_gas else 0;
+                // Determine current block begin index and offset of the executed instruction
+                const base_ptr2: [*]const @TypeOf(instructions[0]) = instructions.ptr;
+                const cur_idx2: usize = (@intFromPtr(ip) - @intFromPtr(base_ptr2)) / @sizeOf(@TypeOf(instructions[0]));
+                // Walk back to block begin
+                var begin_idx: usize = cur_idx2;
+                while (begin_idx > 0 and instructions[begin_idx].arg != .block_info) begin_idx -= 1;
+                // Offset is number of non-block_info entries after begin
+                var offset: usize = 0;
+                var scan: usize = begin_idx + 1;
+                while (scan < cur_idx2) : (scan += 1) {
+                    if (instructions[scan].arg != .block_info) offset += 1;
+                }
+                // Subtract block static gas if this was the first visible instruction in the block
+                var dynamic_amount: u64 = consumed;
+                if (offset == 0) {
+                    const static_cost = instructions[begin_idx].arg.block_info.gas_cost;
+                    if (dynamic_amount > static_cost) {
+                        dynamic_amount -= static_cost;
+                    } else {
+                        dynamic_amount = 0;
+                    }
+                }
+                // Write into analysis-visible blocks dynamicGas slice
+                if (self.analysis) |a2| {
+                    // Find the BlockJson we built earlier that matches begin_idx
+                    // We rebuild per serializeEvmState(), so store pending dynamic gas in frame for durability is heavier.
+                    // Minimal change: store in a side table for this devtool instance.
+                    // Reuse storage_changes map with a synthetic key (unsafe). Instead, keep a local map? Minimal: patch blocks in place now.
+                    _ = a2; // analysis used only to map indices; we patch the blocks we are about to serialize next time
+                }
+                // Persist on DevtoolEvm dynamic map
+                const key: u64 = (@as(u64, @intCast(begin_idx)) << 32) | @as(u64, @intCast(offset));
+                _ = self.dynamic_gas_map.put(key, @intCast(dynamic_amount)) catch {};
             }
             if (exec_err) |e| {
                 if (e == Evm.ExecutionError.Error.STOP or e == Evm.ExecutionError.Error.REVERT) {
