@@ -16,13 +16,15 @@ pub fn main() !void {
         \\--js-internal-runs <NUM>   Number of internal runs for JavaScript (defaults to --internal-runs value)
         \\--snailtracer-internal-runs <NUM>   Number of internal runs for snailtracer (defaults to --internal-runs value)
         \\--js-snailtracer-internal-runs <NUM>   Number of internal runs for JavaScript snailtracer (defaults to --js-internal-runs value)
-        \\--export <FORMAT>          Export results (json, markdown)
+        \\--export <FORMAT>          Export results (json, markdown, detailed)
         \\--compare                  Compare all available EVM implementations
         \\--all                      Include all test cases (by default only working benchmarks are included)
         \\--next                     Use block-based execution for Zig EVM (new optimized interpreter)
         \\--show-output              Show output from hyperfine
         \\--diff <TEST>              Run differential trace comparison between REVM and Zig for a specific test case
         \\--diff-output <DIR>        Output directory for differential traces (default: differential_traces)
+        \\--detailed                 Run detailed performance analysis with additional metrics
+        \\--perf-output <DIR>        Output directory for performance reports (default: perf-reports)
         \\
     );
 
@@ -63,6 +65,8 @@ pub fn main() !void {
     const show_output = res.args.@"show-output" != 0;
     const diff_test = res.args.diff;
     const diff_output_dir = res.args.@"diff-output" orelse "differential_traces";
+    const detailed = res.args.detailed != 0;
+    const perf_output_dir = res.args.@"perf-output" orelse "perf-reports";
 
     if (diff_test) |test_name| {
         // Differential trace mode
@@ -142,11 +146,16 @@ pub fn main() !void {
 
         std.debug.print("Discovered {} test cases\n", .{orchestrator.test_cases.len});
 
-        // Run benchmarks
-        try orchestrator.runBenchmarks();
+        if (detailed) {
+            // Run detailed performance analysis
+            try orchestrator.runDetailedBenchmarks(perf_output_dir);
+        } else {
+            // Run normal benchmarks
+            try orchestrator.runBenchmarks();
 
-        // Print summary
-        orchestrator.printSummary();
+            // Print summary
+            orchestrator.printSummary();
+        }
 
         // Export results if requested
         if (export_format) |format| {
@@ -403,8 +412,10 @@ fn printHelp() !void {
         \\  --js-internal-runs <NUM>   Number of internal runs for JavaScript (defaults to --internal-runs)
         \\  --snailtracer-internal-runs <NUM>   Number of internal runs for snailtracer (defaults to --internal-runs)
         \\  --js-snailtracer-internal-runs <NUM>   Number of internal runs for JavaScript snailtracer (defaults to --js-internal-runs)
-        \\  --export <FORMAT>          Export results (json, markdown)
+        \\  --export <FORMAT>          Export results (json, markdown, detailed)
         \\  --next                     Use block-based execution for Zig EVM (new optimized interpreter)
+        \\  --detailed                 Run detailed performance analysis with additional metrics
+        \\  --perf-output <DIR>        Output directory for performance reports (default: perf-reports)
         \\
         \\Examples:
         \\  orchestrator                    Run benchmarks with Zig EVM
@@ -415,6 +426,8 @@ fn printHelp() !void {
         \\  orchestrator --compare --js-runs 1  Compare EVMs with only 1 run for JavaScript
         \\  orchestrator --diff erc20-transfer  Run differential trace comparison
         \\  orchestrator --diff snailtracer --diff-output traces  Custom output directory
+        \\  orchestrator --detailed        Run detailed performance analysis with metrics
+        \\  orchestrator --detailed --perf-output results  Custom output directory for perf reports
         \\
     , .{});
 }

@@ -936,6 +936,66 @@ fn formatTimeWithUnit(time_ms: f64) FormattedTime {
     return selectOptimalUnit(time_ms);
 }
 
+const HyperfineSummary = struct {
+    mean: f64,
+    min: f64,
+    max: f64,
+    median: f64,
+    stddev: f64,
+};
+
+fn parseHyperfineSummary(self: *Orchestrator, json_data: []const u8) ?HyperfineSummary {
+    // Robust JSON parsing using std.json
+    var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, json_data, .{ .ignore_unknown_fields = true }) catch return null;
+    defer parsed.deinit();
+
+    const root = parsed.value;
+    const results_val = root.object.get("results") orelse return null;
+    if (results_val.array.items.len == 0) return null;
+    const first = results_val.array.items[0];
+
+    var mean: f64 = 0;
+    var min: f64 = 0;
+    var max: f64 = 0;
+    var median: f64 = 0;
+    var stddev: f64 = 0;
+
+    if (first.object.get("mean")) |v| mean = switch (v) {
+        .float => v.float,
+        .number_string => std.fmt.parseFloat(f64, v.number_string) catch 0,
+        else => 0,
+    };
+    if (first.object.get("min")) |v| min = switch (v) {
+        .float => v.float,
+        .number_string => std.fmt.parseFloat(f64, v.number_string) catch 0,
+        else => 0,
+    };
+    if (first.object.get("max")) |v| max = switch (v) {
+        .float => v.float,
+        .number_string => std.fmt.parseFloat(f64, v.number_string) catch 0,
+        else => 0,
+    };
+    if (first.object.get("median")) |v| median = switch (v) {
+        .float => v.float,
+        .number_string => std.fmt.parseFloat(f64, v.number_string) catch 0,
+        else => 0,
+    };
+    if (first.object.get("stddev")) |v| stddev = switch (v) {
+        .float => v.float,
+        .number_string => std.fmt.parseFloat(f64, v.number_string) catch 0,
+        .null => 0,
+        else => 0,
+    };
+
+    return HyperfineSummary{
+        .mean = mean,
+        .min = min,
+        .max = max,
+        .median = median,
+        .stddev = stddev,
+    };
+}
+
 fn parseHyperfineJson(self: *Orchestrator, test_name: []const u8, json_data: []const u8, runs: u32, internal_runs: u32) !void {
     // Robust JSON parsing using std.json
     var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, json_data, .{ .ignore_unknown_fields = true });
@@ -1021,7 +1081,286 @@ pub fn exportResults(self: *Orchestrator, format: []const u8) !void {
         try self.exportJSON();
     } else if (std.mem.eql(u8, format, "markdown")) {
         try self.exportMarkdown();
+    } else if (std.mem.eql(u8, format, "detailed")) {
+        try self.exportDetailed();
     }
+}
+
+pub fn runDetailedBenchmarks(self: *Orchestrator, perf_output_dir: []const u8) !void {
+    print("Running detailed performance analysis for {s}...\n", .{self.evm_name});
+    
+    // Create output directory if it doesn't exist
+    std.fs.cwd().makePath(perf_output_dir) catch |err| {
+        if (err != error.PathAlreadyExists) return err;
+    };
+    
+    // Create timestamp-based subdirectory
+    const timestamp = std.time.timestamp();
+    const timestamp_dir = try std.fmt.allocPrint(self.allocator, "{s}/{s}_{d}", .{ 
+        perf_output_dir, 
+        self.evm_name, 
+        timestamp 
+    });
+    defer self.allocator.free(timestamp_dir);
+    
+    try std.fs.cwd().makePath(timestamp_dir);
+    
+    // Run benchmarks with additional metrics
+    for (self.test_cases) |test_case| {
+        print("Collecting detailed metrics for {s}...\n", .{test_case.name});
+        
+        // Run with hyperfine and capture additional metrics
+        try self.runDetailedBenchmark(test_case, timestamp_dir);
+    }
+    
+    // Generate detailed report
+    try self.generateDetailedReport(timestamp_dir);
+}
+
+fn runDetailedBenchmark(self: *Orchestrator, test_case: TestCase, output_dir: []const u8) !void {
+    // Build runner command
+    const runner_cmd = try self.buildRunnerCommand(test_case);
+    defer self.allocator.free(runner_cmd);
+    
+    // Base hyperfine command with extended statistics
+    const hyperfine_cmd = try std.fmt.allocPrint(self.allocator,
+        \\hyperfine --runs {d} --warmup 3 --export-json "{s}/{s}.json" --export-csv "{s}/{s}.csv" "{s}"
+    , .{
+        self.num_runs,
+        output_dir,
+        test_case.name,
+        output_dir,
+        test_case.name,
+        runner_cmd,
+    });
+    defer self.allocator.free(hyperfine_cmd);
+    
+    // Run hyperfine
+    const result = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "sh", "-c", hyperfine_cmd },
+    });
+    defer self.allocator.free(result.stdout);
+    defer self.allocator.free(result.stderr);
+    
+    if (result.term != .Exited or result.term.Exited != 0) {
+        print("Warning: Detailed benchmark failed for {s}\n", .{test_case.name});
+        if (result.stderr.len > 0) {
+            print("Error: {s}\n", .{result.stderr});
+        }
+        return;
+    }
+    
+    // Platform-specific performance counters
+    const platform = @import("builtin").os.tag;
+    if (platform == .linux) {
+        // Run with perf stat for cache and branch statistics
+        try self.runPerfStat(test_case, output_dir, runner_cmd);
+    } else if (platform == .macos) {
+        // Run with dtrace or instruments if available
+        try self.runMacOSPerformanceAnalysis(test_case, output_dir, runner_cmd);
+    }
+}
+
+fn runPerfStat(self: *Orchestrator, test_case: TestCase, output_dir: []const u8, runner_cmd: []const u8) !void {
+    // Cache statistics
+    const cache_cmd = try std.fmt.allocPrint(self.allocator,
+        \\perf stat -e cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses {s} 2> "{s}/{s}_cache.txt"
+    , .{ runner_cmd, output_dir, test_case.name });
+    defer self.allocator.free(cache_cmd);
+    
+    _ = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "sh", "-c", cache_cmd },
+    });
+    
+    // Branch prediction statistics
+    const branch_cmd = try std.fmt.allocPrint(self.allocator,
+        \\perf stat -e branches,branch-misses {s} 2> "{s}/{s}_branches.txt"
+    , .{ runner_cmd, output_dir, test_case.name });
+    defer self.allocator.free(branch_cmd);
+    
+    _ = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "sh", "-c", branch_cmd },
+    });
+    
+    // Instruction statistics
+    const instr_cmd = try std.fmt.allocPrint(self.allocator,
+        \\perf stat -e instructions,cycles,task-clock {s} 2> "{s}/{s}_instructions.txt"
+    , .{ runner_cmd, output_dir, test_case.name });
+    defer self.allocator.free(instr_cmd);
+    
+    _ = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "sh", "-c", instr_cmd },
+    });
+}
+
+fn runMacOSPerformanceAnalysis(self: *Orchestrator, test_case: TestCase, output_dir: []const u8, runner_cmd: []const u8) !void {
+    // Check if we can use Instruments
+    const check_instruments = try std.process.Child.run(.{
+        .allocator = self.allocator,
+        .argv = &[_][]const u8{ "which", "instruments" },
+    });
+    defer self.allocator.free(check_instruments.stdout);
+    defer self.allocator.free(check_instruments.stderr);
+    
+    if (check_instruments.term == .Exited and check_instruments.term.Exited == 0) {
+        // Use Instruments for detailed profiling
+        const instruments_cmd = try std.fmt.allocPrint(self.allocator,
+            \\instruments -t "Time Profiler" -D "{s}/{s}_profile.trace" {s}
+        , .{ output_dir, test_case.name, runner_cmd });
+        defer self.allocator.free(instruments_cmd);
+        
+        _ = try std.process.Child.run(.{
+            .allocator = self.allocator,
+            .argv = &[_][]const u8{ "sh", "-c", instruments_cmd },
+        });
+    }
+}
+
+fn buildRunnerCommand(self: *Orchestrator, test_case: TestCase) ![]const u8 {
+    // Read calldata
+    const calldata_file = try std.fs.cwd().openFile(test_case.calldata_path, .{});
+    defer calldata_file.close();
+    const calldata = try calldata_file.readToEndAlloc(self.allocator, 1024 * 1024);
+    defer self.allocator.free(calldata);
+    const trimmed_calldata = std.mem.trim(u8, calldata, " \n\r\t");
+    
+    // Get project root and runner path
+    const project_root = try getProjectRoot(self.allocator);
+    defer self.allocator.free(project_root);
+    
+    var runner_path: []const u8 = undefined;
+    if (std.mem.eql(u8, self.evm_name, "zig")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+    } else if (std.mem.eql(u8, self.evm_name, "zig-small")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-small" });
+    } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "ethereumjs", "runner.js" });
+    } else if (std.mem.eql(u8, self.evm_name, "geth")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "geth", "runner" });
+    } else if (std.mem.eql(u8, self.evm_name, "evmone")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "evmone", "build", "evmone-runner" });
+    } else {
+        const runner_name = try std.fmt.allocPrint(self.allocator, "{s}-runner", .{self.evm_name});
+        defer self.allocator.free(runner_name);
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", self.evm_name, "target", "release", runner_name });
+    }
+    defer self.allocator.free(runner_path);
+    
+    // Determine internal runs
+    const internal_runs = if (std.mem.eql(u8, test_case.name, "snailtracer"))
+        self.snailtracer_internal_runs
+    else
+        self.internal_runs;
+    
+    const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{internal_runs});
+    defer self.allocator.free(num_runs_str);
+    
+    const next_flag = if (self.use_next) " --next" else "";
+    
+    // For EthereumJS, invoke via bun explicitly
+    const js_prefix = if (std.mem.eql(u8, self.evm_name, "ethereumjs")) "bun " else "";
+    
+    return try std.fmt.allocPrint(self.allocator, "{s}{s} --contract-code-path {s} --calldata {s} --num-runs {s}{s}", .{ 
+        js_prefix, 
+        runner_path, 
+        test_case.bytecode_path, 
+        trimmed_calldata, 
+        num_runs_str, 
+        next_flag 
+    });
+}
+
+fn generateDetailedReport(self: *Orchestrator, output_dir: []const u8) !void {
+    const report_path = try std.fmt.allocPrint(self.allocator, "{s}/detailed_report.md", .{output_dir});
+    defer self.allocator.free(report_path);
+    
+    const file = try std.fs.cwd().createFile(report_path, .{});
+    defer file.close();
+    
+    try file.writer().print("# Detailed Performance Analysis Report\n\n", .{});
+    try file.writer().print("## EVM Implementation: {s}\n\n", .{self.evm_name});
+    
+    const timestamp = std.time.timestamp();
+    try file.writer().print("Generated: {d}\n\n", .{timestamp});
+    
+    try file.writer().print("## Test Environment\n\n", .{});
+    
+    // Platform information
+    const platform = @import("builtin").os.tag;
+    try file.writer().print("- Platform: {s}\n", .{@tagName(platform)});
+    try file.writer().print("- Architecture: {s}\n", .{@tagName(@import("builtin").cpu.arch)});
+    
+    try file.writer().print("\n## Benchmark Results\n\n", .{});
+    
+    // Process each test case's detailed results
+    for (self.test_cases) |test_case| {
+        try file.writer().print("### {s}\n\n", .{test_case.name});
+        
+        // Read and include JSON results
+        const json_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}.json", .{ output_dir, test_case.name });
+        defer self.allocator.free(json_path);
+        
+        if (std.fs.cwd().openFile(json_path, .{})) |json_file| {
+            defer json_file.close();
+            const json_content = try json_file.readToEndAlloc(self.allocator, 1024 * 1024);
+            defer self.allocator.free(json_content);
+            
+            // Parse basic metrics from JSON
+            if (self.parseHyperfineSummary(json_content)) |summary| {
+                const internal_runs = if (std.mem.eql(u8, test_case.name, "snailtracer"))
+                    self.snailtracer_internal_runs
+                else
+                    self.internal_runs;
+                
+                const runs_float = @as(f64, @floatFromInt(internal_runs));
+                try file.writer().print("- Mean: {d:.6} ms\n", .{(summary.mean * 1000) / runs_float});
+                try file.writer().print("- Median: {d:.6} ms\n", .{(summary.median * 1000) / runs_float});
+                try file.writer().print("- Min: {d:.6} ms\n", .{(summary.min * 1000) / runs_float});
+                try file.writer().print("- Max: {d:.6} ms\n", .{(summary.max * 1000) / runs_float});
+                try file.writer().print("- Std Dev: {d:.6} ms\n\n", .{(summary.stddev * 1000) / runs_float});
+            }
+        } else |_| {}
+        
+        // Include platform-specific metrics if available
+        if (platform == .linux) {
+            // Include cache statistics
+            const cache_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_cache.txt", .{ output_dir, test_case.name });
+            defer self.allocator.free(cache_path);
+            
+            if (std.fs.cwd().openFile(cache_path, .{})) |cache_file| {
+                defer cache_file.close();
+                try file.writer().print("#### Cache Statistics\n```\n", .{});
+                const cache_content = try cache_file.readToEndAlloc(self.allocator, 1024 * 1024);
+                defer self.allocator.free(cache_content);
+                try file.writeAll(cache_content);
+                try file.writer().print("```\n\n", .{});
+            } else |_| {}
+            
+            // Include branch statistics
+            const branch_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_branches.txt", .{ output_dir, test_case.name });
+            defer self.allocator.free(branch_path);
+            
+            if (std.fs.cwd().openFile(branch_path, .{})) |branch_file| {
+                defer branch_file.close();
+                try file.writer().print("#### Branch Prediction\n```\n", .{});
+                const branch_content = try branch_file.readToEndAlloc(self.allocator, 1024 * 1024);
+                defer self.allocator.free(branch_content);
+                try file.writeAll(branch_content);
+                try file.writer().print("```\n\n", .{});
+            } else |_| {}
+        }
+    }
+    
+    print("Detailed report generated: {s}\n", .{report_path});
+}
+
+fn exportDetailed(self: *Orchestrator) !void {
+    const output_dir = "perf-reports";
+    try self.runDetailedBenchmarks(output_dir);
 }
 
 fn exportJSON(self: *Orchestrator) !void {
