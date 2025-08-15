@@ -79,7 +79,7 @@ test "SHL opcode max shift (255) leaves only MSB" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
@@ -181,7 +181,7 @@ test "SHL opcode shift >= 256 returns 0" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
@@ -282,11 +282,11 @@ test "SHR opcode max shift (255) preserves only LSB" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -383,11 +383,11 @@ test "SAR opcode arithmetic shift of negative number" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -485,11 +485,11 @@ test "BYTE opcode out of range returns 0" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -586,11 +586,11 @@ test "SAR opcode shift >= 256 preserves sign" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -688,11 +688,11 @@ test "XOR opcode same value = 0" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
