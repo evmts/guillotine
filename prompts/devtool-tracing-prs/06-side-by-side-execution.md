@@ -1,24 +1,24 @@
-## PR 6: Side-by-Side Execution (Guillotine vs REVM)
+## PR 6: Side-by-Side Execution (Primary EVM vs Mini EVM)
 
 ### Problem
 
-We want the devtool to execute bytecode in both engines and compare traces and results live.
+We want the devtool to execute bytecode in both engines (primary and mini) and compare results live.
 
 ### Goals
 
-- Execute the same bytecode+calldata in Guillotine and REVM.
+- Execute the same bytecode+calldata in the primary EVM and the Mini EVM.
 - Show step-by-step comparison: op, pc/original_pc, gas before/cost, stack depth, and diffs.
 - Provide mismatch highlighting and minimal diff rendering for stack/memory.
 
 ### Scope
 
-- Devtool runner: add `run_both()` mode that produces two traces and a comparison result per step.
-- Add a comparator module to align steps (by index) and compute diffs.
+- Devtool runner: add `run_both()` mode that executes primary and mini and produces comparison results per-step in debug mode, per-call otherwise.
+- Use `src/evm/debug/shadow.zig` comparator from PR 3 to compute diffs.
 - UI: side-by-side panes with synchronized stepping and mismatch badges.
 
 ### Files
 
-- `src/devtool/evm.zig`: integrate `revm_wrapper` call to fetch REVM trace; orchestrate comparison.
+- `src/devtool/evm.zig`: orchestrate running primary and mini, feed data to comparator, and surface mismatches.
 - `src/devtool/solid/components/ComparisonView.tsx`: new component rendering side-by-side.
 
 ### Tests
