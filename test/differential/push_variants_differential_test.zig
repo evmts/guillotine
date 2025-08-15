@@ -70,7 +70,7 @@ test "PUSH2 opcode pushes 2 bytes" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
@@ -161,7 +161,7 @@ test "PUSH4 opcode pushes 4 bytes" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
@@ -253,11 +253,11 @@ test "PUSH8 opcode pushes 8 bytes" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -346,11 +346,11 @@ test "PUSH16 opcode pushes 16 bytes" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -442,11 +442,11 @@ test "PUSH32 edge case all zeros" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -536,11 +536,11 @@ test "PUSH20 opcode pushes 20 bytes (address size)" {
 
     // Execute using mini EVM (after REVM, before Guillotine)
     const mini_result = try vm_instance.call_mini(call_params);
-    
+    // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
-    
+    // VM owns guillotine_result.output; do not free here
 
     // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
@@ -564,7 +564,6 @@ test "PUSH20 opcode pushes 20 bytes (address size)" {
 
         const expected: u256 = 0x1234567890ABCDEF112233445566778899AABBCC;
         try testing.expectEqual(expected, revm_value);
-        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(revm_value, guillotine_value);
     }
