@@ -47,3 +47,79 @@ services:
       echo 'Running poop benchmark on snailtracer...' &&
       zig build poop
       "
+
+  perf-analysis:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.ubuntu
+    container_name: guillotine-perf-analysis
+    volumes:
+      - .:/workspace
+      - ./perf-reports:/workspace/perf-reports
+    command: >
+      bash -c "
+      apt-get update -qq &&
+      apt-get install -y -qq hyperfine time linux-tools-common 2>/dev/null || true &&
+      zig build build-evm-runner &&
+      zig build build-orchestrator &&
+      echo '=== DETAILED PERFORMANCE ANALYSIS ===' &&
+      mkdir -p perf-reports &&
+      echo 'Running ERC20 Transfer Benchmark...' &&
+      hyperfine --runs 50 --warmup 5 \
+        --export-json perf-reports/erc20-transfer.json \
+        --export-markdown perf-reports/erc20-transfer.md \
+        --ignore-failure \
+        './zig-out/bin/evm-runner --contract-code-path bench/official/cases/erc20-transfer/bytecode.txt --calldata 0xa9059cbb00000000000000000000000090f79bf6eb2c4f870365e785982e1f101e93b9060000000000000000000000000000000000000000000000000000000000000001 --num-runs 1000' &&
+      echo 'Running Ten Thousand Hashes Benchmark...' &&
+      hyperfine --runs 50 --warmup 5 \
+        --export-json perf-reports/ten-thousand-hashes.json \
+        --export-markdown perf-reports/ten-thousand-hashes.md \
+        --ignore-failure \
+        './zig-out/bin/evm-runner --contract-code-path bench/official/cases/ten-thousand-hashes/bytecode.txt --calldata 0x30627b7c --num-runs 100' &&
+      echo 'Running ERC20 Mint Benchmark...' &&
+      hyperfine --runs 50 --warmup 5 \
+        --export-json perf-reports/erc20-mint.json \
+        --export-markdown perf-reports/erc20-mint.md \
+        --ignore-failure \
+        './zig-out/bin/evm-runner --contract-code-path bench/official/cases/erc20-mint/bytecode.txt --calldata 0x40c10f190000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a --num-runs 1000' &&
+      echo '=== RESULTS SUMMARY ===' &&
+      cat perf-reports/*.md 2>/dev/null || echo 'No markdown reports generated' &&
+      echo '=== Performance reports saved to perf-reports/ ===' &&
+      ls -la perf-reports/
+      "
+
+  perf-quick:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.ubuntu
+    container_name: guillotine-perf-quick
+    volumes:
+      - .:/workspace
+    command: >
+      bash -c "
+      apt-get update -qq &&
+      apt-get install -y -qq hyperfine 2>/dev/null &&
+      zig build build-evm-runner &&
+      echo '=== QUICK PERFORMANCE TEST ===' &&
+      hyperfine --runs 10 --warmup 3 --ignore-failure './zig-out/bin/evm-runner --contract-code-path bench/official/cases/erc20-transfer/bytecode.txt --calldata 0xa9059cbb00000000000000000000000090f79bf6eb2c4f870365e785982e1f101e93b9060000000000000000000000000000000000000000000000000000000000000001 --num-runs 1000'
+      "
+
+  perf-orchestrator:
+    build:
+      context: .
+      dockerfile: .docker/Dockerfile.ubuntu
+    container_name: guillotine-perf-orchestrator
+    volumes:
+      - .:/workspace
+      - ./perf-reports:/workspace/perf-reports
+    command: >
+      bash -c "
+      apt-get update -qq &&
+      apt-get install -y -qq hyperfine 2>/dev/null &&
+      zig build build-orchestrator &&
+      zig build build-evm-runner &&
+      echo '=== ORCHESTRATOR DETAILED ANALYSIS ===' &&
+      ./zig-out/bin/orchestrator --detailed --perf-output perf-reports -n 10 --internal-runs 100 &&
+      echo '=== Reports generated in perf-reports/ ===' &&
+      ls -la perf-reports/
+      "
