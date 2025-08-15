@@ -7,6 +7,7 @@ import (
     "math/big"
     "os"
     "strings"
+    "time"
 
     "github.com/ethereum/go-ethereum/common"
     "github.com/ethereum/go-ethereum/core/state"
@@ -107,7 +108,10 @@ func main() {
 
     // Run the benchmark num_runs times (no redeploy)
     for i := 0; i < numRuns; i++ {
+        start := time.Now()
         ret, gasLeft, err := runtime.Call(contractAddress, calldata, &cfg)
+        duration := time.Since(start)
+        
         if err != nil {
             fmt.Fprintf(os.Stderr, "Call failed with error: %v\n", err)
             fmt.Fprintf(os.Stderr, "Calldata: %x\n", calldata)
@@ -125,8 +129,14 @@ func main() {
             if len(ret) < 32 || ret[len(ret)-1] != 1 {
                 panic("Unexpected boolean return (expected 32-byte true)")
             }
-        // Note: selector 0x30627b7c (Benchmark()) may return data for some contracts like snailtracer
+        case 0x30627b7c: // Benchmark() - snailtracer returns data, just accept it
+            // No validation needed for benchmark function
+        default:
+            // For unknown selectors, don't validate return values
         }
         _ = ret
+        
+        // Output timing in milliseconds (one per line as expected by orchestrator)
+        fmt.Printf("%.6f\n", duration.Seconds()*1000)
     }
 }
