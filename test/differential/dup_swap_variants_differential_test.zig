@@ -416,7 +416,6 @@ test "SWAP16 opcode swaps 1st and 17th stack elements" {
         // After SWAP16, top of stack should be 0x01
         try testing.expectEqual(@as(u256, 0x01), revm_value);
         try testing.expectEqual(revm_value, mini_value);
-        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(revm_value, guillotine_value);
     }
 }
