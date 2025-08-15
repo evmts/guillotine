@@ -29,6 +29,29 @@ const Controls: Component<ControlsProps> = (props) => {
 	const onStep = () => props.handleStep()
 	const onRunPause = () => props.handleRunPause()
 
+	// Speed states: slow (500ms), default (200ms), fast (50ms)
+	const speedStates = [
+		{ label: 'Slow', value: 500 },
+		{ label: 'Default', value: 200 },
+		{ label: 'Fast', value: 50 },
+	]
+
+	const getCurrentSpeedIndex = () => {
+		const index = speedStates.findIndex((s) => s.value === props.executionSpeed)
+		return index === -1 ? 1 : index // default to Default speed if not found
+	}
+
+	const onSpeedToggle = () => {
+		const currentIndex = getCurrentSpeedIndex()
+		const nextIndex = (currentIndex + 1) % speedStates.length
+		props.setExecutionSpeed(speedStates[nextIndex].value)
+	}
+
+	const getCurrentSpeedLabel = () => {
+		const currentIndex = getCurrentSpeedIndex()
+		return speedStates[currentIndex].label
+	}
+
 	return (
 		<div class="sticky top-18 z-50 flex w-full justify-center px-4">
 			<div class="grid grid-cols-2 xs:grid-cols-4 gap-x-4 gap-y-2 rounded-sm border border-border/30 bg-amber-50/50 p-2 backdrop-blur-md dark:bg-amber-950/30">
@@ -85,13 +108,13 @@ const Controls: Component<ControlsProps> = (props) => {
 				<Button
 					variant="outline"
 					size="sm"
-					disabled={!props.isRunning || !props.bytecode}
-					onClick={onRunPause}
-					aria-label="Speed"
+					disabled={!props.bytecode}
+					onClick={onSpeedToggle}
+					aria-label={`Speed: ${getCurrentSpeedLabel()}`}
 					class="flex items-center gap-2"
 				>
 					<GaugeIcon class="h-4 w-4" />
-					Speed
+					{getCurrentSpeedLabel()}
 				</Button>
 			</div>
 		</div>
