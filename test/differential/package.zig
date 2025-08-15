@@ -21,6 +21,14 @@ pub const snailtracer_differential_test = @import("snailtracer_differential_test
 pub const erc20_differential_test = @import("erc20_differential_test.zig");
 pub const ten_thousand_hashes_differential_test = @import("ten_thousand_hashes_differential_test.zig");
 pub const system_differential_test = @import("system_differential_test.zig");
+pub const arithmetic_edge_cases_differential_test = @import("arithmetic_edge_cases_differential_test.zig");
+pub const bitwise_edge_cases_differential_test = @import("bitwise_edge_cases_differential_test.zig");
+pub const push_variants_differential_test = @import("push_variants_differential_test.zig");
+pub const dup_swap_variants_differential_test = @import("dup_swap_variants_differential_test.zig");
+pub const calldata_differential_test = @import("calldata_differential_test.zig");
+pub const memory_edge_cases_differential_test = @import("memory_edge_cases_differential_test.zig");
+pub const storage_edge_cases_differential_test = @import("storage_edge_cases_differential_test.zig");
+pub const call_edge_cases_differential_test = @import("call_edge_cases_differential_test.zig");
 
 test {
     _ = arithmetic_differential_test;
@@ -44,4 +52,12 @@ test {
     _ = erc20_differential_test;
     _ = ten_thousand_hashes_differential_test;
     _ = system_differential_test;
+    _ = arithmetic_edge_cases_differential_test;
+    _ = bitwise_edge_cases_differential_test;
+    _ = push_variants_differential_test;
+    _ = dup_swap_variants_differential_test;
+    _ = calldata_differential_test;
+    _ = memory_edge_cases_differential_test;
+    _ = storage_edge_cases_differential_test;
+    _ = call_edge_cases_differential_test;
 }
