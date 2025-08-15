@@ -261,28 +261,10 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     // Apply pattern optimizations (like SHA3 precomputation)
     try applyPatternOptimizations(gen.instructions, code);
 
-    // Debug log the jumpdest bitmap before conversion
-    if (builtin.mode == .Debug and code.len < 100) {
-        Log.debug("[analysis] JUMPDEST bitmap contents before conversion:", .{});
-        var idx: usize = 0;
-        while (idx < code.len) : (idx += 1) {
-            if (jumpdest_bitmap.isSet(idx)) {
-                Log.debug("[analysis]   JUMPDEST at pc={}, opcode=0x{x:0>2}", .{idx, code[idx]});
-            }
-        }
-    }
-
     // Convert bitmap to packed array for cache-efficient validation
     const jumpdest_array = try JumpdestArray.from_bitmap(allocator, &jumpdest_bitmap, code.len);
     jumpdest_bitmap.deinit(); // Free the temporary bitmap
     
-    // Debug log the jumpdest array after conversion
-    if (builtin.mode == .Debug and code.len < 100) {
-        Log.debug("[analysis] JUMPDEST array after conversion: positions.len={}", .{jumpdest_array.positions.len});
-        for (jumpdest_array.positions) |pos| {
-            Log.debug("[analysis]   JUMPDEST position in array: {}", .{pos});
-        }
-    }
 
     return CodeAnalysis{
         // === FIRST CACHE LINE - ULTRA HOT ===
