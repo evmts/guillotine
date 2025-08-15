@@ -1,5 +1,24 @@
 ## PR 8: QA and Test Plan for Devtool Tracing Stack
 
+**COMPREHENSIVE IMPLEMENTATION GUIDE**
+
+This document provides exhaustive implementation details for the devtool tracing stack. After reading this document, you should be able to implement the entire PR without additional questions about Zig syntax, codebase patterns, or architecture decisions.
+
+## Table of Contents
+
+1. [Project Architecture Deep Dive](#project-architecture-deep-dive)
+2. [Build System & Configuration](#build-system--configuration)  
+3. [Memory Management Patterns](#memory-management-patterns)
+4. [Testing Framework & Patterns](#testing-framework--patterns)
+5. [Zig Language Idioms for This Project](#zig-language-idioms-for-this-project)
+6. [EVM Architecture & Tracing Integration](#evm-architecture--tracing-integration)
+7. [Devtool Architecture & Debug Flow](#devtool-architecture--debug-flow)
+8. [Per-PR Implementation Details](#per-pr-implementation-details)
+9. [Code Examples & Templates](#code-examples--templates)
+10. [Common Pitfalls & Solutions](#common-pitfalls--solutions)
+
+---
+
 ### Objectives
 
 - Ensure each PR in the stack has passing unit and integration tests.
@@ -50,6 +69,61 @@
 - Lock in deterministic analysis/PC mapping and trace formats for comparison against REVM.
 - Establish a clear workflow to diagnose divergences with minimal repros.
 
+---
+
+## Project Architecture Deep Dive
+
+### Module System
+
+The project uses Zig's module system defined in `build.zig`. Key modules you'll work with:
+
+```zig
+// Build configuration (build.zig excerpt)
+const evm_mod = b.createModule(.{
+    .root_source_file = b.path("src/evm/root.zig"),
+    .target = target,
+    .optimize = optimize,
+});
+evm_mod.addImport("primitives", primitives_mod);
+evm_mod.addImport("crypto", crypto_mod);
+evm_mod.addImport("build_options", build_options_mod); // Contains enable_tracing flag
+```
+
+**Critical Imports in Your Code:**
+```zig
+// Standard imports for all EVM tests
+const std = @import("std");
+const testing = std.testing;
+const evm = @import("evm");          // Main EVM module
+const primitives = @import("primitives"); // Address, storage primitives
+const build_options = @import("build_options"); // Tracing flag
+
+// For REVM comparison tests
+const revm_wrapper = @import("revm");  // Only if REVM available
+```
+
+### Directory Structure
+
+```
+src/
+├── evm/
+│   ├── root.zig              # Main exports
+│   ├── evm.zig                # Core VM implementation
+│   ├── tracer.zig             # Tracing implementation
+│   ├── evm/
+│   │   └── interpret.zig      # Execution loop (where tracing hooks go)
+│   ├── frame.zig              # Execution context
+│   ├── instruction_generation.zig # PC mapping logic
+│   ├── analysis.zig           # Bytecode analysis
+│   └── devtool/
+│       ├── evm.zig            # DevtoolEvm implementation
+│       └── app.zig            # WebUI bindings
+test/
+├── evm/                       # Unit tests (add your new tests here)
+├── differential/              # REVM comparison tests
+└── devtool/                   # Devtool-specific tests (create this)
+```
+
 ### Support Matrix
 
 - Platforms: macOS 14+ (Apple Silicon), Linux (CI).
@@ -59,11 +133,134 @@
   - Devtool: `zig build devtool`
   - Optional sanity: `zig build bench`
 
+---
+
+## Build System & Configuration
+
+### Compile-Time Tracing Control
+
+**Critical Understanding:** Tracing is controlled at compile-time via build options to avoid runtime overhead.
+
+```zig
+// build.zig (already implemented)
+const enable_tracing = b.option(bool, "enable-tracing", "Enable EVM instruction tracing (compile-time)") orelse false;
+build_options.addOption(bool, "enable_tracing", enable_tracing);
+```
+
+**In your code, always guard tracing:**
+```zig
+const build_options = @import("build_options");
+
+// Runtime tracing check
+if (comptime build_options.enable_tracing) {
+    // Only compiled when tracing enabled
+    if (self.tracer) |writer| {
+        // Emit trace
+    }
+} else {
+    // When disabled, return error if user tries to enable
+    return error.FeatureDisabled;
+}
+```
+
+### Build Commands Reference
+
+```bash
+# Standard development (no tracing)
+zig build && zig build test
+
+# With tracing enabled (for tracing tests)
+zig build -Denable-tracing=true && zig build -Denable-tracing=true test
+
+# Devtool UI
+zig build devtool
+
+# Benchmarks (optional)
+zig build bench
+
+# Specific test files (example)
+zig build test -- test/evm/tracer_test.zig
+```
+
+**CRITICAL:** Always use `zig build test`, never `zig test src/file.zig` directly (will fail with import errors).
+
 ### One-time Environment
 
 - Zig: Use the project-standard version (see repository docs and CI); recommended 0.14.x.
 - macOS prerequisites for Devtool UI: WebUI is embedded; no `node`/`npm` needed.
 - REVM wrapper is vendored under `src/revm_wrapper/`; no external Rust toolchain is required to run Zig tests.
+
+---
+
+## Memory Management Patterns
+
+### Allocator Usage Hierarchy
+
+1. **`std.testing.allocator`** - Use for ALL tests (has leak detection)
+2. **`arena.allocator()`** - For temporary allocations within a scope
+3. **User-provided allocator** - For long-lived data structures
+
+### Standard Memory Management Pattern
+
+```zig
+test "example memory pattern" {
+    const allocator = std.testing.allocator;
+    
+    // Long-lived structures
+    var memory_db = evm.MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer vm.deinit();
+    
+    // Temporary allocations
+    const bytecode = try allocator.alloc(u8, 32);
+    defer allocator.free(bytecode);
+    
+    // Use errdefer for cleanup before ownership transfer
+    const contract = try allocator.create(evm.Contract);
+    errdefer allocator.destroy(contract); // Only if we don't transfer ownership
+    
+    // Transfer ownership - no more errdefer needed
+    return contract;
+}
+```
+
+### Defer Patterns
+
+**Immediate defer after allocation:**
+```zig
+var list = std.ArrayList(u8).init(allocator);
+defer list.deinit(); // IMMEDIATELY after init
+
+const buffer = try allocator.alloc(u8, size);
+defer allocator.free(buffer); // IMMEDIATELY after alloc
+```
+
+**ErrorDefer for ownership transfer:**
+```zig
+const frame = try allocator.create(Frame);
+errdefer allocator.destroy(frame); // Clean up on error
+frame.* = try Frame.init(allocator, vm, gas, contract, caller, input);
+// If we return frame, caller owns it now
+return frame;
+```
+
+### ArrayList Usage
+
+```zig
+// Dynamic buffer building
+var trace_buffer = std.ArrayList(u8).init(allocator);
+defer trace_buffer.deinit();
+
+const writer = trace_buffer.writer().any();
+// Write to buffer...
+
+// Transfer ownership to caller
+const result = try trace_buffer.toOwnedSlice();
+// trace_buffer is now empty, deinit() is safe
+return result; // Caller must free(result)
+```
 
 ### Ground Truth Anchors (where things happen)
 
