@@ -24,6 +24,7 @@ const Memory = @import("../memory/memory.zig").Memory;
 const CallJournal = @import("../call_frame_stack.zig").CallJournal;
 const JournalEntry = @import("../call_frame_stack.zig").JournalEntry;
 const EvmLog = @import("../state/evm_log.zig");
+const EvmState = @import("../state/state.zig");
 const Allocator = std.mem.Allocator;
 
 /// Copy stack data with bounds checking
@@ -110,6 +111,7 @@ pub fn collect_storage_changes_since(
     allocator: Allocator,
     journal: *const CallJournal,
     from_index: usize,
+    state: *const EvmState, // State to query current storage values
 ) ![]tracer.StorageChange {
     const entries = journal.entries.items;
     if (from_index >= entries.len) {
@@ -136,11 +138,14 @@ pub fn collect_storage_changes_since(
     for (entries[from_index..]) |entry| {
         switch (entry) {
             .storage_change => |sc| {
+                // Get the current value from storage
+                const current_value = state.get_storage(sc.address, sc.key);
+                
                 changes[i] = tracer.StorageChange{
                     .address = sc.address,
                     .key = sc.key,
-                    .value = sc.original_value, // Note: This needs to be updated to current value
-                    .original_value = sc.original_value,
+                    .value = current_value, // Current value from storage
+                    .original_value = sc.original_value, // Original value from journal
                 };
                 i += 1;
             },
@@ -226,4 +231,150 @@ pub fn create_empty_storage_changes(allocator: Allocator) ![]tracer.StorageChang
 /// Helper to create empty arrays for when there are no logs
 pub fn create_empty_log_entries(allocator: Allocator) ![]tracer.LogEntry {
     return try allocator.alloc(tracer.LogEntry, 0);
+}
+
+/// Capture actual stack changes between pre and post execution states
+/// Returns StackChanges with real pushed/popped items and current stack state
+/// Caller owns returned memory and must call deinit()
+pub fn capture_stack_changes(
+    allocator: Allocator,
+    stack_before: []const u256,
+    stack_after: []const u256,
+    max_items: usize,
+) !tracer.StackChanges {
+    // Calculate what was pushed and popped
+    var items_pushed: []u256 = undefined;
+    var items_popped: []u256 = undefined;
+    
+    if (stack_after.len > stack_before.len) {
+        // Items were pushed
+        const push_count = stack_after.len - stack_before.len;
+        items_pushed = try allocator.alloc(u256, push_count);
+        errdefer allocator.free(items_pushed);
+        
+        // Copy the newly pushed items (they're at the end of stack_after)
+        @memcpy(items_pushed, stack_after[stack_before.len..]);
+        
+        items_popped = try allocator.alloc(u256, 0);
+    } else if (stack_before.len > stack_after.len) {
+        // Items were popped
+        const pop_count = stack_before.len - stack_after.len;
+        items_popped = try allocator.alloc(u256, pop_count);
+        errdefer allocator.free(items_popped);
+        
+        // Copy the popped items (they were at the end of stack_before)
+        @memcpy(items_popped, stack_before[stack_after.len..]);
+        
+        items_pushed = try allocator.alloc(u256, 0);
+    } else {
+        // No change in stack size, but items might have changed (rare case)
+        items_pushed = try allocator.alloc(u256, 0);
+        items_popped = try allocator.alloc(u256, 0);
+    }
+    errdefer allocator.free(items_pushed);
+    errdefer allocator.free(items_popped);
+    
+    // Copy current stack state (bounded)
+    const copy_count = @min(stack_after.len, max_items);
+    const current_stack = try allocator.alloc(u256, copy_count);
+    errdefer allocator.free(current_stack);
+    
+    if (copy_count > 0) {
+        @memcpy(current_stack, stack_after[0..copy_count]);
+    }
+    
+    return tracer.StackChanges{
+        .items_pushed = items_pushed,
+        .items_popped = items_popped,
+        .current_stack = current_stack,
+    };
+}
+
+/// Capture actual memory changes between pre and post execution states
+/// Detects modified regions and captures the changes
+/// Returns MemoryChanges with real modification data
+/// Caller owns returned memory and must call deinit()
+pub fn capture_memory_changes(
+    allocator: Allocator,
+    memory_before: []const u8,
+    memory_after: []const u8,
+    max_bytes: usize,
+) !tracer.MemoryChanges {
+    // Find the modified region
+    const min_len = @min(memory_before.len, memory_after.len);
+    
+    var first_diff_offset: ?usize = null;
+    var last_diff_offset: usize = 0;
+    
+    // Find first difference
+    for (0..min_len) |i| {
+        if (memory_before[i] != memory_after[i]) {
+            if (first_diff_offset == null) {
+                first_diff_offset = i;
+            }
+            last_diff_offset = i;
+        }
+    }
+    
+    // Check if memory was extended
+    if (memory_after.len > memory_before.len) {
+        if (first_diff_offset == null) {
+            first_diff_offset = memory_before.len;
+        }
+        last_diff_offset = memory_after.len - 1;
+    }
+    
+    // If no differences found, return empty changes
+    if (first_diff_offset == null) {
+        return tracer.MemoryChanges{
+            .offset = 0,
+            .data = try allocator.alloc(u8, 0),
+            .current_memory = try allocator.alloc(u8, 0),
+        };
+    }
+    
+    const diff_offset = first_diff_offset.?;
+    const diff_len = last_diff_offset - diff_offset + 1;
+    
+    // Capture the changed data (bounded)
+    const capture_len = @min(diff_len, max_bytes);
+    const changed_data = try allocator.alloc(u8, capture_len);
+    errdefer allocator.free(changed_data);
+    
+    @memcpy(changed_data, memory_after[diff_offset..diff_offset + capture_len]);
+    
+    // Capture bounded current memory state
+    const current_memory_len = @min(memory_after.len, max_bytes);
+    const current_memory = try allocator.alloc(u8, current_memory_len);
+    errdefer allocator.free(current_memory);
+    
+    if (current_memory_len > 0) {
+        @memcpy(current_memory, memory_after[0..current_memory_len]);
+    }
+    
+    return tracer.MemoryChanges{
+        .offset = @intCast(diff_offset),
+        .data = changed_data,
+        .current_memory = current_memory,
+    };
+}
+
+/// Create a snapshot of current memory state for comparison
+/// Returns owned slice that caller must free
+pub fn snapshot_memory_state(
+    allocator: Allocator,
+    memory: *const Memory,
+) ![]u8 {
+    const size = memory.context_size();
+    if (size == 0) return try allocator.alloc(u8, 0);
+    
+    const snapshot = try allocator.alloc(u8, size);
+    errdefer allocator.free(snapshot);
+    
+    const memory_ptr = memory.get_memory_ptr();
+    const checkpoint = memory.get_checkpoint();
+    const source_slice = memory_ptr[checkpoint..checkpoint + size];
+    
+    @memcpy(snapshot, source_slice);
+    return snapshot;
 }

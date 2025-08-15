@@ -175,6 +175,26 @@ pub const MemoryTracer = struct {
         else
             null;
 
+        // Allocate memory for stack and memory changes to persist in StructLog
+        const stack_changes_ptr = if (step_result.stack_changes.items_pushed.len > 0 or
+            step_result.stack_changes.items_popped.len > 0)
+            self.allocator.create(tracer.StackChanges) catch null
+        else
+            null;
+
+        if (stack_changes_ptr) |ptr| {
+            ptr.* = step_result.stack_changes;
+        }
+
+        const memory_changes_ptr = if (step_result.memory_changes.data.len > 0)
+            self.allocator.create(tracer.MemoryChanges) catch null
+        else
+            null;
+
+        if (memory_changes_ptr) |ptr| {
+            ptr.* = step_result.memory_changes;
+        }
+
         // Build complete StructLog entry
         const struct_log = tracer.StructLog{
             .pc = step_info.pc,
@@ -184,9 +204,11 @@ pub const MemoryTracer = struct {
             .depth = step_info.depth,
             .stack = bounded_stack,
             .memory = step_result.memory_snapshot,
-            .storage = step_result.storage_changes,
-            .logs = step_result.logs_emitted,
             .error_info = step_result.error_info,
+            .stack_changes = stack_changes_ptr,
+            .memory_changes = memory_changes_ptr,
+            .storage_changes = step_result.storage_changes,
+            .logs_emitted = step_result.logs_emitted,
         };
 
         // Append to trace
@@ -195,7 +217,18 @@ pub const MemoryTracer = struct {
             std.debug.print("MemoryTracer: Failed to append struct log: {}\n", .{err});
             // Free the step result allocations since we couldn't store them
             self.free_step_result_contents(&step_result);
+            return;
         };
+
+        // Don't free stack_changes and memory_changes here if we stored pointers to them
+        // The StructLog now owns them via the allocated pointers
+        // Only free them if we didn't store them (allocation failed)
+        if (stack_changes_ptr == null) {
+            step_result.stack_changes.deinit(self.allocator);
+        }
+        if (memory_changes_ptr == null) {
+            step_result.memory_changes.deinit(self.allocator);
+        }
 
         // Track cumulative gas usage
         self.gas_used += step_result.gas_cost;
@@ -240,14 +273,25 @@ pub const MemoryTracer = struct {
         }
 
         // Free storage changes array
-        self.allocator.free(log.storage);
+        self.allocator.free(log.storage_changes);
 
         // Free log entries and their nested data
-        for (log.logs) |*log_entry| {
+        for (log.logs_emitted) |*log_entry| {
             self.allocator.free(log_entry.topics);
             self.allocator.free(log_entry.data);
         }
-        self.allocator.free(log.logs);
+        self.allocator.free(log.logs_emitted);
+
+        // Free new state change tracking fields
+        if (log.stack_changes) |changes_ptr| {
+            changes_ptr.deinit(self.allocator);
+            self.allocator.destroy(changes_ptr);
+        }
+
+        if (log.memory_changes) |changes_ptr| {
+            changes_ptr.deinit(self.allocator);
+            self.allocator.destroy(changes_ptr);
+        }
     }
 
     /// Free allocations within step result (for error recovery)
@@ -259,6 +303,12 @@ pub const MemoryTracer = struct {
         if (step_result.memory_snapshot) |memory| {
             self.allocator.free(memory);
         }
+
+        // Free stack changes
+        step_result.stack_changes.deinit(self.allocator);
+
+        // Free memory changes
+        step_result.memory_changes.deinit(self.allocator);
 
         self.allocator.free(step_result.storage_changes);
 

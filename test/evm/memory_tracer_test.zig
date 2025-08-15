@@ -842,3 +842,488 @@ test "MemoryTracer: custom analysis hooks demonstrate step-by-step debugging wor
     try std.testing.expect(execution_trace.struct_logs.len > 0); // Should have traced something
     try std.testing.expect(multiplication_operations >= 1 or jump_operations >= 1); // Should have at least some operations
 }
+
+test "MemoryTracer: real stack changes tracking with push and pop operations" {
+    std.testing.log_level = .warn;
+    const allocator = std.testing.allocator;
+    
+    // Simple bytecode with explicit stack operations
+    // PUSH1 10, PUSH1 20, ADD, PUSH1 5, MUL, POP, STOP
+    const bytecode = [_]u8{
+        0x60, 0x0a, // PUSH1 10
+        0x60, 0x14, // PUSH1 20
+        0x01,       // ADD (pops 2, pushes 1: result = 30)
+        0x60, 0x05, // PUSH1 5
+        0x02,       // MUL (pops 2, pushes 1: result = 150)
+        0x50,       // POP (pops 1, pushes 0)
+        0x00,       // STOP
+    };
+    
+    // Full EVM setup
+    const table = &OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, &bytecode, table);
+    defer analysis.deinit();
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    
+    var evm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm_instance.deinit();
+    
+    const host = Host.init(&evm_instance);
+    var frame = try Frame.init(1000000, false, 0, AddressHelpers.ZERO, AddressHelpers.ZERO, 0, &analysis, host, db_interface, allocator);
+    defer frame.deinit(allocator);
+    
+    // Setup tracer
+    const tracer_config = TracerConfig{
+        .memory_max_bytes = 256,
+        .stack_max_items = 16,
+        .log_data_max_bytes = 256,
+    };
+    
+    var memory_tracer = try MemoryTracer.init(allocator, tracer_config);
+    defer memory_tracer.deinit();
+    
+    evm_instance.set_tracer(memory_tracer.handle());
+    
+    // Execute
+    const execution_result = evm_instance.interpret(&frame);
+    execution_result catch {};
+    
+    // Analyze trace
+    var execution_trace = try memory_tracer.get_trace();
+    defer execution_trace.deinit(allocator);
+    
+    std.log.warn("Total steps captured: {}", .{execution_trace.struct_logs.len});
+    
+    // Look for the arithmetic operations that should have stack changes
+    for (execution_trace.struct_logs) |log| {
+        std.log.warn("Step: PC={}, OP={s}, stack_changes={any}, stack_size={}", .{
+            log.pc, 
+            log.op,
+            log.stack_changes != null,
+            if (log.stack) |s| s.len else 0,
+        });
+        
+        // Verify stack changes are captured for operations that modify the stack
+        if (std.mem.eql(u8, log.op, "ADD")) {
+            // ADD pops 2 items and pushes 1
+            try std.testing.expect(log.stack_changes != null);
+            if (log.stack_changes) |changes| {
+                std.log.warn("ADD: pushed={}, popped={}", .{changes.items_pushed.len, changes.items_popped.len});
+                try std.testing.expectEqual(@as(usize, 2), changes.items_popped.len); // Pops 2
+                try std.testing.expectEqual(@as(usize, 1), changes.items_pushed.len); // Pushes 1
+                try std.testing.expectEqual(@as(u256, 30), changes.items_pushed[0]); // Result
+            }
+        } else if (std.mem.eql(u8, log.op, "MUL")) {
+            // MUL pops 2 items and pushes 1
+            try std.testing.expect(log.stack_changes != null);
+            if (log.stack_changes) |changes| {
+                std.log.warn("MUL: pushed={}, popped={}", .{changes.items_pushed.len, changes.items_popped.len});
+                try std.testing.expectEqual(@as(usize, 2), changes.items_popped.len); // Pops 2
+                try std.testing.expectEqual(@as(usize, 1), changes.items_pushed.len); // Pushes 1
+                try std.testing.expectEqual(@as(u256, 150), changes.items_pushed[0]); // Result
+            }
+        } else if (std.mem.eql(u8, log.op, "POP")) {
+            // POP removes 1 item
+            try std.testing.expect(log.stack_changes != null);
+            if (log.stack_changes) |changes| {
+                std.log.warn("POP: pushed={}, popped={}", .{changes.items_pushed.len, changes.items_popped.len});
+                try std.testing.expectEqual(@as(usize, 1), changes.items_popped.len); // Pops 1
+                try std.testing.expectEqual(@as(usize, 0), changes.items_pushed.len); // Pushes nothing
+            }
+        }
+    }
+}
+
+test "MemoryTracer: real memory changes tracking with MSTORE operations" {
+    std.testing.log_level = .warn;
+    const allocator = std.testing.allocator;
+    
+    // Bytecode that writes to memory at different locations
+    const bytecode = [_]u8{
+        // Store 0xABCD at offset 0
+        0x61, 0xab, 0xcd, // PUSH2 0xABCD
+        0x60, 0x00,       // PUSH1 0
+        0x52,             // MSTORE
+        // Store 0xDEAD at offset 32
+        0x61, 0xde, 0xad, // PUSH2 0xDEAD
+        0x60, 0x20,       // PUSH1 32
+        0x52,             // MSTORE
+        // Load from offset 0 to verify
+        0x60, 0x00,       // PUSH1 0
+        0x51,             // MLOAD
+        0x50,             // POP
+        0x00,             // STOP
+    };
+    
+    // Full EVM setup
+    const table = &OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, &bytecode, table);
+    defer analysis.deinit();
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    
+    var evm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm_instance.deinit();
+    
+    const host = Host.init(&evm_instance);
+    var frame = try Frame.init(1000000, false, 0, AddressHelpers.ZERO, AddressHelpers.ZERO, 0, &analysis, host, db_interface, allocator);
+    defer frame.deinit(allocator);
+    
+    // Setup tracer
+    const tracer_config = TracerConfig{
+        .memory_max_bytes = 128,
+        .stack_max_items = 16,
+        .log_data_max_bytes = 256,
+    };
+    
+    var memory_tracer = try MemoryTracer.init(allocator, tracer_config);
+    defer memory_tracer.deinit();
+    
+    evm_instance.set_tracer(memory_tracer.handle());
+    
+    // Execute
+    const execution_result = evm_instance.interpret(&frame);
+    execution_result catch {};
+    
+    // Analyze trace
+    var execution_trace = try memory_tracer.get_trace();
+    defer execution_trace.deinit(allocator);
+    
+    var mstore_count: u32 = 0;
+    var found_memory_changes = false;
+    
+    for (execution_trace.struct_logs) |log| {
+        if (std.mem.eql(u8, log.op, "MSTORE")) {
+            mstore_count += 1;
+            std.log.warn("MSTORE at PC={}: memory_changes={any}", .{log.pc, log.memory_changes != null});
+            
+            // Memory changes should be captured
+            try std.testing.expect(log.memory_changes != null);
+            if (log.memory_changes) |changes| {
+                found_memory_changes = true;
+                std.log.warn("  Memory changed at offset {}: {} bytes modified", .{changes.offset, changes.data.len});
+                
+                // First MSTORE is at offset 0
+                if (mstore_count == 1) {
+                    try std.testing.expectEqual(@as(u64, 0), changes.offset);
+                }
+                // Second MSTORE is at offset 32
+                else if (mstore_count == 2) {
+                    try std.testing.expectEqual(@as(u64, 32), changes.offset);
+                }
+                
+                // Data should be captured (32 bytes for word-aligned store)
+                try std.testing.expect(changes.data.len > 0);
+            }
+        }
+    }
+    
+    try std.testing.expectEqual(@as(u32, 2), mstore_count);
+    try std.testing.expect(found_memory_changes);
+}
+
+test "MemoryTracer: real storage changes tracking with SSTORE and journal" {
+    std.testing.log_level = .warn;
+    const allocator = std.testing.allocator;
+    
+    // Bytecode that modifies storage
+    const bytecode = [_]u8{
+        // Store 100 at slot 1
+        0x60, 0x64, // PUSH1 100
+        0x60, 0x01, // PUSH1 1
+        0x55,       // SSTORE
+        // Store 200 at slot 2
+        0x60, 0xc8, // PUSH1 200
+        0x60, 0x02, // PUSH1 2
+        0x55,       // SSTORE
+        // Load slot 1 to verify
+        0x60, 0x01, // PUSH1 1
+        0x54,       // SLOAD
+        0x50,       // POP
+        0x00,       // STOP
+    };
+    
+    // Full EVM setup
+    const table = &OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, &bytecode, table);
+    defer analysis.deinit();
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    
+    var evm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm_instance.deinit();
+    
+    // Set initial storage values
+    try evm_instance.state.set_storage(AddressHelpers.ZERO, 1, 50); // Slot 1 starts at 50
+    try evm_instance.state.set_storage(AddressHelpers.ZERO, 2, 0);  // Slot 2 starts at 0
+    
+    const host = Host.init(&evm_instance);
+    var frame = try Frame.init(1000000, false, 0, AddressHelpers.ZERO, AddressHelpers.ZERO, 0, &analysis, host, db_interface, allocator);
+    defer frame.deinit(allocator);
+    
+    // Setup tracer
+    const tracer_config = TracerConfig{
+        .memory_max_bytes = 256,
+        .stack_max_items = 16,
+        .log_data_max_bytes = 256,
+    };
+    
+    var memory_tracer = try MemoryTracer.init(allocator, tracer_config);
+    defer memory_tracer.deinit();
+    
+    evm_instance.set_tracer(memory_tracer.handle());
+    
+    // Execute
+    const execution_result = evm_instance.interpret(&frame);
+    execution_result catch {};
+    
+    // Analyze trace
+    var execution_trace = try memory_tracer.get_trace();
+    defer execution_trace.deinit(allocator);
+    
+    var sstore_count: u32 = 0;
+    var found_storage_changes = false;
+    
+    for (execution_trace.struct_logs) |log| {
+        if (std.mem.eql(u8, log.op, "SSTORE")) {
+            sstore_count += 1;
+            std.log.warn("SSTORE at PC={}: storage.len={}", .{log.pc, log.storage.len});
+            
+            // Storage changes should be captured
+            try std.testing.expect(log.storage.len > 0);
+            if (log.storage.len > 0) {
+                found_storage_changes = true;
+                std.log.warn("  {} storage changes captured", .{log.storage.len});
+                
+                for (log.storage) |change| {
+                    std.log.warn("    Slot {}: {} -> {}", .{change.key, change.original_value, change.value});
+                    
+                    // Verify we captured the right changes
+                    if (change.key == 1) {
+                        try std.testing.expectEqual(@as(u256, 50), change.original_value); // Original
+                        try std.testing.expectEqual(@as(u256, 100), change.value); // New
+                    } else if (change.key == 2) {
+                        try std.testing.expectEqual(@as(u256, 0), change.original_value); // Original
+                        try std.testing.expectEqual(@as(u256, 200), change.value); // New
+                    }
+                }
+            }
+        }
+    }
+    
+    try std.testing.expectEqual(@as(u32, 2), sstore_count);
+    try std.testing.expect(found_storage_changes);
+}
+
+test "MemoryTracer: real log entries tracking with LOG operations" {
+    std.testing.log_level = .warn;
+    const allocator = std.testing.allocator;
+    
+    // Bytecode that emits log events
+    const bytecode = [_]u8{
+        // Store data in memory for log
+        0x60, 0x42, // PUSH1 0x42
+        0x60, 0x00, // PUSH1 0
+        0x52,       // MSTORE
+        
+        // Emit LOG1 with one topic
+        0x60, 0xaa, // PUSH1 0xAA (topic)
+        0x60, 0x20, // PUSH1 32 (data length)
+        0x60, 0x00, // PUSH1 0 (data offset)
+        0xa1,       // LOG1
+        
+        // Store different data
+        0x60, 0x99, // PUSH1 0x99
+        0x60, 0x20, // PUSH1 32
+        0x52,       // MSTORE
+        
+        // Emit LOG2 with two topics
+        0x60, 0xbb, // PUSH1 0xBB (topic2)
+        0x60, 0xcc, // PUSH1 0xCC (topic1)
+        0x60, 0x20, // PUSH1 32 (data length)
+        0x60, 0x20, // PUSH1 32 (data offset)
+        0xa2,       // LOG2
+        
+        0x00,       // STOP
+    };
+    
+    // Full EVM setup
+    const table = &OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, &bytecode, table);
+    defer analysis.deinit();
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    
+    var evm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm_instance.deinit();
+    
+    const host = Host.init(&evm_instance);
+    var frame = try Frame.init(1000000, false, 0, AddressHelpers.ZERO, AddressHelpers.ZERO, 0, &analysis, host, db_interface, allocator);
+    defer frame.deinit(allocator);
+    
+    // Setup tracer
+    const tracer_config = TracerConfig{
+        .memory_max_bytes = 256,
+        .stack_max_items = 16,
+        .log_data_max_bytes = 256,
+    };
+    
+    var memory_tracer = try MemoryTracer.init(allocator, tracer_config);
+    defer memory_tracer.deinit();
+    
+    evm_instance.set_tracer(memory_tracer.handle());
+    
+    // Execute
+    const execution_result = evm_instance.interpret(&frame);
+    execution_result catch {};
+    
+    // Analyze trace
+    var execution_trace = try memory_tracer.get_trace();
+    defer execution_trace.deinit(allocator);
+    
+    var log_count: u32 = 0;
+    var found_log_entries = false;
+    
+    for (execution_trace.struct_logs) |log| {
+        if (std.mem.eql(u8, log.op, "LOG1") or std.mem.eql(u8, log.op, "LOG2")) {
+            log_count += 1;
+            std.log.warn("{s} at PC={}: logs.len={}", .{log.op, log.pc, log.logs.len});
+            
+            // Log entries should be captured
+            try std.testing.expect(log.logs.len > 0);
+            if (log.logs.len > 0) {
+                found_log_entries = true;
+                std.log.warn("  {} log entries captured", .{log.logs.len});
+                
+                for (log.logs) |entry| {
+                    std.log.warn("    Address: {any}, Topics: {}, Data length: {}", .{
+                        entry.address,
+                        entry.topics.len,
+                        entry.data.len,
+                    });
+                    
+                    // Verify topic counts
+                    if (std.mem.eql(u8, log.op, "LOG1")) {
+                        try std.testing.expectEqual(@as(usize, 1), entry.topics.len);
+                    } else if (std.mem.eql(u8, log.op, "LOG2")) {
+                        try std.testing.expectEqual(@as(usize, 2), entry.topics.len);
+                    }
+                    
+                    // Data should be captured
+                    try std.testing.expect(entry.data.len > 0);
+                }
+            }
+        }
+    }
+    
+    try std.testing.expectEqual(@as(u32, 2), log_count);
+    try std.testing.expect(found_log_entries);
+}
+
+test "MemoryTracer: integrated test with all state changes" {
+    std.testing.log_level = .warn;
+    const allocator = std.testing.allocator;
+    
+    // Complex bytecode with stack, memory, storage, and log operations
+    const bytecode = [_]u8{
+        // === Stack operations ===
+        0x60, 0x10, // PUSH1 16
+        0x60, 0x20, // PUSH1 32
+        0x01,       // ADD
+        
+        // === Memory operations ===
+        0x80,       // DUP1 (copy result)
+        0x60, 0x00, // PUSH1 0
+        0x52,       // MSTORE (store result at offset 0)
+        
+        // === Storage operations ===
+        0x60, 0x00, // PUSH1 0
+        0x51,       // MLOAD (load from memory)
+        0x60, 0x05, // PUSH1 5 (storage slot)
+        0x55,       // SSTORE (store to slot 5)
+        
+        // === Log operations ===
+        0x60, 0x05, // PUSH1 5 (storage slot)
+        0x54,       // SLOAD (load value)
+        0x60, 0x20, // PUSH1 32 (data length)
+        0x60, 0x00, // PUSH1 0 (data offset)
+        0xa1,       // LOG1 (emit event with loaded value as topic)
+        
+        0x00,       // STOP
+    };
+    
+    // Full EVM setup
+    const table = &OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, &bytecode, table);
+    defer analysis.deinit();
+    
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+    
+    var evm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm_instance.deinit();
+    
+    const host = Host.init(&evm_instance);
+    var frame = try Frame.init(1000000, false, 0, AddressHelpers.ZERO, AddressHelpers.ZERO, 0, &analysis, host, db_interface, allocator);
+    defer frame.deinit(allocator);
+    
+    // Setup tracer
+    const tracer_config = TracerConfig{
+        .memory_max_bytes = 256,
+        .stack_max_items = 16,
+        .log_data_max_bytes = 256,
+    };
+    
+    var memory_tracer = try MemoryTracer.init(allocator, tracer_config);
+    defer memory_tracer.deinit();
+    
+    evm_instance.set_tracer(memory_tracer.handle());
+    
+    // Execute
+    const execution_result = evm_instance.interpret(&frame);
+    execution_result catch {};
+    
+    // Analyze trace
+    var execution_trace = try memory_tracer.get_trace();
+    defer execution_trace.deinit(allocator);
+    
+    // Verify we captured all types of state changes
+    var has_stack_changes = false;
+    var has_memory_changes = false;
+    var has_storage_changes = false;
+    var has_log_entries = false;
+    
+    for (execution_trace.struct_logs) |log| {
+        if (log.stack_changes != null) has_stack_changes = true;
+        if (log.memory_changes != null) has_memory_changes = true;
+        if (log.storage.len > 0) has_storage_changes = true;
+        if (log.logs.len > 0) has_log_entries = true;
+        
+        std.log.warn("PC={} OP={s}: stack_changes={}, memory_changes={}, storage.len={}, logs.len={}", .{
+            log.pc,
+            log.op,
+            log.stack_changes != null,
+            log.memory_changes != null,
+            log.storage.len,
+            log.logs.len,
+        });
+    }
+    
+    // All state change types should be captured
+    try std.testing.expect(has_stack_changes);
+    try std.testing.expect(has_memory_changes);
+    try std.testing.expect(has_storage_changes);
+    try std.testing.expect(has_log_entries);
+    
+    std.log.warn("Integrated test successful: All state change types captured", .{});
+}

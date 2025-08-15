@@ -56,12 +56,12 @@ pub const StepInfo = struct {
     stack_size: usize,
     /// Current memory size in bytes
     memory_size: usize,
-    
+
     /// Check if this is main execution (depth 0)
     pub fn isMainExecution(self: *const StepInfo) bool {
         return self.depth == 0;
     }
-    
+
     /// Check if this is a sub-call (depth > 0)
     pub fn isSubCall(self: *const StepInfo) bool {
         return self.depth > 0;
@@ -73,21 +73,21 @@ pub const StackChanges = struct {
     items_pushed: []u256,
     items_popped: []u256,
     current_stack: []u256,
-    
+
     pub fn deinit(self: *const StackChanges, allocator: std.mem.Allocator) void {
         allocator.free(self.items_pushed);
         allocator.free(self.items_popped);
         allocator.free(self.current_stack);
     }
-    
+
     pub fn getPushCount(self: *const StackChanges) usize {
         return self.items_pushed.len;
     }
-    
+
     pub fn getPopCount(self: *const StackChanges) usize {
         return self.items_popped.len;
     }
-    
+
     pub fn getCurrentDepth(self: *const StackChanges) usize {
         return self.current_stack.len;
     }
@@ -98,20 +98,20 @@ pub const MemoryChanges = struct {
     offset: u64,
     data: []u8,
     current_memory: []u8,
-    
+
     pub fn deinit(self: *const MemoryChanges, allocator: std.mem.Allocator) void {
         allocator.free(self.data);
         allocator.free(self.current_memory);
     }
-    
+
     pub fn getModificationSize(self: *const MemoryChanges) usize {
         return self.data.len;
     }
-    
+
     pub fn getCurrentSize(self: *const MemoryChanges) usize {
         return self.current_memory.len;
     }
-    
+
     pub fn wasModified(self: *const MemoryChanges) bool {
         return self.data.len > 0;
     }
@@ -137,17 +137,17 @@ pub const StepResult = struct {
     logs_emitted: []LogEntry,
     /// Error information if the step failed
     error_info: ?ExecutionErrorInfo,
-    
+
     /// Check if operation was successful
     pub fn isSuccess(self: *const StepResult) bool {
         return self.error_info == null;
     }
-    
+
     /// Check if operation failed
     pub fn isFailure(self: *const StepResult) bool {
         return self.error_info != null;
     }
-    
+
     /// Clean up allocated memory for step result
     pub fn deinit(self: *const StepResult, allocator: std.mem.Allocator) void {
         self.stack_changes.deinit(allocator);
@@ -176,11 +176,11 @@ pub const StorageChange = struct {
     value: u256,
     /// Original value before this transaction
     original_value: u256,
-    
+
     pub fn isWrite(self: *const StorageChange) bool {
         return self.original_value != self.value;
     }
-    
+
     pub fn isClear(self: *const StorageChange) bool {
         return self.value == 0;
     }
@@ -196,24 +196,24 @@ pub const LogEntry = struct {
     data: []const u8,
     /// True if original data was larger than captured
     data_truncated: bool,
-    
+
     pub fn deinit(self: *const LogEntry, allocator: std.mem.Allocator) void {
         allocator.free(self.topics);
         allocator.free(self.data);
     }
-    
+
     pub fn getTopicCount(self: *const LogEntry) usize {
         return self.topics.len;
     }
-    
+
     pub fn getDataSize(self: *const LogEntry) usize {
         return self.data.len;
     }
-    
+
     pub fn hasTopics(self: *const LogEntry) bool {
         return self.topics.len > 0;
     }
-    
+
     pub fn hasData(self: *const LogEntry) bool {
         return self.data.len > 0;
     }
@@ -245,12 +245,17 @@ pub const StructLog = struct {
     stack: ?[]const u256,
     /// Memory snapshot (null if bounded out)
     memory: ?[]const u8,
-    /// Storage changes during this step
-    storage: []const StorageChange,
-    /// Logs emitted during this step
-    logs: []const LogEntry,
     /// Error information if step failed
     error_info: ?ExecutionErrorInfo,
+
+    /// Actual stack changes (items pushed/popped) during this step
+    stack_changes: ?*const StackChanges,
+    /// Actual memory changes (regions modified) during this step
+    memory_changes: ?*const MemoryChanges,
+    /// Storage changes during this step
+    storage_changes: []const StorageChange,
+    /// Log entries emitted during this step
+    logs_emitted: []const LogEntry,
 };
 
 /// Complete execution trace with all captured steps
@@ -263,7 +268,7 @@ pub const ExecutionTrace = struct {
     return_value: []const u8,
     /// Array of all captured execution steps
     struct_logs: []const StructLog,
-    
+
     /// Clean up all allocations in the trace
     /// Must be called by the owner when done with the trace
     pub fn deinit(self: *ExecutionTrace, allocator: std.mem.Allocator) void {
@@ -273,26 +278,37 @@ pub const ExecutionTrace = struct {
             if (log.stack) |stack| {
                 allocator.free(stack);
             }
-            
-            // Free memory snapshot  
+
+            // Free memory snapshot
             if (log.memory) |memory| {
                 allocator.free(memory);
             }
-            
+
             // Free storage changes
-            for (log.storage) |*change| {
+            for (log.storage_changes) |*change| {
                 _ = change; // Storage changes are simple values, no nested allocs
             }
-            allocator.free(log.storage);
-            
+            allocator.free(log.storage_changes);
+
             // Free log entries and their nested data
-            for (log.logs) |*log_entry| {
+            for (log.logs_emitted) |*log_entry| {
                 allocator.free(log_entry.topics);
                 allocator.free(log_entry.data);
             }
-            allocator.free(log.logs);
+            allocator.free(log.logs_emitted);
+
+            // Free new state change tracking fields
+            if (log.stack_changes) |changes_ptr| {
+                changes_ptr.deinit(allocator);
+                allocator.destroy(changes_ptr);
+            }
+
+            if (log.memory_changes) |changes_ptr| {
+                changes_ptr.deinit(allocator);
+                allocator.destroy(changes_ptr);
+            }
         }
-        
+
         // Free top-level arrays
         allocator.free(self.struct_logs);
         allocator.free(self.return_value);
@@ -309,12 +325,12 @@ pub const FinalResult = struct {
     return_value: []const u8,
     /// Final execution status
     status: ExecutionStatus,
-    
+
     /// Check if execution was successful
     pub fn isSuccess(self: *const FinalResult) bool {
         return !self.failed and self.status == .Success;
     }
-    
+
     /// Check if execution was reverted
     pub fn isRevert(self: *const FinalResult) bool {
         return self.failed and self.status == .Revert;
@@ -330,12 +346,12 @@ pub const ExecutionStatus = enum {
     StackUnderflow,
     StackOverflow,
     InvalidJump,
-    
+
     /// Convert status to string for debugging
     pub fn toString(self: ExecutionStatus) []const u8 {
         return switch (self) {
             .Success => "Success",
-            .Revert => "Revert", 
+            .Revert => "Revert",
             .OutOfGas => "OutOfGas",
             .InvalidOpcode => "InvalidOpcode",
             .StackUnderflow => "StackUnderflow",
@@ -355,7 +371,7 @@ pub const ExecutionErrorEnhanced = struct {
     pc: u64,
     /// Gas remaining when error occurred
     gas_remaining: u64,
-    
+
     pub const ErrorType = enum {
         OutOfGas,
         InvalidOpcode,
@@ -365,7 +381,7 @@ pub const ExecutionErrorEnhanced = struct {
         InvalidMemoryAccess,
         InvalidStorageAccess,
         RevertExecution,
-        
+
         /// Convert error type to string
         pub fn toString(self: ErrorType) []const u8 {
             return switch (self) {
@@ -380,12 +396,12 @@ pub const ExecutionErrorEnhanced = struct {
             };
         }
     };
-    
+
     /// Check if error is recoverable
     pub fn isRecoverable(self: *const ExecutionErrorEnhanced) bool {
         return self.error_type == .RevertExecution;
     }
-    
+
     /// Check if error is fatal
     pub fn isFatal(self: *const ExecutionErrorEnhanced) bool {
         return !self.isRecoverable();
@@ -396,7 +412,7 @@ pub const ExecutionErrorEnhanced = struct {
 pub const TracerVTable = struct {
     /// Called before each opcode execution
     step_before: *const fn (ptr: *anyopaque, step_info: StepInfo) void,
-    /// Called after each opcode execution  
+    /// Called after each opcode execution
     step_after: *const fn (ptr: *anyopaque, step_result: StepResult) void,
     /// Called when execution completes
     finalize: *const fn (ptr: *anyopaque, final_result: FinalResult) void,
@@ -410,36 +426,36 @@ pub const TracerVTable = struct {
 pub const TracerHandle = struct {
     ptr: *anyopaque,
     vtable: *const TracerVTable,
-    
+
     pub fn stepBefore(self: TracerHandle, step_info: StepInfo) void {
         self.vtable.step_before(self.ptr, step_info);
     }
-    
+
     pub fn stepAfter(self: TracerHandle, step_result: StepResult) void {
         self.vtable.step_after(self.ptr, step_result);
     }
-    
+
     pub fn finalize(self: TracerHandle, final_result: FinalResult) void {
         self.vtable.finalize(self.ptr, final_result);
     }
-    
+
     pub fn getTrace(self: TracerHandle, allocator: std.mem.Allocator) !ExecutionTrace {
         return self.vtable.get_trace(self.ptr, allocator);
     }
-    
+
     pub fn deinit(self: TracerHandle, allocator: std.mem.Allocator) void {
         self.vtable.deinit(self.ptr, allocator);
     }
-    
+
     // Backward compatibility methods
     pub fn on_pre_step(self: TracerHandle, step_info: StepInfo) void {
         self.stepBefore(step_info);
     }
-    
+
     pub fn on_post_step(self: TracerHandle, step_result: StepResult) void {
         self.stepAfter(step_result);
     }
-    
+
     pub fn on_finish(self: TracerHandle, return_value: []const u8, success: bool) void {
         const final_result = FinalResult{
             .gas_used = 0,
@@ -457,7 +473,7 @@ pub const TracerHandle = struct {
 pub fn createEmptyStackChanges(allocator: std.mem.Allocator) !StackChanges {
     return StackChanges{
         .items_pushed = try allocator.alloc(u256, 0),
-        .items_popped = try allocator.alloc(u256, 0), 
+        .items_popped = try allocator.alloc(u256, 0),
         .current_stack = try allocator.alloc(u256, 0),
     };
 }

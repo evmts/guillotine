@@ -13,6 +13,24 @@ const UnreachableHandler = @import("../analysis.zig").UnreachableHandler;
 const Instruction = @import("../instruction.zig").Instruction;
 const Tag = @import("../instruction.zig").Tag;
 
+/// Tracks state before instruction execution for comparison (only when tracing enabled)
+const PreStepState = if (build_options.enable_tracing) struct {
+    stack_snapshot: ?[]const u256 = null,
+    memory_snapshot: ?[]u8 = null,
+    journal_size_before: usize = 0,
+    log_count_before: usize = 0,
+    memory_access_region: ?struct { start: usize, len: usize } = null,
+
+    pub fn deinit(self: *PreStepState, allocator: std.mem.Allocator) void {
+        if (self.stack_snapshot) |snapshot| {
+            allocator.free(snapshot);
+        }
+        if (self.memory_snapshot) |snapshot| {
+            allocator.free(snapshot);
+        }
+    }
+} else struct {};
+
 // Hoist U256 type alias used by fused arithmetic ops
 const U256 = @import("primitives").Uint(256, 4);
 
@@ -36,76 +54,94 @@ inline fn bytesToU256(bytes: []const u8) u256 {
     return std.mem.readInt(u256, &padded, .big);
 }
 
-inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_iterations: *usize) void {
+/// Check for infinite loops in debug/safe builds
+inline fn check_loop_iterations(loop_iterations: *usize) void {
     if (comptime SAFE) {
         loop_iterations.* += 1;
         if (loop_iterations.* > MAX_ITERATIONS) {
             unreachable;
         }
     }
+}
 
-    if (comptime build_options.enable_tracing) {
-        const analysis = frame.analysis;
-        const instructions = analysis.instructions;
-        if (self.tracer) |writer| {
+/// Pre-step tracing (only compiled when tracing is enabled)
+inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, pre_state: *PreStepState) void {
+    if (comptime !build_options.enable_tracing) return;
+    const analysis = frame.analysis;
+    if (self.tracer) |writer| {
+        if (frame.depth > 0) {
+            Log.debug("pre_step: HAS TRACER at depth={}, self_ptr=0x{x}", .{ frame.depth, @intFromPtr(self) });
+        }
+        // Derive index of current instruction for tracing
+        const base: [*]const @TypeOf(inst.*) = analysis.instructions.ptr;
+        const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+        const pc_u16 = analysis.inst_to_pc[idx];
+        if (pc_u16 != std.math.maxInt(u16)) {
+            const pc: usize = pc_u16;
+            const opcode: u8 = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
+            const stack_len: usize = frame.stack.size();
+            const stack_view: []const u256 = frame.stack.data[0..stack_len];
+            const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
+            const mem_size: usize = frame.memory.size();
+            var tr = JSONTracer.init(writer);
+            _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
             if (frame.depth > 0) {
-                Log.debug("pre_step: HAS TRACER at depth={}, self_ptr=0x{x}", .{ frame.depth, @intFromPtr(self) });
+                Log.debug("Tracing nested call: pc={}, depth={}, opcode=0x{x}, code_len={}", .{ pc, frame.depth, opcode, analysis.code_len });
             }
-            // Derive index of current instruction for tracing
-            const base: [*]const @TypeOf(inst.*) = instructions.ptr;
-            const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
-            const pc_u16 = analysis.inst_to_pc[idx];
+        }
+    } else if (frame.depth > 0) {
+        Log.debug("No tracer available for nested call at depth={}, self_ptr=0x{x}", .{ frame.depth, @intFromPtr(self) });
+    }
+
+    // Handle structured tracer
+    if (self.inproc_tracer) |tracer_handle| {
+        const struct_analysis = frame.analysis;
+        // Derive index of current instruction for tracing
+        const base: [*]const @TypeOf(inst.*) = struct_analysis.instructions.ptr;
+        const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+
+        if (idx < struct_analysis.inst_to_pc.len) {
+            const pc_u16 = struct_analysis.inst_to_pc[idx];
             if (pc_u16 != std.math.maxInt(u16)) {
                 const pc: usize = pc_u16;
-                const opcode: u8 = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
-                const stack_len: usize = frame.stack.size();
-                const stack_view: []const u256 = frame.stack.data[0..stack_len];
-                const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
-                const mem_size: usize = frame.memory.size();
-                var tr = JSONTracer.init(writer);
-                _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
-                if (frame.depth > 0) {
-                    Log.debug("Tracing nested call: pc={}, depth={}, opcode=0x{x}, code_len={}", .{ pc, frame.depth, opcode, analysis.code_len });
+                const opcode: u8 = if (pc < struct_analysis.code_len) frame.analysis.code[pc] else 0x00;
+
+                // Get opcode name
+                const op_enum = std.meta.intToEnum(opcodes.Enum, opcode) catch opcodes.Enum.INVALID;
+                const op_name = opcodes.get_name(op_enum);
+
+                // Build StepInfo for structured tracer
+                const step_info = tracer.StepInfo{
+                    .pc = pc,
+                    .opcode = opcode,
+                    .op_name = op_name,
+                    .gas_before = frame.gas_remaining,
+                    .depth = frame.depth,
+                    .address = frame.contract_address,
+                    .caller = frame.caller,
+                    .is_static = frame.is_static,
+                    .stack_size = frame.stack.size(),
+                    .memory_size = frame.memory.context_size(),
+                };
+
+                tracer_handle.stepBefore(step_info);
+
+                // Capture pre-execution state for comparison
+                // Stack state - copy current stack data
+                const stack_len = frame.stack.size();
+                if (stack_len > 0) {
+                    const stack_data = frame.stack.data[0..stack_len];
+                    pre_state.stack_snapshot = self.allocator.dupe(u256, stack_data) catch null;
                 }
-            }
-        } else if (frame.depth > 0) {
-            Log.debug("No tracer available for nested call at depth={}, self_ptr=0x{x}", .{ frame.depth, @intFromPtr(self) });
-        }
 
-        // Handle structured tracer
-        if (comptime build_options.enable_tracing and self.inproc_tracer != null) {
-            const tracer_handle = self.inproc_tracer.?;
-            const struct_analysis = frame.analysis;
-            // Derive index of current instruction for tracing
-            const base: [*]const @TypeOf(inst.*) = struct_analysis.instructions.ptr;
-            const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+                // Memory state - capture current memory
+                pre_state.memory_snapshot = capture_utils.snapshot_memory_state(self.allocator, &frame.memory) catch null;
 
-            if (idx < struct_analysis.inst_to_pc.len) {
-                const pc_u16 = struct_analysis.inst_to_pc[idx];
-                if (pc_u16 != std.math.maxInt(u16)) {
-                    const pc: usize = pc_u16;
-                    const opcode: u8 = if (pc < struct_analysis.code_len) frame.analysis.code[pc] else 0x00;
+                // Journal size for tracking storage changes
+                pre_state.journal_size_before = self.journal.entries.items.len;
 
-                    // Get opcode name
-                    const op_enum = std.meta.intToEnum(opcodes.Enum, opcode) catch opcodes.Enum.INVALID;
-                    const op_name = opcodes.get_name(op_enum);
-
-                    // Build StepInfo for structured tracer
-                    const step_info = tracer.StepInfo{
-                        .pc = pc,
-                        .opcode = opcode,
-                        .op_name = op_name,
-                        .gas_before = frame.gas_remaining,
-                        .depth = frame.depth,
-                        .address = frame.contract_address,
-                        .caller = frame.caller,
-                        .is_static = frame.is_static,
-                        .stack_size = frame.stack.size(),
-                        .memory_size = frame.memory.context_size(),
-                    };
-
-                    tracer_handle.stepBefore(step_info);
-                }
+                // Log count for tracking log emissions
+                pre_state.log_count_before = self.state.logs.items.len;
             }
         }
     }
@@ -113,15 +149,10 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
 
 /// Post-step tracing helper for structured tracers
 /// Captures execution results and calls tracer post-step hook
-inline fn post_step(self: *Evm, frame: *Frame, gas_before: u64, _journal_size_before: usize, _log_count_before: usize) void {
+inline fn post_step(self: *Evm, frame: *Frame, gas_before: u64, pre_state: *const PreStepState) void {
     if (comptime !build_options.enable_tracing) return;
 
-    // Suppress unused parameter warnings
-    _ = _journal_size_before;
-    _ = _log_count_before;
-
-    if (comptime build_options.enable_tracing and self.inproc_tracer != null) {
-        const tracer_handle = self.inproc_tracer.?;
+    if (self.inproc_tracer) |tracer_handle| {
         // Get the last step info to extract opcode for gas cost lookup
         // For now, calculate gas cost based on actual consumption
         const gas_after = frame.gas_remaining;
@@ -138,19 +169,41 @@ inline fn post_step(self: *Evm, frame: *Frame, gas_before: u64, _journal_size_be
         // Memory snapshot (no specific accessed region info available here)
         const memory_snapshot = capture_utils.copy_memory_bounded(allocator, &frame.memory, 1024, null) catch null;
 
-        // Storage changes (would need access to journal - simplified for now)
-        const storage_changes = capture_utils.create_empty_storage_changes(allocator) catch @constCast(&[_]tracer.StorageChange{});
+        // Storage changes from journal
+        const storage_changes = capture_utils.collect_storage_changes_since(allocator, &self.journal, pre_state.journal_size_before, &self.state) catch capture_utils.create_empty_storage_changes(allocator) catch @constCast(&[_]tracer.StorageChange{});
 
-        // Log entries (would need access to evm state logs - simplified for now)
-        const logs_emitted = capture_utils.create_empty_log_entries(allocator) catch @constCast(&[_]tracer.LogEntry{});
+        // Log entries from EVM state
+        const logs_emitted = capture_utils.copy_logs_bounded(allocator, self.state.logs.items, pre_state.log_count_before, 1024 // max bytes per log data
+        ) catch capture_utils.create_empty_log_entries(allocator) catch @constCast(&[_]tracer.LogEntry{});
 
-        // Create empty stack and memory changes (simplified for now)
-        const stack_changes = tracer.createEmptyStackChanges(allocator) catch tracer.StackChanges{
+        // Capture real stack changes
+        const stack_len_after = frame.stack.size();
+        const stack_after: []const u256 = if (stack_len_after > 0) frame.stack.data[0..stack_len_after] else &.{};
+        const stack_before = pre_state.stack_snapshot orelse &.{};
+
+        const stack_changes = capture_utils.capture_stack_changes(allocator, stack_before, stack_after, 32 // max items to capture
+        ) catch tracer.StackChanges{
             .items_pushed = @constCast(&[_]u256{}),
             .items_popped = @constCast(&[_]u256{}),
             .current_stack = @constCast(&[_]u256{}),
         };
-        const memory_changes = tracer.createEmptyMemoryChanges(allocator) catch tracer.MemoryChanges{
+
+        // Capture real memory changes
+        const memory_changes = if (pre_state.memory_snapshot) |before_snapshot| blk: {
+            const after_snapshot = capture_utils.snapshot_memory_state(allocator, &frame.memory) catch break :blk tracer.MemoryChanges{
+                .offset = 0,
+                .data = @constCast(&[_]u8{}),
+                .current_memory = @constCast(&[_]u8{}),
+            };
+            defer allocator.free(after_snapshot);
+
+            break :blk capture_utils.capture_memory_changes(allocator, before_snapshot, after_snapshot, 1024 // max bytes to capture
+            ) catch tracer.MemoryChanges{
+                .offset = 0,
+                .data = @constCast(&[_]u8{}),
+                .current_memory = @constCast(&[_]u8{}),
+            };
+        } else tracer.MemoryChanges{
             .offset = 0,
             .data = @constCast(&[_]u8{}),
             .current_memory = @constCast(&[_]u8{}),
@@ -206,7 +259,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         .block_info => {
             @branchHint(.likely);
             Log.debug("[BLOCK_INFO] Processing block at instruction.id={}", .{instruction.id});
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
 
             const params = analysis.getInstructionParams(.block_info, instruction.id);
 
@@ -239,10 +292,17 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         .exec => {
             @branchHint(.likely);
 
-            // Store gas before execution for post-step tracing
-            const gas_before = frame.gas_remaining;
+            check_loop_iterations(&loop_iterations);
 
-            pre_step(self, frame, instruction, &loop_iterations);
+            // Pre-step tracing state (only when tracing enabled)
+            var pre_state: if (build_options.enable_tracing) PreStepState else void = if (comptime build_options.enable_tracing) PreStepState{} else {};
+            defer if (comptime build_options.enable_tracing) pre_state.deinit(self.allocator);
+
+            const gas_before = if (comptime build_options.enable_tracing) frame.gas_remaining else 0;
+
+            if (comptime build_options.enable_tracing) {
+                pre_step(self, frame, instruction, &pre_state);
+            }
 
             const params = analysis.getInstructionParams(.exec, instruction.id);
 
@@ -254,7 +314,9 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             try params.exec_fn(frame);
 
             // Post-step tracing for structured tracers
-            post_step(self, frame, gas_before, 0, 0); // TODO: Pass actual journal and log counts
+            if (comptime build_options.enable_tracing) {
+                post_step(self, frame, gas_before, &pre_state);
+            }
 
             continue :dispatch next_instruction.tag;
         },
@@ -262,10 +324,17 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         .dynamic_gas => {
             @branchHint(.likely);
 
-            // Store gas before execution for post-step tracing
-            const gas_before = frame.gas_remaining;
+            check_loop_iterations(&loop_iterations);
 
-            pre_step(self, frame, instruction, &loop_iterations);
+            // Pre-step tracing state (only when tracing enabled)
+            var pre_state: if (build_options.enable_tracing) PreStepState else void = if (comptime build_options.enable_tracing) PreStepState{} else {};
+            defer if (comptime build_options.enable_tracing) pre_state.deinit(self.allocator);
+
+            const gas_before = if (comptime build_options.enable_tracing) frame.gas_remaining else 0;
+
+            if (comptime build_options.enable_tracing) {
+                pre_step(self, frame, instruction, &pre_state);
+            }
 
             const params = analysis.getInstructionParams(.dynamic_gas, instruction.id);
 
@@ -291,14 +360,16 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             try params.exec_fn(frame);
 
             // Post-step tracing for structured tracers
-            post_step(self, frame, gas_before, 0, 0); // TODO: Pass actual journal and log counts
+            if (comptime build_options.enable_tracing) {
+                post_step(self, frame, gas_before, &pre_state);
+            }
 
             continue :dispatch next_instruction.tag;
         },
         // .noop does nothing but go to next instruction
         // In future this will get optimized away to not needing to exist
         .noop => {
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
 
             i += 1;
             const next_instruction = &instructions[i];
@@ -307,7 +378,13 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             continue :dispatch next_instruction.tag;
         },
         .conditional_jump_invalid => {
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
+
+            if (comptime build_options.enable_tracing) {
+                var pre_state = PreStepState{};
+                defer pre_state.deinit(self.allocator);
+                pre_step(self, frame, instruction, &pre_state);
+            }
 
             i += 1;
             const next_instruction = &instructions[i];
@@ -325,7 +402,13 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             return ExecutionError.Error.InvalidJump;
         },
         .conditional_jump_pc => {
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
+
+            if (comptime build_options.enable_tracing) {
+                var pre_state = PreStepState{};
+                defer pre_state.deinit(self.allocator);
+                pre_step(self, frame, instruction, &pre_state);
+            }
 
             const params = analysis.getInstructionParams(.conditional_jump_pc, instruction.id);
 
@@ -340,7 +423,14 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         },
         // Many jumps have a known jump destination and we handle that here.
         .jump_pc => {
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
+
+            if (comptime build_options.enable_tracing) {
+                var pre_state = PreStepState{};
+                defer pre_state.deinit(self.allocator);
+                pre_step(self, frame, instruction, &pre_state);
+            }
+
             const params = analysis.getInstructionParams(.jump_pc, instruction.id);
             i = params.jump_idx;
             const next_instruction = &instructions[params.jump_idx];
@@ -351,7 +441,15 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         // it is pushed to stack dynamically
         .jump_unresolved => {
             @branchHint(.unlikely);
-            pre_step(self, frame, instruction, &loop_iterations);
+
+            check_loop_iterations(&loop_iterations);
+
+            if (comptime build_options.enable_tracing) {
+                var pre_state = PreStepState{};
+                defer pre_state.deinit(self.allocator);
+                pre_step(self, frame, instruction, &pre_state);
+            }
+
             if (frame.stack.size() < 1) {
                 @branchHint(.cold);
                 return ExecutionError.Error.StackUnderflow;
@@ -375,7 +473,14 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         },
         // Some conditional jumps are not known until runtime because the value is a dynamic value
         .conditional_jump_unresolved => {
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
+
+            if (comptime build_options.enable_tracing) {
+                var pre_state = PreStepState{};
+                defer pre_state.deinit(self.allocator);
+                pre_step(self, frame, instruction, &pre_state);
+            }
+
             if (frame.stack.size() < 2) {
                 @branchHint(.cold);
                 return ExecutionError.Error.StackUnderflow;
@@ -405,7 +510,17 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         // This allows us to keep our instruction bytecode compact without needing to include u256
         .word => {
             @branchHint(.likely);
-            pre_step(self, frame, instruction, &loop_iterations);
+            check_loop_iterations(&loop_iterations);
+
+            // Pre-step tracing state (only when tracing enabled)
+            var pre_state: if (build_options.enable_tracing) PreStepState else void = if (comptime build_options.enable_tracing) PreStepState{} else {};
+            defer if (comptime build_options.enable_tracing) pre_state.deinit(self.allocator);
+
+            const gas_before = if (comptime build_options.enable_tracing) frame.gas_remaining else 0;
+
+            if (comptime build_options.enable_tracing) {
+                pre_step(self, frame, instruction, &pre_state);
+            }
 
             const params = analysis.getInstructionParams(.word, instruction.id);
             const word_bytes = params.word_bytes;
@@ -416,13 +531,29 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             frame.stack.append_unsafe(bytesToU256(word_bytes));
 
+            // Post-step tracing for PUSH operations
+            if (comptime build_options.enable_tracing) {
+                post_step(self, frame, gas_before, &pre_state);
+            }
+
             continue :dispatch next_instruction.tag;
         },
         // .pc handles the PC opcode. Since Frame doesn't include pc this is treated as a oen of atm
         // TODO: In future we want to remove this. This can be a .exec instead
         .pc => {
             @branchHint(.unlikely);
-            pre_step(self, frame, instruction, &loop_iterations);
+
+            check_loop_iterations(&loop_iterations);
+
+            // Pre-step tracing state (only when tracing enabled)
+            var pre_state: if (build_options.enable_tracing) PreStepState else void = if (comptime build_options.enable_tracing) PreStepState{} else {};
+            defer if (comptime build_options.enable_tracing) pre_state.deinit(self.allocator);
+
+            const gas_before = if (comptime build_options.enable_tracing) frame.gas_remaining else 0;
+
+            if (comptime build_options.enable_tracing) {
+                pre_step(self, frame, instruction, &pre_state);
+            }
 
             const params = analysis.getInstructionParams(.pc, instruction.id);
 
@@ -431,6 +562,11 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             instruction = next_instruction;
 
             frame.stack.append_unsafe(@as(u256, params.pc_value));
+
+            // Post-step tracing for PC opcode
+            if (comptime build_options.enable_tracing) {
+                post_step(self, frame, gas_before, &pre_state);
+            }
 
             continue :dispatch next_instruction.tag;
         },
