@@ -58,7 +58,7 @@ pub fn is_empty(self: *const Stack) bool {
 
 pub fn is_full(self: *const Stack) bool {
     self.debug_is_in_bounds();
-    return self.current >= self.limit;
+    return @intFromPtr(self.current) >= @intFromPtr(self.limit);
 }
 
 pub fn debug_is_in_bounds(self: *const Stack) void {
@@ -236,7 +236,7 @@ pub fn peek_unsafe(self: *const Stack) Error!u256 {
 
 pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const FuzzOperation) !void {
     var stack = try Stack.init(allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
     const testing = std.testing;
 
     for (operations) |op| {
@@ -343,7 +343,7 @@ test "fuzz_stack_underflow_boundary" {
 
 test "pointer_arithmetic_correctness" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Test initial state
     try std.testing.expectEqual(@as(usize, 0), stack.size());
@@ -354,24 +354,24 @@ test "pointer_arithmetic_correctness" {
     stack.append_unsafe(42);
     try std.testing.expectEqual(@as(usize, 1), stack.size());
     try std.testing.expect(!stack.is_empty());
-    try std.testing.expectEqual(@as(u256, 42), stack.peek_unsafe().*);
+    try std.testing.expectEqual(@as(u256, 42), stack.peek_unsafe());
 
     // Test multiple pushes
     stack.append_unsafe(100);
     stack.append_unsafe(200);
     try std.testing.expectEqual(@as(usize, 3), stack.size());
-    try std.testing.expectEqual(@as(u256, 200), stack.peek_unsafe().*);
+    try std.testing.expectEqual(@as(u256, 200), stack.peek_unsafe());
 
     // Test pop
     const popped = stack.pop_unsafe();
     try std.testing.expectEqual(@as(u256, 200), popped);
     try std.testing.expectEqual(@as(usize, 2), stack.size());
-    try std.testing.expectEqual(@as(u256, 100), stack.peek_unsafe().*);
+    try std.testing.expectEqual(@as(u256, 100), stack.peek_unsafe());
 }
 
 test "stack_dup_operations" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -379,16 +379,16 @@ test "stack_dup_operations" {
 
     stack.dup_unsafe(1);
     try std.testing.expectEqual(@as(usize, 4), stack.size());
-    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
+    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe());
 
     stack.dup_unsafe(2);
     try std.testing.expectEqual(@as(usize, 5), stack.size());
-    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe().*);
+    try std.testing.expectEqual(@as(u256, 300), stack.peek_unsafe());
 }
 
 test "stack_swap_operations" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -405,7 +405,7 @@ test "stack_swap_operations" {
 
 test "stack_multi_pop_operations" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     stack.append_unsafe(100);
     stack.append_unsafe(200);
@@ -427,7 +427,7 @@ test "stack_multi_pop_operations" {
 
 test "performance_comparison_pointer_vs_indexing" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Fill stack for testing
     var i: usize = 0;
@@ -458,7 +458,7 @@ test "performance_comparison_pointer_vs_indexing" {
 
 test "memory_layout_verification" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Verify pointer setup
     try std.testing.expectEqual(@intFromPtr(stack.base), @intFromPtr(&stack.data[0]));
@@ -481,7 +481,7 @@ test "memory_layout_verification" {
 
 test "stack_boundary_empty" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Test empty stack state
     try std.testing.expectEqual(@as(usize, 0), stack.size());
@@ -500,7 +500,7 @@ test "stack_boundary_empty" {
 
 test "stack_boundary_single_element" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Push single element
     try stack.append(42);
@@ -521,7 +521,7 @@ test "stack_boundary_single_element" {
 
 test "stack_boundary_near_capacity" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Fill stack to capacity - 1 (1023 elements)
     var i: usize = 0;
@@ -546,7 +546,7 @@ test "stack_boundary_near_capacity" {
 
 test "stack_boundary_at_capacity" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Fill stack to exact capacity
     var i: usize = 0;
@@ -574,7 +574,7 @@ test "stack_boundary_at_capacity" {
 
 test "stack_error_conditions_comprehensive" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Underflow on empty stack
     try std.testing.expectError(Error.StackUnderflow, stack.pop());
@@ -603,7 +603,7 @@ test "stack_error_conditions_comprehensive" {
 
 test "stack_dup_comprehensive_DUP1_to_DUP16" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Setup stack with values 1-16 (bottom to top)
     var i: usize = 1;
@@ -633,7 +633,7 @@ test "stack_dup_comprehensive_DUP1_to_DUP16" {
 
 test "stack_dup_edge_cases" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // DUP with minimal stack
     stack.append_unsafe(42);
@@ -655,7 +655,7 @@ test "stack_dup_edge_cases" {
 
 test "stack_swap_comprehensive_SWAP1_to_SWAP16" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Setup stack with values 1-17
     var i: usize = 1;
@@ -687,7 +687,7 @@ test "stack_swap_comprehensive_SWAP1_to_SWAP16" {
 
 test "stack_swap_edge_cases" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // SWAP1 with exactly 2 elements
     stack.append_unsafe(100);
@@ -706,7 +706,7 @@ test "stack_swap_edge_cases" {
 
 test "stack_pop2_unsafe_edge_cases" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Test with exactly 2 elements
     stack.append_unsafe(100);
@@ -733,7 +733,7 @@ test "stack_pop2_unsafe_edge_cases" {
 
 test "stack_pop3_unsafe_edge_cases" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Test with exactly 3 elements
     stack.append_unsafe(100);
@@ -764,7 +764,7 @@ test "stack_pop3_unsafe_edge_cases" {
 
 test "stack_set_top_unsafe" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Test with single element
     stack.append_unsafe(100);
@@ -783,7 +783,7 @@ test "stack_set_top_unsafe" {
 
 test "stack_peek_n_comprehensive" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Setup stack with values 0-9
     var i: usize = 0;
@@ -807,7 +807,7 @@ test "stack_peek_n_comprehensive" {
 
 test "stack_clear_behavior" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Fill with data
     var i: usize = 0;
@@ -839,7 +839,7 @@ test "stack_memory_cleanup_verification" {
     }
 
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Push sensitive value
     const sensitive_value: u256 = 0xDEADBEEFCAFEBABE;
@@ -871,7 +871,7 @@ test "stack_memory_cleanup_verification" {
 
 test "stack_set_size_unsafe" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Test setting various sizes
     stack.set_size_unsafe(0);
@@ -890,7 +890,7 @@ test "stack_set_size_unsafe" {
 
 test "stack_alternating_operations_stress" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Stress test with alternating operations
     var i: usize = 0;
@@ -924,7 +924,7 @@ test "stack_alternating_operations_stress" {
 
 test "stack_unsafe_operations_preconditions" {
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Setup for unsafe operations
     var i: usize = 0;
@@ -933,11 +933,11 @@ test "stack_unsafe_operations_preconditions" {
     }
 
     // Test all unsafe operations work correctly with valid preconditions
-    const peek_val = stack.peek_unsafe().*;
+    const peek_val = try stack.peek_unsafe();
     try std.testing.expectEqual(@as(u256, 19), peek_val);
 
     stack.set_top_unsafe(999);
-    try std.testing.expectEqual(@as(u256, 999), stack.peek_unsafe().*);
+    try std.testing.expectEqual(@as(u256, 999), try stack.peek_unsafe());
 
     stack.dup_unsafe(10);
     try std.testing.expectEqual(@as(u256, 999), stack.pop_unsafe());
@@ -952,7 +952,7 @@ test "stack_concurrent_safety_simulation" {
     // This test simulates what would happen with concurrent access
     // Note: Stack is not thread-safe, this just tests state consistency
     var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit();
+    defer stack.deinit(std.testing.allocator);
 
     // Simulate interleaved operations
     const operations = [_]struct { op: enum { push, pop, dup, swap }, val: u256 }{

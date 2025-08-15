@@ -20,6 +20,7 @@ const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
 const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
 const CallJournal = @import("../call_frame_stack.zig").CallJournal;
+const Account = @import("../state/database_interface.zig").Account;
 
 // Threshold for stack vs heap allocation optimization
 const STACK_ALLOCATION_THRESHOLD = 12800; // bytes of bytecode
@@ -584,11 +585,11 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 pub const call_mini = @import("call_mini.zig").call_mini;
 test "nested call snapshot revert on input validation failure" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -600,7 +601,7 @@ test "nested call snapshot revert on input validation failure" {
     // Setup a contract with simple code
     const code = [_]u8{0x00}; // STOP
     const addr = primitives.Address.ZERO_ADDRESS;
-    try memory_db.set_code(addr, &code);
+    _ = try memory_db.set_code(&code);
 
     // Simulate being in a nested call
     evm.current_frame_depth = 1;
@@ -634,11 +635,11 @@ test "nested call snapshot revert on input validation failure" {
 
 test "nested call snapshot revert on code analysis failure" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -653,7 +654,12 @@ test "nested call snapshot revert on code analysis failure" {
     @memset(oversized_code, 0x00);
 
     const addr = primitives.Address.ZERO_ADDRESS;
-    try memory_db.set_code(addr, oversized_code);
+    const code_hash = try memory_db.set_code(oversized_code);
+    
+    // Create an account with this code hash
+    var account = Account.zero();
+    account.code_hash = code_hash;
+    try memory_db.set_account(addr, account);
 
     evm.current_frame_depth = 1; // Simulate being in a nested call
 
@@ -680,11 +686,11 @@ test "nested call snapshot revert on code analysis failure" {
 
 test "nested call snapshot revert on max depth exceeded" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -696,7 +702,7 @@ test "nested call snapshot revert on max depth exceeded" {
     // Setup a simple contract
     const code = [_]u8{0x00}; // STOP
     const addr = primitives.Address.ZERO_ADDRESS;
-    try memory_db.set_code(addr, &code);
+    _ = try memory_db.set_code(&code);
 
     // Set depth to just below max
     evm.current_frame_depth = MAX_CALL_DEPTH - 1;
@@ -728,11 +734,11 @@ test "nested call snapshot revert on max depth exceeded" {
 
 test "address prewarming for Berlin hardfork" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM with Berlin rules
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -745,7 +751,10 @@ test "address prewarming for Berlin hardfork" {
     const code = [_]u8{0x00}; // STOP
     const contract_addr = [_]u8{0x11} ** 20;
     const caller_addr = [_]u8{0x22} ** 20;
-    try memory_db.set_code(contract_addr, &code);
+    const code_hash_berlin = try memory_db.set_code(&code);
+    var account_berlin = Account.zero();
+    account_berlin.code_hash = code_hash_berlin;
+    try memory_db.set_account(contract_addr, account_berlin);
 
     // Clear access list to ensure clean state
     evm.access_list.clear();
@@ -768,11 +777,11 @@ test "address prewarming for Berlin hardfork" {
 
 test "no address prewarming for pre-Berlin hardfork" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM without Berlin rules
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -785,7 +794,10 @@ test "no address prewarming for pre-Berlin hardfork" {
     const code = [_]u8{0x00}; // STOP
     const contract_addr = [_]u8{0x11} ** 20;
     const caller_addr = [_]u8{0x22} ** 20;
-    try memory_db.set_code(contract_addr, &code);
+    const code_hash_non_berlin = try memory_db.set_code(&code);
+    var account_non_berlin = Account.zero();
+    account_non_berlin.code_hash = code_hash_non_berlin;
+    try memory_db.set_account(contract_addr, account_non_berlin);
 
     // Clear access list to ensure clean state
     evm.access_list.clear();
@@ -808,11 +820,11 @@ test "no address prewarming for pre-Berlin hardfork" {
 
 test "top-level call: minimal selector dispatcher returns 32-byte value" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -845,7 +857,10 @@ test "top-level call: minimal selector dispatcher returns 32-byte value" {
     };
 
     const addr = [_]u8{0xaa} ** 20;
-    try memory_db.set_code(addr, &runtime);
+    const runtime_hash_1 = try memory_db.set_code(&runtime);
+    var runtime_account_1 = Account.zero();
+    runtime_account_1.code_hash = runtime_hash_1;
+    try memory_db.set_account(addr, runtime_account_1);
 
     const caller = [_]u8{0xbb} ** 20;
     const input = [_]u8{ 0x11, 0x22, 0x33, 0x44 };
@@ -860,17 +875,17 @@ test "top-level call: minimal selector dispatcher returns 32-byte value" {
 
     const res = try evm.call(params);
     try std.testing.expect(res.success);
-    try std.testing.expectEqual(@as(usize, 32), res.output.len);
-    try std.testing.expectEqual(@as(u8, 1), res.output[31]);
+    try std.testing.expectEqual(@as(usize, 32), res.output.?.len);
+    try std.testing.expectEqual(@as(u8, 1), res.output.?[31]);
 }
 
 test "top-level call: AND-mask dispatcher with extra calldata returns 32-byte value" {
     const allocator = std.testing.allocator;
-    const MemoryDatabase = @import("../state/memory_database.zig");
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
     // Setup database and EVM
-    var memory_db = try MemoryDatabase.init(allocator);
+    var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
@@ -902,7 +917,10 @@ test "top-level call: AND-mask dispatcher with extra calldata returns 32-byte va
     };
 
     const addr = [_]u8{0xcc} ** 20;
-    try memory_db.set_code(addr, &runtime);
+    const runtime_hash_2 = try memory_db.set_code(&runtime);
+    var runtime_account_2 = Account.zero();
+    runtime_account_2.code_hash = runtime_hash_2;
+    try memory_db.set_account(addr, runtime_account_2);
 
     const caller = [_]u8{0xdd} ** 20;
 
@@ -925,6 +943,6 @@ test "top-level call: AND-mask dispatcher with extra calldata returns 32-byte va
 
     const res = try evm.call(params);
     try std.testing.expect(res.success);
-    try std.testing.expectEqual(@as(usize, 32), res.output.len);
-    try std.testing.expectEqual(@as(u8, 1), res.output[31]);
+    try std.testing.expectEqual(@as(usize, 32), res.output.?.len);
+    try std.testing.expectEqual(@as(u8, 1), res.output.?[31]);
 }

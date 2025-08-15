@@ -50,10 +50,10 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasQuickStep
 
             // Execute inline
-            if (pc + 1 >= frame.contract.code_size) {
+            if (pc + 1 >= frame.analysis.code.len) {
                 try frame.stack.append(0);
             } else {
-                const value = frame.contract.get_op(pc + 1);
+                const value = frame.analysis.code[pc + 1];
                 try frame.stack.append(value);
             }
 
@@ -192,16 +192,16 @@ pub inline fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasQuickStep
 
             // Execute inline
-            if (pc + 2 >= frame.contract.code_size) {
+            if (pc + 2 >= frame.analysis.code.len) {
                 // Partial push - pad with zeros
                 var value: u256 = 0;
-                if (pc + 1 < frame.contract.code_size) {
-                    value = @as(u256, frame.contract.get_op(pc + 1)) << 8;
+                if (pc + 1 < frame.analysis.code.len) {
+                    value = @as(u256, frame.analysis.code[pc + 1]) << 8;
                 }
                 try frame.stack.append(value);
             } else {
-                const value = (@as(u256, frame.contract.get_op(pc + 1)) << 8) |
-                    @as(u256, frame.contract.get_op(pc + 2));
+                const value = (@as(u256, frame.analysis.code[pc + 1]) << 8) |
+                    @as(u256, frame.analysis.code[pc + 2]);
                 try frame.stack.append(value);
             }
 
@@ -273,57 +273,80 @@ test "inline hot ops maintains correctness" {
     // Test that inlined operations produce same results as regular dispatch
     const testing = std.testing;
     const OpcodeMetadata = @import("opcode_metadata.zig");
-
+    const Frame = @import("../frame.zig").Frame;
+    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const MockHost = @import("../host.zig").MockHost;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
+    
     // Test PUSH1
     {
-        var stack = try Stack.init(testing.allocator);
-        defer stack.deinit(testing.allocator);
-        var mock_frame = struct {
-            stack: *Stack,
-            gas_remaining: u64,
-            contract: struct {
-                code_size: usize,
-                fn get_op(_: @This(), index: usize) u8 {
-                    const code = [_]u8{ 0x60, 0x42 }; // PUSH1 0x42
-                    return if (index < code.len) code[index] else 0;
-                }
-            },
-            fn consume_gas(self: *@This(), amount: u64) !void {
-                if (self.gas_remaining < amount) return ExecutionError.Error.OutOfGas;
-                self.gas_remaining -= amount;
-            }
-        }{
-            .stack = &stack,
-            .gas_remaining = 1000,
-            .contract = .{ .code_size = 2 },
-        };
+        const code = &[_]u8{ 0x60, 0x42 }; // PUSH1 0x42
+        const table = OpcodeMetadata.DEFAULT;
+        var analysis = try CodeAnalysis.from_code(testing.allocator, code, &table);
+        defer analysis.deinit();
+        
+        var memory_db = MemoryDatabase.init(testing.allocator);
+        defer memory_db.deinit();
+        
+        var mock_host = MockHost.init(testing.allocator);
+        defer mock_host.deinit();
+        const host = mock_host.to_host();
+        const db_interface = memory_db.to_database_interface();
+        
+        var frame = try Frame.init(
+            1000, // gas_remaining
+            false, // static_call
+            0, // call_depth
+            primitives.Address.ZERO_ADDRESS, // contract_address
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &analysis,
+            host,
+            db_interface,
+            testing.allocator,
+        );
+        defer frame.deinit(testing.allocator);
 
-        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &mock_frame, 0x60);
+        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &frame, 0x60);
         try testing.expectEqual(@as(usize, 2), result.bytes_consumed);
-        try testing.expectEqual(@as(u256, 0x42), try stack.pop());
+        try testing.expectEqual(@as(u256, 0x42), frame.stack.pop_unsafe());
     }
 
     // Test ADD
     {
-        var stack = try Stack.init(testing.allocator);
-        defer stack.deinit(testing.allocator);
-        try stack.append(10);
-        try stack.append(20);
+        const code = &[_]u8{ 0x01 }; // ADD
+        const table = OpcodeMetadata.DEFAULT;
+        var analysis = try CodeAnalysis.from_code(testing.allocator, code, &table);
+        defer analysis.deinit();
+        
+        var memory_db = MemoryDatabase.init(testing.allocator);
+        defer memory_db.deinit();
+        
+        var mock_host = MockHost.init(testing.allocator);
+        defer mock_host.deinit();
+        const host = mock_host.to_host();
+        const db_interface = memory_db.to_database_interface();
+        
+        var frame = try Frame.init(
+            1000, // gas_remaining
+            false, // static_call
+            0, // call_depth
+            primitives.Address.ZERO_ADDRESS, // contract_address
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &analysis,
+            host,
+            db_interface,
+            testing.allocator,
+        );
+        defer frame.deinit(testing.allocator);
+        
+        // Setup stack values for ADD
+        frame.stack.append_unsafe(10);
+        frame.stack.append_unsafe(20);
 
-        var mock_frame = struct {
-            stack: *Stack,
-            gas_remaining: u64,
-            fn consume_gas(self: *@This(), amount: u64) !void {
-                if (self.gas_remaining < amount) return ExecutionError.Error.OutOfGas;
-                self.gas_remaining -= amount;
-            }
-        }{
-            .stack = &stack,
-            .gas_remaining = 1000,
-        };
-
-        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &mock_frame, 0x01);
+        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &frame, 0x01);
         try testing.expectEqual(@as(usize, 1), result.bytes_consumed);
-        try testing.expectEqual(@as(u256, 30), try stack.pop());
+        try testing.expectEqual(@as(u256, 30), frame.stack.pop_unsafe());
     }
 }

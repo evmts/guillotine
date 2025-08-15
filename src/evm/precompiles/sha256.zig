@@ -189,7 +189,7 @@ test "SHA256 precompile with hardware acceleration" {
         defer std.testing.allocator.free(output);
         
         const result = execute(tv.input, output, 100000);
-        try std.testing.expect(result.is_ok);
+        try std.testing.expect(result == .success);
         try std.testing.expectEqualSlices(u8, &tv.expected, output);
     }
 }
@@ -226,7 +226,7 @@ test "SHA256 precompile consistency" {
     defer std.testing.allocator.free(output);
     
     const result = execute(test_data, output, 100000);
-    try std.testing.expect(result.is_ok);
+    try std.testing.expect(result == .success);
     
     // Compare with standard library
     var expected: [32]u8 = undefined;
@@ -240,19 +240,19 @@ test "SHA256 precompile edge cases" {
     
     // Test insufficient gas
     const result_low_gas = execute("test", output, 10);
-    try std.testing.expect(!result_low_gas.is_ok);
-    try std.testing.expectEqual(PrecompileError.OutOfGas, result_low_gas.error_value);
+    try std.testing.expect(result_low_gas == .failure);
+    try std.testing.expectEqual(PrecompileError.OutOfGas, result_low_gas.failure);
     
     // Test output buffer too small
     const small_output = try std.testing.allocator.alloc(u8, 10);
     defer std.testing.allocator.free(small_output);
     const result_small_buf = execute("test", small_output, 100000);
-    try std.testing.expect(!result_small_buf.is_ok);
-    try std.testing.expectEqual(PrecompileError.InvalidInput, result_small_buf.error_value);
+    try std.testing.expect(result_small_buf == .failure);
+    try std.testing.expectEqual(PrecompileError.InvalidInput, result_small_buf.failure);
     
     // Test exactly enough gas
     const gas_needed = calculate_gas(4); // "test" is 4 bytes
     const result_exact_gas = execute("test", output, gas_needed);
-    try std.testing.expect(result_exact_gas.is_ok);
-    try std.testing.expectEqual(gas_needed, result_exact_gas.gas_used);
+    try std.testing.expect(result_exact_gas == .success);
+    try std.testing.expectEqual(gas_needed, result_exact_gas.success.gas_used);
 }

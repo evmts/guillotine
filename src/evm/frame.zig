@@ -282,7 +282,7 @@ comptime {
 // Helper functions for tests
 const TestHelpers = struct {
     const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
-    const MemoryDatabase = @import("state/memory_database.zig");
+    const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
 
     fn createEmptyAnalysis(allocator: std.mem.Allocator) !CodeAnalysis {
         const code = &[_]u8{0x00}; // STOP

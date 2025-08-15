@@ -194,6 +194,7 @@ pub fn get_description(err: Error) []const u8 {
         Error.MAX_CONTRACT_SIZE => "Contract size exceeds maximum allowed",
         Error.STOP => "Normal STOP opcode execution",
         Error.REVERT => "REVERT opcode - state reverted",
+        Error.RETURN => "Normal RETURN opcode execution",
         Error.INVALID => "INVALID opcode or invalid operation",
         Error.OutOfGas => "Out of gas",
         Error.StackUnderflow => "Stack underflow",

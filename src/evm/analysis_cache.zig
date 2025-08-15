@@ -278,7 +278,7 @@ test "AnalysisCache - basic operations" {
     defer cache.deinit();
 
     // Create a mock jump table
-    var jump_table = OpcodeMetadata{};
+    var jump_table = OpcodeMetadata.init();
 
     // Test code samples
     const code1 = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }; // PUSH1 1, PUSH1 2, ADD
@@ -310,7 +310,7 @@ test "AnalysisCache - LRU eviction" {
     var cache = init(allocator, 2); // Very small cache
     defer cache.deinit();
 
-    var jump_table = OpcodeMetadata{};
+    var jump_table = OpcodeMetadata.init();
 
     const code1 = &[_]u8{ 0x60, 0x01 }; // PUSH1 1
     const code2 = &[_]u8{ 0x60, 0x02 }; // PUSH1 2
@@ -338,7 +338,7 @@ test "AnalysisCache - hit rate calculation" {
     var cache = init(allocator, 10);
     defer cache.deinit();
 
-    var jump_table = OpcodeMetadata{};
+    var jump_table = OpcodeMetadata.init();
     const code = &[_]u8{ 0x60, 0x01 };
 
     // First access is a miss
@@ -361,7 +361,7 @@ test "AnalysisCache - clear operation" {
     var cache = init(allocator, 5);
     defer cache.deinit();
 
-    var jump_table = OpcodeMetadata{};
+    var jump_table = OpcodeMetadata.init();
 
     // Add some entries
     const code1 = &[_]u8{ 0x60, 0x01 };

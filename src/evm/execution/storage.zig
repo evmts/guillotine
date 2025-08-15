@@ -145,7 +145,7 @@ pub fn fuzz_storage_operations_DISABLED(allocator: std.mem.Allocator, operations
 
 const FuzzStorageOperation = struct {
     op_type: StorageOpType,
-    contract_address: primitives.Address,
+    contract_address: primitives.Address.Address,
     slot: u256,
     value: u256,
     initial_storage_value: u256 = 0,

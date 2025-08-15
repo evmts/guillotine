@@ -537,7 +537,7 @@ test "jump_table_benchmarks" {
     var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var vm = try @import("../evm.zig").Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try @import("../evm.zig").init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
     const iterations = 100000;
@@ -676,7 +676,7 @@ test "jump_table_benchmarks" {
 
     // Branch prediction analysis
     if (avg_predictable_ns < avg_unpredictable_ns) {
-        std.log.debug("✓ Branch prediction benefit observed");
+        std.log.debug("✓ Branch prediction benefit observed", .{});
     }
 
     // Hardfork dispatch performance comparison
@@ -684,13 +684,13 @@ test "jump_table_benchmarks" {
     const shanghai_avg = shanghai_dispatch_ns / iterations;
     const berlin_avg = berlin_dispatch_ns / iterations;
 
-    std.log.debug("  Hardfork dispatch comparison:");
+    std.log.debug("  Hardfork dispatch comparison:", .{});
     std.log.debug("    Berlin avg: {} ns/op", .{berlin_avg});
     std.log.debug("    Shanghai avg: {} ns/op", .{shanghai_avg});
     std.log.debug("    Cancun avg: {} ns/op", .{cancun_avg});
 
     // Expect very fast dispatch (should be just array indexing)
     if (avg_dispatch_ns < 10) {
-        std.log.debug("✓ OpcodeMetadata showing expected O(1) performance");
+        std.log.debug("✓ OpcodeMetadata showing expected O(1) performance", .{});
     }
 }

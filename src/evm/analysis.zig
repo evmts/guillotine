@@ -78,7 +78,7 @@ test "analysis: minimal dispatcher (SHR) resolves conditional jump target" {
     const bb_idx = analysis.pc_to_block_start[0x16];
     try std.testing.expect(bb_idx != std.math.maxInt(u16));
     try std.testing.expect(bb_idx < analysis.instructions.len);
-    try std.testing.expect(@as(bool, analysis.instructions[bb_idx].arg == .block_info));
+    try std.testing.expect(@as(bool, analysis.instructions[bb_idx].tag == .block_info));
 }
 
 test "analysis: minimal dispatcher (AND-mask) resolves conditional jump target" {
@@ -123,7 +123,7 @@ test "analysis: minimal dispatcher (AND-mask) resolves conditional jump target" 
     const bb_idx = analysis.pc_to_block_start[0x16];
     try std.testing.expect(bb_idx != std.math.maxInt(u16));
     try std.testing.expect(bb_idx < analysis.instructions.len);
-    try std.testing.expect(@as(bool, analysis.instructions[bb_idx].arg == .block_info));
+    try std.testing.expect(@as(bool, analysis.instructions[bb_idx].tag == .block_info));
 }
 
 test "from_code basic functionality" {
@@ -1658,13 +1658,10 @@ test "size_buckets: getInstructionParams for 24-byte instructions" {
     const size24 = try allocator.alloc(Bucket24, 2);
     defer allocator.free(size24);
     
-    // Create a word instruction
+    // Create a word instruction with a test byte slice
+    const test_bytes = [_]u8{0xFF} ** 32;
     const word_params = @import("instruction.zig").WordInstruction{
-        .word_ref = @import("instruction.zig").WordRef{
-            .start_pc = 42,
-            .len = 32,
-            ._pad = 0,
-        },
+        .word_bytes = &test_bytes,
         .next_inst = @ptrFromInt(0x5678),
     };
     @memcpy(size24[0].bytes[0..@sizeOf(@TypeOf(word_params))], std.mem.asBytes(&word_params));
@@ -1673,8 +1670,8 @@ test "size_buckets: getInstructionParams for 24-byte instructions" {
     const retrieved = @import("size_buckets.zig").getInstructionParams(
         size8, size16, size24, .word, 0
     );
-    try std.testing.expectEqual(word_params.word_ref.start_pc, retrieved.word_ref.start_pc);
-    try std.testing.expectEqual(word_params.word_ref.len, retrieved.word_ref.len);
+    try std.testing.expectEqual(word_params.word_bytes.ptr, retrieved.word_bytes.ptr);
+    try std.testing.expectEqual(word_params.word_bytes.len, retrieved.word_bytes.len);
 }
 
 test "code_bitmap: marks PUSH data bytes correctly" {

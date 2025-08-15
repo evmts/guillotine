@@ -250,8 +250,6 @@ test "validate_stack_requirements" {
         .constant_gas = 3,
         .min_stack = 2,
         .max_stack = Stack.CAPACITY - 1,
-        .dynamic_gas = null,
-        .memory_size = null,
         .undefined = false,
     };
 
@@ -268,8 +266,6 @@ test "validate_stack_requirements" {
         .constant_gas = 3,
         .min_stack = 0,
         .max_stack = 10,
-        .dynamic_gas = null,
-        .memory_size = null,
         .undefined = false,
     };
 
@@ -387,5 +383,8 @@ test "validateStackRequirements comptime validation" {
         try stack.append(@intCast(k));
     }
     try validateStackRequirements(0, 1, stack.size()); // Should pass
-    try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 2, stack.size()));
+    // Add one more item to reach capacity
+    try stack.append(Stack.CAPACITY - 1);
+    // Now test overflow with a valid operation that increases stack by 1
+    try testing.expectError(ExecutionError.Error.StackOverflow, validateStackRequirements(0, 1, stack.size()));
 }

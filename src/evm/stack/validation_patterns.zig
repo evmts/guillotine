@@ -115,7 +115,7 @@ pub fn validate_unary_op(stack: *const Stack) ExecutionError.Error!void {
 /// frame.stack.push(value);
 /// ```
 pub fn validate_dup(stack: *const Stack, n: u32) ExecutionError.Error!void {
-    Log.debug("ValidationPatterns.validate_dup: Validating DUP{}, stack_size={}", .{ n, stack.size()() });
+    Log.debug("ValidationPatterns.validate_dup: Validating DUP{}, stack_size={}", .{ n, stack.size() });
     // DUP pops 0 and pushes 1
     if (stack.size() < n) {
         @branchHint(.cold);

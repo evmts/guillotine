@@ -23,7 +23,7 @@ const Log = @import("../log.zig");
 // Imports for tests
 const Vm = @import("../evm.zig");
 const Operation = @import("../opcodes/operation.zig");
-const MemoryDatabase = @import("../state/memory_database.zig");
+const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 const Stack = @import("../stack/stack.zig");
 
 /// LT opcode (0x10) - Less than comparison
@@ -173,9 +173,7 @@ pub fn op_iszero(context: *anyopaque) ExecutionError.Error!void {
 pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []const FuzzComparisonOperation) !void {
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
-    const AccessList = @import("../access_list.zig").AccessList;
-    const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
-    const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
+    const MockHost = @import("../host.zig").MockHost;
 
     for (operations) |op| {
         var memory_db = MemoryDatabase.init(allocator);
@@ -187,26 +185,26 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         var analysis = try CodeAnalysis.from_code(allocator, code, &table);
         defer analysis.deinit();
 
-        // Create mock components
-        var access_list = try AccessList.init(allocator);
-        defer access_list.deinit();
-        var self_destruct = try SelfDestruct.init(allocator);
-        defer self_destruct.deinit();
-        const chain_rules = ChainRules.DEFAULT;
+        // Create mock host
+        var mock_host = MockHost.init(allocator);
+        defer mock_host.deinit();
+        const host = mock_host.to_host();
+        
+        const db_interface = memory_db.to_database_interface();
 
         var context = try Frame.init(
-            allocator,
-            1000000, // gas
-            false, // not static
-            0, // depth
-            primitives.Address.ZERO_ADDRESS,
+            1000000, // gas_remaining
+            false, // static_call
+            0, // call_depth
+            primitives.Address.ZERO_ADDRESS, // contract_address
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
             &analysis,
-            &access_list,
-            memory_db.to_database_interface(),
-            &chain_rules,
-            &self_destruct,
+            host,
+            db_interface,
+            allocator,
         );
-        defer context.deinit();
+        defer context.deinit(allocator);
 
         // Setup stack with test values
         switch (op.op_type) {
@@ -253,7 +251,7 @@ fn validate_comparison_result(stack: *const Stack, op: FuzzComparisonOperation) 
     const testing = std.testing;
 
     // Stack should have exactly one result
-    try testing.expectEqual(@as(usize, 1), stack.size);
+    try testing.expectEqual(@as(usize, 1), stack.size());
 
     const result = stack.data[0];
 

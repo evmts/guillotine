@@ -44,7 +44,7 @@ const primitives = @import("primitives");
 ///     .blob_base_fee = 1,
 /// );
 /// ```
-const Context = @This();
+pub const Context = @This();
 
 /// The original sender address that initiated the transaction.
 ///

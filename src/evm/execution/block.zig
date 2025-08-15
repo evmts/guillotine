@@ -186,7 +186,7 @@ pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
 
 // Tests
 const testing = std.testing;
-const Address = primitives.Address;
+const Address = primitives.Address.Address;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const Host = @import("../host.zig").Host;
 const BlockInfo = @import("../host.zig").BlockInfo;
@@ -195,8 +195,119 @@ const BlockInfo = @import("../host.zig").BlockInfo;
 const TestBlockHost = struct {
     block_info: BlockInfo,
 
+    pub fn get_balance(self: *TestBlockHost, address: Address) u256 {
+        _ = self;
+        _ = address;
+        return 0;
+    }
+
+    pub fn account_exists(self: *TestBlockHost, address: Address) bool {
+        _ = self;
+        _ = address;
+        return false;
+    }
+
+    pub fn get_code(self: *TestBlockHost, address: Address) []const u8 {
+        _ = self;
+        _ = address;
+        return &[_]u8{};
+    }
+
     pub fn get_block_info(self: *TestBlockHost) BlockInfo {
         return self.block_info;
+    }
+
+    pub fn emit_log(self: *TestBlockHost, contract_address: Address, topics: []const u256, data: []const u8) void {
+        _ = self;
+        _ = contract_address;
+        _ = topics;
+        _ = data;
+    }
+
+    pub fn call(self: *TestBlockHost, params: @import("../host.zig").CallParams) anyerror!@import("../host.zig").CallResult {
+        _ = self;
+        _ = params;
+        return error.NotImplemented;
+    }
+
+    pub fn register_created_contract(self: *TestBlockHost, address: Address) anyerror!void {
+        _ = self;
+        _ = address;
+    }
+
+    pub fn was_created_in_tx(self: *TestBlockHost, address: Address) bool {
+        _ = self;
+        _ = address;
+        return false;
+    }
+
+    pub fn create_snapshot(self: *TestBlockHost) u32 {
+        _ = self;
+        return 0;
+    }
+
+    pub fn revert_to_snapshot(self: *TestBlockHost, snapshot_id: u32) void {
+        _ = self;
+        _ = snapshot_id;
+    }
+
+    pub fn record_storage_change(self: *TestBlockHost, address: Address, slot: u256, original_value: u256) !void {
+        _ = self;
+        _ = address;
+        _ = slot;
+        _ = original_value;
+    }
+
+    pub fn get_original_storage(self: *TestBlockHost, address: Address, slot: u256) ?u256 {
+        _ = self;
+        _ = address;
+        _ = slot;
+        return null;
+    }
+
+    pub fn set_output(self: *TestBlockHost, output: []const u8) !void {
+        _ = self;
+        _ = output;
+    }
+
+    pub fn get_output(self: *TestBlockHost) []const u8 {
+        _ = self;
+        return &.{};
+    }
+
+    pub fn access_address(self: *TestBlockHost, address: Address) !u64 {
+        _ = self;
+        _ = address;
+        return 2600; // Cold access cost
+    }
+
+    pub fn access_storage_slot(self: *TestBlockHost, contract_address: Address, slot: u256) !u64 {
+        _ = self;
+        _ = contract_address;
+        _ = slot;
+        return 2100; // Cold storage access cost
+    }
+
+    pub fn mark_for_destruction(self: *TestBlockHost, contract_address: Address, recipient: Address) !void {
+        _ = self;
+        _ = contract_address;
+        _ = recipient;
+    }
+
+    pub fn get_input(self: *TestBlockHost) []const u8 {
+        _ = self;
+        return &.{};
+    }
+
+    pub fn is_hardfork_at_least(self: *TestBlockHost, target: @import("../hardforks/hardfork.zig").Hardfork) bool {
+        _ = self;
+        _ = target;
+        return true;
+    }
+
+    pub fn get_hardfork(self: *TestBlockHost) @import("../hardforks/hardfork.zig").Hardfork {
+        _ = self;
+        return .CANCUN;
     }
 
     pub fn to_host(self: *TestBlockHost) Host {
@@ -209,7 +320,7 @@ test "COINBASE returns block coinbase address" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
     defer stack.deinit(std.testing.allocator);
 
-    const test_coinbase = Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
+    const test_coinbase = primitives.Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
 
     var test_host = TestBlockHost{
         .block_info = BlockInfo{
@@ -228,7 +339,7 @@ test "COINBASE returns block coinbase address" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute COINBASE opcode
@@ -236,7 +347,7 @@ test "COINBASE returns block coinbase address" {
 
     // Verify coinbase address was pushed to stack
     const result = stack.pop_unsafe();
-    try testing.expectEqual(Address.to_u256(test_coinbase), result);
+    try testing.expectEqual(primitives.Address.to_u256(test_coinbase), result);
 }
 
 test "TIMESTAMP returns block timestamp" {
@@ -251,7 +362,7 @@ test "TIMESTAMP returns block timestamp" {
             .timestamp = test_timestamp,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -262,7 +373,7 @@ test "TIMESTAMP returns block timestamp" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute TIMESTAMP opcode
@@ -285,7 +396,7 @@ test "NUMBER returns block number" {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -296,7 +407,7 @@ test "NUMBER returns block number" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute NUMBER opcode
@@ -311,7 +422,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
     defer stack.deinit(std.testing.allocator);
 
-    const test_difficulty: primitives.u256 = 0x123456789ABCDEF;
+    const test_difficulty: u256 = 0x123456789ABCDEF;
 
     var test_host = TestBlockHost{
         .block_info = BlockInfo{
@@ -319,7 +430,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
             .timestamp = 1000,
             .difficulty = test_difficulty,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -330,7 +441,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute DIFFICULTY opcode
@@ -353,7 +464,7 @@ test "GASLIMIT returns block gas limit" {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = test_gas_limit,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -364,7 +475,7 @@ test "GASLIMIT returns block gas limit" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute GASLIMIT opcode
@@ -379,7 +490,7 @@ test "BASEFEE returns block base fee" {
     var stack = try @import("../stack/stack.zig").init(testing.allocator);
     defer stack.deinit(std.testing.allocator);
 
-    const test_base_fee: primitives.u256 = 1_000_000_000; // 1 gwei
+    const test_base_fee: u256 = 1_000_000_000; // 1 gwei
 
     var test_host = TestBlockHost{
         .block_info = BlockInfo{
@@ -387,7 +498,7 @@ test "BASEFEE returns block base fee" {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = test_base_fee,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -398,7 +509,7 @@ test "BASEFEE returns block base fee" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute BASEFEE opcode
@@ -419,7 +530,7 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -430,7 +541,7 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Execute BLOBBASEFEE opcode
@@ -451,7 +562,7 @@ test "BLOCKHASH returns 0 for future blocks" {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -462,7 +573,7 @@ test "BLOCKHASH returns 0 for future blocks" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Push future block number
@@ -486,7 +597,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = primitives.Address.ZERO,
             .base_fee = 1000000000,
             .prev_randao = [_]u8{0} ** 32,
         },
@@ -497,7 +608,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         host: Host,
     }{
         .stack = &stack,
-        .host = test_host.to_host(),
+        .host = (&test_host).to_host(),
     };
 
     // Push block number more than 256 blocks in past
@@ -508,7 +619,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
 
     // Verify 0 was pushed for old block
     const result = try stack.pop();
-    try testing.expectEqual(@as(primitives.u256, 0), result);
+    try testing.expectEqual(@as(u256, 0), result);
 }
 
 // TODO: Convert all tests to ExecutionContext after VM refactor complete

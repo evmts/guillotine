@@ -1,6 +1,6 @@
 const std = @import("std");
 const Address = @import("primitives").Address.Address;
-const CallResult = @import("evm/call_result.zig").CallResult;
+pub const CallResult = @import("evm/call_result.zig").CallResult;
 const Frame = @import("frame.zig").Frame;
 
 /// Call operation parameters for different call types
@@ -414,7 +414,7 @@ pub const MockHost = struct {
             .timestamp = 1000,
             .difficulty = 100,
             .gas_limit = 30000000,
-            .coinbase = Address.ZERO,
+            .coinbase = @import("primitives").ZERO_ADDRESS,
             .base_fee = 1000000000, // 1 gwei
             .prev_randao = [_]u8{0} ** 32,
         };
@@ -517,6 +517,32 @@ pub const MockHost = struct {
         return 2100;
     }
 
+    pub fn mark_for_destruction(self: *MockHost, contract_address: Address, recipient: Address) !void {
+        _ = self;
+        _ = contract_address;
+        _ = recipient;
+        // Mock implementation - do nothing
+    }
+
+    pub fn get_input(self: *MockHost) []const u8 {
+        _ = self;
+        // Mock implementation - return empty input
+        return &.{};
+    }
+
+    pub fn is_hardfork_at_least(self: *MockHost, target: @import("hardforks/hardfork.zig").Hardfork) bool {
+        _ = self;
+        _ = target;
+        // Mock implementation - always return true
+        return true;
+    }
+
+    pub fn get_hardfork(self: *MockHost) @import("hardforks/hardfork.zig").Hardfork {
+        _ = self;
+        // Mock implementation - return latest hardfork
+        return .CANCUN;
+    }
+
     pub fn to_host(self: *MockHost) Host {
         return Host.init(self);
     }
@@ -531,14 +557,15 @@ test "Host interface with MockHost" {
     const host = mock_host.to_host();
 
     // Test balance
-    const balance = host.get_balance(Address.ZERO);
+    const zero_addr = @import("primitives").ZERO_ADDRESS;
+    const balance = host.get_balance(zero_addr);
     try std.testing.expectEqual(@as(u256, 1000), balance);
 
     // Test account exists
-    try std.testing.expect(host.account_exists(Address.ZERO));
+    try std.testing.expect(host.account_exists(zero_addr));
 
     // Test code
-    const code = host.get_code(Address.ZERO);
+    const code = host.get_code(zero_addr);
     try std.testing.expectEqual(@as(usize, 0), code.len);
 
     // Test block info
@@ -549,12 +576,12 @@ test "Host interface with MockHost" {
     // Test log emission
     const topics = [_]u256{ 0x1234, 0x5678 };
     const data = "test log data";
-    host.emit_log(Address.ZERO, &topics, data);
+    host.emit_log(zero_addr, &topics, data);
 
     // Verify log was stored
     try std.testing.expectEqual(@as(usize, 1), mock_host.logs.items.len);
     const stored_log = mock_host.logs.items[0];
-    try std.testing.expectEqualSlices(u8, &Address.ZERO, &stored_log.contract_address);
+    try std.testing.expectEqualSlices(u8, &zero_addr, &stored_log.contract_address);
     try std.testing.expectEqual(@as(usize, 2), stored_log.topics.len);
     try std.testing.expectEqual(@as(u256, 0x1234), stored_log.topics[0]);
     try std.testing.expectEqual(@as(u256, 0x5678), stored_log.topics[1]);

@@ -1917,17 +1917,43 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
 }
 
 test "CALL with value guarantees 2300 gas stipend added to forwarded gas" {
-    // Test with simple frame struct that has only what calculate_call_gas_amount needs
-    var frame = struct {
-        gas_remaining: u64,
-    }{
-        .gas_remaining = 10000, // Sufficient gas remaining
-    };
+    const allocator = testing.allocator;
+    
+    // Create a proper frame for testing
+    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    const code = &[_]u8{0x00}; // STOP
+    const table = OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+    defer analysis.deinit();
+    
+    const MockHost = @import("../host.zig").MockHost;
+    const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemDb.init(allocator);
+    defer memory_db.deinit();
+    var mock_host = MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+    const db_interface = memory_db.to_database_interface();
+    
+    var frame = try Frame.init(
+        10000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis,
+        host,
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Test 1: With value transfer, stipend is ADDED to forwarded gas
     {
-        const gas_requested: primitives.u256 = 1000; // Request 1000 gas
-        const value: primitives.u256 = 1; // Non-zero value triggers stipend
+        const gas_requested: u256 = 1000; // Request 1000 gas
+        const value: u256 = 1; // Non-zero value triggers stipend
         const already_consumed: u64 = 100; // Some gas already consumed
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -1942,8 +1968,8 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas" {
     // Test 2: EIP-150 63/64 rule limits gas forwarding
     {
         frame.gas_remaining = 6400; // Specific amount for easy calculation
-        const gas_requested: primitives.u256 = 10000; // Request more than available
-        const value: primitives.u256 = 0; // No value, no stipend
+        const gas_requested: u256 = 10000; // Request more than available
+        const value: u256 = 0; // No value, no stipend
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -1958,8 +1984,8 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas" {
     // Test 3: Stipend is added even when gas is limited by 63/64 rule
     {
         frame.gas_remaining = 640; // Low gas
-        const gas_requested: primitives.u256 = 1000; // Request more than available
-        const value: primitives.u256 = 1; // Non-zero value
+        const gas_requested: u256 = 1000; // Request more than available
+        const value: u256 = 1; // Non-zero value
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -1973,17 +1999,44 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas" {
 }
 
 test "CALL without value respects gas limit without stipend" {
-    // Test with simple frame struct that has only what calculate_call_gas_amount needs
-    var frame = struct {
-        gas_remaining: u64,
-    }{
-        .gas_remaining = 1000,
-    };
+    const allocator = testing.allocator;
+    
+    // Create a proper frame for testing
+    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    const code = &[_]u8{0x00}; // STOP
+    const table = OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+    defer analysis.deinit();
+    
+    const MockHost = @import("../host.zig").MockHost;
+    const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemDb.init(allocator);
+    defer memory_db.deinit();
+    var mock_host = MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+    const db_interface = memory_db.to_database_interface();
+    
+    const prim = @import("primitives");
+    var frame = try Frame.init(
+        1000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        prim.Address.ZERO_ADDRESS, // contract_address
+        prim.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis,
+        host,
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Test: Without value transfer, no stipend should be applied
     {
-        const gas_requested: primitives.u256 = 50; // Request only 50 gas
-        const value: primitives.u256 = 0; // Zero value - no stipend
+        const gas_requested: u256 = 50; // Request only 50 gas
+        const value: u256 = 0; // Zero value - no stipend
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -1999,17 +2052,44 @@ test "CALL without value respects gas limit without stipend" {
 }
 
 test "EIP-150 gas calculations for nested calls" {
-    // Test nested call gas calculations following EIP-150 semantics
-    var frame = struct {
-        gas_remaining: u64,
-    }{
-        .gas_remaining = 100000,
-    };
+    const allocator = testing.allocator;
+    
+    // Create a proper frame for testing
+    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    const code = &[_]u8{0x00}; // STOP
+    const table = OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+    defer analysis.deinit();
+    
+    const MockHost = @import("../host.zig").MockHost;
+    const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemDb.init(allocator);
+    defer memory_db.deinit();
+    var mock_host = MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+    const db_interface = memory_db.to_database_interface();
+    
+    const prim = @import("primitives");
+    var frame = try Frame.init(
+        100000, // gas_remaining
+        false, // static_call
+        0, // call_depth
+        prim.Address.ZERO_ADDRESS, // contract_address
+        prim.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis,
+        host,
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Test 1: First level call gets 63/64 of available gas
     {
-        const gas_requested: primitives.u256 = std.math.maxInt(u64); // Request all gas
-        const value: primitives.u256 = 0;
+        const gas_requested: u256 = std.math.maxInt(u64); // Request all gas
+        const value: u256 = 0;
         const already_consumed: u64 = 1000; // Some overhead
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -2024,8 +2104,8 @@ test "EIP-150 gas calculations for nested calls" {
     // Test 2: Simulate second level call (from within first call)
     {
         frame.gas_remaining = 97454; // Gas forwarded to first call
-        const gas_requested: primitives.u256 = std.math.maxInt(u64);
-        const value: primitives.u256 = 0;
+        const gas_requested: u256 = std.math.maxInt(u64);
+        const value: u256 = 0;
         const already_consumed: u64 = 500; // Some overhead in nested call
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -2039,17 +2119,46 @@ test "EIP-150 gas calculations for nested calls" {
 }
 
 test "EIP-150 minimum gas retention" {
+    const allocator = std.testing.allocator;
+    
+    // Create minimal test infrastructure
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const MockHost = @import("../host.zig").MockHost;
+    const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
+    
+    var memory_db = MemDb.init(allocator);
+    defer memory_db.deinit();
+    
+    const code = &[_]u8{0x00}; // STOP
+    const table = OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+    defer analysis.deinit();
+    
+    var mock_host = MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+    const db_interface = memory_db.to_database_interface();
+    
     // Test that caller always retains at least 1/64 of gas
-    var frame = struct {
-        gas_remaining: u64,
-    }{
-        .gas_remaining = 64, // Exactly 64 gas
-    };
+    var frame = try Frame.init(
+        64, // gas_remaining - Exactly 64 gas
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis,
+        host,
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Caller should retain exactly 1 gas (64/64 = 1)
     {
-        const gas_requested: primitives.u256 = 100; // Request more than available
-        const value: primitives.u256 = 0;
+        const gas_requested: u256 = 100; // Request more than available
+        const value: u256 = 0;
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -2063,8 +2172,8 @@ test "EIP-150 minimum gas retention" {
     // Test with very low gas (less than 64)
     frame.gas_remaining = 32;
     {
-        const gas_requested: primitives.u256 = 100;
-        const value: primitives.u256 = 0;
+        const gas_requested: u256 = 100;
+        const value: u256 = 0;
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -2077,17 +2186,44 @@ test "EIP-150 minimum gas retention" {
 }
 
 test "EIP-150 stipend edge cases" {
-    // Test edge cases around the 2300 gas stipend
-    var frame = struct {
-        gas_remaining: u64,
-    }{
-        .gas_remaining = 100, // Very low gas
-    };
+    const allocator = testing.allocator;
+    
+    // Create a proper frame for testing
+    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
+    const code = &[_]u8{0x00}; // STOP
+    const table = OpcodeMetadata.DEFAULT;
+    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
+    defer analysis.deinit();
+    
+    const MockHost = @import("../host.zig").MockHost;
+    const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
+    var memory_db = MemDb.init(allocator);
+    defer memory_db.deinit();
+    var mock_host = MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+    const db_interface = memory_db.to_database_interface();
+    
+    const prim = @import("primitives");
+    var frame = try Frame.init(
+        100, // gas_remaining - Very low gas
+        false, // static_call
+        0, // call_depth
+        prim.Address.ZERO_ADDRESS, // contract_address
+        prim.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &analysis,
+        host,
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Test 1: Stipend is added even when caller has very low gas
     {
-        const gas_requested: primitives.u256 = 10;
-        const value: primitives.u256 = 1; // Value transfer
+        const gas_requested: u256 = 10;
+        const value: u256 = 1; // Value transfer
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
@@ -2102,8 +2238,8 @@ test "EIP-150 stipend edge cases" {
 
     // Test 2: Stipend with zero gas requested
     {
-        const gas_requested: primitives.u256 = 0; // Request zero gas
-        const value: primitives.u256 = 1; // Value transfer
+        const gas_requested: u256 = 0; // Request zero gas
+        const value: u256 = 1; // Value transfer
         const already_consumed: u64 = 0;
 
         const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);

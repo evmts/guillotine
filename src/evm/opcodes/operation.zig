@@ -48,7 +48,7 @@ pub const Interpreter = *@import("../evm.zig");
 
 /// Direct pointer to the frame context with transaction and execution environment.
 /// Simplified from a single-variant union to a direct pointer type.
-pub const State = Frame;
+pub const State = *Frame;
 
 /// Function signature for opcode execution.
 ///

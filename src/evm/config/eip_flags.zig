@@ -102,16 +102,17 @@ pub const EipFlags = struct {
         try buf.appendSlice("Enabled EIPs: ");
         
         var first = true;
-        inline for (@typeInfo(EipFlags).Struct.fields) |field| {
+        inline for (@typeInfo(EipFlags).@"struct".fields) |field| {
             if (@field(self, field.name) and field.type == bool) {
-                if (!first) try buf.appendSlice(", ");
-                first = false;
-                
                 // Extract EIP number from field name
-                const eip_start = std.mem.indexOf(u8, field.name, "eip") orelse continue;
-                const num_start = eip_start + 3;
-                const num_end = std.mem.indexOfScalar(u8, field.name[num_start..], '_') orelse field.name.len - num_start;
-                try buf.appendSlice(field.name[num_start..num_start + num_end]);
+                if (std.mem.indexOf(u8, field.name, "eip")) |eip_start| {
+                    if (!first) try buf.appendSlice(", ");
+                    first = false;
+                    
+                    const num_start = eip_start + 3;
+                    const num_end = std.mem.indexOfScalar(u8, field.name[num_start..], '_') orelse field.name.len - num_start;
+                    try buf.appendSlice(field.name[num_start..num_start + num_end]);
+                }
             }
         }
         
@@ -199,10 +200,11 @@ pub fn deriveEipFlagsFromHardfork(hardfork: Hardfork) EipFlags {
         flags.eip7516_blobbasefee = true;
     }
     
-    // Prague (future)
-    if (hardfork_num >= @intFromEnum(Hardfork.PRAGUE)) {
-        flags.eip7702_eoa_delegation = true;
-    }
+    // Prague (future) - not yet implemented
+    // When PRAGUE is added to Hardfork enum, uncomment:
+    // if (hardfork_num >= @intFromEnum(Hardfork.PRAGUE)) {
+    //     flags.eip7702_eoa_delegation = true;
+    // }
     
     return flags;
 }

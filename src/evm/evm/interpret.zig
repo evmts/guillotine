@@ -339,7 +339,7 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     const Host = @import("../host.zig").Host;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Simple block with 5 x PUSH1 (5*3 gas) then STOP
     const code = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x60, 0x03, 0x60, 0x04, 0x60, 0x05, 0x00 };
@@ -364,30 +364,20 @@ test "BEGINBLOCK: upfront OutOfGas when gas < block base cost" {
     defer created_contracts.deinit();
 
     // Evm implements Host interface
-    const host = Host.init(vm);
+    const host = Host.init(&vm);
 
     // Gas is less than block base cost (5*3 = 15)
     var frame = try Frame.init(
         10, // gas_remaining
-        false, // static
-        0, // depth
-        Address.ZERO, // contract
-        Address.ZERO, // caller
+        false, // static_call
+        0, // call_depth
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
         0, // value
         &analysis,
-        &access_list,
-        &journal,
         host,
-        0, // snapshot_id
         db_interface,
-        Frame.ChainRules.DEFAULT,
-        &self_destruct,
-        &created_contracts,
-        &[_]u8{}, // input
         allocator,
-        null,
-        false,
-        false,
     );
     defer frame.deinit(allocator);
 
@@ -401,7 +391,7 @@ test "interpret: keccak+pop+JUMPDEST+STOP fragment halts with STOP" {
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     const code = &[_]u8{
         0x60, 0x20, // PUSH1 32
@@ -428,8 +418,8 @@ test "interpret: keccak+pop+JUMPDEST+STOP fragment halts with STOP" {
         100000, // gas_remaining
         false, // static
         0, // depth
-        Address.ZERO, // contract
-        Address.ZERO, // caller
+        primitives.Address.ZERO_ADDRESS, // contract
+        primitives.Address.ZERO_ADDRESS, // caller
         0, // value
         &analysis,
         host,
@@ -447,7 +437,7 @@ test "interpret: fused PUSH+JUMP to forward JUMPDEST halts with STOP" {
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     const code = &[_]u8{ 0x60, 0x03, 0x56, 0x5b, 0x00 }; // PUSH1 3; JUMP; JUMPDEST; STOP
     var analysis = try Analysis.from_code(allocator, code, &OpcodeMetadata.DEFAULT);
@@ -465,8 +455,8 @@ test "interpret: fused PUSH+JUMP to forward JUMPDEST halts with STOP" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -488,7 +478,7 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
     const Host = @import("../host.zig").Host;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Block with ADD (requires 2 stack items) then STOP
     const code = &[_]u8{ 0x01, 0x00 };
@@ -510,29 +500,19 @@ test "BEGINBLOCK: stack underflow detected at block entry" {
     var created_contracts = CreatedContracts.init(allocator);
     defer created_contracts.deinit();
 
-    const host = Host.init(vm);
+    const host = Host.init(&vm);
 
     var frame = try Frame.init(
         1000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
-        &access_list,
-        &journal,
         host,
-        0,
         db_interface,
-        Frame.ChainRules.DEFAULT,
-        &self_destruct,
-        &created_contracts,
-        &[_]u8{},
         allocator,
-        null,
-        false,
-        false,
     );
     defer frame.deinit(allocator);
 
@@ -551,7 +531,7 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
     const Host = @import("../host.zig").Host;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
     const Stack = @import("../stack/stack.zig");
 
     // Block with PUSH1 then STOP (max_growth = +1)
@@ -574,29 +554,19 @@ test "BEGINBLOCK: stack overflow detected from max growth" {
     var created_contracts = CreatedContracts.init(allocator);
     defer created_contracts.deinit();
 
-    const host = Host.init(vm);
+    const host = Host.init(&vm);
 
     var frame = try Frame.init(
         1000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
-        &access_list,
-        &journal,
         host,
-        0,
         db_interface,
-        Frame.ChainRules.DEFAULT,
-        &self_destruct,
-        &created_contracts,
-        &[_]u8{},
         allocator,
-        null,
-        false,
-        false,
     );
     defer frame.deinit(allocator);
 
@@ -620,7 +590,7 @@ test "dynamic jump returns 32-byte true" {
     const Host = @import("../host.zig").Host;
     const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
     const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Bytecode:
     // 00: PUSH1 0x05
@@ -668,24 +638,19 @@ test "dynamic jump returns 32-byte true" {
     defer created_contracts.deinit();
 
     // Evm implements Host
-    const host = Host.init(vm);
+    const host = Host.init(&vm);
 
     var frame = try Frame.init(
         1_000_000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
         db_interface,
-        Frame.ChainRules.DEFAULT,
-        &self_destruct,
-        &[_]u8{},
         allocator,
-        false,
-        false,
     );
     defer frame.deinit(allocator);
 
@@ -701,7 +666,7 @@ test "interpret: minimal dispatcher executes selected branch and returns 32 byte
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Build minimal dispatcher that checks for selector 0x11223344 and returns 32-byte 0x01 on match
     // Layout:
@@ -744,8 +709,8 @@ test "interpret: minimal dispatcher executes selected branch and returns 32 byte
         1_000_000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -767,8 +732,8 @@ test "interpret: minimal dispatcher executes selected branch and returns 32 byte
         1_000_000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -789,7 +754,7 @@ test "interpret: dispatcher using AND 0xffffffff extracts selector and returns 3
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Bytecode that masks selector with AND 0xffffffff instead of SHR
     const code = &[_]u8{
@@ -829,8 +794,8 @@ test "interpret: dispatcher using AND 0xffffffff extracts selector and returns 3
         1_000_000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -872,7 +837,7 @@ test "interpret: ERC20 bench dispatcher returns 32 bytes for 0x30627b7c selector
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const Analysis = @import("../analysis.zig").CodeAnalysis;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Read initcode and calldata from official bench files
     const initcode_hex_path = "/Users/williamcory/guillotine/bench/official/cases/erc20-transfer/bytecode.txt";
@@ -902,7 +867,7 @@ test "interpret: ERC20 bench dispatcher returns 32 bytes for 0x30627b7c selector
     var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm.deinit();
 
-    const deployer = Address.ZERO;
+    const deployer = primitives.Address.ZERO_ADDRESS;
     const create_res = try vm.create_contract(deployer, 0, init_bytes, 50_000_000);
     try std.testing.expect(create_res.success);
     const contract_addr = create_res.address;
@@ -946,7 +911,7 @@ test "interpret: simple JUMP to valid JUMPDEST" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Simple jump: PUSH1 0x05, JUMP, INVALID, INVALID, JUMPDEST, STOP
     const code = &[_]u8{
@@ -977,8 +942,8 @@ test "interpret: simple JUMP to valid JUMPDEST" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -997,7 +962,7 @@ test "interpret: JUMP to invalid destination (not JUMPDEST)" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Jump to non-JUMPDEST: PUSH1 0x04, JUMP, INVALID, ADD, STOP
     const code = &[_]u8{
@@ -1024,8 +989,8 @@ test "interpret: JUMP to invalid destination (not JUMPDEST)" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1044,7 +1009,7 @@ test "interpret: JUMP to out-of-bounds destination" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Jump beyond code size: PUSH1 0xFF, JUMP, STOP
     const code = &[_]u8{
@@ -1069,8 +1034,8 @@ test "interpret: JUMP to out-of-bounds destination" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1089,7 +1054,7 @@ test "interpret: JUMPI with true condition" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // JUMPI with true condition: PUSH1 0x08, PUSH1 0x01, JUMPI, INVALID, INVALID, JUMPDEST, STOP
     const code = &[_]u8{
@@ -1118,8 +1083,8 @@ test "interpret: JUMPI with true condition" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1138,7 +1103,7 @@ test "interpret: JUMPI with false condition" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // JUMPI with false condition: PUSH1 0x08, PUSH1 0x00, JUMPI, STOP, INVALID, JUMPDEST, INVALID
     const code = &[_]u8{
@@ -1167,8 +1132,8 @@ test "interpret: JUMPI with false condition" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1187,7 +1152,7 @@ test "interpret: JUMPI to invalid destination with true condition" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // JUMPI to non-JUMPDEST: PUSH1 0x06, PUSH1 0x01, JUMPI, STOP, ADD
     const code = &[_]u8{
@@ -1214,8 +1179,8 @@ test "interpret: JUMPI to invalid destination with true condition" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1234,7 +1199,7 @@ test "interpret: PC opcode returns correct program counter" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Test PC at different positions: PC, PC, PC, STOP
     const code = &[_]u8{
@@ -1260,8 +1225,8 @@ test "interpret: PC opcode returns correct program counter" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1286,7 +1251,7 @@ test "interpret: word instruction pushes correct values" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Various PUSH operations with different sizes
     const code = &[_]u8{
@@ -1312,8 +1277,8 @@ test "interpret: word instruction pushes correct values" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1338,7 +1303,7 @@ test "interpret: dynamic gas calculation for memory expansion" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // MLOAD with large offset to trigger memory expansion
     const code = &[_]u8{
@@ -1365,8 +1330,8 @@ test "interpret: dynamic gas calculation for memory expansion" {
         100, // Very low gas
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1383,8 +1348,8 @@ test "interpret: dynamic gas calculation for memory expansion" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1403,7 +1368,7 @@ test "interpret: noop instruction advances correctly" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Code with JUMPDEST (which becomes noop) and arithmetic
     const code = &[_]u8{
@@ -1430,8 +1395,8 @@ test "interpret: noop instruction advances correctly" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1454,7 +1419,7 @@ test "interpret: conditional_jump_invalid with true condition" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // JUMPI to invalid location (will be analyzed as conditional_jump_invalid)
     const code = &[_]u8{
@@ -1480,8 +1445,8 @@ test "interpret: conditional_jump_invalid with true condition" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1500,7 +1465,7 @@ test "interpret: conditional_jump_invalid with false condition continues" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // JUMPI to invalid location but with false condition
     const code = &[_]u8{
@@ -1526,8 +1491,8 @@ test "interpret: conditional_jump_invalid with false condition continues" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1546,7 +1511,7 @@ test "interpret: jump_unresolved with empty stack causes underflow" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Dynamic JUMP with empty stack
     const code = &[_]u8{
@@ -1570,8 +1535,8 @@ test "interpret: jump_unresolved with empty stack causes underflow" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1590,7 +1555,7 @@ test "interpret: conditional_jump_unresolved with insufficient stack" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // JUMPI with only one stack item (needs two)
     const code = &[_]u8{
@@ -1615,8 +1580,8 @@ test "interpret: conditional_jump_unresolved with insufficient stack" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1635,7 +1600,7 @@ test "interpret: complex control flow with multiple jumps" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
 
     // Complex control flow: multiple jumps and conditional jumps
     const code = &[_]u8{
@@ -1679,8 +1644,8 @@ test "interpret: complex control flow with multiple jumps" {
         100000,
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,
@@ -1703,7 +1668,7 @@ test "interpret: maximum stack depth" {
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
     const Analysis = @import("../analysis.zig").CodeAnalysis;
     const Host = @import("../host.zig").Host;
-    const Address = @import("primitives").Address.Address;
+    const primitives = @import("primitives");
     const Stack = @import("../stack/stack.zig");
 
     // Try to push beyond stack limit
@@ -1733,8 +1698,8 @@ test "interpret: maximum stack depth" {
         10000000, // Lots of gas
         false,
         0,
-        Address.ZERO,
-        Address.ZERO,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
         0,
         &analysis,
         host,

@@ -72,7 +72,7 @@ test "ExecInstruction struct layout" {
     };
     
     try std.testing.expectEqual(@as(usize, 16), @sizeOf(ExecInstruction));
-    try std.testing.expect(exec_inst.exec_fn != null);
+    try std.testing.expectEqual(dummy_fn, exec_inst.exec_fn);
     try std.testing.expect(exec_inst.next_inst == &dummy_inst);
 }
 

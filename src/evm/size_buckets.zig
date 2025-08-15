@@ -274,7 +274,7 @@ test "getInstructionParams with 8-byte instruction" {
 test "getInstructionParams with 16-byte instruction" {
     const allocator = std.testing.allocator;
     const ExecInstruction = @import("instruction.zig").ExecInstruction;
-    const ExecutionFunction = @import("instruction.zig").ExecutionFunction;
+    const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 
     // Allocate size arrays
     const size8 = try allocator.alloc(Bucket8, 1);
@@ -285,7 +285,7 @@ test "getInstructionParams with 16-byte instruction" {
     defer allocator.free(size24);
 
     // Create dummy function and instruction
-    const dummy_fn: ExecutionFunction = @import("../analysis.zig").UnreachableHandler;
+    const dummy_fn: ExecutionFunc = @import("analysis.zig").UnreachableHandler;
     const dummy_inst = @import("instruction.zig").Instruction{ .tag = .exec, .id = 0 };
 
     // Create an ExecInstruction in the second bucket

@@ -749,7 +749,16 @@ test "fuzz_access_list_transaction_patterns" {
             var to_address: [20]u8 = undefined;
             
             std.mem.copyForwards(u8, &tx_origin, input[0..20]);
-            std.mem.copyForwards(u8, &coinbase, input[20..40] ++ ([_]u8{0} ** (40 - @min(40, input.len)))[20..20]);
+            if (input.len >= 40) {
+                std.mem.copyForwards(u8, &coinbase, input[20..40]);
+            } else if (input.len > 20) {
+                var temp: [20]u8 = [_]u8{0} ** 20;
+                const copy_len = input.len - 20;
+                std.mem.copyForwards(u8, temp[0..copy_len], input[20..input.len]);
+                std.mem.copyForwards(u8, &coinbase, &temp);
+            } else {
+                coinbase = [_]u8{0} ** 20;
+            }
             
             // Handle case where input is too short for full addresses
             if (input.len >= 60) {
