@@ -4,17 +4,17 @@
 
 Execute bytecode simultaneously in the primary EVM and the Mini EVM, render a live, step-by-step comparison, and highlight divergences with precise diffs. This PR builds on:
 
-- PR 1 (Interpreter Debug Hooks) for pausable stepping
-- PR 2 (Standard Memory Tracer)
+- PR 1 (Standard Memory Tracer with TracerHandle interface)
+- PR 2 (Enhanced Memory Tracer with execution control)
 - PR 3 (Mini EVM Comparator and `debug/shadow.zig`)
-- PR 4 (Devtool refactor to tracer-driven execution)
+- PR 4 (Devtool refactor to TracerHandle-driven execution)
 
 This document provides **EVERYTHING** needed to implement PR 6 end-to-end: exact code touch points, APIs, data structures, memory ownership rules, UI contracts, tests, and comprehensive Zig patterns with complete examples.
 
 ### Why side-by-side?
 
 - Faster debugging: immediately see where and how primary diverges from Mini
-- Deterministic reproduction: lockstep execution driven by debug hooks ensures consistent step indices
+- Deterministic reproduction: lockstep execution driven by TracerHandle system ensures consistent step indices
 - Minimal overhead mode: per-call comparison when step-by-step isn't needed
 
 ## CODEBASE UNDERSTANDING - CRITICAL CONTEXT
@@ -27,7 +27,7 @@ After thorough analysis, here's the complete current state:
 - Uses analysis-based execution via `interpret()` function
 - Code is pre-analyzed into instruction blocks with `CodeAnalysis.from_code()`
 - Frame tracks `instruction: *const Instruction` pointer into analysis blocks
-- Supports debug logging but **NO debug hooks system exists yet**
+- Supports TracerHandle integration for execution monitoring and control
 - Complex frame management with snapshot handling for nested calls
 - Memory-optimized Frame structure with cache-aligned hot fields
 
@@ -39,16 +39,16 @@ After thorough analysis, here's the complete current state:
 - **Much simpler control flow but same Frame/Host interface**
 
 **Current Devtool (`src/devtool/evm.zig`) - After PR 4**:
-- Now uses tracer-driven execution instead of custom `stepExecute()` logic
-- Integrated with debug hooks from PR 1 for pausable stepping
-- Uses standard memory tracer from PR 2 for state capture
+- Now uses TracerHandle-driven execution instead of custom `stepExecute()` logic
+- Integrated with MemoryTracer execution control for pausable stepping
+- Uses enhanced MemoryTracer from PR 2 for state capture and control flow
 - Ready for dual-engine integration
 
 ### Components Available From Previous PRs
-- **PR 1**: Debug hooks system (`src/evm/debug_hooks.zig`) with `OnStepFn` callbacks
-- **PR 2**: Standard memory tracer for state capture and serialization  
+- **PR 1**: Standard MemoryTracer with TracerHandle interface for unified tracing
+- **PR 2**: Enhanced MemoryTracer with execution control, step modes, and breakpoints
 - **PR 3**: Shadow comparator (`src/evm/debug/shadow.zig`) and Mini per-step API (`execute_single_op`)
-- **PR 4**: Devtool refactored to use tracer-driven execution via debug hooks
+- **PR 4**: Devtool refactored to use TracerHandle-driven execution
 
 ### PR 6 Components To Implement  
 - Side-by-side dual execution mode in devtool

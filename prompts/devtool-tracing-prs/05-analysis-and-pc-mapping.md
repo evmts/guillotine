@@ -900,7 +900,7 @@ A:
 A: Start with single-byte highlighting at `currentPc`. Multi-byte highlighting is possible but requires additional logic to calculate immediate lengths and spans.
 
 **Q: Do we need to modify the core interpreter?**  
-A: No. The interpreter already has PC tracking for external tracers. Devtool uses analysis-first stepping and can derive all needed information from existing structures.
+A: No. The interpreter already has PC tracking for the TracerHandle system. Devtool uses analysis-first stepping and can derive all needed information from existing structures.
 
 **Q: How does this work with dynamic jumps?**  
 A: 

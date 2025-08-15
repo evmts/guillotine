@@ -31,16 +31,16 @@ This document provides exhaustive implementation details for the devtool tracing
 
 ### Per-PR Checks
 
-1. Debug Hooks:
-   - Unit: pause/abort semantics; message hooks fire around CALL/CREATE.
+1. TracerHandle Infrastructure:
+   - Unit: pause/abort semantics via StepControl; message hooks fire around CALL/CREATE.
    - Integration: stepping preserves interpreter semantics.
-2. Standard Tracer:
+2. MemoryTracer:
    - Unit: arithmetic/memory/storage/log capture; bounded memory.
-   - Perf: ensure near-zero overhead when disabled (compile-time guarded checks).
+   - Perf: ensure near-zero overhead when disabled (TracerHandle is null).
 3. REVM Bridge:
    - Differential: parity on small programs; struct log alignment.
 4. Devtool Refactor:
-   - Headless: step/pause/resume; breakpoints.
+   - Headless: step/pause/resume using MemoryTracer; breakpoints.
    - UI Smoke: opcode list, stack/memory/storage, gas.
 5. Analysis + PC Mapping:
    - Unit: instruction index to original PC is stable across steps.
@@ -57,7 +57,7 @@ This document provides exhaustive implementation details for the devtool tracing
 ### Acceptance Criteria for the Stack
 
 - All tests green per PR and at top-of-stack.
-- Devtool can load bytecode, step interactively, and compare with REVM.
+- Devtool can load bytecode, step interactively using MemoryTracer, and compare with REVM.
 - Memory ownership clear; no leaks under `std.heap.GeneralPurposeAllocator` checks.
 
 ## PR 8: QA and Test Plan for Devtool Tracing Stack (Implementation-Ready)
@@ -65,7 +65,7 @@ This document provides exhaustive implementation details for the devtool tracing
 ### Goals
 
 - Ensure each PR in the tracing stack (PRs 1–7) is fully covered by unit/integration tests with zero regressions.
-- Validate end-to-end behavior of the Devtool (headless and UI) driven by the tracer.
+- Validate end-to-end behavior of the Devtool (headless and UI) driven by the TracerHandle system.
 - Lock in deterministic analysis/PC mapping and trace formats for comparison against REVM.
 - Establish a clear workflow to diagnose divergences with minimal repros.
 
@@ -109,7 +109,9 @@ src/
 ├── evm/
 │   ├── root.zig              # Main exports
 │   ├── evm.zig                # Core VM implementation
-│   ├── tracer.zig             # Tracing implementation
+│   ├── tracing/               # TracerHandle infrastructure
+│   │   ├── trace_types.zig    # TracerHandle and VTable definitions
+│   │   └── memory_tracer.zig  # MemoryTracer implementation
 │   ├── evm/
 │   │   └── interpret.zig      # Execution loop (where tracing hooks go)
 │   ├── frame.zig              # Execution context
@@ -129,7 +131,7 @@ test/
 - Platforms: macOS 14+ (Apple Silicon), Linux (CI).
 - Build flavors:
   - Regular: `zig build && zig build test`
-  - Tracing-enabled: `zig build -Denable-tracing=true && zig build -Denable-tracing=true test`
+  - With TracerHandle: `zig build && zig build test` (TracerHandle system is always available)
   - Devtool: `zig build devtool`
   - Optional sanity: `zig build bench`
 
@@ -137,40 +139,38 @@ test/
 
 ## Build System & Configuration
 
-### Compile-Time Tracing Control
+### TracerHandle System Control
 
-**Critical Understanding:** Tracing is controlled at compile-time via build options to avoid runtime overhead.
+**Critical Understanding:** TracerHandle system provides zero-cost tracing through type erasure and optional hooks.
 
 ```zig
-// build.zig (already implemented)
-const enable_tracing = b.option(bool, "enable-tracing", "Enable EVM instruction tracing (compile-time)") orelse false;
-build_options.addOption(bool, "enable_tracing", enable_tracing);
+// TracerHandle is always available, no compile-time flags needed
+const tracer_handle = TracerHandle{
+    .vtable = &memory_tracer_vtable,
+    .ctx = @ptrCast(&memory_tracer),
+};
+evm.set_tracer(tracer_handle);
 ```
 
-**In your code, always guard tracing:**
+**In your code, TracerHandle calls are zero-cost when null:**
 ```zig
-const build_options = @import("build_options");
-
-// Runtime tracing check
-if (comptime build_options.enable_tracing) {
-    // Only compiled when tracing enabled
-    if (self.tracer) |writer| {
-        // Emit trace
+// Runtime tracer check (zero overhead when null)
+if (self.tracer_handle) |tracer| {
+    if (tracer.vtable.on_step_before) |hook| {
+        const step_control = hook(tracer.ctx, &step_info);
+        // Handle step control response
     }
-} else {
-    // When disabled, return error if user tries to enable
-    return error.FeatureDisabled;
 }
 ```
 
 ### Build Commands Reference
 
 ```bash
-# Standard development (no tracing)
+# Standard development (TracerHandle always available)
 zig build && zig build test
 
-# With tracing enabled (for tracing tests)
-zig build -Denable-tracing=true && zig build -Denable-tracing=true test
+# Same commands work for tracing (no special flags needed)
+zig build && zig build test
 
 # Devtool UI
 zig build devtool
@@ -371,39 +371,40 @@ pub const Tracer = struct {
 
 ### Per‑PR QA Checklist (what to test, how to test, and exact anchors)
 
-1. Interpreter Debug Hooks (PR 1)
+1. TracerHandle Infrastructure (PR 1)
 
-- Purpose: deterministic stepping control (pause/continue/abort) and lifecycle hooks around CALL/CREATE.
-- Hook point: `pre_step(...)` in `src/evm/evm/interpret.zig` runs before each instruction; add hook calls here and before/after CALL/CREATE handlers.
-- Unit tests (new): `test/evm/debug_hooks_test.zig`
+- Purpose: deterministic stepping control (pause/continue/abort) via StepControl and lifecycle hooks around CALL/CREATE.
+- Hook point: TracerHandle calls in `src/evm/evm/interpret.zig` before each instruction and around CALL/CREATE handlers.
+- Unit tests (new): `test/evm/tracer_handle_test.zig`
   - Arrange: minimal bytecode (e.g., `PUSH1,PUSH1,ADD,STOP`).
-  - Configure: install a hook that pauses after N steps; assert interpreter halts and resumes correctly.
-  - CALL/CREATE hook assertions: deploy a tiny callee; assert `on_enter_call`/`on_exit_call` fire exactly once and with correct depth.
-- Integration: ensure hook presence does not change semantics. Run a small program twice: with hooks (no pauses) and without; compare `Host` output and gas usage.
+  - Configure: install a TracerHandle that returns `.pause` after N steps; assert interpreter halts and resumes correctly.
+  - CALL/CREATE hook assertions: deploy a tiny callee; assert `on_message_before`/`on_message_after` fire exactly once and with correct depth.
+- Integration: ensure TracerHandle presence does not change semantics. Run a small program twice: with TracerHandle (no pauses) and without; compare `Host` output and gas usage.
 
-2. Standard Tracer (PR 2)
+2. MemoryTracer (PR 2)
 
-- File: `src/evm/tracer.zig`
-- Enable tracing at runtime: set `Evm.tracer = AnyWriter` (use `Evm.enable_tracing_to_path()` or builder-style API if available).
-- Unit tests: `test/evm/tracer_test.zig` already verifies JSON lines exist; extend with:
-  - Verify required fields exist (`pc`, `op`, `gas`, `gasCost`, `stack`, `depth`, `memSize`, `opName`).
-  - Verify stack formatting (hex, minimal form, `0x0` for zero).
-  - Verify bounded memory metadata: `memSize` equals `frame.memory.size()` snapshot.
-- Perf guard: ensure tracer calls are behind `comptime build_options.enable_tracing`. Add a test that builds without `-Denable-tracing` and asserts tracing cannot be enabled (`error.FeatureDisabled`).
+- File: `src/evm/tracing/memory_tracer.zig`
+- Enable tracing at runtime: set `Evm.tracer_handle = memory_tracer.get_tracer_handle()`.
+- Unit tests: `test/evm/memory_tracer_test.zig` extends existing tracer tests with:
+  - Verify execution trace capture with bounded memory limits.
+  - Verify step control functionality (pause/resume/abort).
+  - Verify message event capture for CALL/CREATE operations.
+  - Verify ExecutionTrace serialization and bounded capture system.
+- Perf guard: ensure TracerHandle calls are zero-cost when null. Add a test that verifies no performance overhead when tracer_handle is null.
 
 3. REVM Bridge (PR 3)
 
 - Files: `src/revm_wrapper/revm.zig`, `src/revm_wrapper/src/lib.rs`.
 - Differential tests: in `test/differential/system_differential_test.zig`:
   - Arithmetic/memory/control flow samples: parity on success flag, return data, gas, and stack.
-  - Trace parity when `-Denable-tracing=true`: same `pc`, `op`, stack length/values per step.
+  - Trace parity with MemoryTracer: same `pc`, `op`, stack length/values per step.
 - Add small focused cases: `CREATE`, `CREATE2`, `CALL`, `STATICCALL`, `DELEGATECALL`, storage read/write, and memory growth.
 
-4. Devtool Refactor to Tracer-Driven (PR 4)
+4. Devtool Refactor to TracerHandle-Driven (PR 4)
 
-- Replace analysis-first stepping in `src/devtool/evm.zig` with tracer-driven execution using debug hooks from PR 1.
+- Integrate MemoryTracer execution control in `src/devtool/evm.zig` with TracerHandle-driven stepping.
 - Headless tests (new): `test/devtool/devtool_runner_test.zig` to verify:
-  - `step()` executes exactly one opcode; `continue()` respects pause/breakpoints; `reset()` clears state.
+  - `step()` executes exactly one opcode using MemoryTracer; `continue()` respects pause/breakpoints; `reset()` clears state.
   - Errors surface to the UI layer (expose last error string/code in the serialized state).
 - UI smoke tests (manual): run `zig build devtool`, then verify the following via the WebUI bindings (`src/devtool/app.zig`):
   - Opcode list renders; bytecode grid highlights current PC.
@@ -555,27 +556,25 @@ This plan, together with the cited anchors and commands, is sufficient to implem
 
 ### Public APIs to (add|use) across PRs
 
-- EVM debug hooks (to add in PR 1):
-  - `pub const StepControl = enum { continue, pause, abort };`
-  - `pub const MessagePhase = enum { before, after };`
-  - `pub const OnStepFn = *const fn (user_ctx: ?*anyopaque, frame: *Frame, pc: usize, opcode: u8) anyerror!StepControl;`
-  - `pub const OnMessageFn = *const fn (user_ctx: ?*anyopaque, params: *const CallParams, phase: MessagePhase) anyerror!void;`
-  - `pub const DebugHooks = struct { user_ctx: ?*anyopaque = null, on_step: ?OnStepFn = null, on_message: ?OnMessageFn = null };`
-  - `pub fn set_debug_hooks(self: *Evm, hooks: ?DebugHooks) void { self.debug_hooks = hooks; }`
-  - Wire calls in `interpret.zig` before exec and around CALL/CREATE in system op handlers.
+- TracerHandle infrastructure (already implemented in PR 1):
+  - `pub const StepControl = enum { cont, pause, abort };`
+  - `pub const TracerVTable = struct { on_step_before: ?*const fn (ctx: *anyopaque, info: *const StepInfo) StepControl = null, ... };`
+  - `pub const TracerHandle = struct { vtable: *const TracerVTable, ctx: *anyopaque };`
+  - `pub fn set_tracer(self: *Evm, tracer_handle: ?TracerHandle) void { self.tracer_handle = tracer_handle; }`
+  - TracerHandle calls are integrated in `interpret.zig` before exec and around CALL/CREATE in system op handlers.
 - Tracing (already present):
   - `pub fn enable_tracing_to_path(self: *Evm, path: []const u8, append: bool) !void` (gated by `build_options.enable_tracing`).
   - When enabled and `self.tracer` is set, `interpret.zig` emits REVM‑compatible JSON lines via `Tracer.trace(...)`.
 - Devtool runner (PR 4):
   - Headless control methods: `load(bytecode, calldata, env)`, `step()`, `continue(max_steps?)`, `pause()`, `reset()`, `set_breakpoints(pcs: []usize)`.
-  - Use debug hooks for pause/break; use tracer output to build UI state.
+  - Use MemoryTracer for pause/break control; use ExecutionTrace to build UI state.
 
 ### Differential tests and commands
 
-- Run all tests (no tracing):
+- Run all tests (TracerHandle always available):
   - `zig build && zig build test`
-- Run tracing-dependent tests and comparisons:
-  - `zig build -Denable-tracing=true && zig build -Denable-tracing=true test`
+- Run TracerHandle-dependent tests and comparisons:
+  - `zig build && zig build test` (same commands)
 - Run dedicated differential test step (if defined in `build.zig`):
   - `zig build test-differential`
 - Build devtool UI app:
@@ -595,12 +594,12 @@ This plan, together with the cited anchors and commands, is sufficient to implem
 
 ### Common pitfalls and how to avoid them
 
-- Tracing overhead:
-  - Always guard tracing with `comptime build_options.enable_tracing` and `if (self.tracer) |w| { ... }` inside the guard. Do not allocate on the hot path.
+- TracerHandle overhead:
+  - TracerHandle calls are zero-cost when null: `if (self.tracer_handle) |tracer| { ... }`. Do not allocate on the hot path.
 - Pausing semantics:
-  - When `on_step` returns `.pause`, surface a distinct pause error or state to the caller and do not advance `frame.instruction`. Resumption should continue from the same instruction.
+  - When `on_step_before` returns `.pause`, surface a distinct pause error or state to the caller and do not advance `frame.instruction`. Resumption should continue from the same instruction.
 - CALL/CREATE hooks:
-  - For `.before`, compute and pass params but don’t allocate. For `.after`, include success flag and returned gas/output if available. Do not retain borrowed slices outside the scope.
+  - For `on_message_before`, compute and pass MessageEvent but don't allocate. For `on_message_after`, include success flag and returned gas/output if available. Do not retain borrowed slices outside the scope.
 - PC mapping edge cases:
   - For fused/derived instructions without a direct PC mapping, `inst_to_pc[idx] == maxInt(u16)`. Use the fallback derivation `(prev_pc + 1 + imm_len(prev_op))` only for UI hints, not for correctness.
 - Memory and stack ownership:
@@ -621,6 +620,6 @@ This plan, together with the cited anchors and commands, is sufficient to implem
 ### Commit policy and verification gates
 
 - After every edit: `zig build && zig build test` (stop and fix on any failure).
-- For tracing changes: also run `zig build -Denable-tracing=true && zig build -Denable-tracing=true test`.
+- For TracerHandle changes: same command `zig build && zig build test` (TracerHandle always available).
 - For differential: `zig build test-differential` where available.
 - Use emoji conventional commits (see repository rules).

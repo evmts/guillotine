@@ -4,7 +4,7 @@
 
 The UI currently shows only per-step execution. For effective debugging and comprehension, we need a collapsible call tree of message frames (CALL/CALLCODE/DELEGATECALL/STATICCALL/CREATE/CREATE2). Each frame must capture lifecycle and summary: caller, callee/created address, value, gas forwarded, input/output sizes, status (success/revert), and the step range [start_step, end_step] it spans in the execution trace.
 
-This PR implements frame capture at core tracing hooks and adds a sidebar UI to browse the call tree. Selection must filter the step list to the selected frame's step range.
+This PR implements frame capture using TracerHandle message hooks and adds a sidebar UI to browse the call tree. Selection must filter the step list to the selected frame's step range.
 
 ### Codebase Architecture Analysis
 
@@ -20,10 +20,10 @@ This section provides a comprehensive understanding of the Zig EVM implementatio
 - `src/evm/execution/system.zig` - CALL/CREATE opcode implementations (6 variants)
 
 **Current Tracing Infrastructure:**
-- `src/evm/tracer.zig` - JSON tracer that outputs REVM-compatible trace lines
-- Build-time `enable_tracing` flag controls tracing compilation
-- EVM has optional `tracer: ?std.io.AnyWriter` field
-- `pre_step()` in interpret.zig already generates trace data when tracer is active
+- `src/evm/tracing/trace_types.zig` - TracerHandle interface with VTable pattern
+- `src/evm/tracing/memory_tracer.zig` - MemoryTracer with execution control
+- TracerHandle supports message hooks for CALL/CREATE operations
+- Execution control with StepControl enum (cont, pause, abort)
 
 **Devtool Integration:**
 - `src/devtool/debug_state.zig` - Current EvmStateJson structure for frontend
@@ -197,9 +197,9 @@ const call_params = CallParams{
 
 ### Preconditions and Context
 
-- This PR builds on PR 1 (onStep/onMessage hooks) and PR 2 (standard in-process tracer). It uses those hooks to construct a frame timeline.
-- **CRITICAL**: The hook system doesn't exist yet - this PR needs to create the debug hooks infrastructure first
-- The core already exposes: Frame state during interpretation, Host/CallParams for CALL/CREATE-family, and a minimal JSON tracer gated by `build_options.enable_tracing`.
+- This PR builds on the TracerHandle infrastructure and MemoryTracer implementation. It uses TracerHandle message hooks to construct a frame timeline.
+- The TracerHandle system is already implemented with VTable pattern for zero-cost type erasure
+- The core already exposes: Frame state during interpretation, Host/CallParams for CALL/CREATE-family, and TracerHandle message hooks for lifecycle tracking.
 
 - Interpreter pre-step with PC/opcode mapping (where step index can be derived from `inst`):
 
@@ -318,56 +318,26 @@ const call_params = CallParams{
 
 ### Complete Implementation Strategy
 
-Since the debug hooks infrastructure doesn't exist yet, this PR needs to implement the entire system from scratch. Here's the complete implementation strategy:
+The TracerHandle infrastructure is already implemented, so this PR builds upon the existing system. Here's the implementation strategy:
 
-### Step 1: Create Debug Hooks Infrastructure
+### Step 1: Extend TracerHandle for Frame Capture
 
-**Create `src/evm/debug_hooks.zig`:**
+The TracerHandle system in `src/evm/tracing/trace_types.zig` already provides the foundation with:
+
 ```zig
-const std = @import("std");
-const primitives = @import("primitives");
-const CallParams = @import("host.zig").CallParams;
-const Frame = @import("frame.zig").Frame;
-const Instruction = @import("instruction.zig").Instruction;
-
-/// Phase of message call execution
-pub const MessagePhase = enum {
-    before, // Just before host.call() is invoked
-    after,  // Just after host.call() returns, before output is freed
+/// VTable for tracer implementations with optional hook methods
+pub const TracerVTable = struct {
+    on_step_before: ?*const fn (ctx: *anyopaque, info: *const StepInfo) StepControl = null,
+    on_step_after: ?*const fn (ctx: *anyopaque, result: *const StepResult) void = null,
+    on_message_before: ?*const fn (ctx: *anyopaque, event: *const MessageEvent) void = null,
+    on_message_after: ?*const fn (ctx: *anyopaque, event: *const MessageEvent) void = null,
+    deinit: ?*const fn (ctx: *anyopaque, allocator: std.mem.Allocator) void = null,
 };
 
-/// Result data available in the 'after' phase
-pub const CallResultView = struct { 
-    success: bool, 
-    gas_left: u64, 
-    output: ?[]const u8  // Valid only during hook call, must copy if storing
-};
-
-/// Hook function for step-by-step execution tracing  
-pub const OnStepFn = *const fn (
-    user_ctx: ?*anyopaque,
-    frame: *Frame,
-    inst_idx: usize,
-    pc: usize,
-    opcode: u8,
-) anyerror!void;
-
-/// Hook function for message call lifecycle (CALL/CREATE family)
-pub const OnMessageFn = *const fn (
-    user_ctx: ?*anyopaque,
-    params: *const CallParams,
-    phase: MessagePhase,
-    result: ?CallResultView, // null in .before; set in .after
-) anyerror!void;
-
-/// Debug hooks configuration structure
-pub const DebugHooks = struct {
-    /// Arbitrary user context passed to all hook functions
-    user_ctx: ?*anyopaque = null,
-    /// Called on every EVM step (before instruction execution)
-    on_step: ?OnStepFn = null,
-    /// Called before and after message calls (CALL/CREATE family)
-    on_message: ?OnMessageFn = null,
+/// Zero-cost type-erased tracer handle
+pub const TracerHandle = struct {
+    vtable: *const TracerVTable,
+    ctx: *anyopaque,
 };
 ```
 

@@ -2,13 +2,13 @@
 
 ### Problem
 
-The devtool currently reproduces interpreter logic to step instructions, making it hard to maintain. With Debug Hooks and the Standard Tracer, we can eliminate duplication and drive the UI from trace data.
+The devtool currently reproduces interpreter logic to step instructions, making it hard to maintain. With the unified TracerHandle system and MemoryTracer implementation, we can eliminate duplication and drive the UI from trace data.
 
 ### Goals
 
-- Replace duplicated stepping logic in `src/devtool/evm.zig` with calls to EVM `set_debug_hooks` and `set_tracer`.
-- Implement a `MemoryTracerAdapter` that accumulates steps and exposes the exact data the UI needs.
-- Provide pause/resume/step/break functionality via hooks.
+- Replace duplicated stepping logic in `src/devtool/evm.zig` with TracerHandle-based execution control.
+- Utilize the enhanced MemoryTracer with execution control capabilities that combines tracing and debugging.
+- Provide pause/resume/step/break functionality via TracerHandle control flow methods.
 
 ### Existing Devtool Behaviors to Preserve
 
@@ -21,11 +21,12 @@ The devtool currently reproduces interpreter logic to step instructions, making 
 
 - `src/devtool/evm.zig`:
   - Create a wrapper around `Evm` that:
-    - initializes with `set_debug_hooks` and `set_tracer`.
+    - initializes with MemoryTracer using TracerHandle interface.
     - exposes `start(bytecode, calldata, env)`, `step()`, `continue()`, `pause()`, `reset()`.
+    - utilizes MemoryTracer's execution control features (step modes, breakpoints).
   - Implement internal ring buffer for steps to support back/forward scrubbing without recomputation; cap size and allow replay.
 - UI wiring (`src/devtool/solid/*`):
-  - Switch data source from custom interpreter model to tracer stream.
+  - Switch data source from custom interpreter model to TracerHandle stream.
   - Maintain derived selectors for current step, gas, stack/memory/storage.
 
 ### APIs
@@ -33,10 +34,11 @@ The devtool currently reproduces interpreter logic to step instructions, making 
 - `DevtoolRunner` (Zig):
   - `init(allocator)` / `deinit()`
   - `load(bytecode, calldata, env)`
-  - `step() bool` -> executes one opcode and appends a step; returns false if halted/paused.
-  - `continue(max_steps?: usize)` -> runs until halt/pause/breakpoint or step cap.
-  - `set_breakpoints(pcs: []usize)` and honor in `onStep`.
-  - `get_trace()` -> `ExecutionTrace` for export.
+  - `step() bool` -> executes one opcode using MemoryTracer's single-step mode; returns false if halted/paused.
+  - `continue(max_steps?: usize)` -> runs until halt/pause/breakpoint or step cap using TracerHandle control flow.
+  - `set_breakpoints(pcs: []usize)` -> configure MemoryTracer breakpoints.
+  - `get_trace()` -> `ExecutionTrace` from MemoryTracer for export.
+  - `pause()` / `resume()` -> control execution state via TracerHandle system.
 
 ### Tests
 
@@ -47,7 +49,8 @@ The devtool currently reproduces interpreter logic to step instructions, making 
 
 ### Acceptance Criteria
 
-- Devtool builds and runs with tracer-driven execution; stepping works with pause/resume.
+- Devtool builds and runs with TracerHandle-driven execution; stepping works with pause/resume via MemoryTracer control flow.
+- MemoryTracer integration provides both tracing data and execution control in a unified interface.
 - No interpreter code duplication remains in devtool; only uses EVM public APIs and tracer data.
 - All existing devtool UI affordances remain functional.
 

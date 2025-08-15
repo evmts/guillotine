@@ -16,13 +16,13 @@ The Mini EVM is already a fully functional simplified EVM interpreter that:
 - Introduce a shadow execution mode that compares the primary EVM (analysis/jumptable) with the Mini EVM for the same calls.
 - Default: per-call comparison (cheap). Debug mode: optional per-step comparison to find first divergent opcode.
 - Produce a structured mismatch report with precise state differences.
-- Leverage existing tracing infrastructure for integration with devtool.
+- Leverage existing `TracerHandle` infrastructure and unified tracing system for integration with devtool.
 
 ### Scope
 
 - Expose a lightweight step API in Mini EVM to enable per-step lockstep comparison.
 - Add an orchestrator that, for each CALL/CREATE-family operation, runs both engines with identical inputs and compares results.
-- Integrate with existing Debug/Tracing infrastructure so that devtool can pause on the first mismatch and display a detailed diff.
+- Integrate with existing `TracerHandle` infrastructure so that devtool can pause on the first mismatch and display a detailed diff.
 
 ### Integration Points & Architecture Overview
 
@@ -33,7 +33,7 @@ The Mini EVM is already a fully functional simplified EVM interpreter that:
 - Translates bytecode into instruction blocks for optimization
 - Uses tagged instruction dispatch (`.block_info`, `.exec`, `.dynamic_gas`, etc.)
 - PC tracking via `analysis.inst_to_pc` mapping for tracing
-- Built-in tracing infrastructure with `Tracer` support
+- Integrated with `TracerHandle` system for execution monitoring and control
 
 **Mini EVM (PC-Based)**:
 - Uses `src/evm/evm/call_mini.zig` with simple PC tracking
@@ -117,33 +117,48 @@ if (call_result.output) |out_buf| {
 ```
 
 **Required Integration**:
-Inject shadow comparison right after `host.call()`:
+Integrate shadow comparison via message hooks in TracerHandle:
 ```zig
+// Before host.call()
+const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+if (comptime build_options.enable_tracing) {
+    if (evm_ptr.inproc_tracer) |tracer_handle| {
+        const before_event = MessageEvent{
+            .phase = .before,
+            .params = call_params,
+            .result = null,
+            .depth = frame.depth,
+            .gas_before = frame.gas_remaining,
+            .gas_after = null,
+        };
+        tracer_handle.on_message_before(before_event);
+    }
+}
+
 const call_result = host.call(call_params) catch { /* ... */ };
 
-// SHADOW COMPARISON INJECTION POINT
-const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-if (evm_ptr.shadow_mode == .per_call) {
-    const mini_result = evm_ptr.call_mini_shadow(call_params, .per_call) catch |err| {
-        // Mini error becomes a mismatch event
-        CallResult{ .success = false, .gas_left = 0, .output = &.{} }
-    };
-    
-    if (try DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch| {
-        evm_ptr.last_shadow_mismatch = mismatch;
-        if (comptime builtin.mode == .Debug) {
-            return ExecutionError.Error.ShadowMismatch; // New error type
-        }
+// After host.call()
+if (comptime build_options.enable_tracing) {
+    if (evm_ptr.inproc_tracer) |tracer_handle| {
+        const after_event = MessageEvent{
+            .phase = .after,
+            .params = call_params,
+            .result = call_result,
+            .depth = frame.depth,
+            .gas_before = frame.gas_remaining,
+            .gas_after = call_result.gas_left,
+        };
+        tracer_handle.on_message_after(after_event);
     }
 }
 ```
 
 **3. `src/evm/evm/interpret.zig` - Per-Step Integration**
 
-The main interpreter has built-in tracing infrastructure (lines 44-72):
+The main interpreter integrates with the `TracerHandle` system for execution monitoring:
 ```zig
 if (comptime build_options.enable_tracing) {
-    if (self.tracer) |writer| {
+    if (self.inproc_tracer) |tracer_handle| {
         // Derive PC from instruction for tracing
         const base: [*]const Instruction = analysis.instructions.ptr;
         const idx = (@intFromPtr(instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
@@ -151,7 +166,10 @@ if (comptime build_options.enable_tracing) {
             const pc_u16 = analysis.inst_to_pc[idx];
             if (pc_u16 != std.math.maxInt(u16)) {
                 const pc: usize = pc_u16;
-                // Trace execution...
+                // Call tracer step hooks
+                tracer_handle.on_step_before(step_info);
+                // ... execute opcode ...
+                tracer_handle.on_step_after(step_result);
             }
         }
     }
@@ -159,28 +177,35 @@ if (comptime build_options.enable_tracing) {
 ```
 
 **Required Integration**:
-Extend the existing `pre_step()` function to include shadow comparison:
+Extend the existing tracer integration to include shadow comparison via specialized tracer:
 ```zig
-inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_iterations: *usize) !void {
-    // Existing tracing code...
+// Create a shadow comparison tracer that implements TracerVTable
+const ShadowComparator = struct {
+    mini_evm: *Evm,
+    main_frame: *Frame,
+    mini_frame: ?*Frame,
     
-    // NEW: Shadow step comparison
-    if (comptime build_options.enable_shadow_compare) {
-        if (self.shadow_mode == .per_step) {
-            // Extract PC like tracing does
-            const pc = /* PC derivation logic */;
-            
-            // Drive Mini EVM one step
-            const mini_pc = self.mini_shadow_frame_step(pc) catch return;
-            
-            // Compare states
-            if (try DebugShadow.compare_step(frame, self.mini_shadow_frame, pc, mini_pc, self.shadow_cfg, self.allocator)) |mismatch| {
-                self.last_shadow_mismatch = mismatch;
-                return ExecutionError.Error.ShadowMismatch;
-            }
+    fn on_step_before_impl(ptr: *anyopaque, step_info: StepInfo) void {
+        const self = @ptrCast(*ShadowComparator, @alignCast(@alignOf(ShadowComparator), ptr));
+        // Step Mini EVM and compare state
+        const mini_result = self.mini_evm.execute_single_op(...) catch return;
+        if (!self.compare_states(step_info, mini_result)) {
+            // Trigger mismatch handling
         }
     }
-}
+    
+    pub fn handle(self: *ShadowComparator) TracerHandle {
+        return TracerHandle{
+            .ptr = @ptrCast(self),
+            .vtable = &.{
+                .on_step_before = on_step_before_impl,
+                .finalize = finalize_impl,
+                .get_trace = get_trace_impl,
+                .deinit = deinit_impl,
+            },
+        };
+    }
+};
 ```
 
 ### Comprehensive Comparator Design
