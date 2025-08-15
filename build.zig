@@ -1141,6 +1141,23 @@ pub fn build(b: *std.Build) void {
     const evm_package_test_step = b.step("test-evm-all", "Run all EVM tests via package");
     evm_package_test_step.dependOn(&run_evm_package_test.step);
 
+    // Add evm.zig tests
+    const evm_core_test = b.addTest(.{
+        .name = "evm-core-test",
+        .root_source_file = b.path("src/evm/evm.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evm_core_test.root_module.addImport("evm", evm_mod);
+    evm_core_test.root_module.addImport("primitives", primitives_mod);
+    evm_core_test.root_module.addImport("crypto", crypto_mod);
+    evm_core_test.root_module.addImport("build_options", build_options_mod);
+    evm_core_test.addIncludePath(b.path("src/bn254_wrapper"));
+    const run_evm_core_test = b.addRunArtifact(evm_core_test);
+    const evm_core_test_step = b.step("test-evm-core", "Run evm.zig tests");
+    evm_core_test_step.dependOn(&run_evm_core_test.step);
+    evm_package_test_step.dependOn(&run_evm_core_test.step);
+
     // Add comprehensive opcodes tests package
     const opcodes_package_test = b.addTest(.{
         .name = "opcodes-package-test",
@@ -1888,6 +1905,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_config_test.step);
     test_step.dependOn(&run_differential_test.step);
     test_step.dependOn(&run_staticcall_test.step);
+    test_step.dependOn(&run_evm_core_test.step);
     // benchmark runner test removed - file no longer exists
 
     // Add inline ops test
