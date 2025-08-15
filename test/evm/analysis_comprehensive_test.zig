@@ -11,6 +11,10 @@ const ExecutionError = evm.ExecutionError;
 const MemoryDatabase = evm.MemoryDatabase;
 const Address = @import("primitives").Address;
 
+test {
+    std.testing.log_level = .warn;
+}
+
 // ============================================================================
 // Unit Tests - Testing analysis.zig functions in isolation
 // ============================================================================
@@ -429,8 +433,8 @@ test "E2E: JUMPI conditional jump taken" {
     defer vm.deinit();
     
     const bytecode = &[_]u8{
-        0x60, 0x08, // PUSH1 8 (jump target)
         0x60, 0x01, // PUSH1 1 (condition - true)
+        0x60, 0x08, // PUSH1 8 (jump target)
         0x57, // JUMPI
         0x60, 0xFF, // PUSH1 255 (should be skipped)
         0x00, // STOP
@@ -482,8 +486,8 @@ test "E2E: JUMPI conditional jump not taken" {
     defer vm.deinit();
     
     const bytecode = &[_]u8{
-        0x60, 0x08, // PUSH1 8 (jump target)
         0x60, 0x00, // PUSH1 0 (condition - false)
+        0x60, 0x08, // PUSH1 8 (jump target)
         0x57, // JUMPI
         0x60, 0xFF, // PUSH1 255 (should execute)
         0x00, // STOP
@@ -508,6 +512,60 @@ test "E2E: JUMPI conditional jump not taken" {
     const result = try vm.call(params);
     // Should succeed (STOP after push)
     try testing.expect(result.success);
+}
+
+test "Debug: JUMPDEST analysis" {
+    // Enable debug logging for this test
+    std.testing.log_level = .warn;
+    
+    const allocator = testing.allocator;
+    
+    const bytecode = &[_]u8{
+        0x60, 0x01, // PUSH1 1 (positions 0-1)
+        0x60, 0x08, // PUSH1 8 (positions 2-3)  
+        0x57,       // JUMPI   (position 4)
+        0x60, 0xFF, // PUSH1 255 (positions 5-6)
+        0x00,       // STOP    (position 7)
+        0x5b,       // JUMPDEST (position 8)
+        0x60, 0x42, // PUSH1 66 (positions 9-10)
+        0x60, 0x00, // PUSH1 0  (positions 11-12)
+        0x52,       // MSTORE  (position 13)
+        0x60, 0x20, // PUSH1 32 (positions 14-15)
+        0x60, 0x00, // PUSH1 0  (positions 16-17)
+        0xf3,       // RETURN  (position 18)
+    };
+    
+    std.log.warn("\n=== Testing bytecode analysis ===", .{});
+    for (bytecode, 0..) |byte, i| {
+        std.log.warn("Position {d:2}: 0x{x:0>2}", .{i, byte});
+    }
+    
+    const table = OpcodeMetadata.DEFAULT;
+    
+    var analysis = try Analysis.from_code(allocator, bytecode, &table);
+    defer analysis.deinit();
+    
+    std.log.warn("\n=== Jumpdest analysis ===", .{});
+    std.log.warn("Code length: {}", .{analysis.code_len});
+    std.log.warn("Jumpdest array positions: {}", .{analysis.jumpdest_array.positions.len});
+    
+    for (analysis.jumpdest_array.positions) |pos| {
+        std.log.warn("  JUMPDEST at position: {}", .{pos});
+    }
+    
+    // Test jumpdest validation
+    std.log.warn("\n=== Testing jumpdest validation ===", .{});
+    for (0..bytecode.len) |i| {
+        const is_valid = analysis.jumpdest_array.is_valid_jumpdest(i);
+        if (is_valid) {
+            std.log.warn("Position {}: VALID JUMPDEST", .{i});
+        }
+    }
+    
+    // The JUMPDEST should be at position 8
+    try testing.expect(analysis.jumpdest_array.is_valid_jumpdest(8));
+    try testing.expect(!analysis.jumpdest_array.is_valid_jumpdest(7));
+    try testing.expect(!analysis.jumpdest_array.is_valid_jumpdest(9));
 }
 
 test "E2E: Loop with backward JUMP" {
