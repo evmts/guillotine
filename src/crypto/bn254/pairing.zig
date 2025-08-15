@@ -83,21 +83,21 @@ pub fn final_exponentiation_easy_part(f: *const Fp12Mont) Fp12Mont {
 
 //this is algorithm 6 from this paper: https://eprint.iacr.org/2015/192.pdf
 pub fn final_exponentiation_hard_part(f: *const Fp12Mont) Fp12Mont {
-    var t0 = f.pow(CURVE_PARAM_T).unaryInverse();
+    var t0 = f.powParamT().unaryInverse();
 
     t0.squareAssign();
 
     var t1 = t0.square();
     t1.mulAssign(&t0);
 
-    var t2 = t1.pow(CURVE_PARAM_T).unaryInverse();
+    var t2 = t1.powParamT().unaryInverse();
     var t3 = t1.unaryInverse();
 
     t1 = t2;
     t1.mulAssign(&t3);
 
     t3 = t2.square();
-    var t4 = t3.pow(CURVE_PARAM_T).unaryInverse();
+    var t4 = t3.powParamT().unaryInverse();
 
     t4.unaryInverseAssign();
     t4.mulAssign(&t1);

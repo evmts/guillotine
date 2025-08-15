@@ -1,6 +1,11 @@
 const std = @import("std");
 const curve_parameters = @import("curve_parameters.zig");
 
+//
+// Base field: F_p where p is the BN254 prime modulus
+// We use Montgomery representation: elements are stored as a*R mod p where R = 2^256
+//
+
 pub const FpMont = @This();
 
 value: u256,
@@ -9,6 +14,9 @@ pub const ZERO = FpMont{ .value = 0 };
 pub const ONE = FpMont{ .value = curve_parameters.MONTGOMERY_R_MOD_P };
 pub const FP_MOD = curve_parameters.FP_MOD;
 
+/// Initialize a new FpMont element from a standard integer value
+/// This converts the value to Montgomery form by multiplying by R^2 mod p
+/// using Montgomery multiplication
 pub fn init(value: u256) FpMont {
     const value_mod_p = value % curve_parameters.FP_MOD;
 
@@ -23,10 +31,10 @@ pub fn toStandardRepresentation(self: *const FpMont) u256 {
     return REDC(self.value);
 }
 
+/// Montgomery REDC algorithm
+/// Reference: https://en.wikipedia.org/wiki/Montgomery_modular_multiplication
+/// This is used to convert from Montgomery to standard representation
 pub fn REDC(T: u256) u256 {
-    // const T_mc: u512 = @as(u512, T) * @as(u512, curve_parameters.MONTGOMERY_MINUS_P_INV_MOD_R);
-    // const T_mc_mod_R: u256 = @truncate(T_mc); // lower 256 bits
-
     const a = T *% curve_parameters.MONTGOMERY_MINUS_P_INV_MOD_R;
 
     const u = T + (@as(u512, a) * @as(u512, FP_MOD));
@@ -64,17 +72,20 @@ pub fn subAssign(self: *FpMont, other: *const FpMont) void {
     self.* = self.sub(other);
 }
 
+/// Montgomery REDC multiplication: (a*R) * (b*R) * R^-1 mod p = (a*b*R) mod p
+/// Reference: https://en.wikipedia.org/wiki/Montgomery_modular_multiplication
 pub fn mul(self: *const FpMont, other: *const FpMont) FpMont {
-    const T: u512 = @as(u512, self.value) * @as(u512, other.value);
-    const T_mod_R: u256 = @truncate(T); // lower 256 bits
+    // a = self.value, b = other.value (both in Montgomery form)
+    const ab: u512 = @as(u512, self.value) * @as(u512, other.value);
+    const ab_lo: u256 = @truncate(ab); // Lower 256 bits
 
-    const T_K = T_mod_R *% curve_parameters.MONTGOMERY_MINUS_P_INV_MOD_R; // lower 256 bits
+    const k = ab_lo *% curve_parameters.MONTGOMERY_MINUS_P_INV_MOD_R; // Montgomery factor
 
-    const u = T + (@as(u512, T_K) * @as(u512, FP_MOD));
-    const u_div_R: u256 = @truncate(u >> 256); // upper 256 bits
+    const t = ab + (@as(u512, k) * @as(u512, FP_MOD));
+    const c: u256 = @truncate(t >> 256); // Upper 256 bits = result candidate
 
     return FpMont{
-        .value = if (u_div_R >= curve_parameters.FP_MOD) u_div_R - curve_parameters.FP_MOD else u_div_R,
+        .value = if (c >= curve_parameters.FP_MOD) c - curve_parameters.FP_MOD else c,
     };
 }
 
@@ -82,7 +93,7 @@ pub fn mulAssign(self: *FpMont, other: *const FpMont) void {
     self.* = self.mul(other);
 }
 
-//we use double and add to multiply by a small integer, this is faster than Montgomery multiplication for small hamming weights
+// we use double and add to multiply by a small integer, this is faster than Montgomery multiplication for very small hamming weights
 pub fn mulBySmallInt(self: *const FpMont, other: u8) FpMont {
     var result = ZERO;
     var base = self.*;

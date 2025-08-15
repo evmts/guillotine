@@ -2,6 +2,11 @@ const FpMont = @import("FpMont.zig");
 const Fp2Mont = @import("Fp2Mont.zig");
 const curve_parameters = @import("curve_parameters.zig");
 
+//
+// Field extension: F_p6 = F_p2[v] / (v^3 - ξ) where ξ = 9 + u ∈ F_p2
+// Elements: a = a0 + a1*v + a2*v^2, where a0, a1, a2 ∈ F_p2 and v^3 = 9 + u
+//
+
 pub const Fp6Mont = @This();
 
 v0: Fp2Mont,
@@ -72,36 +77,31 @@ pub fn mulByV(self: *const Fp6Mont) Fp6Mont {
     };
 }
 
-// using the Karatsuba algorithm
+/// Karatsuba multiplication: (a0 + a1*v + a2*v²)(b0 + b1*v + b2*v²) mod (v³ - ξ)
+/// Reference: https://en.wikipedia.org/wiki/Karatsuba_algorithm
 pub fn mul(self: *const Fp6Mont, other: *const Fp6Mont) Fp6Mont {
-    // ξ = 9 + u ∈ Fp2
+    // a = a0 + a1*v + a2*v², b = b0 + b1*v + b2*v², ξ = 9 + u ∈ F_p2
     const xi = curve_parameters.XI;
 
-    // s0 = a0 * b0, s1 = a1 * b1, s2 = a2 * b2
-    const s0 = self.v0.mul(&other.v0);
-    const s1 = self.v1.mul(&other.v1);
-    const s2 = self.v2.mul(&other.v2);
+    // Direct products: a_i * b_i
+    const a0_b0 = self.v0.mul(&other.v0);
+    const a1_b1 = self.v1.mul(&other.v1);
+    const a2_b2 = self.v2.mul(&other.v2);
 
-    // t0 = (a1 + a2) * (b1 + b2)
-    // t1 = (a0 + a1) * (b0 + b1)
-    // t2 = (a0 + a2) * (b0 + b2)
-    const t0 = self.v1.add(&self.v2).mul(&other.v1.add(&other.v2));
-    const t1 = self.v0.add(&self.v1).mul(&other.v0.add(&other.v1));
-    const t2 = self.v0.add(&self.v2).mul(&other.v0.add(&other.v2));
+    // Karatsuba cross-products: (a_i + a_j)(b_i + b_j)
+    const t0 = self.v1.add(&self.v2).mul(&other.v1.add(&other.v2)); // (a1+a2)(b1+b2)
+    const t1 = self.v0.add(&self.v1).mul(&other.v0.add(&other.v1)); // (a0+a1)(b0+b1)
+    const t2 = self.v0.add(&self.v2).mul(&other.v0.add(&other.v2)); // (a0+a2)(b0+b2)
 
-    // tmp0 = t0 - s1 - s2
-    // tmp1 = t1 - s0 - s1
-    // tmp2 = t2 - s0 - s2
-    const tmp0 = t0.sub(&s1).sub(&s2);
-    const tmp1 = t1.sub(&s0).sub(&s1);
-    const tmp2 = t2.sub(&s0).sub(&s2);
+    // Extract cross-terms: t_i - direct products
+    const a1_b2_plus_a2_b1 = t0.sub(&a1_b1).sub(&a2_b2); // a1*b2 + a2*b1
+    const a0_b1_plus_a1_b0 = t1.sub(&a0_b0).sub(&a1_b1); // a0*b1 + a1*b0
+    const a0_b2_plus_a2_b0 = t2.sub(&a0_b0).sub(&a2_b2); // a0*b2 + a2*b0
 
-    // c0 = s0 + ξ * tmp0
-    // c1 = tmp1 + ξ * s2
-    // c2 = tmp2 + s1
-    const c0 = s0.add(&xi.mul(&tmp0));
-    const c1 = tmp1.add(&xi.mul(&s2));
-    const c2 = tmp2.add(&s1);
+    // Final result with ξ = 9 + u reduction: v³ ≡ ξ
+    const c0 = a0_b0.add(&xi.mul(&a1_b2_plus_a2_b1)); // a0*b0 + ξ*(a1*b2 + a2*b1)
+    const c1 = a0_b1_plus_a1_b0.add(&xi.mul(&a2_b2)); // (a0*b1 + a1*b0) + ξ*a2*b2
+    const c2 = a0_b2_plus_a2_b0.add(&a1_b1); // (a0*b2 + a2*b0) + a1*b1
 
     return Fp6Mont{
         .v0 = c0,
@@ -132,18 +132,24 @@ pub fn mulBySmallIntAssign(self: *Fp6Mont, other: u8) void {
     self.* = self.mulBySmallInt(other);
 }
 
-// using CH-SQR2 algorithm
+/// CH-SQR2 squaring: (a0 + a1*v + a2*v²)² using Squaring Method 2
+/// Reference: https://www.lirmm.fr/arith18/papers/Chung-Squaring.pdf
+/// Saves 3 multiplications compared to naive squaring (5 muls vs 8 muls)
 pub fn square(self: *const Fp6Mont) Fp6Mont {
+    // a = a0 + a1*v + a2*v², ξ = 9 + u ∈ F_p2
     const xi = curve_parameters.XI;
-    const s0 = self.v0.square();
-    const s1 = self.v0.mul(&self.v1).mulBySmallInt(2);
-    const s2 = self.v0.sub(&self.v1).add(&self.v2).square();
-    const s3 = self.v1.mul(&self.v2).mulBySmallInt(2);
-    const s4 = self.v2.square();
 
-    const c0 = s0.add(&xi.mul(&s3));
-    const c1 = s1.add(&xi.mul(&s4));
-    const c2 = s1.add(&s2).add(&s3).sub(&s4).sub(&s0);
+    // CH-SQR2 intermediate products
+    const s0 = self.v0.square(); // a0²
+    const s1 = self.v0.mul(&self.v1).mulBySmallInt(2); // 2*a0*a1
+    const s2 = self.v0.sub(&self.v1).add(&self.v2).square(); // (a0 - a1 + a2)²
+    const s3 = self.v1.mul(&self.v2).mulBySmallInt(2); // 2*a1*a2
+    const s4 = self.v2.square(); // a2²
+
+    // Final coefficients using CH-SQR2 formula
+    const c0 = s0.add(&xi.mul(&s3)); // a0² + ξ*2*a1*a2
+    const c1 = s1.add(&xi.mul(&s4)); // 2*a0*a1 + ξ*a2²
+    const c2 = s1.add(&s2).add(&s3).sub(&s4).sub(&s0); // 2*a0*a2 + a1²
 
     return Fp6Mont{
         .v0 = c0,
@@ -173,19 +179,18 @@ pub fn powAssign(self: *Fp6Mont, exponent: u256) void {
     self.* = self.pow(exponent);
 }
 
+/// Norm: N(a0 + a1*v + a2*v²) = a*a̅ where a̅ is conjugate over F_p2
+/// Maps F_p6 element to F_p2 via the norm map
 pub fn norm(self: *const Fp6Mont) Fp2Mont {
+    // a = a0 + a1*v + a2*v², ξ = 9 + u ∈ F_p2
     const xi = curve_parameters.XI;
 
-    // c0 = v0^2 - ξ * (v1 * v2)
-    const c0 = self.v0.mul(&self.v0).sub(&xi.mul(&self.v1.mul(&self.v2)));
+    // Intermediate norm components
+    const c0 = self.v0.mul(&self.v0).sub(&xi.mul(&self.v1.mul(&self.v2))); // a0² - ξ*a1*a2
+    const c1 = xi.mul(&self.v2.mul(&self.v2)).sub(&self.v0.mul(&self.v1)); // ξ*a2² - a0*a1
+    const c2 = self.v1.mul(&self.v1).sub(&self.v0.mul(&self.v2)); // a1² - a0*a2
 
-    // c1 = ξ * v2^2 - v0 * v1
-    const c1 = xi.mul(&self.v2.mul(&self.v2)).sub(&self.v0.mul(&self.v1));
-
-    // c2 = v1^2 - v0 * v2
-    const c2 = self.v1.mul(&self.v1).sub(&self.v0.mul(&self.v2));
-
-    // norm_result = v0 * c0 + ξ * (v2 * c1 + v1 * c2)
+    // Final norm: a0*c0 + ξ*(a2*c1 + a1*c2)
     return self.v0.mul(&c0).add(&xi.mul(&self.v2.mul(&c1).add(&self.v1.mul(&c2))));
 }
 

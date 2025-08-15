@@ -1,6 +1,11 @@
 const FpMont = @import("FpMont.zig");
 const curve_parameters = @import("curve_parameters.zig");
 
+//
+// Field extension: F_p2 = F_p[u] / (u^2 - β) where β = -1
+// Elements: a = a0 + a1*u, where a0, a1 ∈ F_p and u^2 = -1
+//
+
 pub const Fp2Mont = @This();
 
 u0: FpMont,
@@ -56,17 +61,20 @@ pub fn subAssign(self: *Fp2Mont, other: *const Fp2Mont) void {
     self.* = self.sub(other);
 }
 
-// using the schoolbook algorithm
+/// Schoolbook multiplication: (a0 + a1*u)(b0 + b1*u) = (a0*b0 - a1*b1) + (a0*b1 + a1*b0)*u
 pub fn mul(self: *const Fp2Mont, other: *const Fp2Mont) Fp2Mont {
-    const ac = self.u0.mul(&other.u0);
-    const bd = self.u1.mul(&other.u1);
-    const ad = self.u0.mul(&other.u1);
-    const bc = self.u1.mul(&other.u0);
-    const result_u0 = ac.sub(&bd);
-    const result_u1 = ad.add(&bc);
+    // a = a0 + a1*u, b = b0 + b1*u
+    const a0_b0 = self.u0.mul(&other.u0);
+    const a1_b1 = self.u1.mul(&other.u1);
+    const a0_b1 = self.u0.mul(&other.u1);
+    const a1_b0 = self.u1.mul(&other.u0);
+
+    const c0 = a0_b0.sub(&a1_b1); // Real part: a0*b0 - a1*b1
+    const c1 = a0_b1.add(&a1_b0); // Imag part: a0*b1 + a1*b0
+
     return Fp2Mont{
-        .u0 = result_u0,
-        .u1 = result_u1,
+        .u0 = c0,
+        .u1 = c1,
     };
 }
 
@@ -92,16 +100,19 @@ pub fn mulBySmallIntAssign(self: *Fp2Mont, other: u8) void {
     self.* = self.mulBySmallInt(other);
 }
 
-// using complex squaring
+/// Complex squaring: (a0 + a1*u)² = (a0 + a1)(a0 - a1) + 2*a0*a1*u
+/// Optimized for β = -1
 pub fn square(self: *const Fp2Mont) Fp2Mont {
-    const apb = self.u0.add(&self.u1);
-    const amb = self.u0.sub(&self.u1);
+    // a = a0 + a1*u
+    const a0_plus_a1 = self.u0.add(&self.u1);
+    const a0_minus_a1 = self.u0.sub(&self.u1);
 
-    const result_u0 = apb.mul(&amb);
-    const result_u1 = self.u0.mul(&self.u1).mulBySmallInt(2);
+    const c0 = a0_plus_a1.mul(&a0_minus_a1); // Real part: (a0+a1)(a0-a1) = a0² - a1²
+    const c1 = self.u0.mul(&self.u1).mulBySmallInt(2); // Imag part: 2*a0*a1
+
     return Fp2Mont{
-        .u0 = result_u0,
-        .u1 = result_u1,
+        .u0 = c0,
+        .u1 = c1,
     };
 }
 
@@ -126,10 +137,12 @@ pub fn powAssign(self: *Fp2Mont, exponent: u256) void {
     self.* = self.pow(exponent);
 }
 
+/// Norm: N(a0 + a1*u) = a0² + a1² (since u² = -1, norm becomes a0² - (a1*u)² = a0² + a1²)
 pub fn norm(self: *const Fp2Mont) FpMont {
-    const real_sq = self.u0.mul(&self.u0);
-    const imag_sq = self.u1.mul(&self.u1);
-    return real_sq.add(&imag_sq);
+    // a = a0 + a1*u
+    const a0_squared = self.u0.mul(&self.u0);
+    const a1_squared = self.u1.mul(&self.u1);
+    return a0_squared.add(&a1_squared); // a0² + a1²
 }
 
 pub fn conj(self: *const Fp2Mont) Fp2Mont {
