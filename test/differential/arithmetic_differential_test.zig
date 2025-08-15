@@ -78,25 +78,36 @@ test "ADD opcode 0 + 0 = 0" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
@@ -173,25 +184,36 @@ test "ADD opcode 1 + 1 = 2" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
@@ -268,25 +290,36 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
@@ -577,25 +610,36 @@ test "MUL opcode 7 * 6 = 42" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
@@ -673,25 +717,36 @@ test "DIV opcode 6 / 42 = 0" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
@@ -769,25 +824,36 @@ test "DIV opcode division by zero = 0" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
@@ -865,25 +931,36 @@ test "DIV opcode division by zero 42 / 0 = 0" {
         .gas = 1000000,
     } };
 
+    // Execute using mini EVM (after REVM, before Guillotine)
+    const mini_result = try vm_instance.call_mini(call_params);
+    defer if (mini_result.output) |output| allocator.free(output);
+
+    // Execute using Guillotine regular EVM
     const guillotine_result = try vm_instance.call(call_params);
     defer if (guillotine_result.output) |output| allocator.free(output);
 
-    // Compare results - both should succeed
+    // Compare results - all three should succeed
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
+    const mini_succeeded = mini_result.success;
 
     try testing.expect(revm_succeeded == guillotine_succeeded);
+    try testing.expect(revm_succeeded == mini_succeeded);
 
-    if (revm_succeeded and guillotine_succeeded) {
+    if (revm_succeeded and guillotine_succeeded and mini_succeeded) {
         try testing.expect(revm_result.output.len == 32);
         try testing.expect(guillotine_result.output != null);
         try testing.expect(guillotine_result.output.?.len == 32);
+        try testing.expect(mini_result.output != null);
+        try testing.expect(mini_result.output.?.len == 32);
 
         // Extract u256 from output (big-endian)
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
+        const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
+        try testing.expectEqual(revm_value, mini_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
