@@ -237,6 +237,8 @@ pub const tracing = struct {
     pub const StackChanges = @import("tracing/trace_types.zig").StackChanges;
     pub const MemoryChanges = @import("tracing/trace_types.zig").MemoryChanges;
     pub const StorageChange = @import("tracing/trace_types.zig").StorageChange;
+    pub const MessageEvent = @import("tracing/trace_types.zig").MessageEvent;
+    pub const StepControl = @import("tracing/trace_types.zig").StepControl;
     pub const LogEntry = @import("tracing/trace_types.zig").LogEntry;
     pub const ExecutionErrorInfo = @import("tracing/trace_types.zig").ExecutionErrorInfo;
     

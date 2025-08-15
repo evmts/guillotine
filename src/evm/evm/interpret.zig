@@ -20,6 +20,7 @@ const PreStepState = if (build_options.enable_tracing) struct {
     journal_size_before: usize = 0,
     log_count_before: usize = 0,
     memory_access_region: ?struct { start: usize, len: usize } = null,
+    step_info: ?tracer.StepInfo = null,
 
     pub fn deinit(self: *PreStepState, allocator: std.mem.Allocator) void {
         if (self.stack_snapshot) |snapshot| {
@@ -124,7 +125,10 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, pre_stat
                     .memory_size = frame.memory.context_size(),
                 };
 
-                tracer_handle.stepBefore(step_info);
+                tracer_handle.on_step_before(step_info);
+
+                // Store step_info for transition hook
+                pre_state.step_info = step_info;
 
                 // Capture pre-execution state for comparison
                 // Stack state - copy current stack data
@@ -222,7 +226,12 @@ inline fn post_step(self: *Evm, frame: *Frame, gas_before: u64, pre_state: *cons
             .error_info = null, // Set this if there was an error
         };
 
-        tracer_handle.stepAfter(step_result);
+        tracer_handle.on_step_after(step_result);
+        
+        // Call transition hook with complete before→after state
+        if (pre_state.step_info) |step_info| {
+            tracer_handle.on_step_transition(step_info, step_result);
+        }
     }
 }
 
@@ -316,6 +325,16 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Post-step tracing for structured tracers
             if (comptime build_options.enable_tracing) {
                 post_step(self, frame, gas_before, &pre_state);
+                
+                // Check for control decision from tracer
+                if (self.inproc_tracer) |tracer_handle| {
+                    const control = tracer_handle.get_step_control();
+                    switch (control) {
+                        .cont => {},  // Continue normally
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
             }
 
             continue :dispatch next_instruction.tag;
@@ -362,6 +381,16 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Post-step tracing for structured tracers
             if (comptime build_options.enable_tracing) {
                 post_step(self, frame, gas_before, &pre_state);
+                
+                // Check for control decision from tracer
+                if (self.inproc_tracer) |tracer_handle| {
+                    const control = tracer_handle.get_step_control();
+                    switch (control) {
+                        .cont => {},  // Continue normally
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
             }
 
             continue :dispatch next_instruction.tag;
@@ -534,6 +563,16 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Post-step tracing for PUSH operations
             if (comptime build_options.enable_tracing) {
                 post_step(self, frame, gas_before, &pre_state);
+                
+                // Check for control decision from tracer
+                if (self.inproc_tracer) |tracer_handle| {
+                    const control = tracer_handle.get_step_control();
+                    switch (control) {
+                        .cont => {},  // Continue normally
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
             }
 
             continue :dispatch next_instruction.tag;
@@ -566,6 +605,16 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Post-step tracing for PC opcode
             if (comptime build_options.enable_tracing) {
                 post_step(self, frame, gas_before, &pre_state);
+                
+                // Check for control decision from tracer
+                if (self.inproc_tracer) |tracer_handle| {
+                    const control = tracer_handle.get_step_control();
+                    switch (control) {
+                        .cont => {},  // Continue normally
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
             }
 
             continue :dispatch next_instruction.tag;

@@ -422,6 +422,20 @@ pub fn reset_gas_refunds(self: *Evm) void {
     self.gas_refunds = 0;
 }
 
+/// Resume execution after a pause
+/// Frame must be the same one that was paused
+pub fn resume_execution(self: *Evm, frame: *Frame) ExecutionError.Error!void {
+    // Clear any pending pause state in tracer
+    if (self.inproc_tracer) |tracer_handle| {
+        // Tracer should continue from where it left off
+        // The frame still has its instruction pointer
+        _ = tracer_handle;
+    }
+    
+    // Continue interpretation
+    return @import("evm/interpret.zig").interpret(self, frame);
+}
+
 // Host interface implementation - EVM acts as its own host
 /// Get account balance (Host interface)
 pub fn get_balance(self: *Evm, address: primitives.Address.Address) u256 {

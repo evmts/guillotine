@@ -1,6 +1,7 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const Frame = @import("../frame.zig").Frame;
 const Evm = @import("../evm.zig");
 const Vm = Evm; // Alias for compatibility
@@ -12,6 +13,9 @@ const Host = @import("../host.zig").Host;
 const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
+
+// Tracing types for message hooks
+const MessageEvent = @import("../tracing/trace_types.zig").MessageEvent;
 
 // Define local CallType to decouple from preallocated call frame stack
 const CallType = enum { Call, CallCode, DelegateCall, StaticCall };
@@ -631,6 +635,24 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     // This allows us to revert all state changes if creation fails
     const snapshot = frame.host.create_snapshot();
 
+    // Message hook before CREATE
+    var before_event: if (build_options.enable_tracing) ?MessageEvent else void = if (comptime build_options.enable_tracing) null else {};
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const event = MessageEvent{
+                .phase = .before,
+                .params = call_params,
+                .result = null,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining,
+                .gas_after = null,
+            };
+            before_event = event;
+            tracer_handle.on_message_before(event);
+        }
+    }
+
     // Execute the CREATE through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -688,6 +710,27 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
             evm_ptr.allocator.free(buf);
         }
         frame.stack.append_unsafe(0);
+    }
+
+    // Message hook after CREATE
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const after_event = MessageEvent{
+                .phase = .after,
+                .params = call_params,
+                .result = call_result,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining + (gas_for_create - call_result.gas_left),
+                .gas_after = frame.gas_remaining,
+            };
+            tracer_handle.on_message_after(after_event);
+            
+            // Call transition hook with complete before→after message flow
+            if (before_event) |before| {
+                tracer_handle.on_message_transition(before, after_event);
+            }
+        }
     }
 }
 
@@ -785,6 +828,24 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     // This allows us to revert all state changes if creation fails
     const snapshot = frame.host.create_snapshot();
 
+    // Message hook before CREATE2
+    var before_event: if (build_options.enable_tracing) ?MessageEvent else void = if (comptime build_options.enable_tracing) null else {};
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const event = MessageEvent{
+                .phase = .before,
+                .params = call_params,
+                .result = null,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining,
+                .gas_after = null,
+            };
+            before_event = event;
+            tracer_handle.on_message_before(event);
+        }
+    }
+
     // Execute the CREATE2 through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -842,6 +903,27 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
             evm_ptr.allocator.free(buf);
         }
         frame.stack.append_unsafe(0);
+    }
+
+    // Message hook after CREATE2
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const after_event = MessageEvent{
+                .phase = .after,
+                .params = call_params,
+                .result = call_result,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining + (gas_for_create - call_result.gas_left),
+                .gas_after = frame.gas_remaining,
+            };
+            tracer_handle.on_message_after(after_event);
+            
+            // Call transition hook with complete before→after message flow
+            if (before_event) |before| {
+                tracer_handle.on_message_transition(before, after_event);
+            }
+        }
     }
 }
 
@@ -942,6 +1024,24 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         .gas = gas_limit,
     } };
 
+    // Message hook before CALL
+    var before_event: if (build_options.enable_tracing) ?MessageEvent else void = if (comptime build_options.enable_tracing) null else {};
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const event = MessageEvent{
+                .phase = .before,
+                .params = call_params,
+                .result = null,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining,
+                .gas_after = null,
+            };
+            before_event = event;
+            tracer_handle.on_message_before(event);
+        }
+    }
+
     // Perform the call using the host's call method
     const call_result = host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -986,6 +1086,27 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
 
     // Push result (1 for success, 0 for failure)
     frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+
+    // Message hook after CALL
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const after_event = MessageEvent{
+                .phase = .after,
+                .params = call_params,
+                .result = call_result,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining - call_result.gas_left + gas_limit,
+                .gas_after = frame.gas_remaining,
+            };
+            tracer_handle.on_message_after(after_event);
+            
+            // Transition hook
+            if (before_event) |before| {
+                tracer_handle.on_message_transition(before, after_event);
+            }
+        }
+    }
 }
 
 pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
@@ -1070,6 +1191,24 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
         .gas = gas_limit,
     } };
 
+    // Message hook before CALLCODE
+    var before_event: if (build_options.enable_tracing) ?MessageEvent else void = if (comptime build_options.enable_tracing) null else {};
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const event = MessageEvent{
+                .phase = .before,
+                .params = call_params,
+                .result = null,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining,
+                .gas_after = null,
+            };
+            before_event = event;
+            tracer_handle.on_message_before(event);
+        }
+    }
+
     const call_result = frame.host.call(call_params) catch {
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -1105,6 +1244,27 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
 
     // Push success flag
     frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+
+    // Message hook after CALLCODE
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const after_event = MessageEvent{
+                .phase = .after,
+                .params = call_params,
+                .result = call_result,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining - call_result.gas_left + gas_limit,
+                .gas_after = frame.gas_remaining,
+            };
+            tracer_handle.on_message_after(after_event);
+            
+            // Transition hook
+            if (before_event) |before| {
+                tracer_handle.on_message_transition(before, after_event);
+            }
+        }
+    }
 }
 
 pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
@@ -1180,6 +1340,24 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         },
     };
 
+    // Message hook before DELEGATECALL
+    var before_event: if (build_options.enable_tracing) ?MessageEvent else void = if (comptime build_options.enable_tracing) null else {};
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const event = MessageEvent{
+                .phase = .before,
+                .params = call_params,
+                .result = null,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining,
+                .gas_after = null,
+            };
+            before_event = event;
+            tracer_handle.on_message_before(event);
+        }
+    }
+
     // Execute the delegatecall through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -1219,6 +1397,27 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
 
     // Push success flag (1 for success, 0 for failure)
     frame.stack.append_unsafe(if (call_result.success) 1 else 0);
+
+    // Message hook after DELEGATECALL
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.inproc_tracer) |tracer_handle| {
+            const after_event = MessageEvent{
+                .phase = .after,
+                .params = call_params,
+                .result = call_result,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining - call_result.gas_left + gas_limit,
+                .gas_after = frame.gas_remaining,
+            };
+            tracer_handle.on_message_after(after_event);
+            
+            // Transition hook
+            if (before_event) |before| {
+                tracer_handle.on_message_transition(before, after_event);
+            }
+        }
+    }
 }
 
 pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
@@ -1324,6 +1523,24 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         },
     };
 
+    // Message hook before STATICCALL
+    var before_event: if (build_options.enable_tracing) ?MessageEvent else void = if (comptime build_options.enable_tracing) null else {};
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr_tracer = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr_tracer.inproc_tracer) |tracer_handle| {
+            const event = MessageEvent{
+                .phase = .before,
+                .params = call_params,
+                .result = null,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining,
+                .gas_after = null,
+            };
+            before_event = event;
+            tracer_handle.on_message_before(event);
+        }
+    }
+
     // Execute the staticcall through the host
     // Debug: capture stack/frame state before call
     // Get the EVM to check current state
@@ -1404,6 +1621,27 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             Log.debug("[STATICCALL] Stack size mismatch! pre_stack_size={}, expected={}, actual={}", .{ pre_stack_size, expected_size, final_stack_size });
         }
         std.debug.assert(final_stack_size == expected_size); // Should have pushed result
+    }
+
+    // Message hook after STATICCALL
+    if (comptime build_options.enable_tracing) {
+        const evm_ptr_tracer = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr_tracer.inproc_tracer) |tracer_handle| {
+            const after_event = MessageEvent{
+                .phase = .after,
+                .params = call_params,
+                .result = call_result,
+                .depth = frame.depth,
+                .gas_before = frame.gas_remaining - call_result.gas_left + gas_limit,
+                .gas_after = frame.gas_remaining,
+            };
+            tracer_handle.on_message_after(after_event);
+            
+            // Transition hook
+            if (before_event) |before| {
+                tracer_handle.on_message_transition(before, after_event);
+            }
+        }
     }
 }
 

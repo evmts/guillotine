@@ -242,30 +242,59 @@ pub fn capture_stack_changes(
     stack_after: []const u256,
     max_items: usize,
 ) !tracer.StackChanges {
-    // Calculate what was pushed and popped
+    // This function requires operation-specific knowledge to properly track
+    // actual pushes and pops vs. just net changes. For now, we'll detect
+    // common patterns but this is a limitation of post-hoc analysis.
+    
     var items_pushed: []u256 = undefined;
     var items_popped: []u256 = undefined;
     
-    if (stack_after.len > stack_before.len) {
-        // Items were pushed
-        const push_count = stack_after.len - stack_before.len;
+    const before_len = stack_before.len;
+    const after_len = stack_after.len;
+    
+    if (after_len > before_len) {
+        // Net push: Simple push operations (PUSH1, DUP, etc.)
+        const push_count = after_len - before_len;
         items_pushed = try allocator.alloc(u256, push_count);
         errdefer allocator.free(items_pushed);
         
         // Copy the newly pushed items (they're at the end of stack_after)
-        @memcpy(items_pushed, stack_after[stack_before.len..]);
+        @memcpy(items_pushed, stack_after[before_len..]);
         
         items_popped = try allocator.alloc(u256, 0);
-    } else if (stack_before.len > stack_after.len) {
-        // Items were popped
-        const pop_count = stack_before.len - stack_after.len;
-        items_popped = try allocator.alloc(u256, pop_count);
-        errdefer allocator.free(items_popped);
+    } else if (before_len > after_len) {
+        // Net pop: Could be simple POP or complex operations like ADD/MUL
+        const net_pop = before_len - after_len;
         
-        // Copy the popped items (they were at the end of stack_before)
-        @memcpy(items_popped, stack_before[stack_after.len..]);
-        
-        items_pushed = try allocator.alloc(u256, 0);
+        // For operations that reduce stack size by 1 (like ADD, MUL), assume:
+        // - 2 pops (operands) + 1 push (result) = net -1
+        if (net_pop == 1 and before_len >= 2) {
+            // Likely arithmetic operation: pops 2, pushes 1
+            items_popped = try allocator.alloc(u256, 2);
+            errdefer allocator.free(items_popped);
+            
+            // Copy the 2 items that were consumed
+            @memcpy(items_popped, stack_before[before_len-2..]);
+            
+            items_pushed = try allocator.alloc(u256, 1);
+            errdefer allocator.free(items_pushed);
+            
+            // Copy the result that was pushed
+            if (after_len > 0) {
+                items_pushed[0] = stack_after[after_len-1];
+            } else {
+                items_pushed[0] = 0; // Fallback
+            }
+        } else {
+            // Simple pop or other operation
+            items_popped = try allocator.alloc(u256, net_pop);
+            errdefer allocator.free(items_popped);
+            
+            // Copy the popped items (they were at the end of stack_before)
+            @memcpy(items_popped, stack_before[after_len..]);
+            
+            items_pushed = try allocator.alloc(u256, 0);
+        }
     } else {
         // No change in stack size, but items might have changed (rare case)
         items_pushed = try allocator.alloc(u256, 0);
