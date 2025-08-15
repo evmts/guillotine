@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ExecutionError = @import("../execution/execution_error.zig");
 const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
@@ -7,6 +8,7 @@ const Frame = @import("../frame.zig").Frame;
 const Evm = @import("../evm.zig");
 const primitives = @import("primitives");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
+const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
 const Memory = @import("../memory/memory.zig");
 const MAX_INPUT_SIZE = 131072; // 128KB
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
@@ -36,7 +38,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
     var call_gas: u64 = undefined;
     var call_is_static: bool = undefined;
     var call_caller: primitives.Address.Address = undefined;
-    var call_value: primitives.u256 = undefined;
+    var call_value: u256 = undefined;
 
     switch (params) {
         .call => |call_data| {
@@ -70,20 +72,20 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
     }
 
     // Charge base transaction cost for top-level calls
-    var remaining_gas = call_gas;
+    var gas_after_base = call_gas;
     if (is_top_level_call) {
         const GasConstants = @import("primitives").GasConstants;
         const base_cost = GasConstants.TxGas;
         
-        if (remaining_gas < base_cost) {
+        if (gas_after_base < base_cost) {
             return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
         }
-        remaining_gas -= base_cost;
+        gas_after_base -= base_cost;
     }
 
     // Check for precompiles
     if (precompile_addresses.get_precompile_id_checked(call_address)) |precompile_id| {
-        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_input, remaining_gas, call_is_static) catch |err| {
+        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_input, gas_after_base, call_is_static) catch |err| {
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return switch (err) {
                 else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
@@ -117,7 +119,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
         const new_depth = self.current_frame_depth + 1;
         if (new_depth >= MAX_CALL_DEPTH) {
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
-            return CallResult{ .success = false, .gas_left = remaining_gas, .output = &.{} };
+            return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
         }
     }
 
@@ -127,45 +129,53 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
         self.access_list.pre_warm_addresses(&addresses_to_warm) catch {};
     }
 
-    // Simple execution without analysis - use bitvector for jumpdest validation
-    var pc: usize = 0;
-    var stack = try @import("../stack/stack.zig").Stack.init(self.allocator);
-    defer stack.deinit(self.allocator);
-    var memory = try Memory.init(self.allocator, 1024, @import("../constants/memory_limits.zig").MAX_MEMORY_SIZE);
-    defer memory.deinit();
+    // Analyze code for jumpdest validation
+    var analysis_owned = false;
+    const analysis_ptr: *CodeAnalysis = blk: {
+        Log.debug("[call_mini] Analyzing code directly", .{});
+        var analysis_val = CodeAnalysis.from_code(self.allocator, call_code, &self.table) catch |err| {
+            Log.err("[call_mini] Code analysis failed: {}", .{err});
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
+            return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
+        };
+        const analysis_heap = self.allocator.create(CodeAnalysis) catch {
+            analysis_val.deinit();
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
+            return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
+        };
+        analysis_heap.* = analysis_val;
+        analysis_owned = true;
+        break :blk analysis_heap;
+    };
+    defer if (analysis_owned) {
+        analysis_ptr.deinit();
+        self.allocator.destroy(analysis_ptr);
+    };
     
-    // Use DynamicBitSet for jumpdest tracking like analysis does
-    var jumpdest_bitmap = try std.DynamicBitSet.initEmpty(self.allocator, call_code.len);
-    defer jumpdest_bitmap.deinit();
-    
-    // Pre-scan for jumpdests using same logic as analysis
-    var scan_pc: usize = 0;
-    while (scan_pc < call_code.len) {
-        const op = call_code[scan_pc];
-        
-        // Mark JUMPDEST positions in bitmap
-        if (op == @intFromEnum(opcode_mod.Enum.JUMPDEST)) {
-            jumpdest_bitmap.set(scan_pc);
-        }
-        
-        // Skip push data
-        if (opcode_mod.is_push(op)) {
-            const push_size = opcode_mod.get_push_size(op);
-            scan_pc += push_size;
-        }
-        scan_pc += 1;
-    }
-    
-    // Convert bitmap to JumpdestArray for efficient validation
-    const size_buckets = @import("../size_buckets.zig");
-    var jumpdest_array = try size_buckets.JumpdestArray.from_bitmap(self.allocator, &jumpdest_bitmap, call_code.len);
-    defer jumpdest_array.deinit(self.allocator);
+    // Create frame
+    const contract_addr_for_frame = call_address;
+    var frame = try Frame.init(
+        gas_after_base,
+        call_is_static,
+        @intCast(self.current_frame_depth),
+        contract_addr_for_frame,
+        call_caller,
+        call_value,
+        analysis_ptr,
+        host,
+        self.state.database,
+        self.allocator,
+    );
+    defer frame.deinit(self.allocator);
 
     // Main execution loop
     var exec_err: ?ExecutionError.Error = null;
     const was_executing = self.is_executing;
     self.is_executing = true;
     defer self.is_executing = was_executing;
+    
+    // For mini EVM, we'll use simple PC tracking instead of analysis blocks
+    var pc: usize = 0;
     
     while (pc < call_code.len) {
         const op = call_code[pc];
@@ -180,21 +190,19 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
         }
         
         // Check gas
-        if (remaining_gas < operation.constant_gas) {
+        if (frame.gas_remaining < operation.constant_gas) {
             exec_err = ExecutionError.Error.OutOfGas;
             break;
         }
-        remaining_gas -= operation.constant_gas;
+        frame.gas_remaining -= operation.constant_gas;
         
         // Check stack requirements
-        if (stack.size() < operation.min_stack) {
+        if (frame.stack.size() < operation.min_stack) {
             exec_err = ExecutionError.Error.StackUnderflow;
             break;
         }
-        // max_stack represents the net stack effect after operation
-        // We need to ensure we don't exceed 1024 after the operation
-        const stack_after = stack.size() - operation.min_stack + operation.max_stack;
-        if (stack_after > 1024) {
+        // max_stack represents the maximum stack size allowed before operation
+        if (frame.stack.size() > operation.max_stack) {
             exec_err = ExecutionError.Error.StackOverflow;
             break;
         }
@@ -206,13 +214,13 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 break;
             },
             @intFromEnum(opcode_mod.Enum.JUMP) => {
-                const dest = try stack.pop();
+                const dest = try frame.stack.pop();
                 if (dest > call_code.len) {
                     exec_err = ExecutionError.Error.InvalidJump;
                     break;
                 }
                 const dest_usize = @as(usize, @intCast(dest));
-                if (!jumpdest_array.is_valid_jumpdest(dest_usize)) {
+                if (!frame.valid_jumpdest(dest)) {
                     exec_err = ExecutionError.Error.InvalidJump;
                     break;
                 }
@@ -220,15 +228,15 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 continue;
             },
             @intFromEnum(opcode_mod.Enum.JUMPI) => {
-                const dest = try stack.pop();
-                const condition = try stack.pop();
+                const dest = try frame.stack.pop();
+                const condition = try frame.stack.pop();
                 if (condition != 0) {
                     if (dest > call_code.len) {
                         exec_err = ExecutionError.Error.InvalidJump;
                         break;
                     }
                     const dest_usize = @as(usize, @intCast(dest));
-                    if (!jumpdest_array.is_valid_jumpdest(dest_usize)) {
+                    if (!frame.valid_jumpdest(dest)) {
                         exec_err = ExecutionError.Error.InvalidJump;
                         break;
                     }
@@ -239,19 +247,19 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 continue;
             },
             @intFromEnum(opcode_mod.Enum.PC) => {
-                try stack.append(@intCast(pc));
+                try frame.stack.append(@intCast(pc));
                 pc += 1;
                 continue;
             },
             @intFromEnum(opcode_mod.Enum.RETURN) => {
-                const offset = try stack.pop();
-                const size = try stack.pop();
+                const offset = try frame.stack.pop();
+                const size = try frame.stack.pop();
                 
                 // Get return data from memory
                 if (size > 0) {
                     const offset_usize = @as(usize, @intCast(offset));
                     const size_usize = @as(usize, @intCast(size));
-                    const data = try memory.get_slice(offset_usize, size_usize);
+                    const data = try frame.memory.get_slice(offset_usize, size_usize);
                     const output = try self.allocator.dupe(u8, data);
                     host.set_output(output) catch {
                         exec_err = ExecutionError.Error.DatabaseCorrupted;
@@ -263,14 +271,14 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 break;
             },
             @intFromEnum(opcode_mod.Enum.REVERT) => {
-                const offset = try stack.pop();
-                const size = try stack.pop();
+                const offset = try frame.stack.pop();
+                const size = try frame.stack.pop();
                 
                 // Get revert data from memory
                 if (size > 0) {
                     const offset_usize = @as(usize, @intCast(offset));
                     const size_usize = @as(usize, @intCast(size));
-                    const data = try memory.get_slice(offset_usize, size_usize);
+                    const data = try frame.memory.get_slice(offset_usize, size_usize);
                     const output = try self.allocator.dupe(u8, data);
                     host.set_output(output) catch {
                         exec_err = ExecutionError.Error.DatabaseCorrupted;
@@ -290,38 +298,6 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 pc += 1;
                 continue;
             },
-            @intFromEnum(opcode_mod.Enum.ADD) => {
-                const a = try stack.pop();
-                const b = try stack.pop();
-                const result = a +% b; // Wrapping addition
-                try stack.append(result);
-                pc += 1;
-                continue;
-            },
-            @intFromEnum(opcode_mod.Enum.MUL) => {
-                const a = try stack.pop();
-                const b = try stack.pop();
-                const result = a *% b; // Wrapping multiplication
-                try stack.append(result);
-                pc += 1;
-                continue;
-            },
-            @intFromEnum(opcode_mod.Enum.SUB) => {
-                const a = try stack.pop();
-                const b = try stack.pop();
-                const result = a -% b; // Wrapping subtraction
-                try stack.append(result);
-                pc += 1;
-                continue;
-            },
-            @intFromEnum(opcode_mod.Enum.DIV) => {
-                const a = try stack.pop();
-                const b = try stack.pop();
-                const result = if (b == 0) 0 else a / b;
-                try stack.append(result);
-                pc += 1;
-                continue;
-            },
             else => {
                 // For push opcodes, handle data
                 if (opcode_mod.is_push(op)) {
@@ -332,7 +308,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                     }
                     
                     // Read push data
-                    var value: primitives.u256 = 0;
+                    var value: u256 = 0;
                     const data_start = pc + 1;
                     const data_end = @min(data_start + push_size, call_code.len);
                     const data = call_code[data_start..data_end];
@@ -342,15 +318,20 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                         value = (value << 8) | byte;
                     }
                     
-                    try stack.append(value);
+                    try frame.stack.append(value);
                     pc += 1 + push_size;
                     continue;
                 }
                 
-                // For simplicity, mini EVM only supports basic opcodes
-                // More complex opcodes would need proper frame/context setup
-                exec_err = ExecutionError.Error.OpcodeNotImplemented;
-                break;
+                // For all other opcodes, use the execution function from the jump table
+                // Create a context pointer for the execution function
+                const context: *anyopaque = @ptrCast(&frame);
+                operation.execute(context) catch |err| {
+                    exec_err = err;
+                    break;
+                };
+                pc += 1;
+                continue;
             },
         }
     }
@@ -385,7 +366,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
     
     return CallResult{
         .success = success,
-        .gas_left = remaining_gas,
+        .gas_left = frame.gas_remaining,
         .output = output,
     };
 }
