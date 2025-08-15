@@ -2012,7 +2012,6 @@ test "Evm debug hooks - set, get, has methods" {
     defer evm.deinit();
 
     // Initially no hooks
-    try std.testing.expect(!evm.has_debug_hooks());
     try std.testing.expect(evm.get_debug_hooks() == null);
 
     // Test context for hooks
@@ -2046,17 +2045,16 @@ test "Evm debug hooks - set, get, has methods" {
 
     // Set hooks
     evm.set_debug_hooks(hooks);
-    try std.testing.expect(evm.has_debug_hooks());
+    try std.testing.expect(evm.get_debug_hooks() != null);
 
     // Get hooks and verify they match
     const retrieved_hooks = evm.get_debug_hooks().?;
-    try std.testing.expect(retrieved_hooks.user_ctx == &test_ctx);
+    try std.testing.expect(retrieved_hooks.user_ctx == @as(?*anyopaque, &test_ctx));
     try std.testing.expect(retrieved_hooks.on_step != null);
     try std.testing.expect(retrieved_hooks.on_message != null);
 
     // Clear hooks
     evm.set_debug_hooks(null);
-    try std.testing.expect(!evm.has_debug_hooks());
     try std.testing.expect(evm.get_debug_hooks() == null);
 }
 
@@ -2086,7 +2084,7 @@ test "Evm debug hooks - partial hooks configuration" {
     };
 
     evm.set_debug_hooks(step_only_hooks);
-    try std.testing.expect(evm.has_debug_hooks());
+    try std.testing.expect(evm.get_debug_hooks() != null);
 
     const retrieved = evm.get_debug_hooks().?;
     try std.testing.expect(retrieved.on_step != null);
@@ -2118,11 +2116,10 @@ test "Evm debug hooks - reset clears hooks" {
         .on_step = TestHooks.dummy_step,
     };
     evm.set_debug_hooks(hooks);
-    try std.testing.expect(evm.has_debug_hooks());
+    try std.testing.expect(evm.get_debug_hooks() != null);
 
     // Reset should clear hooks
     evm.reset();
-    try std.testing.expect(!evm.has_debug_hooks());
     try std.testing.expect(evm.get_debug_hooks() == null);
 }
 
@@ -2200,14 +2197,16 @@ test "Evm debug hooks - actual execution with step hooks" {
     const bytecode = [_]u8{ 0x60, 0x42, 0x60, 0x01, 0x01, 0x00 };
 
     // Execute the bytecode
-    const result = try evm.call(
-        primitives.Address.ZERO, // caller
-        primitives.Address.ZERO, // to
-        0, // value
-        &bytecode, // input (bytecode)
-        100000, // gas
-        false, // is_static
-    );
+    const params = CallParams{
+        .call = .{
+            .caller = primitives.Address.ZERO,
+            .to = primitives.Address.ZERO,
+            .value = 0,
+            .input = &bytecode,
+            .gas = 100000,
+        },
+    };
+    const result = try evm.call(params);
 
     // Verify execution completed successfully
     try std.testing.expect(result.success);
@@ -2296,14 +2295,16 @@ test "Evm debug hooks - step hook abort control" {
     };
 
     // Execute - should abort after 3 steps
-    const result = try evm.call(
-        primitives.Address.ZERO,
-        primitives.Address.ZERO,
-        0,
-        &bytecode,
-        100000,
-        false,
-    );
+    const params = CallParams{
+        .call = .{
+            .caller = primitives.Address.ZERO,
+            .to = primitives.Address.ZERO,
+            .value = 0,
+            .input = &bytecode,
+            .gas = 100000,
+        },
+    };
+    const result = try evm.call(params);
 
     // Execution should fail due to debug abort
     try std.testing.expect(!result.success);
@@ -2363,7 +2364,7 @@ test "Evm debug hooks - message hooks for CALL operations" {
     evm.set_debug_hooks(hooks);
 
     // Set up a contract that will be called
-    const callee_address = primitives.Address.from_low_u64_be(0x2000);
+    const callee_address = primitives.Address.from_u256(0x2000);
     const callee_code = [_]u8{
         0x60, 0x99, // PUSH1 0x99
         0x60, 0x00, // PUSH1 0x00
@@ -2404,14 +2405,16 @@ test "Evm debug hooks - message hooks for CALL operations" {
     });
 
     // Execute the CALL
-    const result = try evm.call(
-        primitives.Address.ZERO,
-        primitives.Address.ZERO,
-        0,
-        call_bytecode.items,
-        100000,
-        false,
-    );
+    const params = CallParams{
+        .call = .{
+            .caller = primitives.Address.ZERO,
+            .to = primitives.Address.ZERO,
+            .value = 0,
+            .input = call_bytecode.items,
+            .gas = 100000,
+        },
+    };
+    const result = try evm.call(params);
 
     try std.testing.expect(result.success);
 
@@ -2437,8 +2440,8 @@ test "Evm debug hooks - message hooks for CALL operations" {
     try std.testing.expect(tracker.before_calls.items.len > 0);
 
     // Check the captured call parameters
-    for (tracker.before_calls.items) |params| {
-        switch (params) {
+    for (tracker.before_calls.items) |call_params| {
+        switch (call_params) {
             .call => |call| {
                 // Verify the call was to our callee address
                 try std.testing.expectEqual(callee_address, call.to);
@@ -2537,14 +2540,16 @@ test "Evm debug hooks - CREATE operation tracking" {
     }
     try create_bytecode.appendSlice(&init_code);
 
-    const result = try evm.call(
-        primitives.Address.ZERO,
-        primitives.Address.ZERO,
-        0,
-        create_bytecode.items,
-        100000,
-        false,
-    );
+    const params = CallParams{
+        .call = .{
+            .caller = primitives.Address.ZERO,
+            .to = primitives.Address.ZERO,
+            .value = 0,
+            .input = create_bytecode.items,
+            .gas = 100000,
+        },
+    };
+    const result = try evm.call(params);
 
     // CREATE might fail due to various reasons, but hooks should still be called
     _ = result;
@@ -2614,14 +2619,16 @@ test "Evm debug hooks - combined step and message hooks" {
         0x00, // STOP
     };
 
-    const result = try evm.call(
-        primitives.Address.ZERO,
-        primitives.Address.ZERO,
-        0,
-        &bytecode,
-        100000,
-        false,
-    );
+    const params = CallParams{
+        .call = .{
+            .caller = primitives.Address.ZERO,
+            .to = primitives.Address.ZERO,
+            .value = 0,
+            .input = &bytecode,
+            .gas = 100000,
+        },
+    };
+    const result = try evm.call(params);
 
     try std.testing.expect(result.success);
 
