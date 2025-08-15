@@ -31,21 +31,23 @@ test "Instruction packed struct size" {
 }
 
 test "Instruction size categorization" {
+    // 0-byte instructions (tag-only)
+    try std.testing.expectEqual(@as(usize, 0), getInstructionSize(.noop));
+    try std.testing.expectEqual(@as(usize, 0), getInstructionSize(.conditional_jump_unresolved));
+    try std.testing.expectEqual(@as(usize, 0), getInstructionSize(.conditional_jump_invalid));
+    
+    // 2-byte instructions
+    try std.testing.expectEqual(@as(usize, 2), getInstructionSize(.jump_pc));
+    try std.testing.expectEqual(@as(usize, 2), getInstructionSize(.conditional_jump_pc));
+    try std.testing.expectEqual(@as(usize, 2), getInstructionSize(.pc));
+    
     // 8-byte instructions
-    try std.testing.expectEqual(@as(usize, 8), getInstructionSize(.noop));
-    try std.testing.expectEqual(@as(usize, 8), getInstructionSize(.jump_pc));
-    try std.testing.expectEqual(@as(usize, 8), getInstructionSize(.conditional_jump_unresolved));
-    try std.testing.expectEqual(@as(usize, 8), getInstructionSize(.conditional_jump_invalid));
+    try std.testing.expectEqual(@as(usize, 8), getInstructionSize(.exec));
+    try std.testing.expectEqual(@as(usize, 8), getInstructionSize(.block_info));
     
     // 16-byte instructions
-    try std.testing.expectEqual(@as(usize, 16), getInstructionSize(.exec));
-    try std.testing.expectEqual(@as(usize, 16), getInstructionSize(.conditional_jump_pc));
-    try std.testing.expectEqual(@as(usize, 16), getInstructionSize(.pc));
-    try std.testing.expectEqual(@as(usize, 16), getInstructionSize(.block_info));
-    
-    // 24-byte instructions
-    try std.testing.expectEqual(@as(usize, 24), getInstructionSize(.dynamic_gas));
-    try std.testing.expectEqual(@as(usize, 24), getInstructionSize(.word));
+    try std.testing.expectEqual(@as(usize, 16), getInstructionSize(.dynamic_gas));
+    try std.testing.expectEqual(@as(usize, 16), getInstructionSize(.word));
 }
 
 test "InstructionType comptime function" {
@@ -64,29 +66,22 @@ test "ExecInstruction struct layout" {
         }
     }.exec;
     
-    const dummy_inst = Instruction{ .tag = .noop, .id = 0 };
-    
     const exec_inst = ExecInstruction{
         .exec_fn = dummy_fn,
-        .next_inst = &dummy_inst,
     };
     
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(ExecInstruction));
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(ExecInstruction));
     try std.testing.expectEqual(dummy_fn, exec_inst.exec_fn);
-    try std.testing.expect(exec_inst.next_inst == &dummy_inst);
 }
 
 test "BlockInstruction gas and stack tracking" {
-    const dummy_inst = Instruction{ .tag = .noop, .id = 0 };
-    
     const block = BlockInstruction{
         .gas_cost = 1000,
         .stack_req = 3,
         .stack_max_growth = 2,
-        .next_inst = &dummy_inst,
     };
     
-    try std.testing.expectEqual(@as(usize, 16), @sizeOf(BlockInstruction));
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(BlockInstruction));
     try std.testing.expectEqual(@as(u32, 1000), block.gas_cost);
     try std.testing.expectEqual(@as(u16, 3), block.stack_req);
     try std.testing.expectEqual(@as(u16, 2), block.stack_max_growth);
@@ -94,14 +89,12 @@ test "BlockInstruction gas and stack tracking" {
 
 test "WordInstruction with bytecode slice" {
     const bytecode = [_]u8{ 0x60, 0x40 }; // PUSH1 0x40
-    const dummy_inst = Instruction{ .tag = .noop, .id = 0 };
     
     const word_inst = WordInstruction{
         .word_bytes = bytecode[1..2], // Just the 0x40 byte
-        .next_inst = &dummy_inst,
     };
     
-    try std.testing.expectEqual(@as(usize, 24), @sizeOf(WordInstruction));
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(WordInstruction));
     try std.testing.expectEqual(@as(usize, 1), word_inst.word_bytes.len);
     try std.testing.expectEqual(@as(u8, 0x40), word_inst.word_bytes[0]);
 }

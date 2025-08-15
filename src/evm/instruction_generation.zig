@@ -27,12 +27,13 @@ const Log = @import("log.zig");
 
 const BlockAnalysis = @import("block_analysis.zig").BlockAnalysis;
 const getDynamicGasFunction = @import("dynamic_gas_mapping.zig").getDynamicGasFunction;
+const Bucket2 = @import("size_buckets.zig").Bucket2;
 const Bucket8 = @import("size_buckets.zig").Bucket8;
 const Bucket16 = @import("size_buckets.zig").Bucket16;
-const Bucket24 = @import("size_buckets.zig").Bucket24;
+const Size0Counts = @import("size_buckets.zig").Size0Counts;
+const Size2Counts = @import("size_buckets.zig").Size2Counts;
 const Size8Counts = @import("size_buckets.zig").Size8Counts;
 const Size16Counts = @import("size_buckets.zig").Size16Counts;
-const Size24Counts = @import("size_buckets.zig").Size24Counts;
 
 /// Convert bytecode to null-terminated instruction stream with block-based optimization.
 /// This implementation follows evmone's advanced analysis approach by:
@@ -44,12 +45,13 @@ pub const CodeGenResult = struct {
     pc_to_block_start: []u16,
     inst_jump_type: []JumpType,
     inst_to_pc: []u16,
+    size2_instructions: []Bucket2,
     size8_instructions: []Bucket8,
     size16_instructions: []Bucket16,
-    size24_instructions: []Bucket24,
+    size0_counts: Size0Counts,
+    size2_counts: Size2Counts,
     size8_counts: Size8Counts,
     size16_counts: Size16Counts,
-    size24_counts: Size24Counts,
 };
 
 const Stats = struct {
@@ -714,17 +716,20 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
         }
     }
 
-    const total8: usize = @intCast(c_noop + c_jump_pc + c_cju + c_cji);
-    const total16: usize = @intCast(c_exec + c_cjp + c_pc + c_block);
-    const total24: usize = @intCast(c_dyn + c_word);
+    // New bucket totals based on instruction sizes
+    // Note: 0-byte instructions don't need storage allocation
+    const total2: usize = @intCast(c_jump_pc + c_cjp + c_pc); // 2-byte instructions  
+    const total8: usize = @intCast(c_exec + c_block); // 8-byte instructions
+    const total16: usize = @intCast(c_dyn + c_word); // 16-byte instructions
 
+    var size2_instructions = try allocator.alloc(Bucket2, total2);
     var size8_instructions = try allocator.alloc(Bucket8, total8);
     var size16_instructions = try allocator.alloc(Bucket16, total16);
-    var size24_instructions = try allocator.alloc(Bucket24, total24);
 
-    var idx8: u24 = 0;
-    var idx16: u24 = 0;
-    var idx24: u24 = 0;
+    var idx0: u24 = 0; // For 0-byte instructions (tag-only)
+    var idx2: u24 = 0; // For 2-byte instructions
+    var idx8: u24 = 0; // For 8-byte instructions
+    var idx16: u24 = 0; // For 16-byte instructions
 
     var it_exec: usize = 0;
     var it_cjp_pc: usize = 0;
@@ -735,105 +740,92 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
     // it_word removed - we now use instruction IDs directly to index into words_builder
 
     for (final_instructions, 0..) |hdr, i| {
-        const next_inst = if (i + 1 < final_instructions.len) &final_instructions[i + 1] else &final_instructions[final_instructions.len - 1];
         switch (hdr.tag) {
             .noop => {
-                const payload: NoopInstruction = .{ .next_inst = next_inst };
-                final_instructions[i].id = idx8;
-                {
-                    const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size8_instructions[@intCast(idx8)].bytes[0..bytes.len], bytes);
-                }
-                idx8 += 1;
+                // 0-byte instruction - no payload needed
+                final_instructions[i].id = idx0;
+                idx0 += 1;
             },
             .jump_pc => {
                 const pc_val = jump_pcs_builder.items[it_jump_pc];
                 it_jump_pc += 1;
                 const jump_idx = pc_to_block_start[pc_val];
-                const jump_target = if (jump_idx != std.math.maxInt(u16) and jump_idx < final_instructions.len) &final_instructions[jump_idx] else &final_instructions[0];
-                Log.debug("[CODEGEN] JUMP_PC: pc_val={}, jump_idx={}, jump_target_tag={}", .{ pc_val, jump_idx, jump_target.tag });
-                const payload: JumpPcInstruction = .{ .jump_target = jump_target };
-                final_instructions[i].id = idx8;
+                const target_idx: u16 = if (jump_idx != std.math.maxInt(u16) and jump_idx < final_instructions.len) @intCast(jump_idx) else 0;
+                Log.debug("[CODEGEN] JUMP_PC: pc_val={}, jump_idx={}", .{ pc_val, target_idx });
+                const payload: JumpPcInstruction = .{ .jump_idx = target_idx };
+                final_instructions[i].id = idx2;
                 {
                     const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size8_instructions[@intCast(idx8)].bytes[0..bytes.len], bytes);
+                    @memcpy(size2_instructions[@intCast(idx2)].bytes[0..bytes.len], bytes);
                 }
-                idx8 += 1;
+                idx2 += 1;
             },
             .conditional_jump_unresolved => {
-                const payload: ConditionalJumpUnresolvedInstruction = .{ .next_inst = next_inst };
-                final_instructions[i].id = idx8;
-                {
-                    const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size8_instructions[@intCast(idx8)].bytes[0..bytes.len], bytes);
-                }
-                idx8 += 1;
+                // 0-byte instruction - no payload needed
+                final_instructions[i].id = idx0;
+                idx0 += 1;
             },
             .conditional_jump_invalid => {
-                const payload: ConditionalJumpInvalidInstruction = .{ .next_inst = next_inst };
-                final_instructions[i].id = idx8;
-                {
-                    const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size8_instructions[@intCast(idx8)].bytes[0..bytes.len], bytes);
-                }
-                idx8 += 1;
+                // 0-byte instruction - no payload needed
+                final_instructions[i].id = idx0;
+                idx0 += 1;
             },
             .exec => {
                 const exec_fn = exec_builder.items[it_exec];
                 it_exec += 1;
-                const payload: ExecInstruction = .{ .exec_fn = exec_fn, .next_inst = next_inst };
-                final_instructions[i].id = idx16;
+                const payload: ExecInstruction = .{ .exec_fn = exec_fn };
+                final_instructions[i].id = idx8;
                 {
                     const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size16_instructions[@intCast(idx16)].bytes[0..bytes.len], bytes);
+                    @memcpy(size8_instructions[@intCast(idx8)].bytes[0..bytes.len], bytes);
                 }
-                idx16 += 1;
+                idx8 += 1;
             },
             .conditional_jump_pc => {
                 const pc_val = cond_jump_pcs_builder.items[it_cjp_pc];
                 it_cjp_pc += 1;
                 const jump_idx = pc_to_block_start[pc_val];
-                const jump_target = if (jump_idx != std.math.maxInt(u16) and jump_idx < final_instructions.len) &final_instructions[jump_idx] else &final_instructions[0];
-                const payload: ConditionalJumpPcInstruction = .{ .jump_target = jump_target, .next_inst = next_inst };
-                final_instructions[i].id = idx16;
+                const target_idx: u16 = if (jump_idx != std.math.maxInt(u16) and jump_idx < final_instructions.len) @intCast(jump_idx) else 0;
+                const payload: ConditionalJumpPcInstruction = .{ .jump_idx = target_idx };
+                final_instructions[i].id = idx2;
                 {
                     const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size16_instructions[@intCast(idx16)].bytes[0..bytes.len], bytes);
+                    @memcpy(size2_instructions[@intCast(idx2)].bytes[0..bytes.len], bytes);
                 }
-                idx16 += 1;
+                idx2 += 1;
             },
             .pc => {
                 const pc_value = pcs_builder.items[it_pc];
                 it_pc += 1;
-                const payload: PcInstruction = .{ .pc_value = @intCast(pc_value), .next_inst = next_inst };
-                final_instructions[i].id = idx16;
+                const payload: PcInstruction = .{ .pc_value = @intCast(pc_value) };
+                final_instructions[i].id = idx2;
                 {
                     const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size16_instructions[@intCast(idx16)].bytes[0..bytes.len], bytes);
+                    @memcpy(size2_instructions[@intCast(idx2)].bytes[0..bytes.len], bytes);
                 }
-                idx16 += 1;
+                idx2 += 1;
             },
             .block_info => {
                 const bi = blocks_builder.items[it_block];
                 it_block += 1;
-                const payload: BlockInstruction = .{ .gas_cost = bi.gas_cost, .stack_req = bi.stack_req, .stack_max_growth = bi.stack_max_growth, .next_inst = next_inst };
+                const payload: BlockInstruction = .{ .gas_cost = bi.gas_cost, .stack_req = bi.stack_req, .stack_max_growth = bi.stack_max_growth };
+                final_instructions[i].id = idx8;
+                {
+                    const bytes = std.mem.asBytes(&payload);
+                    @memcpy(size8_instructions[@intCast(idx8)].bytes[0..bytes.len], bytes);
+                }
+                idx8 += 1;
+            },
+            .dynamic_gas => {
+                const dg = dyn_builder.items[it_dyn];
+                it_dyn += 1;
+                const payload: DynamicGasInstruction = .{ .gas_fn = dg.gas_fn, .exec_fn = dg.exec_fn };
                 final_instructions[i].id = idx16;
                 {
                     const bytes = std.mem.asBytes(&payload);
                     @memcpy(size16_instructions[@intCast(idx16)].bytes[0..bytes.len], bytes);
                 }
                 idx16 += 1;
-            },
-            .dynamic_gas => {
-                const dg = dyn_builder.items[it_dyn];
-                it_dyn += 1;
-                const payload: DynamicGasInstruction = .{ .gas_fn = dg.gas_fn, .exec_fn = dg.exec_fn, .next_inst = next_inst };
-                final_instructions[i].id = idx24;
-                {
-                    const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size24_instructions[@intCast(idx24)].bytes[0..bytes.len], bytes);
-                }
-                idx24 += 1;
             },
             .word => {
                 // Use the instruction's ID to index into words_builder, not a sequential iterator
@@ -841,13 +833,13 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 const wr = words_builder.items[word_id];
                 const start = wr.start_pc;
                 const end = @min(start + wr.len, code.len);
-                const payload: WordInstruction = .{ .word_bytes = if (end > start) code[start..end] else &[_]u8{0}, .next_inst = next_inst };
-                final_instructions[i].id = idx24;
+                const payload: WordInstruction = .{ .word_bytes = if (end > start) code[start..end] else &[_]u8{0} };
+                final_instructions[i].id = idx16;
                 {
                     const bytes = std.mem.asBytes(&payload);
-                    @memcpy(size24_instructions[@intCast(idx24)].bytes[0..bytes.len], bytes);
+                    @memcpy(size16_instructions[@intCast(idx16)].bytes[0..bytes.len], bytes);
                 }
-                idx24 += 1;
+                idx16 += 1;
             },
             .jump_unresolved, .conditional_jump_idx => {},
         }
@@ -891,11 +883,12 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
         .pc_to_block_start = pc_to_block_start,
         .inst_jump_type = final_jump_types,
         .inst_to_pc = inst_to_pc,
+        .size2_instructions = size2_instructions,
         .size8_instructions = size8_instructions,
         .size16_instructions = size16_instructions,
-        .size24_instructions = size24_instructions,
-        .size8_counts = .{ .noop = c_noop, .jump_pc = c_jump_pc, .conditional_jump_unresolved = c_cju, .conditional_jump_invalid = c_cji },
-        .size16_counts = .{ .exec = c_exec, .conditional_jump_pc = c_cjp, .pc = c_pc, .block_info = c_block },
-        .size24_counts = .{ .word = c_word, .dynamic_gas = c_dyn },
+        .size0_counts = .{ .noop = c_noop, .conditional_jump_unresolved = c_cju, .conditional_jump_invalid = c_cji },
+        .size2_counts = .{ .jump_pc = c_jump_pc, .conditional_jump_pc = c_cjp, .pc = c_pc },
+        .size8_counts = .{ .exec = c_exec, .block_info = c_block },
+        .size16_counts = .{ .word = c_word, .dynamic_gas = c_dyn },
     };
 }

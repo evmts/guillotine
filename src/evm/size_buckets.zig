@@ -5,60 +5,65 @@ const DynamicBitSet = std.DynamicBitSet;
 const limits = @import("constants/code_analysis_limits.zig");
 
 // Aligned bucket element types for size-based instruction storage
+pub const Bucket2 = extern struct { bytes: [2]u8 align(2) };
 pub const Bucket8 = extern struct { bytes: [8]u8 align(8) };
 pub const Bucket16 = extern struct { bytes: [16]u8 align(8) };
-pub const Bucket24 = extern struct { bytes: [24]u8 align(8) };
 
 // Shared count types to keep struct identity stable
-pub const Size8Counts = struct {
+pub const Size0Counts = struct {
     noop: u24 = 0,
-    jump_pc: u24 = 0,
     conditional_jump_unresolved: u24 = 0,
     conditional_jump_invalid: u24 = 0,
+};
+
+pub const Size2Counts = struct {
+    jump_pc: u24 = 0,
+    conditional_jump_pc: u24 = 0,
+    pc: u24 = 0,
+};
+
+pub const Size8Counts = struct {
+    exec: u24 = 0,
+    block_info: u24 = 0,
 };
 
 // ============================================================================
 // Compile-time layout assertions for bucket storage and JumpdestArray
 comptime {
+    if (@sizeOf(Bucket2) != 2 or @alignOf(Bucket2) != 2)
+        @compileError("Bucket2 must be size=2, align=2");
     if (@sizeOf(Bucket8) != 8 or @alignOf(Bucket8) != 8)
         @compileError("Bucket8 must be size=8, align=8");
     if (@sizeOf(Bucket16) != 16 or @alignOf(Bucket16) != 8)
         @compileError("Bucket16 must be size=16, align=8");
-    if (@sizeOf(Bucket24) != 24 or @alignOf(Bucket24) != 8)
-        @compileError("Bucket24 must be size=24, align=8");
 }
 pub const Size16Counts = struct {
-    exec: u24 = 0,
-    conditional_jump_pc: u24 = 0,
-    pc: u24 = 0,
-    block_info: u24 = 0,
-};
-pub const Size24Counts = struct {
     word: u24 = 0,
     dynamic_gas: u24 = 0,
 };
 
 /// Generic function to get instruction parameters from size-based arrays
 pub fn getInstructionParams(
+    size2_instructions: []Bucket2,
     size8_instructions: []Bucket8,
     size16_instructions: []Bucket16,
-    size24_instructions: []Bucket24,
     comptime tag: Tag,
     id: u24,
 ) InstructionType(tag) {
     const InstType = InstructionType(tag);
     const size = comptime @sizeOf(InstType);
     return switch (size) {
+        0 => InstructionType(tag){}, // Return empty struct for 0-byte instructions
+        2 => blk: {
+            const base_ptr: *const u8 = &size2_instructions[id].bytes[0];
+            break :blk (@as(*const InstType, @ptrCast(@alignCast(base_ptr)))).*;
+        },
         8 => blk: {
             const base_ptr: *const u8 = &size8_instructions[id].bytes[0];
             break :blk (@as(*const InstType, @ptrCast(@alignCast(base_ptr)))).*;
         },
         16 => blk: {
             const base_ptr: *const u8 = &size16_instructions[id].bytes[0];
-            break :blk (@as(*const InstType, @ptrCast(@alignCast(base_ptr)))).*;
-        },
-        24 => blk: {
-            const base_ptr: *const u8 = &size24_instructions[id].bytes[0];
             break :blk (@as(*const InstType, @ptrCast(@alignCast(base_ptr)))).*;
         },
         else => {
@@ -172,168 +177,169 @@ test "Bucket16 size and alignment" {
     try std.testing.expectEqualSlices(u8, &test_data, &bucket.bytes);
 }
 
-test "Bucket24 size and alignment" {
-    // Verify Bucket24 has correct size and alignment
-    try std.testing.expectEqual(@as(usize, 24), @sizeOf(Bucket24));
-    try std.testing.expectEqual(@as(usize, 8), @alignOf(Bucket24));
+test "Bucket2 size and alignment" {
+    // Verify Bucket2 has correct size and alignment
+    try std.testing.expectEqual(@as(usize, 2), @sizeOf(Bucket2));
+    try std.testing.expectEqual(@as(usize, 2), @alignOf(Bucket2));
 
     // Test storing and retrieving data
-    var bucket: Bucket24 = undefined;
-    const test_data = [_]u8{ 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8 };
+    var bucket: Bucket2 = undefined;
+    const test_data = [_]u8{ 0x12, 0x34 };
     @memcpy(&bucket.bytes, &test_data);
 
     try std.testing.expectEqualSlices(u8, &test_data, &bucket.bytes);
 }
 
+test "Size2Counts initialization and modification" {
+    // Test default initialization
+    var counts: Size2Counts = .{};
+    try std.testing.expectEqual(@as(u24, 0), counts.jump_pc);
+    try std.testing.expectEqual(@as(u24, 0), counts.conditional_jump_pc);
+    try std.testing.expectEqual(@as(u24, 0), counts.pc);
+
+    // Test modification
+    counts.jump_pc = 100;
+    counts.conditional_jump_pc = 200;
+    counts.pc = 300;
+
+    try std.testing.expectEqual(@as(u24, 100), counts.jump_pc);
+    try std.testing.expectEqual(@as(u24, 200), counts.conditional_jump_pc);
+    try std.testing.expectEqual(@as(u24, 300), counts.pc);
+
+    // Test max value
+    counts.jump_pc = std.math.maxInt(u24);
+    try std.testing.expectEqual(@as(u24, 16777215), counts.jump_pc);
+}
+
 test "Size8Counts initialization and modification" {
     // Test default initialization
     var counts: Size8Counts = .{};
-    try std.testing.expectEqual(@as(u24, 0), counts.noop);
-    try std.testing.expectEqual(@as(u24, 0), counts.jump_pc);
-    try std.testing.expectEqual(@as(u24, 0), counts.conditional_jump_unresolved);
-    try std.testing.expectEqual(@as(u24, 0), counts.conditional_jump_invalid);
+    try std.testing.expectEqual(@as(u24, 0), counts.exec);
+    try std.testing.expectEqual(@as(u24, 0), counts.block_info);
 
     // Test modification
-    counts.noop = 100;
-    counts.jump_pc = 200;
-    counts.conditional_jump_unresolved = 300;
-    counts.conditional_jump_invalid = 400;
+    counts.exec = 100;
+    counts.block_info = 200;
 
-    try std.testing.expectEqual(@as(u24, 100), counts.noop);
-    try std.testing.expectEqual(@as(u24, 200), counts.jump_pc);
-    try std.testing.expectEqual(@as(u24, 300), counts.conditional_jump_unresolved);
-    try std.testing.expectEqual(@as(u24, 400), counts.conditional_jump_invalid);
+    try std.testing.expectEqual(@as(u24, 100), counts.exec);
+    try std.testing.expectEqual(@as(u24, 200), counts.block_info);
 
     // Test max value
-    counts.noop = std.math.maxInt(u24);
-    try std.testing.expectEqual(@as(u24, 16777215), counts.noop);
+    counts.exec = std.math.maxInt(u24);
+    try std.testing.expectEqual(@as(u24, 16777215), counts.exec);
 }
 
 test "Size16Counts initialization and modification" {
     // Test default initialization
     var counts: Size16Counts = .{};
-    try std.testing.expectEqual(@as(u24, 0), counts.exec);
-    try std.testing.expectEqual(@as(u24, 0), counts.conditional_jump_pc);
-    try std.testing.expectEqual(@as(u24, 0), counts.pc);
-    try std.testing.expectEqual(@as(u24, 0), counts.block_info);
-
-    // Test modification
-    counts.exec = 1000;
-    counts.conditional_jump_pc = 2000;
-    counts.pc = 3000;
-    counts.block_info = 4000;
-
-    try std.testing.expectEqual(@as(u24, 1000), counts.exec);
-    try std.testing.expectEqual(@as(u24, 2000), counts.conditional_jump_pc);
-    try std.testing.expectEqual(@as(u24, 3000), counts.pc);
-    try std.testing.expectEqual(@as(u24, 4000), counts.block_info);
-}
-
-test "Size24Counts initialization and modification" {
-    // Test default initialization
-    var counts: Size24Counts = .{};
     try std.testing.expectEqual(@as(u24, 0), counts.word);
     try std.testing.expectEqual(@as(u24, 0), counts.dynamic_gas);
 
     // Test modification
-    counts.word = 5000;
-    counts.dynamic_gas = 6000;
+    counts.word = 1000;
+    counts.dynamic_gas = 2000;
 
-    try std.testing.expectEqual(@as(u24, 5000), counts.word);
-    try std.testing.expectEqual(@as(u24, 6000), counts.dynamic_gas);
+    try std.testing.expectEqual(@as(u24, 1000), counts.word);
+    try std.testing.expectEqual(@as(u24, 2000), counts.dynamic_gas);
+}
+
+test "Size0Counts initialization and modification" {
+    // Test default initialization
+    var counts: Size0Counts = .{};
+    try std.testing.expectEqual(@as(u24, 0), counts.noop);
+    try std.testing.expectEqual(@as(u24, 0), counts.conditional_jump_unresolved);
+    try std.testing.expectEqual(@as(u24, 0), counts.conditional_jump_invalid);
+
+    // Test modification
+    counts.noop = 5000;
+    counts.conditional_jump_unresolved = 6000;
+    counts.conditional_jump_invalid = 7000;
+
+    try std.testing.expectEqual(@as(u24, 5000), counts.noop);
+    try std.testing.expectEqual(@as(u24, 6000), counts.conditional_jump_unresolved);
+    try std.testing.expectEqual(@as(u24, 7000), counts.conditional_jump_invalid);
 }
 
 test "getInstructionParams with 8-byte instruction" {
-    const allocator = std.testing.allocator;
-    const NoopInstruction = @import("instruction.zig").NoopInstruction;
-
-    // Allocate size arrays
-    const size8 = try allocator.alloc(Bucket8, 2);
-    defer allocator.free(size8);
-    const size16 = try allocator.alloc(Bucket16, 1);
-    defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 1);
-    defer allocator.free(size24);
-
-    // Create a dummy instruction for next_inst pointer
-    const dummy_inst = @import("instruction.zig").Instruction{ .tag = .noop, .id = 0 };
-
-    // Create a NoopInstruction in the first bucket
-    const noop_inst = NoopInstruction{
-        .next_inst = &dummy_inst,
-    };
-
-    // Copy the instruction data into the bucket
-    @memcpy(size8[0].bytes[0..@sizeOf(NoopInstruction)], std.mem.asBytes(&noop_inst));
-
-    // Retrieve and verify
-    const retrieved = getInstructionParams(size8, size16, size24, .noop, 0);
-    try std.testing.expectEqual(&dummy_inst, retrieved.next_inst);
-}
-
-test "getInstructionParams with 16-byte instruction" {
     const allocator = std.testing.allocator;
     const ExecInstruction = @import("instruction.zig").ExecInstruction;
     const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 
     // Allocate size arrays
-    const size8 = try allocator.alloc(Bucket8, 1);
+    const size2 = try allocator.alloc(Bucket2, 1);
+    defer allocator.free(size2);
+    const size8 = try allocator.alloc(Bucket8, 2);
     defer allocator.free(size8);
-    const size16 = try allocator.alloc(Bucket16, 2);
+    const size16 = try allocator.alloc(Bucket16, 1);
     defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 1);
-    defer allocator.free(size24);
 
-    // Create dummy function and instruction
+    // Create dummy function
     const dummy_fn: ExecutionFunc = @import("analysis.zig").UnreachableHandler;
-    const dummy_inst = @import("instruction.zig").Instruction{ .tag = .exec, .id = 0 };
 
-    // Create an ExecInstruction in the second bucket
+    // Create an ExecInstruction in the first bucket
     const exec_inst = ExecInstruction{
         .exec_fn = dummy_fn,
-        .next_inst = &dummy_inst,
     };
 
     // Copy the instruction data into the bucket
-    @memcpy(size16[1].bytes[0..@sizeOf(ExecInstruction)], std.mem.asBytes(&exec_inst));
+    @memcpy(size8[0].bytes[0..@sizeOf(ExecInstruction)], std.mem.asBytes(&exec_inst));
 
     // Retrieve and verify
-    const retrieved = getInstructionParams(size8, size16, size24, .exec, 1);
+    const retrieved = getInstructionParams(size2, size8, size16, .exec, 0);
     try std.testing.expectEqual(dummy_fn, retrieved.exec_fn);
-    try std.testing.expectEqual(&dummy_inst, retrieved.next_inst);
 }
 
-test "getInstructionParams with 24-byte instruction" {
+test "getInstructionParams with 16-byte instruction" {
     const allocator = std.testing.allocator;
     const WordInstruction = @import("instruction.zig").WordInstruction;
 
     // Allocate size arrays
+    const size2 = try allocator.alloc(Bucket2, 1);
+    defer allocator.free(size2);
     const size8 = try allocator.alloc(Bucket8, 1);
     defer allocator.free(size8);
-    const size16 = try allocator.alloc(Bucket16, 1);
+    const size16 = try allocator.alloc(Bucket16, 2);
     defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 3);
-    defer allocator.free(size24);
-
-    // Create dummy instruction
-    const dummy_inst = @import("instruction.zig").Instruction{ .tag = .word, .id = 0 };
 
     // Create test word bytes
     const test_bytes = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
 
-    // Create a WordInstruction in the third bucket
+    // Create a WordInstruction in the second bucket
     const word_inst = WordInstruction{
         .word_bytes = &test_bytes,
-        .next_inst = &dummy_inst,
     };
 
     // Copy the instruction data into the bucket
-    @memcpy(size24[2].bytes[0..@sizeOf(WordInstruction)], std.mem.asBytes(&word_inst));
+    @memcpy(size16[1].bytes[0..@sizeOf(WordInstruction)], std.mem.asBytes(&word_inst));
 
     // Retrieve and verify
-    const retrieved = getInstructionParams(size8, size16, size24, .word, 2);
+    const retrieved = getInstructionParams(size2, size8, size16, .word, 1);
     try std.testing.expectEqual(&test_bytes, retrieved.word_bytes);
-    try std.testing.expectEqual(&dummy_inst, retrieved.next_inst);
+}
+
+test "getInstructionParams with 2-byte instruction" {
+    const allocator = std.testing.allocator;
+    const JumpPcInstruction = @import("instruction.zig").JumpPcInstruction;
+
+    // Allocate size arrays
+    const size2 = try allocator.alloc(Bucket2, 3);
+    defer allocator.free(size2);
+    const size8 = try allocator.alloc(Bucket8, 1);
+    defer allocator.free(size8);
+    const size16 = try allocator.alloc(Bucket16, 1);
+    defer allocator.free(size16);
+
+    // Create a JumpPcInstruction in the third bucket
+    const jump_inst = JumpPcInstruction{
+        .jump_idx = 42,
+    };
+
+    // Copy the instruction data into the bucket
+    @memcpy(size2[2].bytes[0..@sizeOf(JumpPcInstruction)], std.mem.asBytes(&jump_inst));
+
+    // Retrieve and verify
+    const retrieved = getInstructionParams(size2, size8, size16, .jump_pc, 2);
+    try std.testing.expectEqual(@as(u16, 42), retrieved.jump_idx);
 }
 
 test "JumpdestArray.from_bitmap empty bitmap" {
@@ -539,17 +545,23 @@ test "getInstructionParams with different tags" {
     const allocator = std.testing.allocator;
 
     // Allocate size arrays
+    const size2 = try allocator.alloc(Bucket2, 5);
+    defer allocator.free(size2);
     const size8 = try allocator.alloc(Bucket8, 5);
     defer allocator.free(size8);
     const size16 = try allocator.alloc(Bucket16, 5);
     defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 5);
-    defer allocator.free(size24);
 
     // Test that getInstructionParams correctly routes to the right bucket based on size
     // We'll create dummy data and verify it's retrieved from the correct bucket
 
     // Fill buckets with recognizable patterns
+    for (size2, 0..) |*bucket, i| {
+        for (&bucket.bytes, 0..) |*byte, j| {
+            byte.* = @intCast(i * 5 + j);
+        }
+    }
+
     for (size8, 0..) |*bucket, i| {
         for (&bucket.bytes, 0..) |*byte, j| {
             byte.* = @intCast(i * 10 + j);
@@ -559,12 +571,6 @@ test "getInstructionParams with different tags" {
     for (size16, 0..) |*bucket, i| {
         for (&bucket.bytes, 0..) |*byte, j| {
             byte.* = @intCast(i * 20 + j);
-        }
-    }
-
-    for (size24, 0..) |*bucket, i| {
-        for (&bucket.bytes, 0..) |*byte, j| {
-            byte.* = @intCast(i * 30 + j);
         }
     }
 

@@ -16,12 +16,13 @@ const createCodeBitmap = @import("code_bitmap.zig").createCodeBitmap;
 const codeToInstructions = @import("instruction_generation.zig").codeToInstructions;
 const applyPatternOptimizations = @import("pattern_optimization.zig").applyPatternOptimizations;
 const size_buckets = @import("size_buckets.zig");
+const Bucket2 = size_buckets.Bucket2;
 const Bucket8 = size_buckets.Bucket8;
 const Bucket16 = size_buckets.Bucket16;
-const Bucket24 = size_buckets.Bucket24;
+const Size0Counts = size_buckets.Size0Counts;
+const Size2Counts = size_buckets.Size2Counts;
 const Size8Counts = size_buckets.Size8Counts;
 const Size16Counts = size_buckets.Size16Counts;
-const Size24Counts = size_buckets.Size24Counts;
 pub const JumpdestArray = size_buckets.JumpdestArray;
 
 /// Handler for opcodes that should never be executed directly.
@@ -53,17 +54,18 @@ pub const CodeAnalysis = @This();
 instructions: []Instruction, // compact headers
 
 /// Size-based arrays for better cache efficiency
-/// 8-byte structs (NoopInstruction, JumpPcInstruction, ConditionalJumpUnresolvedInstruction, ConditionalJumpInvalidInstruction)
+/// 2-byte structs (JumpPcInstruction, ConditionalJumpPcInstruction, PcInstruction)
+size2_instructions: []Bucket2,
+/// 8-byte structs (ExecInstruction, BlockInstruction)
 size8_instructions: []Bucket8,
-/// 16-byte structs (ExecInstruction, ConditionalJumpPcInstruction, WordInstruction, PcInstruction)
+/// 16-byte structs (WordInstruction, DynamicGasInstruction)
 size16_instructions: []Bucket16,
-/// 24-byte structs (BlockInstruction, DynamicGasInstruction)
-size24_instructions: []Bucket24,
 
 /// Tracking counters for each struct type within size categories
+size0_counts: Size0Counts,
+size2_counts: Size2Counts,
 size8_counts: Size8Counts,
 size16_counts: Size16Counts,
-size24_counts: Size24Counts,
 
 /// Mapping from bytecode PC to the BEGINBLOCK instruction index that contains that PC.
 /// Size = code_len. Value = maxInt(u16) if unmapped.
@@ -94,7 +96,7 @@ allocator: std.mem.Allocator, // 16 bytes - only accessed on deinit
 
 /// Generic function to get instruction parameters from size-based arrays
 pub fn getInstructionParams(self: *const CodeAnalysis, comptime tag: Tag, id: u24) InstructionType(tag) {
-    return size_buckets.getInstructionParams(self.size8_instructions, self.size16_instructions, self.size24_instructions, tag, id);
+    return size_buckets.getInstructionParams(self.size2_instructions, self.size8_instructions, self.size16_instructions, tag, id);
 }
 
 /// Main public API: Analyzes bytecode and returns optimized CodeAnalysis with instruction stream.
@@ -140,17 +142,16 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         empty_instructions[0] = .{ .tag = .exec, .id = 0 };
 
         // Allocate size-based arrays
-        const empty_size8 = try allocator.alloc(Bucket8, 0);
-        const empty_size16 = try allocator.alloc(Bucket16, 1); // Need 1 exec instruction for STOP
-        const empty_size24 = try allocator.alloc(Bucket24, 0);
+        const empty_size2 = try allocator.alloc(Bucket2, 0);
+        const empty_size8 = try allocator.alloc(Bucket8, 1); // Need 1 exec instruction for STOP
+        const empty_size16 = try allocator.alloc(Bucket16, 0);
 
-        // Create and copy the STOP exec instruction to size16 array
+        // Create and copy the STOP exec instruction to size8 array
         const stop_op = jump_table.get_operation(@intFromEnum(Opcode.Enum.STOP));
         const exec_inst = @import("instruction.zig").ExecInstruction{
             .exec_fn = stop_op.execute,
-            .next_inst = &empty_instructions[0], // Points to itself (STOP terminates anyway)
         };
-        @memcpy(empty_size16[0].bytes[0..@sizeOf(@import("instruction.zig").ExecInstruction)], std.mem.asBytes(&exec_inst));
+        @memcpy(empty_size8[0].bytes[0..@sizeOf(@import("instruction.zig").ExecInstruction)], std.mem.asBytes(&exec_inst));
 
         const empty_jump_types = try allocator.alloc(JumpType, 0);
         const empty_pc_map = try allocator.alloc(u16, 0);
@@ -158,12 +159,13 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         return CodeAnalysis{
             // First cache line - hot
             .instructions = empty_instructions,
+            .size2_instructions = empty_size2,
             .size8_instructions = empty_size8,
             .size16_instructions = empty_size16,
-            .size24_instructions = empty_size24,
-            .size8_counts = .{},
-            .size16_counts = .{ .exec = 1 },
-            .size24_counts = .{},
+            .size0_counts = .{},
+            .size2_counts = .{},
+            .size8_counts = .{ .exec = 1 },
+            .size16_counts = .{},
             .pc_to_block_start = empty_pc_map,
             .jumpdest_array = jumpdest_array,
             // Second cache line - warm
@@ -269,12 +271,13 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
     return CodeAnalysis{
         // === FIRST CACHE LINE - ULTRA HOT ===
         .instructions = gen.instructions,
+        .size2_instructions = gen.size2_instructions,
         .size8_instructions = gen.size8_instructions,
         .size16_instructions = gen.size16_instructions,
-        .size24_instructions = gen.size24_instructions,
+        .size0_counts = gen.size0_counts,
+        .size2_counts = gen.size2_counts,
         .size8_counts = gen.size8_counts,
         .size16_counts = gen.size16_counts,
-        .size24_counts = gen.size24_counts,
         .pc_to_block_start = gen.pc_to_block_start,
         .jumpdest_array = jumpdest_array,
         // === SECOND CACHE LINE - WARM ===
@@ -292,9 +295,9 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
 pub fn deinit(self: *CodeAnalysis) void {
     // Free the instruction array and size-based arrays
     self.allocator.free(self.instructions);
+    self.allocator.free(self.size2_instructions);
     self.allocator.free(self.size8_instructions);
     self.allocator.free(self.size16_instructions);
-    self.allocator.free(self.size24_instructions);
 
     // Free auxiliary arrays
     self.allocator.free(self.inst_jump_type);

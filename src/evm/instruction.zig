@@ -48,17 +48,14 @@ pub fn InstructionType(comptime tag: Tag) type {
 /// Returns the size category for a given tag
 pub fn getInstructionSize(comptime tag: Tag) usize {
     return switch (tag) {
-        .noop, .jump_pc, .conditional_jump_unresolved, .conditional_jump_invalid => 8,
+        // 0-byte group (no data needed, tag is sufficient)
+        .noop, .conditional_jump_unresolved, .conditional_jump_invalid => 0,
+        // 2-byte group
+        .jump_pc, .conditional_jump_pc, .pc => 2,
+        // 8-byte group
+        .exec, .block_info => 8,
         // 16-byte group
-        // ExecInstruction (2 pointers)
-        // ConditionalJumpPcInstruction (2 pointers)
-        // PcInstruction (u16 + pointer, padded/aligned)
-        // BlockInstruction (u32 + u16 + u16 + pointer)
-        .exec, .conditional_jump_pc, .pc, .block_info => 16,
-        // 24-byte group
-        // DynamicGasInstruction (3 pointers)
-        // WordInstruction (slice + pointer)
-        .dynamic_gas, .word => 24,
+        .dynamic_gas, .word => 16,
         .jump_unresolved, .conditional_jump_idx => 0, // Special handling
     };
 }
@@ -68,8 +65,7 @@ pub fn getInstructionSize(comptime tag: Tag) usize {
 // - `len` is the number of immediate bytes (0..32)
 pub const WordRef = struct {
     start_pc: u16,
-    len: u8,
-    _pad: u8 = 0,
+    len: u16,
 };
 
 /// Block information for BEGINBLOCK instructions.
@@ -89,64 +85,52 @@ pub const DynamicGas = struct {
     exec_fn: ExecutionFunc,
 };
 
-/// Execution instruction with pre-calculated next instruction pointer
+/// Execution instruction with function pointer only
 pub const ExecInstruction = struct {
     exec_fn: ExecutionFunc,
-    next_inst: *const Instruction,
 };
 
-/// Noop instruction with pre-calculated next instruction pointer
-pub const NoopInstruction = struct {
-    next_inst: *const Instruction,
-};
+/// Noop instruction (no data needed, tag is sufficient)
+pub const NoopInstruction = struct {};
 
-/// Block instruction with validation data and pre-calculated next instruction
+/// Block instruction with validation data only
 pub const BlockInstruction = struct {
     gas_cost: u32,
     stack_req: u16,
     stack_max_growth: u16,
-    next_inst: *const Instruction,
 };
 
-/// Dynamic gas instruction with gas function, exec function, and pre-calculated next instruction
+/// Dynamic gas instruction with gas function and exec function
 pub const DynamicGasInstruction = struct {
     gas_fn: DynamicGasFunc,
     exec_fn: ExecutionFunc,
-    next_inst: *const Instruction,
 };
 
-/// Conditional jump to invalid destination with pre-calculated next instruction
-pub const ConditionalJumpInvalidInstruction = struct {
-    next_inst: *const Instruction,
-};
+/// Conditional jump to invalid destination (no data needed, tag is sufficient)
+pub const ConditionalJumpInvalidInstruction = struct {};
 
-/// PC instruction with pre-calculated PC value and next instruction
+/// PC instruction with PC value only
 pub const PcInstruction = struct {
     pc_value: u16,
-    next_inst: *const Instruction,
 };
 
-/// Conditional jump with known PC target and pre-calculated instruction pointers
+/// Conditional jump with known target index
 pub const ConditionalJumpPcInstruction = struct {
-    jump_target: *const Instruction, // where to jump if condition is true
-    next_inst: *const Instruction, // where to go if condition is false (fall-through)
+    jump_idx: u16, // instruction index to jump to if condition is true
 };
 
-/// Word instruction with bytecode slice and next instruction
+/// Word instruction with bytecode slice only
 pub const WordInstruction = struct {
     word_bytes: []const u8, // Slice view into bytecode (1-32 bytes)
-    next_inst: *const Instruction,
 };
 
-/// Jump PC instruction with pre-calculated jump target
+/// Jump PC instruction with target index
 pub const JumpPcInstruction = struct {
-    jump_target: *const Instruction,
+    jump_idx: u16, // instruction index to jump to
 };
 
-/// Conditional jump with unresolved target and pre-calculated fall-through
-pub const ConditionalJumpUnresolvedInstruction = struct {
-    next_inst: *const Instruction, // fall-through when condition is false
-};
+/// Conditional jump with unresolved target (no data needed, tag is sufficient)
+pub const ConditionalJumpUnresolvedInstruction = struct {};
 
 pub fn NoopHandler(context: *anyopaque) ExecutionError.Error!void {
     _ = context;
@@ -162,21 +146,23 @@ comptime {
     // Header must remain tightly packed: 4 bytes
     if (@sizeOf(Instruction) != 4) @compileError("Instruction must be exactly 4 bytes");
 
+    // 0-byte group (tag-only instructions)
+    if (@sizeOf(NoopInstruction) != 0) @compileError("NoopInstruction must be 0 bytes");
+    if (@sizeOf(ConditionalJumpUnresolvedInstruction) != 0) @compileError("ConditionalJumpUnresolvedInstruction must be 0 bytes");
+    if (@sizeOf(ConditionalJumpInvalidInstruction) != 0) @compileError("ConditionalJumpInvalidInstruction must be 0 bytes");
+
+    // 2-byte bucket group
+    if (@sizeOf(JumpPcInstruction) != 2) @compileError("JumpPcInstruction must be 2 bytes");
+    if (@sizeOf(ConditionalJumpPcInstruction) != 2) @compileError("ConditionalJumpPcInstruction must be 2 bytes");
+    if (@sizeOf(PcInstruction) != 2) @compileError("PcInstruction must be 2 bytes");
+
     // 8-byte bucket group
-    if (@sizeOf(NoopInstruction) != 8) @compileError("NoopInstruction must be 8 bytes");
-    if (@sizeOf(JumpPcInstruction) != 8) @compileError("JumpPcInstruction must be 8 bytes");
-    if (@sizeOf(ConditionalJumpUnresolvedInstruction) != 8) @compileError("ConditionalJumpUnresolvedInstruction must be 8 bytes");
-    if (@sizeOf(ConditionalJumpInvalidInstruction) != 8) @compileError("ConditionalJumpInvalidInstruction must be 8 bytes");
+    if (@sizeOf(ExecInstruction) != 8) @compileError("ExecInstruction must be 8 bytes");
+    if (@sizeOf(BlockInstruction) != 8) @compileError("BlockInstruction must be 8 bytes");
 
     // 16-byte bucket group
-    if (@sizeOf(ExecInstruction) != 16) @compileError("ExecInstruction must be 16 bytes");
-    if (@sizeOf(ConditionalJumpPcInstruction) != 16) @compileError("ConditionalJumpPcInstruction must be 16 bytes");
-    if (@sizeOf(PcInstruction) != 16) @compileError("PcInstruction must be 16 bytes");
-    if (@sizeOf(BlockInstruction) != 16) @compileError("BlockInstruction must be 16 bytes");
-
-    // 24-byte bucket group
-    if (@sizeOf(DynamicGasInstruction) != 24) @compileError("DynamicGasInstruction must be 24 bytes");
-    if (@sizeOf(WordInstruction) != 24) @compileError("WordInstruction must be 24 bytes");
+    if (@sizeOf(DynamicGasInstruction) != 16) @compileError("DynamicGasInstruction must be 16 bytes");
+    if (@sizeOf(WordInstruction) != 16) @compileError("WordInstruction must be 16 bytes");
 
     // Size table sanity check
     if (getInstructionSize(.noop) != @sizeOf(NoopInstruction)) @compileError("noop size mismatch");

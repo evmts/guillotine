@@ -21,9 +21,9 @@ const Tag = @import("instruction.zig").Tag;
 const InstructionType = @import("instruction.zig").InstructionType;
 
 // Import bucket types for tests
+const Bucket2 = @import("size_buckets.zig").Bucket2;
 const Bucket8 = @import("size_buckets.zig").Bucket8;
 const Bucket16 = @import("size_buckets.zig").Bucket16;
-const Bucket24 = @import("size_buckets.zig").Bucket24;
 
 // Tests moved from original analysis.zig  
 // These tests verify the correct behavior of the refactored modules
@@ -1602,76 +1602,72 @@ test "size_buckets: getInstructionParams for 8-byte instructions" {
     const allocator = std.testing.allocator;
     
     // Create test arrays
+    const size2 = try allocator.alloc(Bucket2, 1);
+    defer allocator.free(size2);
     const size8 = try allocator.alloc(Bucket8, 2);
     defer allocator.free(size8);
     const size16 = try allocator.alloc(Bucket16, 1);
     defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 1);
-    defer allocator.free(size24);
-    
-    // Create a noop instruction
-    const noop_inst = Instruction{ .tag = .noop, .id = 0 };
-    const noop_params = @import("instruction.zig").NoopInstruction{
-        .next_inst = &noop_inst,
-    };
-    @memcpy(size8[0].bytes[0..@sizeOf(@TypeOf(noop_params))], std.mem.asBytes(&noop_params));
-    
-    // Test retrieval
-    const retrieved = @import("size_buckets.zig").getInstructionParams(
-        size8, size16, size24, .noop, 0
-    );
-    try std.testing.expectEqual(noop_params.next_inst, retrieved.next_inst);
-}
-
-test "size_buckets: getInstructionParams for 16-byte instructions" {
-    const allocator = std.testing.allocator;
-    
-    const size8 = try allocator.alloc(Bucket8, 1);
-    defer allocator.free(size8);
-    const size16 = try allocator.alloc(Bucket16, 2);
-    defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 1);
-    defer allocator.free(size24);
     
     // Create an exec instruction
     const dummy_fn = @import("code_analysis.zig").UnreachableHandler;
     const exec_params = @import("instruction.zig").ExecInstruction{
         .exec_fn = dummy_fn,
-        .next_inst = @ptrFromInt(0x1234),
     };
-    @memcpy(size16[0].bytes[0..@sizeOf(@TypeOf(exec_params))], std.mem.asBytes(&exec_params));
+    @memcpy(size8[0].bytes[0..@sizeOf(@TypeOf(exec_params))], std.mem.asBytes(&exec_params));
     
     // Test retrieval
     const retrieved = @import("size_buckets.zig").getInstructionParams(
-        size8, size16, size24, .exec, 0
+        size2, size8, size16, .exec, 0
     );
     try std.testing.expectEqual(exec_params.exec_fn, retrieved.exec_fn);
 }
 
-test "size_buckets: getInstructionParams for 24-byte instructions" {
+test "size_buckets: getInstructionParams for 16-byte instructions" {
     const allocator = std.testing.allocator;
     
+    const size2 = try allocator.alloc(Bucket2, 1);
+    defer allocator.free(size2);
+    const size8 = try allocator.alloc(Bucket8, 1);
+    defer allocator.free(size8);
+    const size16 = try allocator.alloc(Bucket16, 2);
+    defer allocator.free(size16);
+    
+    // Create a word instruction
+    const test_bytes = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
+    const word_params = @import("instruction.zig").WordInstruction{
+        .word_bytes = &test_bytes,
+    };
+    @memcpy(size16[0].bytes[0..@sizeOf(@TypeOf(word_params))], std.mem.asBytes(&word_params));
+    
+    // Test retrieval
+    const retrieved = @import("size_buckets.zig").getInstructionParams(
+        size2, size8, size16, .word, 0
+    );
+    try std.testing.expectEqual(word_params.word_bytes.ptr, retrieved.word_bytes.ptr);
+}
+
+test "size_buckets: getInstructionParams for 2-byte instructions" {
+    const allocator = std.testing.allocator;
+    
+    const size2 = try allocator.alloc(Bucket2, 2);
+    defer allocator.free(size2);
     const size8 = try allocator.alloc(Bucket8, 1);
     defer allocator.free(size8);
     const size16 = try allocator.alloc(Bucket16, 1);
     defer allocator.free(size16);
-    const size24 = try allocator.alloc(Bucket24, 2);
-    defer allocator.free(size24);
     
-    // Create a word instruction with a test byte slice
-    const test_bytes = [_]u8{0xFF} ** 32;
-    const word_params = @import("instruction.zig").WordInstruction{
-        .word_bytes = &test_bytes,
-        .next_inst = @ptrFromInt(0x5678),
+    // Create a jump instruction  
+    const jump_params = @import("instruction.zig").JumpPcInstruction{
+        .jump_idx = 42,
     };
-    @memcpy(size24[0].bytes[0..@sizeOf(@TypeOf(word_params))], std.mem.asBytes(&word_params));
+    @memcpy(size2[0].bytes[0..@sizeOf(@TypeOf(jump_params))], std.mem.asBytes(&jump_params));
     
     // Test retrieval
     const retrieved = @import("size_buckets.zig").getInstructionParams(
-        size8, size16, size24, .word, 0
+        size2, size8, size16, .jump_pc, 0
     );
-    try std.testing.expectEqual(word_params.word_bytes.ptr, retrieved.word_bytes.ptr);
-    try std.testing.expectEqual(word_params.word_bytes.len, retrieved.word_bytes.len);
+    try std.testing.expectEqual(jump_params.jump_idx, retrieved.jump_idx);
 }
 
 test "code_bitmap: marks PUSH data bytes correctly" {
