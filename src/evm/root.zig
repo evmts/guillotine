@@ -220,8 +220,31 @@ pub const opcode = @import("opcodes/opcode.zig");
 /// Logger for EVM operations
 pub const Log = @import("log.zig");
 
-/// Tracer for capturing execution traces
-pub const Tracer = @import("tracer.zig").Tracer;
+/// Structured tracing for devtools and debugging
+pub const tracing = struct {
+    pub const TracerConfig = @import("tracing/trace_types.zig").TracerConfig;
+    pub const TracerHandle = @import("tracing/trace_types.zig").TracerHandle;
+    pub const TracerVTable = @import("tracing/trace_types.zig").TracerVTable;
+    pub const JSONTracer = @import("tracing/json_tracer.zig").JSONTracer; // for capturing revm-compatible execution traces
+    pub const MemoryTracer = @import("tracing/memory_tracer.zig").MemoryTracer;
+    pub const ExecutionTrace = @import("tracing/trace_types.zig").ExecutionTrace;
+    pub const StructLog = @import("tracing/trace_types.zig").StructLog;
+    pub const StepInfo = @import("tracing/trace_types.zig").StepInfo;
+    pub const StepResult = @import("tracing/trace_types.zig").StepResult;
+    pub const FinalResult = @import("tracing/trace_types.zig").FinalResult;
+    pub const ExecutionStatus = @import("tracing/trace_types.zig").ExecutionStatus;
+    pub const ExecutionErrorEnhanced = @import("tracing/trace_types.zig").ExecutionErrorEnhanced;
+    pub const StackChanges = @import("tracing/trace_types.zig").StackChanges;
+    pub const MemoryChanges = @import("tracing/trace_types.zig").MemoryChanges;
+    pub const StorageChange = @import("tracing/trace_types.zig").StorageChange;
+    pub const LogEntry = @import("tracing/trace_types.zig").LogEntry;
+    pub const ExecutionErrorInfo = @import("tracing/trace_types.zig").ExecutionErrorInfo;
+    
+    // Helper functions
+    pub const createEmptyStackChanges = @import("tracing/trace_types.zig").createEmptyStackChanges;
+    pub const createEmptyMemoryChanges = @import("tracing/trace_types.zig").createEmptyMemoryChanges;
+    pub const createEmptyStepResult = @import("tracing/trace_types.zig").createEmptyStepResult;
+};
 
 /// EIP-7702 EOA delegation bytecode format
 pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");

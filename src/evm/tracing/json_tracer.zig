@@ -1,17 +1,17 @@
 const std = @import("std");
-const opcodes = @import("opcodes/opcode.zig");
+const opcodes = @import("../opcodes/opcode.zig");
 
 /// Tracer interface for capturing EVM execution traces
-pub const Tracer = struct {
+pub const JSONTracer = struct {
     writer: std.io.AnyWriter,
     
-    pub fn init(writer: std.io.AnyWriter) Tracer {
+    pub fn init(writer: std.io.AnyWriter) JSONTracer {
         return .{ .writer = writer };
     }
     
     /// Write a trace entry in REVM-compatible JSON format
     pub fn trace(
-        self: *Tracer,
+        self: *JSONTracer,
         pc: usize,
         opcode: u8,
         stack: []const u256,

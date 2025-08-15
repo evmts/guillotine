@@ -1,7 +1,9 @@
 const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
 const build_options = @import("build_options");
-const Tracer = @import("../tracer.zig").Tracer;
+const tracer = @import("../tracing/trace_types.zig");
+const capture_utils = @import("../tracing/capture_utils.zig");
+const opcodes = @import("../opcodes/opcode.zig");
 const Frame = @import("../frame.zig").Frame;
 const Log = @import("../log.zig");
 const Evm = @import("../evm.zig");
@@ -59,7 +61,7 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
                 const stack_view: []const u256 = frame.stack.data[0..stack_len];
                 const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
                 const mem_size: usize = frame.memory.size();
-                var tr = Tracer.init(writer);
+                var tr = tracer.JSONTracer.init(writer);
                 _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
                 if (frame.depth > 0) {
                     Log.debug("Tracing nested call: pc={}, depth={}, opcode=0x{x}, code_len={}", .{ pc, frame.depth, opcode, analysis.code_len });
@@ -68,6 +70,95 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
         } else if (frame.depth > 0) {
             Log.debug("No tracer available for nested call at depth={}, self_ptr=0x{x}", .{ frame.depth, @intFromPtr(self) });
         }
+        
+        // Handle structured tracer
+        if (self.inproc_tracer) |tracer_handle| {
+            const struct_analysis = frame.analysis;
+            // Derive index of current instruction for tracing
+            const base: [*]const @TypeOf(inst.*) = struct_analysis.instructions.ptr;
+            const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+            
+            if (idx < struct_analysis.inst_to_pc.len) {
+                const pc_u16 = struct_analysis.inst_to_pc[idx];
+                if (pc_u16 != std.math.maxInt(u16)) {
+                    const pc: usize = pc_u16;
+                    const opcode: u8 = if (pc < struct_analysis.code_len) frame.analysis.code[pc] else 0x00;
+                    
+                    // Get opcode name
+                    const op_enum = std.meta.intToEnum(opcodes.Enum, opcode) catch opcodes.Enum.INVALID;
+                    const op_name = opcodes.get_name(op_enum);
+                    
+                    // Build StepInfo for structured tracer
+                    const step_info = tracer.StepInfo{
+                        .pc = pc,
+                        .opcode = opcode,
+                        .op_name = op_name,
+                        .gas_before = frame.gas_remaining,
+                        .depth = frame.depth,
+                        .address = frame.contract_address,
+                        .caller = frame.caller,
+                        .is_static = frame.is_static,
+                        .stack_size = frame.stack.size(),
+                        .memory_size = frame.memory.context_size(),
+                    };
+                    
+                    tracer_handle.on_pre_step(step_info);
+                }
+            }
+        }
+    }
+}
+
+/// Post-step tracing helper for structured tracers
+/// Captures execution results and calls tracer post-step hook
+inline fn post_step(
+    self: *Evm, 
+    frame: *Frame, 
+    gas_before: u64, 
+    _journal_size_before: usize, 
+    _log_count_before: usize
+) void {
+    if (comptime !build_options.enable_tracing) return;
+    
+    // Suppress unused parameter warnings
+    _ = _journal_size_before;
+    _ = _log_count_before;
+    
+    if (self.inproc_tracer) |tracer_handle| {
+        // Get the last step info to extract opcode for gas cost lookup
+        // For now, calculate gas cost based on actual consumption
+        const gas_after = frame.gas_remaining;
+        const gas_cost = if (gas_before >= gas_after) gas_before - gas_after else 0;
+        
+        // Capture bounded snapshots using EVM's allocator
+        const allocator = self.allocator;
+        
+        // Stack snapshot - pass raw data, let tracer apply bounds
+        const stack_len = frame.stack.size();
+        const stack_view: []const u256 = if (stack_len > 0) frame.stack.data[0..stack_len] else &.{};
+        const stack_snapshot = if (stack_view.len > 0) allocator.dupe(u256, stack_view) catch null else null;
+        
+        // Memory snapshot (no specific accessed region info available here)
+        const memory_snapshot = capture_utils.copy_memory_bounded(allocator, &frame.memory, 1024, null) catch null;
+        
+        // Storage changes (would need access to journal - simplified for now)
+        const storage_changes = capture_utils.create_empty_storage_changes(allocator) catch @constCast(&[_]tracer.StorageChange{});
+        
+        // Log entries (would need access to evm state logs - simplified for now)  
+        const logs_emitted = capture_utils.create_empty_log_entries(allocator) catch @constCast(&[_]tracer.LogEntry{});
+        
+        // Build StepResult
+        const step_result = tracer.StepResult{
+            .gas_after = gas_after,
+            .gas_cost = gas_cost,
+            .stack_snapshot = stack_snapshot,
+            .memory_snapshot = memory_snapshot,
+            .storage_changes = storage_changes,
+            .logs_emitted = logs_emitted,
+            .error_info = null, // Set this if there was an error
+        };
+        
+        tracer_handle.on_post_step(step_result);
     }
 }
 
@@ -136,6 +227,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         // 2. Goto the next instruction next
         .exec => {
             @branchHint(.likely);
+            
+            // Store gas before execution for post-step tracing
+            const gas_before = frame.gas_remaining;
+            
             pre_step(self, frame, instruction, &loop_iterations);
 
             const params = analysis.getInstructionParams(.exec, instruction.id);
@@ -147,11 +242,18 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             try params.exec_fn(frame);
 
+            // Post-step tracing for structured tracers
+            post_step(self, frame, gas_before, 0, 0); // TODO: Pass actual journal and log counts
+
             continue :dispatch next_instruction.tag;
         },
         // .dynamic_gas is like .exec but it also dynamically charges gas that couldn't be statically analyzed
         .dynamic_gas => {
             @branchHint(.likely);
+            
+            // Store gas before execution for post-step tracing
+            const gas_before = frame.gas_remaining;
+            
             pre_step(self, frame, instruction, &loop_iterations);
 
             const params = analysis.getInstructionParams(.dynamic_gas, instruction.id);
@@ -176,6 +278,9 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             }
             frame.gas_remaining -= additional_gas;
             try params.exec_fn(frame);
+
+            // Post-step tracing for structured tracers
+            post_step(self, frame, gas_before, 0, 0); // TODO: Pass actual journal and log counts
 
             continue :dispatch next_instruction.tag;
         },

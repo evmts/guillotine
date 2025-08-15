@@ -812,6 +812,52 @@ pub fn build(b: *std.Build) void {
     const analysis_corner_test_step = b.step("test-analysis-corner", "Run Analysis corner cases tests");
     analysis_corner_test_step.dependOn(&run_analysis_corner_test.step);
     
+    // Tracing tests (require enable-tracing flag)
+    // Run with `zig build -Denable-tracing=true test-memory-tracer`
+    var run_memory_tracer_test: ?*std.Build.Step.Run = null;
+    if (enable_tracing) {
+        const memory_tracer_test = b.addTest(.{
+            .name = "memory-tracer-test",
+            .root_source_file = b.path("test/evm/memory_tracer_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        memory_tracer_test.root_module.addImport("evm", evm_mod);
+        memory_tracer_test.root_module.addImport("primitives", primitives_mod);
+        if (bn254_lib) |bn254| {
+            memory_tracer_test.linkLibrary(bn254);
+            memory_tracer_test.addIncludePath(b.path("src/bn254_wrapper"));
+        }
+        
+        run_memory_tracer_test = b.addRunArtifact(memory_tracer_test);
+        const memory_tracer_test_step = b.step("test-memory-tracer", "Run memory tracer tests");
+        memory_tracer_test_step.dependOn(&run_memory_tracer_test.?.step);
+    }
+    
+    // Trace types tests (require enable-tracing flag)
+    // Run with `zig build -Denable-tracing=true test-trace-types`
+    var run_trace_types_test: ?*std.Build.Step.Run = null;
+    if (enable_tracing) {
+        const trace_types_test = b.addTest(.{
+            .name = "trace-types-test",
+            .root_source_file = b.path("test/evm/trace_types_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        trace_types_test.root_module.addImport("evm", evm_mod);
+        trace_types_test.root_module.addImport("primitives", primitives_mod);
+        trace_types_test.root_module.addImport("crypto", crypto_mod);
+        trace_types_test.root_module.addImport("build_options", build_options_mod);
+        if (bn254_lib) |bn254| {
+            trace_types_test.linkLibrary(bn254);
+            trace_types_test.addIncludePath(b.path("src/bn254_wrapper"));
+        }
+        
+        run_trace_types_test = b.addRunArtifact(trace_types_test);
+        const trace_types_test_step = b.step("test-trace-types", "Run trace types tests");
+        trace_types_test_step.dependOn(&run_trace_types_test.?.step);
+    }
+    
     // Interpret comprehensive tests
     const interpret_test = b.addTest(.{
         .name = "interpret-comprehensive-test",

@@ -12,6 +12,8 @@ const Host = @import("../host.zig").Host;
 const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
 const Evm = @import("../evm.zig");
 const interpret = @import("interpret.zig").interpret;
+const tracer = @import("../tracing/trace_types.zig");
+const build_options = @import("build_options");
 const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const primitives = @import("primitives");
@@ -21,6 +23,22 @@ const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
 const CallJournal = @import("../call_frame_stack.zig").CallJournal;
 const Account = @import("../state/database_interface.zig").Account;
+
+/// Map ExecutionError to ExecutionStatus
+fn map_execution_status(exec_err: ?ExecutionError.Error) tracer.ExecutionStatus {
+    if (exec_err) |err| {
+        return switch (err) {
+            ExecutionError.Error.OutOfGas => .OutOfGas,
+            ExecutionError.Error.InvalidOpcode => .InvalidOpcode,
+            ExecutionError.Error.StackUnderflow => .StackUnderflow,
+            ExecutionError.Error.StackOverflow => .StackOverflow,
+            ExecutionError.Error.InvalidJump => .InvalidJump,
+            ExecutionError.Error.REVERT => .Revert,
+            else => .InvalidOpcode, // Default for other errors
+        };
+    }
+    return .Success;
+}
 
 // Threshold for stack vs heap allocation optimization
 const STACK_ALLOCATION_THRESHOLD = 12800; // bytes of bytecode
@@ -470,6 +488,22 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             Log.warn("[call] OutOfGas signaled", .{});
         }
     };
+    
+    // Call finalize hook for structured tracers
+    if (comptime build_options.enable_tracing) {
+        if (self.inproc_tracer) |tracer_handle| {
+            const initial_gas = call_gas;
+            const gas_used = initial_gas - current_frame.gas_remaining;
+            const final_result = tracer.FinalResult{
+                .gas_used = gas_used,
+                .failed = exec_err != null,
+                .return_value = host.get_output(),
+                .status = map_execution_status(exec_err),
+            };
+            tracer_handle.finalize(final_result);
+        }
+    }
+    
     // Restore executing flag
     self.set_is_executing(was_executing);
 
