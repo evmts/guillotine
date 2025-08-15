@@ -4,7 +4,7 @@ const primitives = @import("primitives");
 const Log = @import("evm").Log;
 
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 
 test "reproduce exact ERC20 deployment failure" {
