@@ -689,9 +689,9 @@ pub const call_mini = @import("call_mini.zig").call_mini;
     }
     
     // Convert bitmap to JumpdestArray for efficient validation
-    const JumpdestArray = @import("../analysis.zig").JumpdestArray;
-    var jumpdest_array = try JumpdestArray.from_bitmap(self.allocator, &jumpdest_bitmap, call_code.len);
-    defer jumpdest_array.deinit();
+    const size_buckets = @import("../size_buckets.zig");
+    var jumpdest_array = try size_buckets.JumpdestArray.from_bitmap(self.allocator, &jumpdest_bitmap, call_code.len);
+    defer jumpdest_array.deinit(self.allocator);
 
     // Main execution loop
     var exec_err: ?ExecutionError.Error = null;
