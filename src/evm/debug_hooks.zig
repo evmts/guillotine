@@ -209,7 +209,7 @@ test "DebugHooks step_only constructor" {
     var ctx = TestContext{};
     const hooks = DebugHooks.step_only(TestContext.step_hook, &ctx);
     
-    try testing.expect(hooks.user_ctx == &ctx);
+    try testing.expect(hooks.user_ctx == @as(*anyopaque, @ptrCast(&ctx)));
     try testing.expect(hooks.on_step != null);
     try testing.expect(hooks.on_message == null);
 }
@@ -229,7 +229,7 @@ test "DebugHooks message_only constructor" {
     var ctx = TestContext{};
     const hooks = DebugHooks.message_only(TestContext.message_hook, &ctx);
     
-    try testing.expect(hooks.user_ctx == &ctx);
+    try testing.expect(hooks.user_ctx == @as(*anyopaque, @ptrCast(&ctx)));
     try testing.expect(hooks.on_step == null);
     try testing.expect(hooks.on_message != null);
 }
@@ -259,7 +259,7 @@ test "DebugHooks full constructor" {
     var ctx = TestContext{};
     const hooks = DebugHooks.full(TestContext.step_hook, TestContext.message_hook, &ctx);
     
-    try testing.expect(hooks.user_ctx == &ctx);
+    try testing.expect(hooks.user_ctx == @as(*anyopaque, @ptrCast(&ctx)));
     try testing.expect(hooks.on_step != null);
     try testing.expect(hooks.on_message != null);
 }
@@ -287,11 +287,15 @@ test "OnStepFn signature and error handling" {
     var mock_frame = Frame{
         .memory = undefined,
         .stack = undefined,
+        .analysis = undefined,
+        .host = undefined,
+        .state = undefined,
         .contract_address = primitives.Address.ZERO,
         .depth = 0,
         .gas_remaining = 1000,
         .is_static = false,
-        .host = undefined,
+        .caller = primitives.Address.ZERO,
+        .value = 0,
     };
     
     // Test continue
