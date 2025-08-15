@@ -99,18 +99,19 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
         return precompile_result;
     }
 
-    // Initialize frame for execution
+    // Initialize frame state for top-level calls
     if (is_top_level_call) {
-        // Reset execution state
         self.current_frame_depth = 0;
         self.access_list.clear();
+        
         self.self_destruct.deinit();
         self.self_destruct = SelfDestruct.init(self.allocator);
+        
         self.created_contracts.deinit();
         self.created_contracts = CreatedContracts.init(self.allocator);
+        
         self.current_output = &.{};
-
-        // Allocate frame stack if needed
+        
         if (self.frame_stack == null) {
             self.frame_stack = try std.heap.page_allocator.alloc(Frame, MAX_CALL_DEPTH);
         }
@@ -123,25 +124,34 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
         }
     }
 
-    // Pre-warm addresses for Berlin
+    // Prewarm addresses for Berlin
     if (self.chain_rules.is_berlin) {
         const addresses_to_warm = [_]primitives.Address.Address{ call_address, call_caller };
-        self.access_list.pre_warm_addresses(&addresses_to_warm) catch {};
+        self.access_list.pre_warm_addresses(&addresses_to_warm) catch |err| {
+            Log.debug("[call_mini] Failed to warm addresses: {}", .{err});
+        };
     }
 
-    // Analyze code for jumpdest validation
+    // Use cached analysis if available, otherwise analyze and cache
     var analysis_owned = false;
-    const analysis_ptr: *CodeAnalysis = blk: {
-        Log.debug("[call_mini] Analyzing code directly", .{});
+    var analysis_ptr: *CodeAnalysis = if (self.analysis_cache) |*cache| blk: {
+        Log.debug("[call_mini] Using analysis cache for code analysis", .{});
+        break :blk cache.getOrAnalyze(call_code, &self.table) catch |err| {
+            Log.err("[call_mini] Cached code analysis failed: {}", .{err});
+            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
+            return CallResult{ .success = false, .gas_left = call_gas, .output = &.{} };
+        };
+    } else blk: {
+        Log.debug("[call_mini] No cache available, analyzing code directly", .{});
         var analysis_val = CodeAnalysis.from_code(self.allocator, call_code, &self.table) catch |err| {
             Log.err("[call_mini] Code analysis failed: {}", .{err});
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
-            return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
+            return CallResult{ .success = false, .gas_left = call_gas, .output = &.{} };
         };
         const analysis_heap = self.allocator.create(CodeAnalysis) catch {
             analysis_val.deinit();
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
-            return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
+            return CallResult{ .success = false, .gas_left = call_gas, .output = &.{} };
         };
         analysis_heap.* = analysis_val;
         analysis_owned = true;
@@ -207,7 +217,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
             break;
         }
 
-        // Handle specific opcodes inline
+        // Handle specific opcodes that need special handling
         switch (op) {
             @intFromEnum(opcode_mod.Enum.STOP) => {
                 exec_err = ExecutionError.Error.STOP;
@@ -215,34 +225,34 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
             },
             @intFromEnum(opcode_mod.Enum.JUMP) => {
                 const dest = try frame.stack.pop();
-                if (dest > call_code.len) {
-                    exec_err = ExecutionError.Error.InvalidJump;
-                    break;
-                }
                 const dest_usize = @as(usize, @intCast(dest));
-                if (!frame.valid_jumpdest(dest)) {
+                
+                // Check if destination is valid jumpdest
+                if (dest_usize >= call_code.len or call_code[dest_usize] != @intFromEnum(opcode_mod.Enum.JUMPDEST)) {
                     exec_err = ExecutionError.Error.InvalidJump;
                     break;
                 }
+                
                 pc = dest_usize;
                 continue;
             },
             @intFromEnum(opcode_mod.Enum.JUMPI) => {
                 const dest = try frame.stack.pop();
-                const condition = try frame.stack.pop();
-                if (condition != 0) {
-                    if (dest > call_code.len) {
-                        exec_err = ExecutionError.Error.InvalidJump;
-                        break;
-                    }
+                const cond = try frame.stack.pop();
+                
+                if (cond != 0) {
                     const dest_usize = @as(usize, @intCast(dest));
-                    if (!frame.valid_jumpdest(dest)) {
+                    
+                    // Check if destination is valid jumpdest
+                    if (dest_usize >= call_code.len or call_code[dest_usize] != @intFromEnum(opcode_mod.Enum.JUMPDEST)) {
                         exec_err = ExecutionError.Error.InvalidJump;
                         break;
                     }
+                    
                     pc = dest_usize;
                     continue;
                 }
+                
                 pc += 1;
                 continue;
             },
@@ -287,17 +297,8 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 exec_err = ExecutionError.Error.REVERT;
                 break;
             },
-            @intFromEnum(opcode_mod.Enum.INVALID) => {
-                exec_err = ExecutionError.Error.INVALID;
-                break;
-            },
-            @intFromEnum(opcode_mod.Enum.JUMPDEST) => {
-                // No-op, just advance
-                pc += 1;
-                continue;
-            },
             else => {
-                // For push opcodes, handle data
+                // Handle PUSH opcodes
                 if (opcode_mod.is_push(op)) {
                     const push_size = opcode_mod.get_push_size(op);
                     if (pc + push_size >= call_code.len) {
@@ -311,7 +312,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                     const data_end = @min(data_start + push_size, call_code.len);
                     const data = call_code[data_start..data_end];
 
-                    // Convert bytes to primitives.u256 (big-endian)
+                    // Convert bytes to u256 (big-endian)
                     for (data) |byte| {
                         value = (value << 8) | byte;
                     }
@@ -329,18 +330,11 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                     break;
                 };
                 pc += 1;
-                continue;
             },
         }
     }
 
-    // Handle execution result
-    if (exec_err == null and pc >= call_code.len) {
-        // Fell off the end - treat as STOP
-        exec_err = ExecutionError.Error.STOP;
-    }
-
-    // Revert snapshot for failed nested calls
+    // Handle snapshot revert for failed nested calls
     if (!is_top_level_call and exec_err != null) {
         const should_revert = switch (exec_err.?) {
             ExecutionError.Error.STOP => false,
@@ -352,21 +346,19 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
         }
     }
 
-    // View VM-owned output, then dupe for test-compat so caller owns it
-    const output_view = host.get_output();
-    const output_dupe = self.allocator.dupe(u8, output_view) catch &.{};
+    // Get output before frame cleanup
+    const output = if (frame.output_buffer.len > 0) frame.output_buffer else &.{};
 
-    // Determine success
+    // Map error to success status
     const success = if (exec_err) |e| switch (e) {
         ExecutionError.Error.STOP => true,
         ExecutionError.Error.RETURN => true,
         else => false,
     } else false;
 
-    const out_opt: ?[]const u8 = if (output_dupe.len > 0) output_dupe else null;
     return CallResult{
         .success = success,
         .gas_left = frame.gas_remaining,
-        .output = out_opt,
+        .output = output,
     };
 }
