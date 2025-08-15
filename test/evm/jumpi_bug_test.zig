@@ -12,6 +12,12 @@ test {
     std.testing.log_level = .debug;
 }
 
+// Import the instruction mapping test
+pub const jumpi_instruction_mapping_test = @import("jumpi_instruction_mapping_test.zig");
+test {
+    _ = jumpi_instruction_mapping_test;
+}
+
 // WORKING: This test documents a dynamic JUMPI to a valid JUMPDEST.
 // It should pass once jumpdest validation off-by-one is fixed in analysis.
 test "WORKING dynamic JUMPI to valid JUMPDEST returns 0x01" {

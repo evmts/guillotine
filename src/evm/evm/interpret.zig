@@ -125,6 +125,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         .block_info => {
             pre_step(self, frame, instruction, &loop_iterations);
             const block_inst = analysis.getInstructionParams(.block_info, instruction.id);
+            Log.debug("[BLOCK_INFO] Processing block at instruction.id={}, next_inst.id={}", .{ instruction.id, block_inst.next_inst.id });
             const current_stack_size: u16 = @intCast(frame.stack.size());
             if (frame.gas_remaining < block_inst.gas_cost) {
                 @branchHint(.unlikely);
@@ -165,7 +166,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     pc = pc_u16;
                 }
             }
-            Log.debug("[EXEC] Executing instruction at idx={}, pc={}, stack_size={}", .{ idx, pc, frame.stack.size() });
+            Log.debug("[EXEC] Executing instruction at idx={}, pc={}, stack_size={}, instruction.id={}", .{ idx, pc, frame.stack.size(), instruction.id });
 
             try exec_fun(frame);
             instruction = next_instruction;
@@ -223,8 +224,9 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             Log.debug("[JUMPI] CONDITIONAL_JUMP_PC: condition={}, taking jump={}", .{ condition, condition != 0 });
             if (condition != 0) {
-                Log.debug("[JUMPI] Jumping to target instruction: {}", .{cjp_inst.jump_target});
+                Log.debug("[JUMPI] Jumping to target instruction: {} (tag={})", .{ cjp_inst.jump_target, cjp_inst.jump_target.tag });
                 instruction = cjp_inst.jump_target;
+                Log.debug("[JUMPI] After jump assignment: instruction.id={}, instruction.tag={}", .{ instruction.id, instruction.tag });
             } else {
                 Log.debug("[JUMPI] Not jumping, continuing to next: {}", .{cjp_inst.next_inst});
                 instruction = cjp_inst.next_inst;
@@ -308,7 +310,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             // Debug logging for PUSH instructions
             if (builtin.mode == .Debug) {
                 const bytes_hex = std.fmt.fmtSliceHexLower(word_inst.word_bytes);
-                Log.debug("[WORD] Pushing value={} from bytes={x} (len={})", .{ word_value, bytes_hex, word_inst.word_bytes.len });
+                const byte_ptr = @intFromPtr(word_inst.word_bytes.ptr);
+                const code_ptr = @intFromPtr(frame.analysis.code.ptr);
+                const offset = if (byte_ptr >= code_ptr) byte_ptr - code_ptr else 0;
+                Log.debug("[WORD] Pushing value={} from bytes={x} (len={}, offset={}, instruction.id={})", .{ word_value, bytes_hex, word_inst.word_bytes.len, offset, instruction.id });
             }
             
             frame.stack.append_unsafe(word_value);
