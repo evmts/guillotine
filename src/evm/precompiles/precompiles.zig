@@ -40,21 +40,23 @@ const PrecompileHandler = union(enum) {
 const PRECOMPILE_TABLE = blk: {
     var table: [10]?PrecompileHandler = .{null} ** 10;
     
-    // Standard precompiles (no chain rules)
-    table[0] = PrecompileHandler{ .standard = &ecrecover.execute }; // ID 1: ECRECOVER
-    table[1] = PrecompileHandler{ .standard = &sha256.execute }; // ID 2: SHA256
-    table[2] = PrecompileHandler{ .standard = &ripemd160.execute }; // ID 3: RIPEMD160
-    table[3] = PrecompileHandler{ .standard = &identity.execute }; // ID 4: IDENTITY
-    table[4] = PrecompileHandler{ .standard = &modexp.execute }; // ID 5: MODEXP
-    
-    // EC precompiles (require chain rules)
-    table[5] = PrecompileHandler{ .with_chain_rules = &ecadd.execute }; // ID 6: ECADD
-    table[6] = PrecompileHandler{ .with_chain_rules = &ecmul.execute }; // ID 7: ECMUL
-    table[7] = PrecompileHandler{ .with_chain_rules = &ecpairing.execute }; // ID 8: ECPAIRING
-    
-    // Standard precompiles
-    table[8] = PrecompileHandler{ .standard = &blake2f.execute }; // ID 9: BLAKE2F
-    table[9] = PrecompileHandler{ .standard = &kzg_point_evaluation.execute }; // ID 10: POINT_EVALUATION
+    if (!no_precompiles) {
+        // Standard precompiles (no chain rules)
+        table[0] = PrecompileHandler{ .standard = &ecrecover.execute }; // ID 1: ECRECOVER
+        table[1] = PrecompileHandler{ .standard = &sha256.execute }; // ID 2: SHA256
+        table[2] = PrecompileHandler{ .standard = &ripemd160.execute }; // ID 3: RIPEMD160
+        table[3] = PrecompileHandler{ .standard = &identity.execute }; // ID 4: IDENTITY
+        table[4] = PrecompileHandler{ .standard = &modexp.execute }; // ID 5: MODEXP
+        
+        // EC precompiles (require chain rules)
+        table[5] = PrecompileHandler{ .with_chain_rules = &ecadd.execute }; // ID 6: ECADD
+        table[6] = PrecompileHandler{ .with_chain_rules = &ecmul.execute }; // ID 7: ECMUL
+        table[7] = PrecompileHandler{ .with_chain_rules = &ecpairing.execute }; // ID 8: ECPAIRING
+        
+        // Standard precompiles
+        table[8] = PrecompileHandler{ .standard = &blake2f.execute }; // ID 9: BLAKE2F
+        table[9] = PrecompileHandler{ .standard = &kzg_point_evaluation.execute }; // ID 10: POINT_EVALUATION
+    }
     
     break :blk table;
 };
