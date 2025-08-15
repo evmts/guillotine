@@ -38,7 +38,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
     var call_gas: u64 = undefined;
     var call_is_static: bool = undefined;
     var call_caller: primitives.Address.Address = undefined;
-    var call_value: u256 = undefined;
+    var call_value: primitives.u256 = undefined;
 
     switch (params) {
         .call => |call_data| {
@@ -306,7 +306,7 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                     }
 
                     // Read push data
-                    var value: u256 = 0;
+                    var value: primitives.u256 = 0;
                     const data_start = pc + 1;
                     const data_end = @min(data_start + push_size, call_code.len);
                     const data = call_code[data_start..data_end];
