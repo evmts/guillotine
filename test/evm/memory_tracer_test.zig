@@ -1094,15 +1094,15 @@ test "MemoryTracer: real storage changes tracking with SSTORE and journal" {
     for (execution_trace.struct_logs) |log| {
         if (std.mem.eql(u8, log.op, "SSTORE")) {
             sstore_count += 1;
-            std.log.warn("SSTORE at PC={}: storage.len={}", .{log.pc, log.storage.len});
+            std.log.warn("SSTORE at PC={}: storage.len={}", .{log.pc, log.storage_changes.len});
             
             // Storage changes should be captured
-            try std.testing.expect(log.storage.len > 0);
-            if (log.storage.len > 0) {
+            try std.testing.expect(log.storage_changes.len > 0);
+            if (log.storage_changes.len > 0) {
                 found_storage_changes = true;
-                std.log.warn("  {} storage changes captured", .{log.storage.len});
+                std.log.warn("  {} storage changes captured", .{log.storage_changes.len});
                 
-                for (log.storage) |change| {
+                for (log.storage_changes) |change| {
                     std.log.warn("    Slot {}: {} -> {}", .{change.key, change.original_value, change.value});
                     
                     // Verify we captured the right changes
@@ -1196,15 +1196,15 @@ test "MemoryTracer: real log entries tracking with LOG operations" {
     for (execution_trace.struct_logs) |log| {
         if (std.mem.eql(u8, log.op, "LOG1") or std.mem.eql(u8, log.op, "LOG2")) {
             log_count += 1;
-            std.log.warn("{s} at PC={}: logs.len={}", .{log.op, log.pc, log.logs.len});
+            std.log.warn("{s} at PC={}: logs.len={}", .{log.op, log.pc, log.logs_emitted.len});
             
             // Log entries should be captured
-            try std.testing.expect(log.logs.len > 0);
-            if (log.logs.len > 0) {
+            try std.testing.expect(log.logs_emitted.len > 0);
+            if (log.logs_emitted.len > 0) {
                 found_log_entries = true;
-                std.log.warn("  {} log entries captured", .{log.logs.len});
+                std.log.warn("  {} log entries captured", .{log.logs_emitted.len});
                 
-                for (log.logs) |entry| {
+                for (log.logs_emitted) |entry| {
                     std.log.warn("    Address: {any}, Topics: {}, Data length: {}", .{
                         entry.address,
                         entry.topics.len,
@@ -1306,16 +1306,16 @@ test "MemoryTracer: integrated test with all state changes" {
     for (execution_trace.struct_logs) |log| {
         if (log.stack_changes != null) has_stack_changes = true;
         if (log.memory_changes != null) has_memory_changes = true;
-        if (log.storage.len > 0) has_storage_changes = true;
-        if (log.logs.len > 0) has_log_entries = true;
+        if (log.storage_changes.len > 0) has_storage_changes = true;
+        if (log.logs_emitted.len > 0) has_log_entries = true;
         
         std.log.warn("PC={} OP={s}: stack_changes={}, memory_changes={}, storage.len={}, logs.len={}", .{
             log.pc,
             log.op,
             log.stack_changes != null,
             log.memory_changes != null,
-            log.storage.len,
-            log.logs.len,
+            log.storage_changes.len,
+            log.logs_emitted.len,
         });
     }
     
