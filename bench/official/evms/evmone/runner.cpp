@@ -29,12 +29,6 @@ evmc::bytes hex_to_bytes(const std::string& hex) {
     return bytes;
 }
 
-void check_status(evmc_result result) {
-    if (result.status_code != EVMC_SUCCESS) {
-        std::cerr << "Execution failed with status: " << result.status_code << std::endl;
-        exit(1);
-    }
-}
 
 int main(int argc, char* argv[]) {
     std::string contract_code_path;
