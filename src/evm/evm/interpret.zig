@@ -2,6 +2,7 @@ const std = @import("std");
 const ExecutionError = @import("../execution/execution_error.zig");
 const build_options = @import("build_options");
 const tracer = @import("../tracing/trace_types.zig");
+const JSONTracer = @import("../tracing/json_tracer.zig").JSONTracer;
 const capture_utils = @import("../tracing/capture_utils.zig");
 const opcodes = @import("../opcodes/opcode.zig");
 const Frame = @import("../frame.zig").Frame;
@@ -61,7 +62,7 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
                 const stack_view: []const u256 = frame.stack.data[0..stack_len];
                 const gas_cost: u64 = 0; // Block-based validation; per-op gas not tracked here
                 const mem_size: usize = frame.memory.size();
-                var tr = tracer.JSONTracer.init(writer);
+                var tr = JSONTracer.init(writer);
                 _ = tr.trace(pc, opcode, stack_view, frame.gas_remaining, gas_cost, mem_size, @intCast(frame.depth)) catch {};
                 if (frame.depth > 0) {
                     Log.debug("Tracing nested call: pc={}, depth={}, opcode=0x{x}, code_len={}", .{ pc, frame.depth, opcode, analysis.code_len });
@@ -72,7 +73,7 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
         }
         
         // Handle structured tracer
-        if (self.inproc_tracer) |tracer_handle| {
+        if (comptime build_options.enable_tracing and self.inproc_tracer) |tracer_handle| {
             const struct_analysis = frame.analysis;
             // Derive index of current instruction for tracing
             const base: [*]const @TypeOf(inst.*) = struct_analysis.instructions.ptr;
@@ -102,7 +103,7 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
                         .memory_size = frame.memory.context_size(),
                     };
                     
-                    tracer_handle.on_pre_step(step_info);
+                    tracer_handle.stepBefore(step_info);
                 }
             }
         }
@@ -124,7 +125,7 @@ inline fn post_step(
     _ = _journal_size_before;
     _ = _log_count_before;
     
-    if (self.inproc_tracer) |tracer_handle| {
+    if (comptime build_options.enable_tracing and self.inproc_tracer) |tracer_handle| {
         // Get the last step info to extract opcode for gas cost lookup
         // For now, calculate gas cost based on actual consumption
         const gas_after = frame.gas_remaining;
@@ -147,18 +148,32 @@ inline fn post_step(
         // Log entries (would need access to evm state logs - simplified for now)  
         const logs_emitted = capture_utils.create_empty_log_entries(allocator) catch @constCast(&[_]tracer.LogEntry{});
         
-        // Build StepResult
+        // Create empty stack and memory changes (simplified for now)
+        const stack_changes = tracer.createEmptyStackChanges(allocator) catch tracer.StackChanges{
+            .items_pushed = @constCast(&[_]u256{}),
+            .items_popped = @constCast(&[_]u256{}), 
+            .current_stack = @constCast(&[_]u256{}),
+        };
+        const memory_changes = tracer.createEmptyMemoryChanges(allocator) catch tracer.MemoryChanges{
+            .offset = 0,
+            .data = @constCast(&[_]u8{}),
+            .current_memory = @constCast(&[_]u8{}),
+        };
+        
+        // Build StepResult with new structure
         const step_result = tracer.StepResult{
             .gas_after = gas_after,
             .gas_cost = gas_cost,
             .stack_snapshot = stack_snapshot,
             .memory_snapshot = memory_snapshot,
+            .stack_changes = stack_changes,
+            .memory_changes = memory_changes,
             .storage_changes = storage_changes,
             .logs_emitted = logs_emitted,
             .error_info = null, // Set this if there was an error
         };
         
-        tracer_handle.on_post_step(step_result);
+        tracer_handle.stepAfter(step_result);
     }
 }
 

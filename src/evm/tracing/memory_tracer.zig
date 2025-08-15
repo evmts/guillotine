@@ -48,11 +48,13 @@ pub const MemoryTracer = struct {
     last_journal_size: usize,
     last_log_count: usize,
 
-    // VTable for type erasure
+    // VTable with all tracer methods
     const VTABLE = tracer.TracerVTable{
-        .on_pre_step = on_pre_step_impl,
-        .on_post_step = on_post_step_impl,
-        .on_finish = on_finish_impl,
+        .step_before = step_before_impl,
+        .step_after = step_after_impl,
+        .finalize = finalize_impl,
+        .get_trace = get_trace_impl,
+        .deinit = deinit_impl,
     };
 
     /// Initialize tracer with allocator and configuration
@@ -124,20 +126,32 @@ pub const MemoryTracer = struct {
         self.last_log_count = 0;
     }
 
-    // VTable implementations with proper type casting
-    fn on_pre_step_impl(ptr: *anyopaque, step_info: tracer.StepInfo) void {
+    // VTable implementations
+    fn step_before_impl(ptr: *anyopaque, step_info: tracer.StepInfo) void {
         const self: *MemoryTracer = @ptrCast(@alignCast(ptr));
         self.on_pre_step(step_info);
     }
 
-    fn on_post_step_impl(ptr: *anyopaque, step_result: tracer.StepResult) void {
+    fn step_after_impl(ptr: *anyopaque, step_result: tracer.StepResult) void {
         const self: *MemoryTracer = @ptrCast(@alignCast(ptr));
         self.on_post_step(step_result);
     }
 
-    fn on_finish_impl(ptr: *anyopaque, return_value: []const u8, success: bool) void {
+    fn finalize_impl(ptr: *anyopaque, final_result: tracer.FinalResult) void {
         const self: *MemoryTracer = @ptrCast(@alignCast(ptr));
-        self.on_finish(return_value, success);
+        self.finalize(final_result);
+    }
+
+    fn get_trace_impl(ptr: *anyopaque, allocator: Allocator) !tracer.ExecutionTrace {
+        const self: *MemoryTracer = @ptrCast(@alignCast(ptr));
+        _ = allocator; // Allocator is already stored in self
+        return self.get_trace();
+    }
+
+    fn deinit_impl(ptr: *anyopaque, allocator: Allocator) void {
+        const self: *MemoryTracer = @ptrCast(@alignCast(ptr));
+        _ = allocator; // Allocator is already stored in self
+        self.deinit();
     }
 
     // Implementation methods
@@ -190,7 +204,19 @@ pub const MemoryTracer = struct {
         self.current_step_info = null;
     }
 
-    /// Record execution completion with final state
+    /// Finalize method
+    fn finalize(self: *MemoryTracer, final_result: tracer.FinalResult) void {
+        self.gas_used = final_result.gas_used;
+        self.failed = final_result.failed;
+        // Copy return value if not already set
+        if (self.return_value.items.len == 0) {
+            self.return_value.appendSlice(final_result.return_value) catch |err| {
+                std.debug.print("MemoryTracer: Failed to store return value: {}\n", .{err});
+            };
+        }
+    }
+
+    /// Record execution completion with final state (backward compatibility)
     fn on_finish(self: *MemoryTracer, return_value: []const u8, success: bool) void {
         self.failed = !success;
 
