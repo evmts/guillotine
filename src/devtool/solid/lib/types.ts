@@ -7,8 +7,11 @@ export interface BlockJson {
 	blockEndPcExclusive: number
 	pcs: number[]
 	opcodes: string[]
+	opcodeBytes?: number[]
 	hex: string[]
 	data: string[]
+	dynamicGas: number[]
+	dynCandidate: boolean[]
 }
 
 export interface EvmState {

@@ -58,8 +58,13 @@ pub const BlockJson = struct {
     blockEndPcExclusive: u32,
     pcs: []u32,
     opcodes: [][]const u8,
+    opcodeBytes: []u8,
     hex: [][]const u8,
     data: [][]const u8,
+    // Dynamic gas observed per instruction in this block (0 if none or not yet executed)
+    dynamicGas: []u32,
+    // Whether an instruction may incur dynamic gas at runtime
+    dynCandidate: []bool,
     // debugging aids
     instIndices: []u32,
     instMappedPcs: []u32,
@@ -333,6 +338,9 @@ pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void 
         allocator.free(blk.hex);
         for (blk.data) |s| allocator.free(s);
         allocator.free(blk.data);
+        allocator.free(blk.opcodeBytes);
+        allocator.free(blk.dynamicGas);
+        allocator.free(blk.dynCandidate);
         allocator.free(blk.instIndices);
         allocator.free(blk.instMappedPcs);
     }

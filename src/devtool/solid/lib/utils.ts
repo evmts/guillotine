@@ -91,6 +91,7 @@ export async function getEvmState(): Promise<EvmState> {
 				currentInstructionIndex: parsed.currentInstructionIndex || 0,
 				currentBlockStartIndex: parsed.currentBlockStartIndex || 0,
 				blocks: parsed.blocks || [],
+				codeHex: parsed.codeHex || '',
 			}
 		}
 		return response
