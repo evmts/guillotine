@@ -9,7 +9,7 @@ const Evm = evm.Evm;
 
 // Enable debug logging for all tests
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 
 test "JUMPI instruction mapping - verify correct PUSH value after jump" {
