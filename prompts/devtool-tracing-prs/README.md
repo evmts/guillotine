@@ -1,12 +1,12 @@
 ## Devtool Tracing PR Stack
 
-This folder contains a stack of self-contained PR specifications to add interactive step-by-step execution, tracers, and side-by-side REVM comparison to Guillotine and its Devtool. Each file is intended to be the full, standalone specification for one PR, including design, file touch-list, tests, and acceptance criteria.
+This folder contains a stack of self-contained PR specifications to add interactive step-by-step execution, tracers, and side-by-side comparison to Guillotine and its Devtool. Each file is intended to be the full, standalone specification for one PR, including design, file touch-list, tests, and acceptance criteria.
 
 ### PR Order (top to bottom)
 
 - 01-interpreter-debug-hooks.md
 - 02-standard-memory-tracer-guillotine.md
-- 03-revm-tracer-bridge.md
+- 03-mini-evm-comparator.md
 - 04-devtool-refactor-to-tracer.md
 - 05-analysis-and-pc-mapping.md
 - 06-side-by-side-execution.md
