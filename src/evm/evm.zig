@@ -119,6 +119,10 @@ analysis_cache: ?AnalysisCache = null, // 8 bytes - analysis cache pointer
 tracer: ?std.io.AnyWriter = null, // 16 bytes - debugging only
 /// Open file handle used by tracer when tracing to file
 trace_file: ?std.fs.File = null, // 8 bytes - debugging only
+/// Optional debug hooks for development and debugging tools
+/// When null, zero performance overhead
+/// Placed in cold section as debug hooks are rarely used in production
+debug_hooks: ?@import("debug_hooks.zig").DebugHooks = null, // debugging only
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
@@ -726,7 +730,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[CREATE_DEBUG]   gas: {}", .{gas});
     Log.debug("[CREATE_DEBUG]   new_address: {any}", .{std.fmt.fmtSliceHexLower(&new_address)});
     Log.debug("[CREATE_DEBUG]   current_frame_depth: {}", .{self.current_frame_depth});
-    
+
     if (bytecode.len > 0) {
         Log.debug("[CREATE_DEBUG]   bytecode first 32 bytes: {any}", .{std.fmt.fmtSliceHexLower(bytecode[0..@min(bytecode.len, 32)])});
     }
@@ -796,7 +800,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[CREATE_DEBUG]   InitcodeWordGas: {}", .{GasC.InitcodeWordGas});
     Log.debug("[CREATE_DEBUG]   CreateDataGas: {}", .{GasC.CreateDataGas});
     Log.debug("[CREATE_DEBUG]   precharge total: {}", .{precharge});
-    
+
     if (remaining_gas <= precharge) {
         // Not enough gas to even pay creation overhead
         Log.debug("[CREATE_DEBUG] OutOfGas: remaining_gas {} <= precharge {}", .{ remaining_gas, precharge });
@@ -955,6 +959,39 @@ pub fn interpret_block_write(self: *Evm, contract: *const anyopaque, input: []co
         .address = primitives_internal.Address.ZERO,
         .success = true,
     };
+}
+
+/// Set debug hooks for execution tracing and control
+///
+/// **Parameters:**
+/// - `hooks`: Debug hooks configuration, or null to disable
+///
+/// **Performance Impact:**
+/// - When hooks is null: Zero overhead
+/// - When hooks is non-null but individual callbacks are null: Minimal branch overhead
+/// - When callbacks are set: Overhead proportional to hook implementation
+///
+/// **Thread Safety:**
+/// - This method is not thread-safe
+/// - Must be called when EVM is not executing
+/// - Hooks will be used by subsequent EVM executions on the same thread
+pub fn set_debug_hooks(self: *Evm, hooks: ?@import("debug_hooks.zig").DebugHooks) void {
+    self.debug_hooks = hooks;
+}
+
+/// Get current debug hooks configuration (for introspection)
+pub fn get_debug_hooks(self: *const Evm) ?@import("debug_hooks.zig").DebugHooks {
+    return self.debug_hooks;
+}
+
+/// Check if debug stepping is enabled
+pub fn is_step_debugging_enabled(self: *const Evm) bool {
+    return self.debug_hooks != null and self.debug_hooks.?.on_step != null;
+}
+
+/// Check if message tracing is enabled
+pub fn is_message_tracing_enabled(self: *const Evm) bool {
+    return self.debug_hooks != null and self.debug_hooks.?.on_message != null;
 }
 
 pub const ConsumeGasError = ExecutionError.Error;
@@ -1963,4 +2000,634 @@ test "gas refund reset" {
     evm.add_gas_refund(3000);
     evm.reset();
     try std.testing.expectEqual(@as(i64, 0), evm.gas_refunds);
+}
+
+test "Evm debug hooks - set, get, has methods" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    // Initially no hooks
+    try std.testing.expect(!evm.has_debug_hooks());
+    try std.testing.expect(evm.get_debug_hooks() == null);
+
+    // Test context for hooks
+    const TestContext = struct {
+        step_calls: u32 = 0,
+        message_calls: u32 = 0,
+
+        fn step_hook(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            _ = frame;
+            _ = pc;
+            _ = op;
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+            self.step_calls += 1;
+            return .cont;
+        }
+
+        fn message_hook(ctx: ?*anyopaque, params: *const CallParams, phase: @import("debug_hooks.zig").MessagePhase) anyerror!void {
+            _ = params;
+            _ = phase;
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+            self.message_calls += 1;
+        }
+    };
+
+    var test_ctx = TestContext{};
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &test_ctx,
+        .on_step = TestContext.step_hook,
+        .on_message = TestContext.message_hook,
+    };
+
+    // Set hooks
+    evm.set_debug_hooks(hooks);
+    try std.testing.expect(evm.has_debug_hooks());
+
+    // Get hooks and verify they match
+    const retrieved_hooks = evm.get_debug_hooks().?;
+    try std.testing.expect(retrieved_hooks.user_ctx == &test_ctx);
+    try std.testing.expect(retrieved_hooks.on_step != null);
+    try std.testing.expect(retrieved_hooks.on_message != null);
+
+    // Clear hooks
+    evm.set_debug_hooks(null);
+    try std.testing.expect(!evm.has_debug_hooks());
+    try std.testing.expect(evm.get_debug_hooks() == null);
+}
+
+test "Evm debug hooks - partial hooks configuration" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const TestHooks = struct {
+        fn step_only(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            _ = ctx;
+            _ = frame;
+            _ = pc;
+            _ = op;
+            return .cont;
+        }
+    };
+
+    // Set only step hook
+    const step_only_hooks = @import("debug_hooks.zig").DebugHooks{
+        .on_step = TestHooks.step_only,
+        // on_message remains null
+    };
+
+    evm.set_debug_hooks(step_only_hooks);
+    try std.testing.expect(evm.has_debug_hooks());
+
+    const retrieved = evm.get_debug_hooks().?;
+    try std.testing.expect(retrieved.on_step != null);
+    try std.testing.expect(retrieved.on_message == null);
+    try std.testing.expect(retrieved.user_ctx == null);
+}
+
+test "Evm debug hooks - reset clears hooks" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const TestHooks = struct {
+        fn dummy_step(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            _ = ctx;
+            _ = frame;
+            _ = pc;
+            _ = op;
+            return .cont;
+        }
+    };
+
+    // Set hooks
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .on_step = TestHooks.dummy_step,
+    };
+    evm.set_debug_hooks(hooks);
+    try std.testing.expect(evm.has_debug_hooks());
+
+    // Reset should clear hooks
+    evm.reset();
+    try std.testing.expect(!evm.has_debug_hooks());
+    try std.testing.expect(evm.get_debug_hooks() == null);
+}
+
+test "Evm debug hooks - actual execution with step hooks" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    // Test context to capture execution details
+    const StepTracker = struct {
+        opcodes_executed: std.ArrayList(u8),
+        pcs: std.ArrayList(usize),
+        stack_sizes: std.ArrayList(usize),
+        gas_values: std.ArrayList(u64),
+        depths: std.ArrayList(u32),
+        abort_at_pc: ?usize = null,
+        pause_at_pc: ?usize = null,
+
+        fn step_hook(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+
+            // Record execution state
+            try self.opcodes_executed.append(op);
+            try self.pcs.append(pc);
+            try self.stack_sizes.append(frame.stack.size());
+            try self.gas_values.append(frame.gas_remaining);
+            try self.depths.append(frame.depth);
+
+            // Test control flow
+            if (self.abort_at_pc) |abort_pc| {
+                if (pc == abort_pc) return .abort;
+            }
+            if (self.pause_at_pc) |pause_pc| {
+                if (pc == pause_pc) return .pause;
+            }
+
+            return .cont;
+        }
+
+        fn init(alloc: std.mem.Allocator) @This() {
+            return .{
+                .opcodes_executed = std.ArrayList(u8).init(alloc),
+                .pcs = std.ArrayList(usize).init(alloc),
+                .stack_sizes = std.ArrayList(usize).init(alloc),
+                .gas_values = std.ArrayList(u64).init(alloc),
+                .depths = std.ArrayList(u32).init(alloc),
+            };
+        }
+
+        fn deinit(self: *@This()) void {
+            self.opcodes_executed.deinit();
+            self.pcs.deinit();
+            self.stack_sizes.deinit();
+            self.gas_values.deinit();
+            self.depths.deinit();
+        }
+    };
+
+    var tracker = StepTracker.init(allocator);
+    defer tracker.deinit();
+
+    // Set up hooks
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &tracker,
+        .on_step = StepTracker.step_hook,
+    };
+    evm.set_debug_hooks(hooks);
+
+    // Simple bytecode: PUSH1 0x42, PUSH1 0x01, ADD, STOP
+    // Opcodes: 0x60 0x42 0x60 0x01 0x01 0x00
+    const bytecode = [_]u8{ 0x60, 0x42, 0x60, 0x01, 0x01, 0x00 };
+
+    // Execute the bytecode
+    const result = try evm.call(
+        primitives.Address.ZERO, // caller
+        primitives.Address.ZERO, // to
+        0, // value
+        &bytecode, // input (bytecode)
+        100000, // gas
+        false, // is_static
+    );
+
+    // Verify execution completed successfully
+    try std.testing.expect(result.success);
+
+    // Verify we captured the correct opcodes
+    try std.testing.expect(tracker.opcodes_executed.items.len > 0);
+
+    // Should have executed: PUSH1, PUSH1, ADD, STOP
+    // Note: The interpreter may execute additional opcodes internally
+    const executed = tracker.opcodes_executed.items;
+
+    // Find the PUSH1 opcodes (0x60)
+    var push_count: u32 = 0;
+    var add_found = false;
+    var stop_found = false;
+
+    for (executed) |op| {
+        if (op == 0x60) push_count += 1; // PUSH1
+        if (op == 0x01) add_found = true; // ADD
+        if (op == 0x00) stop_found = true; // STOP
+    }
+
+    try std.testing.expect(push_count >= 2); // At least 2 PUSH1 instructions
+    try std.testing.expect(add_found); // ADD was executed
+    try std.testing.expect(stop_found); // STOP was executed
+
+    // Verify PCs are monotonically increasing (with jumps for push data)
+    try std.testing.expect(tracker.pcs.items.len > 0);
+
+    // Verify gas is decreasing
+    if (tracker.gas_values.items.len > 1) {
+        // Gas should generally decrease (though may have some patterns due to refunds)
+        const first_gas = tracker.gas_values.items[0];
+        const last_gas = tracker.gas_values.items[tracker.gas_values.items.len - 1];
+        try std.testing.expect(last_gas < first_gas);
+    }
+
+    // All execution should be at depth 0 for this simple case
+    for (tracker.depths.items) |depth| {
+        try std.testing.expectEqual(@as(u32, 0), depth);
+    }
+}
+
+test "Evm debug hooks - step hook abort control" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const AbortTracker = struct {
+        step_count: u32 = 0,
+        abort_after: u32 = 3,
+
+        fn step_hook(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            _ = frame;
+            _ = pc;
+            _ = op;
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+            self.step_count += 1;
+
+            if (self.step_count >= self.abort_after) {
+                return .abort;
+            }
+            return .cont;
+        }
+    };
+
+    var tracker = AbortTracker{};
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &tracker,
+        .on_step = AbortTracker.step_hook,
+    };
+    evm.set_debug_hooks(hooks);
+
+    // Bytecode with many operations
+    const bytecode = [_]u8{
+        0x60, 0x01, // PUSH1 1
+        0x60, 0x02, // PUSH1 2
+        0x01, // ADD
+        0x60, 0x03, // PUSH1 3
+        0x01, // ADD
+        0x00, // STOP
+    };
+
+    // Execute - should abort after 3 steps
+    const result = try evm.call(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        &bytecode,
+        100000,
+        false,
+    );
+
+    // Execution should fail due to debug abort
+    try std.testing.expect(!result.success);
+    try std.testing.expectEqual(@as(u32, 3), tracker.step_count);
+}
+
+test "Evm debug hooks - message hooks for CALL operations" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const MessageTracker = struct {
+        before_calls: std.ArrayList(CallParams),
+        after_calls: std.ArrayList(CallParams),
+        phases: std.ArrayList(@import("debug_hooks.zig").MessagePhase),
+
+        fn message_hook(ctx: ?*anyopaque, params: *const CallParams, phase: @import("debug_hooks.zig").MessagePhase) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+
+            try self.phases.append(phase);
+
+            // Deep copy the params since they're ephemeral
+            const params_copy = params.*;
+
+            switch (phase) {
+                .before => try self.before_calls.append(params_copy),
+                .after => try self.after_calls.append(params_copy),
+            }
+        }
+
+        fn init(alloc: std.mem.Allocator) @This() {
+            return .{
+                .before_calls = std.ArrayList(CallParams).init(alloc),
+                .after_calls = std.ArrayList(CallParams).init(alloc),
+                .phases = std.ArrayList(@import("debug_hooks.zig").MessagePhase).init(alloc),
+            };
+        }
+
+        fn deinit(self: *@This()) void {
+            self.before_calls.deinit();
+            self.after_calls.deinit();
+            self.phases.deinit();
+        }
+    };
+
+    var tracker = MessageTracker.init(allocator);
+    defer tracker.deinit();
+
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &tracker,
+        .on_message = MessageTracker.message_hook,
+    };
+    evm.set_debug_hooks(hooks);
+
+    // Set up a contract that will be called
+    const callee_address = primitives.Address.from_low_u64_be(0x2000);
+    const callee_code = [_]u8{
+        0x60, 0x99, // PUSH1 0x99
+        0x60, 0x00, // PUSH1 0x00
+        0x52, // MSTORE
+        0x60, 0x20, // PUSH1 32
+        0x60, 0x00, // PUSH1 0
+        0xF3, // RETURN
+    };
+
+    // Store the callee contract
+    try evm.state.set_code(callee_address, &callee_code);
+
+    // Bytecode that performs a CALL
+    // PUSH1 0x20 (ret size)
+    // PUSH1 0x00 (ret offset)
+    // PUSH1 0x00 (args size)
+    // PUSH1 0x00 (args offset)
+    // PUSH1 0x00 (value)
+    // PUSH20 <address>
+    // PUSH2 0x1000 (gas)
+    // CALL
+    var call_bytecode = std.ArrayList(u8).init(allocator);
+    defer call_bytecode.deinit();
+
+    try call_bytecode.appendSlice(&[_]u8{
+        0x60, 0x20, // PUSH1 32 (ret size)
+        0x60, 0x00, // PUSH1 0 (ret offset)
+        0x60, 0x00, // PUSH1 0 (args size)
+        0x60, 0x00, // PUSH1 0 (args offset)
+        0x60, 0x00, // PUSH1 0 (value)
+        0x73, // PUSH20
+    });
+    try call_bytecode.appendSlice(&callee_address);
+    try call_bytecode.appendSlice(&[_]u8{
+        0x61, 0x10, 0x00, // PUSH2 0x1000 (gas)
+        0xF1, // CALL
+        0x00, // STOP
+    });
+
+    // Execute the CALL
+    const result = try evm.call(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        call_bytecode.items,
+        100000,
+        false,
+    );
+
+    try std.testing.expect(result.success);
+
+    // Verify message hooks were called
+    try std.testing.expect(tracker.phases.items.len >= 2); // At least before and after
+
+    // Should have before followed by after
+    var found_before = false;
+    var found_after = false;
+    for (tracker.phases.items) |phase| {
+        if (phase == .before) {
+            found_before = true;
+        } else if (phase == .after) {
+            try std.testing.expect(found_before); // after should come after before
+            found_after = true;
+        }
+    }
+
+    try std.testing.expect(found_before);
+    try std.testing.expect(found_after);
+
+    // Verify we captured call parameters
+    try std.testing.expect(tracker.before_calls.items.len > 0);
+
+    // Check the captured call parameters
+    for (tracker.before_calls.items) |params| {
+        switch (params) {
+            .call => |call| {
+                // Verify the call was to our callee address
+                try std.testing.expectEqual(callee_address, call.to);
+                try std.testing.expectEqual(@as(u256, 0), call.value);
+            },
+            else => {
+                // Could be other call types depending on execution
+            },
+        }
+    }
+}
+
+test "Evm debug hooks - CREATE operation tracking" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const CreateTracker = struct {
+        create_count: u32 = 0,
+        before_count: u32 = 0,
+        after_count: u32 = 0,
+        init_codes: std.ArrayList([]const u8),
+
+        fn message_hook(ctx: ?*anyopaque, params: *const CallParams, phase: @import("debug_hooks.zig").MessagePhase) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+
+            switch (phase) {
+                .before => self.before_count += 1,
+                .after => self.after_count += 1,
+            }
+
+            switch (params.*) {
+                .create => |create| {
+                    self.create_count += 1;
+                    // Store a copy of init code
+                    const init_copy = try self.init_codes.allocator.alloc(u8, create.init_code.len);
+                    @memcpy(init_copy, create.init_code);
+                    try self.init_codes.append(init_copy);
+                },
+                .create2 => {
+                    self.create_count += 1;
+                },
+                else => {},
+            }
+        }
+
+        fn init(alloc: std.mem.Allocator) @This() {
+            return .{
+                .init_codes = std.ArrayList([]const u8).init(alloc),
+            };
+        }
+
+        fn deinit(self: *@This()) void {
+            for (self.init_codes.items) |code| {
+                self.init_codes.allocator.free(code);
+            }
+            self.init_codes.deinit();
+        }
+    };
+
+    var tracker = CreateTracker.init(allocator);
+    defer tracker.deinit();
+
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &tracker,
+        .on_message = CreateTracker.message_hook,
+    };
+    evm.set_debug_hooks(hooks);
+
+    // Bytecode that performs CREATE
+    // The init code just returns empty (deployed code will be empty)
+    const init_code = [_]u8{0x00}; // STOP
+
+    var create_bytecode = std.ArrayList(u8).init(allocator);
+    defer create_bytecode.deinit();
+
+    // PUSH1 <init_code_size>
+    // PUSH1 0x20 (offset where init code starts)
+    // PUSH1 0 (value)
+    // CREATE
+    try create_bytecode.appendSlice(&[_]u8{
+        0x60, @as(u8, @intCast(init_code.len)), // PUSH1 size
+        0x60, 0x20, // PUSH1 offset
+        0x60, 0x00, // PUSH1 value
+        0xF0, // CREATE
+        0x00, // STOP
+    });
+
+    // Pad to offset 0x20 and add init code
+    while (create_bytecode.items.len < 0x20) {
+        try create_bytecode.append(0x00);
+    }
+    try create_bytecode.appendSlice(&init_code);
+
+    const result = try evm.call(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        create_bytecode.items,
+        100000,
+        false,
+    );
+
+    // CREATE might fail due to various reasons, but hooks should still be called
+    _ = result;
+
+    // Verify CREATE hooks were called
+    try std.testing.expect(tracker.before_count > 0);
+    try std.testing.expect(tracker.after_count > 0);
+    try std.testing.expectEqual(tracker.before_count, tracker.after_count);
+
+    // Verify we captured the CREATE operation
+    if (tracker.create_count > 0) {
+        try std.testing.expect(tracker.init_codes.items.len > 0);
+        // Verify init code was captured correctly
+        const captured_init = tracker.init_codes.items[0];
+        try std.testing.expectEqual(@as(usize, init_code.len), captured_init.len);
+    }
+}
+
+test "Evm debug hooks - combined step and message hooks" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const CombinedTracker = struct {
+        step_count: u32 = 0,
+        message_count: u32 = 0,
+        last_pc_before_call: ?usize = null,
+
+        fn step_hook(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            _ = frame;
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+            self.step_count += 1;
+
+            // Track PC before CALL opcode
+            if (op == 0xF1) { // CALL
+                self.last_pc_before_call = pc;
+            }
+
+            return .cont;
+        }
+
+        fn message_hook(ctx: ?*anyopaque, params: *const CallParams, phase: @import("debug_hooks.zig").MessagePhase) anyerror!void {
+            _ = params;
+            _ = phase;
+            const self = @as(*@This(), @ptrCast(@alignCast(ctx.?)));
+            self.message_count += 1;
+        }
+    };
+
+    var tracker = CombinedTracker{};
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &tracker,
+        .on_step = CombinedTracker.step_hook,
+        .on_message = CombinedTracker.message_hook,
+    };
+    evm.set_debug_hooks(hooks);
+
+    // Simple bytecode with arithmetic
+    const bytecode = [_]u8{
+        0x60, 0x01, // PUSH1 1
+        0x60, 0x02, // PUSH1 2
+        0x01, // ADD
+        0x00, // STOP
+    };
+
+    const result = try evm.call(
+        primitives.Address.ZERO,
+        primitives.Address.ZERO,
+        0,
+        &bytecode,
+        100000,
+        false,
+    );
+
+    try std.testing.expect(result.success);
+
+    // Verify both hooks were active
+    try std.testing.expect(tracker.step_count > 0);
+    // This simple bytecode has no CALLs, so message_count might be 0
+    // But step hooks should definitely have been called
+    try std.testing.expect(tracker.step_count >= 4); // At least 4 opcodes
 }

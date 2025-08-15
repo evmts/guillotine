@@ -1140,6 +1140,22 @@ pub fn build(b: *std.Build) void {
     const run_evm_package_test = b.addRunArtifact(evm_package_test);
     const evm_package_test_step = b.step("test-evm-all", "Run all EVM tests via package");
     evm_package_test_step.dependOn(&run_evm_package_test.step);
+    
+    // Add debug_hooks.zig tests
+    const debug_hooks_test = b.addTest(.{
+        .name = "debug-hooks-test",
+        .root_source_file = b.path("src/evm/debug_hooks.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    debug_hooks_test.root_module.addImport("evm", evm_mod);
+    debug_hooks_test.root_module.addImport("primitives", primitives_mod);
+    debug_hooks_test.root_module.addImport("crypto", crypto_mod);
+    debug_hooks_test.root_module.addImport("build_options", build_options_mod);
+    const run_debug_hooks_test = b.addRunArtifact(debug_hooks_test);
+    const debug_hooks_test_step = b.step("test-debug-hooks", "Run debug hooks tests");
+    debug_hooks_test_step.dependOn(&run_debug_hooks_test.step);
+    evm_package_test_step.dependOn(&run_debug_hooks_test.step);
 
     // Add evm.zig tests
     const evm_core_test = b.addTest(.{
@@ -1919,6 +1935,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_differential_test.step);
     test_step.dependOn(&run_staticcall_test.step);
     test_step.dependOn(&run_evm_core_test.step);
+    test_step.dependOn(&run_debug_hooks_test.step);
     // benchmark runner test removed - file no longer exists
 
     // Add inline ops test

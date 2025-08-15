@@ -223,6 +223,14 @@ pub const Log = @import("log.zig");
 /// Tracer for capturing execution traces
 pub const Tracer = @import("tracer.zig").Tracer;
 
+/// Debug hooks for EVM execution tracing and stepping
+pub const debug_hooks = @import("debug_hooks.zig");
+pub const DebugHooks = debug_hooks.DebugHooks;
+pub const StepControl = debug_hooks.StepControl;
+pub const MessagePhase = debug_hooks.MessagePhase;
+pub const OnStepFn = debug_hooks.OnStepFn;
+pub const OnMessageFn = debug_hooks.OnMessageFn;
+
 /// EIP-7702 EOA delegation bytecode format
 pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");
 

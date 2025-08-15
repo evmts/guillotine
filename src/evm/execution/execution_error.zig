@@ -170,6 +170,16 @@ pub const Error = error{
     /// SELFDESTRUCT opcode not available in current hardfork
     /// Some hardforks disable SELFDESTRUCT functionality
     SelfDestructNotAvailable,
+
+    /// Debug hook requested execution abort
+    /// This is a controlled termination for debugging purposes
+    /// Should be handled by the debugging tool, not treated as an error
+    DebugAbort,
+
+    /// Debug hook requested execution pause
+    /// Execution can be resumed by calling interpret() again
+    /// The current frame state is preserved for resumption
+    DebugPaused,
 };
 
 /// Get a human-readable description for an execution error
@@ -233,6 +243,8 @@ pub fn get_description(err: Error) []const u8 {
         Error.InputSizeExceeded => "Contract input size exceeds maximum allowed size",
         Error.CodeSizeMismatch => "Contract code size mismatch between expected and actual size",
         Error.SelfDestructNotAvailable => "SELFDESTRUCT opcode not available in current hardfork",
+        Error.DebugAbort => "Debug hook requested execution abort",
+        Error.DebugPaused => "Debug hook requested execution pause",
     };
 }
 
@@ -415,6 +427,16 @@ test "get_description returns correct message for SnapshotNotFound error" {
     try testing.expectEqualStrings("Snapshot not found in database", desc);
 }
 
+test "get_description returns correct message for DebugAbort error" {
+    const desc = get_description(Error.DebugAbort);
+    try testing.expectEqualStrings("Debug hook requested execution abort", desc);
+}
+
+test "get_description returns correct message for DebugPaused error" {
+    const desc = get_description(Error.DebugPaused);
+    try testing.expectEqualStrings("Debug hook requested execution pause", desc);
+}
+
 test "get_description consistency - all errors have non-empty descriptions" {
     for (all_errors) |err| {
         const desc = get_description(err);
@@ -447,6 +469,7 @@ const all_errors = [_]Error{
     Error.InvalidAddress,        Error.DatabaseCorrupted,       Error.NetworkError,       Error.PermissionDenied,
     Error.InvalidSnapshot,       Error.NoBatchInProgress,       Error.SnapshotNotFound,   Error.InstructionLimitExceeded,
     Error.OpcodeNotImplemented,  Error.InputSizeExceeded,       Error.CodeSizeMismatch,   Error.SelfDestructNotAvailable,
+    Error.DebugAbort,            Error.DebugPaused,
 };
 
 // test "fuzz_error_enumeration_completeness" {

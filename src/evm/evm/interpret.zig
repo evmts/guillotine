@@ -155,18 +155,36 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const exec_fun = exec_inst.exec_fn;
             const next_instruction = exec_inst.next_inst;
 
-            // Log execution details
-            // Get PC from instruction index
+            // Log execution details and debug hooks
+            // Get PC from instruction index - reuse for debug hooks
             const base: [*]const Instruction = analysis.instructions.ptr;
             const idx = (@intFromPtr(instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
             var pc: usize = 0;
+            var opcode: u8 = 0x00;
             if (idx < analysis.inst_to_pc.len) {
                 const pc_u16 = analysis.inst_to_pc[idx];
                 if (pc_u16 != std.math.maxInt(u16)) {
                     pc = pc_u16;
+                    opcode = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
                 }
             }
             Log.debug("[EXEC] Executing instruction at idx={}, pc={}, stack_size={}, instruction.id={}", .{ idx, pc, frame.stack.size(), instruction.id });
+
+            // DEBUG HOOKS - Step hook injection
+            if (self.debug_hooks) |hooks| {
+                if (hooks.on_step) |step_fn| {
+                    const decision = step_fn(hooks.user_ctx, frame, pc, opcode) catch |err| switch (err) {
+                        error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                        else => return ExecutionError.Error.DebugAbort,
+                    };
+                    
+                    switch (decision) {
+                        .cont => {}, // Continue normal execution
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
+            }
 
             try exec_fun(frame);
             instruction = next_instruction;
@@ -177,6 +195,35 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             @branchHint(.likely);
             pre_step(self, frame, instruction, &loop_iterations);
             const dyn_inst = analysis.getInstructionParams(.dynamic_gas, instruction.id);
+
+            // DEBUG HOOKS - Step hook injection for dynamic gas opcodes
+            if (self.debug_hooks) |hooks| {
+                if (hooks.on_step) |step_fn| {
+                    const base: [*]const Instruction = analysis.instructions.ptr;
+                    const idx = (@intFromPtr(instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
+                    var pc: usize = 0;
+                    var opcode: u8 = 0x00;
+                    if (idx < analysis.inst_to_pc.len) {
+                        const pc_u16 = analysis.inst_to_pc[idx];
+                        if (pc_u16 != std.math.maxInt(u16)) {
+                            pc = pc_u16;
+                            opcode = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
+                        }
+                    }
+                    
+                    const decision = step_fn(hooks.user_ctx, frame, pc, opcode) catch |err| switch (err) {
+                        error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                        else => return ExecutionError.Error.DebugAbort,
+                    };
+                    
+                    switch (decision) {
+                        .cont => {}, // Continue normal execution
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
+            }
+
             const additional_gas = dyn_inst.gas_fn(frame) catch |err| {
                 if (err == ExecutionError.Error.OutOfOffset) {
                     return err;
@@ -304,6 +351,35 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             @branchHint(.likely);
             pre_step(self, frame, instruction, &loop_iterations);
             const word_inst = analysis.getInstructionParams(.word, instruction.id);
+
+            // DEBUG HOOKS - Step hook injection for PUSH operations
+            if (self.debug_hooks) |hooks| {
+                if (hooks.on_step) |step_fn| {
+                    const base: [*]const Instruction = analysis.instructions.ptr;
+                    const idx = (@intFromPtr(instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
+                    var pc: usize = 0;
+                    var opcode: u8 = 0x00;
+                    if (idx < analysis.inst_to_pc.len) {
+                        const pc_u16 = analysis.inst_to_pc[idx];
+                        if (pc_u16 != std.math.maxInt(u16)) {
+                            pc = pc_u16;
+                            opcode = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
+                        }
+                    }
+                    
+                    const decision = step_fn(hooks.user_ctx, frame, pc, opcode) catch |err| switch (err) {
+                        error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                        else => return ExecutionError.Error.DebugAbort,
+                    };
+                    
+                    switch (decision) {
+                        .cont => {}, // Continue normal execution
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
+            }
+
             // Lazily convert bytecode slice to u256
             const word_value = bytesToU256(word_inst.word_bytes);
             
@@ -326,6 +402,35 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             @branchHint(.unlikely);
             pre_step(self, frame, instruction, &loop_iterations);
             const pc_inst = analysis.getInstructionParams(.pc, instruction.id);
+
+            // DEBUG HOOKS - Step hook injection for PC opcode
+            if (self.debug_hooks) |hooks| {
+                if (hooks.on_step) |step_fn| {
+                    const base: [*]const Instruction = analysis.instructions.ptr;
+                    const idx = (@intFromPtr(instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
+                    var pc: usize = 0;
+                    var opcode: u8 = 0x00;
+                    if (idx < analysis.inst_to_pc.len) {
+                        const pc_u16 = analysis.inst_to_pc[idx];
+                        if (pc_u16 != std.math.maxInt(u16)) {
+                            pc = pc_u16;
+                            opcode = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
+                        }
+                    }
+                    
+                    const decision = step_fn(hooks.user_ctx, frame, pc, opcode) catch |err| switch (err) {
+                        error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                        else => return ExecutionError.Error.DebugAbort,
+                    };
+                    
+                    switch (decision) {
+                        .cont => {}, // Continue normal execution
+                        .pause => return ExecutionError.Error.DebugPaused,
+                        .abort => return ExecutionError.Error.DebugAbort,
+                    }
+                }
+            }
+
             frame.stack.append_unsafe(@as(u256, pc_inst.pc_value));
             instruction = pc_inst.next_inst;
             continue :dispatch instruction.tag;

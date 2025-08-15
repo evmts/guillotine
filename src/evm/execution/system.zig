@@ -631,6 +631,22 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     // This allows us to revert all state changes if creation fails
     const snapshot = frame.host.create_snapshot();
 
+    // DEBUG HOOKS - Message hook before CREATE
+    const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .before) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => {
+                    // Revert snapshot on hook failure
+                    frame.host.revert_to_snapshot(snapshot);
+                    frame.stack.append_unsafe(0);
+                    return ExecutionError.Error.DebugAbort;
+                },
+            };
+        }
+    }
+
     // Execute the CREATE through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -670,8 +686,8 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
                 frame.stack.append_unsafe(0);
             }
             // Free returned buffer now that we've consumed it
-            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-            evm_ptr.allocator.free(address_bytes);
+            const evm_ptr_free = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr_free.allocator.free(address_bytes);
         } else {
             frame.stack.append_unsafe(0);
         }
@@ -684,10 +700,20 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
 
         // Free revert/output buffer if present
         if (call_result.output) |buf| {
-            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-            evm_ptr.allocator.free(buf);
+            const evm_ptr_cleanup = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr_cleanup.allocator.free(buf);
         }
         frame.stack.append_unsafe(0);
+    }
+
+    // DEBUG HOOKS - Message hook after CREATE
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .after) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => return ExecutionError.Error.DebugAbort,
+            };
+        }
     }
 }
 
@@ -785,6 +811,22 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     // This allows us to revert all state changes if creation fails
     const snapshot = frame.host.create_snapshot();
 
+    // DEBUG HOOKS - Message hook before CREATE2
+    const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .before) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => {
+                    // Revert snapshot on hook failure
+                    frame.host.revert_to_snapshot(snapshot);
+                    frame.stack.append_unsafe(0);
+                    return ExecutionError.Error.DebugAbort;
+                },
+            };
+        }
+    }
+
     // Execute the CREATE2 through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -824,8 +866,8 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
                 frame.stack.append_unsafe(0);
             }
             // Free returned buffer now that we've consumed it
-            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-            evm_ptr.allocator.free(address_bytes);
+            const evm_ptr_free = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr_free.allocator.free(address_bytes);
         } else {
             frame.stack.append_unsafe(0);
         }
@@ -838,10 +880,20 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
 
         // Free revert/output buffer if present
         if (call_result.output) |buf| {
-            const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-            evm_ptr.allocator.free(buf);
+            const evm_ptr_cleanup = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+            evm_ptr_cleanup.allocator.free(buf);
         }
         frame.stack.append_unsafe(0);
+    }
+
+    // DEBUG HOOKS - Message hook after CREATE2
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .after) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => return ExecutionError.Error.DebugAbort,
+            };
+        }
     }
 }
 
@@ -942,6 +994,22 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         .gas = gas_limit,
     } };
 
+    // DEBUG HOOKS - Message hook before CALL
+    const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .before) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => {
+                    // Revert snapshot on hook failure
+                    frame.host.revert_to_snapshot(snapshot);
+                    try frame.stack.append(0);
+                    return ExecutionError.Error.DebugAbort;
+                },
+            };
+        }
+    }
+
     // Perform the call using the host's call method
     const call_result = host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -949,6 +1017,16 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         try frame.stack.append(0);
         return;
     };
+
+    // DEBUG HOOKS - Message hook after CALL
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .after) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => return ExecutionError.Error.DebugAbort,
+            };
+        }
+    }
 
     // Handle result based on success/failure
     if (call_result.success) {
@@ -980,8 +1058,8 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     // try frame.return_data.set(call_result.output orelse &[_]u8{});
     // Free callee-owned output buffer if present (ownership transferred by Host.call)
     if (call_result.output) |out_buf| {
-        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-        evm_ptr.allocator.free(out_buf);
+        const evm_ptr_free = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        evm_ptr_free.allocator.free(out_buf);
     }
 
     // Push result (1 for success, 0 for failure)
@@ -1070,11 +1148,37 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
         .gas = gas_limit,
     } };
 
+    // DEBUG HOOKS - Message hook before CALLCODE
+    const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .before) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => {
+                    // Revert snapshot on hook failure
+                    frame.host.revert_to_snapshot(snapshot);
+                    frame.stack.append_unsafe(0);
+                    return ExecutionError.Error.DebugAbort;
+                },
+            };
+        }
+    }
+
     const call_result = frame.host.call(call_params) catch {
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
         return;
     };
+
+    // DEBUG HOOKS - Message hook after CALLCODE
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .after) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => return ExecutionError.Error.DebugAbort,
+            };
+        }
+    }
 
     // Commit or revert snapshot based on success
     if (!call_result.success) {
@@ -1096,8 +1200,8 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
         }
         // TODO: frame.return_data was removed
         // try frame.return_data.set(output);
-        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-        evm_ptr.allocator.free(output);
+        const evm_ptr_free = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        evm_ptr_free.allocator.free(output);
     } else {
         // TODO: frame.return_data was removed
         // try frame.return_data.set(&[_]u8{});
@@ -1180,6 +1284,22 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         },
     };
 
+    // DEBUG HOOKS - Message hook before DELEGATECALL
+    const evm_ptr_del = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+    if (evm_ptr_del.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .before) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => {
+                    // Revert snapshot on hook failure
+                    frame.host.revert_to_snapshot(snapshot);
+                    frame.stack.append_unsafe(0);
+                    return ExecutionError.Error.DebugAbort;
+                },
+            };
+        }
+    }
+
     // Execute the delegatecall through the host
     const call_result = frame.host.call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
@@ -1187,6 +1307,16 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         frame.stack.append_unsafe(0);
         return;
     };
+
+    // DEBUG HOOKS - Message hook after DELEGATECALL
+    if (evm_ptr_del.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .after) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => return ExecutionError.Error.DebugAbort,
+            };
+        }
+    }
 
     // Handle result based on success/failure
     if (call_result.success) {
@@ -1210,8 +1340,8 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         }
         // TODO: frame.return_data was removed
         // try frame.return_data.set(output);
-        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-        evm_ptr.allocator.free(output);
+        const evm_ptr_free = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        evm_ptr_free.allocator.free(output);
     } else {
         // TODO: frame.return_data was removed
         // try frame.return_data.set(&[_]u8{});
@@ -1330,6 +1460,21 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
     const evm_depth_before = evm_ptr.current_frame_depth;
 
+    // DEBUG HOOKS - Message hook before STATICCALL
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .before) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => {
+                    // Revert snapshot on hook failure
+                    frame.host.revert_to_snapshot(snapshot);
+                    frame.stack.append_unsafe(0);
+                    return ExecutionError.Error.DebugAbort;
+                },
+            };
+        }
+    }
+
     const pre_depth = frame.depth;
     const pre_stack_size = frame.stack.size();
     Log.debug(
@@ -1404,6 +1549,16 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
             Log.debug("[STATICCALL] Stack size mismatch! pre_stack_size={}, expected={}, actual={}", .{ pre_stack_size, expected_size, final_stack_size });
         }
         std.debug.assert(final_stack_size == expected_size); // Should have pushed result
+    }
+
+    // DEBUG HOOKS - Message hook after STATICCALL
+    if (evm_ptr.debug_hooks) |hooks| {
+        if (hooks.on_message) |msg_fn| {
+            msg_fn(hooks.user_ctx, &call_params, .after) catch |err| switch (err) {
+                error.OutOfMemory => return ExecutionError.Error.OutOfMemory,
+                else => return ExecutionError.Error.DebugAbort,
+            };
+        }
     }
 }
 
