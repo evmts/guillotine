@@ -1,307 +1,1052 @@
 ## PR 5: Analysis and PC Mapping in the UI
 
-### Problem
+### Problem Statement
 
-We need to render a synchronized view of:
+The Guillotine EVM Devtool needs to synchronize two critical views during debugging:
 
-- the optimized instruction stream produced by analysis (with fused ops, BEGINBLOCK, etc.), and
-- the original bytecode stream (PC-indexed bytes)
+1. **Analysis-optimized instruction stream** - Contains fused operations, BEGINBLOCK metadata, and optimized execution flow
+2. **Original bytecode stream** - Raw EVM bytecode with PC-indexed bytes as they appear in contracts
 
-…such that on every step we can highlight both the current analysis instruction and the exact original bytecode PC(s) it maps to. We also want to annotate valid/invalid jump destinations using analysis results.
+Currently, the UI shows analysis instructions but lacks precise mapping to original bytecode positions. This PR implements bidirectional synchronization so users can:
+- See exactly which original bytecode byte corresponds to the current analysis instruction
+- Identify valid JUMPDEST positions derived from analysis
+- Understand the relationship between optimized execution and raw contract code
 
-The codebase already exposes all required data. This PR wires it through to the Devtool runtime and UI with strong guarantees and tests.
+### Architecture Overview
 
-### High-level design
+Guillotine uses a sophisticated **Structure-of-Arrays (SoA)** instruction representation with three key analysis artifacts:
 
-- Analysis provides a compact instruction stream and mapping tables:
-  - `inst_to_pc`: map from analysis instruction index → original bytecode PC (if known; else sentinel)
-  - `pc_to_block_start`: map from original bytecode PC → analysis BEGINBLOCK instruction index
-  - `jumpdest_array`: packed set of valid JUMPDEST PCs
-- Interpreter (and Devtool’s analysis-first stepper) can determine the current instruction pointer (`Instruction*`) and derive:
-  - instruction index: pointer arithmetic against `analysis.instructions.ptr`
-  - current PC: `analysis.inst_to_pc[idx]` (with sentinel fallback)
-- Devtool runtime serializes analysis artifacts in JSON for the UI. We will add:
-  - `currentPc`: the best-known original PC for the current instruction
-  - `jumpdests`: packed positions array to mark valid jump destinations in the bytecode view
-  - keep existing per-block `pcs`, `opcodes`, `hex`, and `data` already derived from analysis/code
-- UI highlights:
-  - current instruction row in the instruction list (existing)
-  - current byte in the bytecode grid using `currentPc`
-  - overlays jumpdest validity using `jumpdests`
+#### Core Analysis Structures (`src/evm/code_analysis.zig`)
 
-### Ground truth APIs and structures
-
-Key types the PR relies on:
-
-```69:101:/Users/polarzero/code/tevm/guillotine/src/evm/code_analysis.zig
-    /// Mapping from bytecode PC to the BEGINBLOCK instruction index that contains that PC.
-    /// Size = code_len. Value = maxInt(u16) if unmapped.
-    pc_to_block_start: []u16, // 16 bytes - accessed on EVERY jump
-
-    /// Packed array of valid JUMPDEST positions in the bytecode.
-    /// Required for JUMP/JUMPI validation during execution.
-    /// Uses cache-efficient linear search on packed u15 array.
-    jumpdest_array: JumpdestArray, // 24 bytes - accessed on jump validation
-
-    /// Original contract bytecode for this analysis (used by CODECOPY).
-    code: []const u8, // 16 bytes - accessed by CODECOPY/CODESIZE
-
-    /// Original code length (used for bounds checks)
-    code_len: usize, // 8 bytes - accessed with code operations
-
-    /// For each instruction index, indicates if it is a JUMP or JUMPI (or other).
-    /// Size = instructions.len
-    inst_jump_type: []JumpType, // 16 bytes - accessed during control flow
-
-    /// Mapping from instruction index to original bytecode PC (for debugging/tracing)
-    inst_to_pc: []u16, // 16 bytes - only for debugging/tracing
+```zig
+pub const CodeAnalysis = struct {
+    // === FIRST CACHE LINE - ULTRA HOT ===
+    instructions: []Instruction,              // Compact 32-bit headers
+    size8_instructions: []Bucket8,            // 8-byte instruction payloads  
+    size16_instructions: []Bucket16,          // 16-byte instruction payloads
+    size24_instructions: []Bucket24,          // 24-byte instruction payloads
+    
+    // Mapping tables for PC synchronization
+    pc_to_block_start: []u16,                 // PC → block start index
+    jumpdest_array: JumpdestArray,            // Packed JUMPDEST positions
+    inst_to_pc: []u16,                        // Instruction → original PC
+    
+    // Original bytecode and metadata
+    code: []const u8,                         // Original contract bytecode
+    code_len: usize,                          // Bytecode length
+    inst_jump_type: []JumpType,               // Jump classification per instruction
+};
 ```
 
-```60:88:/Users/polarzero/code/tevm/guillotine/src/evm/jumpdest_array.zig
-    /// Validates if a program counter is a valid JUMPDEST using cache-friendly linear search.
+#### Instruction Pointer Arithmetic Pattern
+
+The codebase uses pointer arithmetic to derive instruction indices:
+
+```zig
+// From src/evm/evm/interpret.zig:51-52
+const base: [*]const @TypeOf(inst.*) = analysis.instructions.ptr;
+const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+```
+
+#### JUMPDEST Validation (`src/evm/jumpdest_array.zig`)
+
+```zig
+pub const JumpdestArray = struct {
+    positions: []const u15,  // Packed u15 array (max 32KB contracts)
+    code_len: usize,
+    
     pub fn is_valid_jumpdest(self: *const JumpdestArray, pc: usize) bool {
-        if (self.positions.len == 0 or pc >= self.code_len) return false;
+        // Cache-friendly linear search with proportional starting point
         const start_idx = (pc * self.positions.len) / self.code_len;
-        // ... forward/backward search over packed positions
+        // Search forward/backward from calculated position
+    }
+};
 ```
 
-Interpreter tracing shows how to derive `idx` and map to a PC (we’ll mirror this in Devtool):
+### Current Devtool Architecture Deep Dive
 
-```50:67:/Users/polarzero/code/tevm/guillotine/src/evm/evm/interpret.zig
-            const base: [*]const @TypeOf(inst.*) = analysis.instructions.ptr;
-            const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
-            if (idx < analysis.inst_to_pc.len) {
-                const pc_u16 = analysis.inst_to_pc[idx];
-                if (pc_u16 != std.math.maxInt(u16)) {
-                    const pc: usize = pc_u16;
-                    const opcode: u8 = if (pc < analysis.code_len) frame.analysis.code[pc] else 0x00;
-                    // ...
+#### DevtoolEvm Structure (`src/devtool/evm.zig`)
+
+```zig
+const DevtoolEvm = struct {
+    // Core EVM components
+    evm: EvmType,
+    database: MemoryDatabase,
+    host: Host,
+    allocator: std.mem.Allocator,
+    
+    // Debug-specific state
+    current_frame: ?*Evm.Frame,
+    current_contract: ?*Evm.Contract, 
+    analysis: ?*Evm.CodeAnalysis,      // Key: owns the analysis
+    instr_index: usize,                // Current instruction index
+    
+    // Execution state
+    is_initialized: bool,
+    is_completed: bool,
+    is_paused: bool,
+    
+    // Dynamic gas attribution tracking
+    dynamic_gas_map: std.AutoHashMap(u64, u32),
+};
 ```
 
-Devtool already builds rich block/PC/opcode tables for the UI:
+#### Current JSON Serialization (`src/devtool/debug_state.zig`)
 
-```323:381:/Users/polarzero/code/tevm/guillotine/src/devtool/evm.zig
-                while (j < instrs.len and instrs[j].arg != .block_info) : (j += 1) {
-                    const mapped_u16: u16 = if (j < a.inst_to_pc.len) a.inst_to_pc[j] else std.math.maxInt(u16);
-                    var pc: usize = 0;
-                    if (mapped_u16 != std.math.maxInt(u16)) {
-                        pc = mapped_u16;
-                        last_pc_opt = pc;
-                    } else if (last_pc_opt) |prev_pc| {
-                        // derive best-effort PC from previous PC + opcode immediate size
-                        // ...
-                    }
-                    // populate pcs/opcodes/hex/data lists for the block rows
+```zig
+pub const EvmStateJson = struct {
+    gasLeft: u64,
+    depth: u32,
+    stack: [][]const u8,
+    memory: []const u8,
+    storage: []StorageEntry,
+    logs: [][]const u8,
+    returnData: []const u8,
+    codeHex: []const u8,                    // Full bytecode as hex
+    completed: bool,
+    currentInstructionIndex: usize,         // Current analysis instruction
+    currentBlockStartIndex: usize,          // Current block start
+    blocks: []BlockJson,                    // Rich block information
+};
+
+pub const BlockJson = struct {
+    beginIndex: usize,
+    gasCost: u32,
+    stackReq: u16, 
+    stackMaxGrowth: u16,
+    blockStartPc: u32,                     // Block's first PC
+    blockEndPcExclusive: u32,              // Block's end PC
+    pcs: []u32,                            // Per-instruction PCs
+    opcodes: [][]const u8,                 // Opcode names
+    opcodeBytes: []u8,                     // Raw opcode bytes
+    hex: [][]const u8,                     // Hex representation
+    data: [][]const u8,                    // PUSH immediate data
+    dynamicGas: []u32,                     // Runtime gas costs
+    dynCandidate: []bool,                  // May have dynamic gas
+    // Debug fields
+    instIndices: []u32,
+    instMappedPcs: []u32,
+};
 ```
 
-### Implementation plan (precise edits)
+#### PC Mapping Logic in `serializeEvmState()` (lines 323-381)
 
-#### 1) Devtool runtime: add currentPc and jumpdests to serialized state
+The Devtool already implements sophisticated PC mapping:
 
-File: `src/devtool/evm.zig`
+```zig
+// Get current instruction index from pointer arithmetic
+const base: [*]const @TypeOf(instrs[0]) = instrs.ptr;
+derived_idx = (@intFromPtr(f.instruction) - @intFromPtr(base)) / @sizeOf(@TypeOf(instrs[0]));
 
-Edits:
-
-- Compute current instruction index from the frame’s `instruction` pointer (already done) and derive the best-known original PC:
-  - If `inst_to_pc[idx] != maxInt(u16)`, use that value
-  - Else, fall back to our existing derived PC logic used in `serializeEvmState` for table rows (use `last_pc_opt` then `prev_op` immediate length)
-- Serialize two new fields in the returned JSON object:
-  - `currentPc: usize`
-  - `jumpdests: []usize` extracted from `analysis.jumpdest_array.positions` (cast u15→usize)
-
-Where to add:
-
-- Right before constructing `state` in `serializeEvmState()`, compute `current_pc` using `self.instr_index` and `a.inst_to_pc`.
-- Build a `jumpdests` `std.ArrayList(usize)` from `a.jumpdest_array.positions`.
-- Extend `debug_state.EvmStateJson` object literal to include `.currentPc` and `.jumpdests`.
-
-Edge cases and fallbacks:
-
-- If index is out of range or sentinel, fall back to 0.
-- Guard `current_pc < a.code_len` before UI uses it; UI treats out-of-range as “no highlight”.
-
-Complexity: O(positions.len) once per serialization to copy packed jumpdests; typical contracts have sparse jumpdests so this is cheap for dev tooling. If needed, we can cache the slice in `DevtoolEvm` after load.
-
-#### 2) Devtool step result: expose PC for immediate consumers (optional)
-
-If you intend to stream per-step info (e.g., incremental UI without re-serializing full state), extend `DebugStepResult` with:
-
-- `pc: usize` (current PC after the step), computed the same way as above.
-
-This is optional because the current UI already calls `serializeEvmState()` after each step.
-
-#### 3) TypeScript types and UI wiring
-
-File: `src/devtool/solid/lib/types.ts`
-
-Edits:
-
-- Extend `EvmState` with:
-  - `currentPc: number`
-  - `jumpdests: number[]`
-
-File: `src/devtool/solid/components/evm-debugger/BytecodeBlocksMap.tsx`
-
-Edits:
-
-- Accept two new props (thread them from parent):
-  - `currentPc: number`
-  - `jumpdests: number[]`
-- Highlight the single cell at `currentPc` in addition to the block-coloring you already do:
-  - If `pc() === props.currentPc`, apply a stronger highlight (e.g., amber-600/90 + ring)
-- Optionally mark valid jumpdests with a subtle dot/underline:
-  - Build a `Set` from `jumpdests` for O(1) checks; if `pc()` in set, add a small indicator (e.g., a corner dot or border) and a title tooltip “valid JUMPDEST”.
-
-File: `src/devtool/solid/components/evm-debugger/ExecutionStepsView.tsx`
-
-Edits:
-
-- No functional change required; it already highlights the active instruction by index. Keep as-is.
-
-Parent component (where state is fetched): ensure you pass `currentPc` and `jumpdests` down to `BytecodeBlocksMap` along with existing `codeHex`, `blocks`, and `currentBlockStartIndex`.
-
-#### 4) Optional dual-pane “CodePane”
-
-You can keep the current split (ExecutionStepsView + BytecodeBlocksMap) which already implements a dual-pane experience. If you prefer a single compositional wrapper, create `CodePane.tsx` that just composes these two with synchronized props; no additional logic required.
-
-### Mapping details and edge cases
-
-- Instruction index derivation:
-  - Use the exact pointer arithmetic from interpreter (see citation above): `idx = (ptr - base) / sizeof(Instruction)`
-- Mapping to original PCs:
-  - Prefer `inst_to_pc[idx]` when not sentinel (`!= maxInt(u16)`). This is the authoritative mapping from analysis
-  - For fused/meta instructions with sentinel PC, derive a best-effort PC:
-    - Keep `last_pc_opt` as you traverse the current block; if the previous opcode was at `prev_pc` and is a PUSH with N bytes, the next opcode’s PC is `prev_pc + 1 + N`
-    - PUSH immediate length: `N = op == 0x5f ? 0 : (0x60..0x7f ? op - 0x5f : 0)`
-- BEGINBLOCK rows:
-  - BEGINBLOCK (`.block_info`) is meta; it precedes visible instructions in the block. UI highlights instructions (`idx > beginIndex`) while BEGINBLOCK stays in the header columns (gas, stack)
-- Dynamic jumps:
-  - When executing `.jump_unresolved`/`.conditional_jump_unresolved`, the target resolution uses `pc_to_block_start[dest]` guarded by `jumpdest_array.is_valid_jumpdest(dest)`
-  - The UI doesn’t need to simulate jumps; it only visualizes state. We surface `jumpdests` for tooltips/overlays and keep highlighting by `currentInstructionIndex` and `currentPc`
-- Invalid jump detection:
-  - For convenience you can also expose a helper in the runtime like `isValidJumpdest(pc)` using `jumpdest_array.is_valid_jumpdest(pc)`. The UI can show different styling if `currentPc` is not a JUMPDEST while the instruction is a JUMPDEST (shouldn’t happen) or if the upcoming target (peeked from stack) is invalid (requires simulator; out of scope for now)
-
-### File-by-file diffs (sketch)
-
-These are the exact places to add code. Names are precise to speed implementation.
-
-1. `src/devtool/evm.zig`
-
-   - In `serializeEvmState(self: *DevtoolEvm) ![]u8`:
-     - After computing `self.instr_index`, derive `current_pc`:
-       - If `self.analysis) |a|` then:
-         - If `self.instr_index < a.inst_to_pc.len` and `a.inst_to_pc[self.instr_index] != maxInt(u16)` then `current_pc = a.inst_to_pc[self.instr_index]`
-         - Else reuse the local “derive PC” logic you already have for per-row fallback using `last_pc_opt`
-     - Build `jumpdests`: iterate `a.jumpdest_array.positions` and push into a `std.ArrayList(usize)`
-     - Extend `state` with `.currentPc = current_pc` and `.jumpdests = try jumpdests_list.toOwnedSlice()`
-   - Optionally in `DebugStepResult` (struct at top), add `pc: usize` and set it in `stepExecute()` right before returning
-
-2. `src/devtool/solid/lib/types.ts`
-
-   - Extend `export interface EvmState`:
-     - `currentPc: number`
-     - `jumpdests: number[]`
-
-3. `src/devtool/solid/components/evm-debugger/BytecodeBlocksMap.tsx`
-
-   - Props: add `currentPc: number`, `jumpdests: number[]`
-   - In the cell renderer:
-     - If `pc() === props.currentPc`, apply a strong highlight class (e.g., `bg-amber-600/90 text-black ring-2 ring-amber-500`)
-     - Create a `jumpSet = new Set(props.jumpdests)` (memoized) and show a small indicator for `jumpSet.has(pc())`
-
-4. Parent wiring (where you already fetch/hold `EvmState` from the Rust/Zig bridge): pass `state.currentPc` and `state.jumpdests` to `BytecodeBlocksMap`.
-
-### Tests
-
-All tests live in-source per project conventions.
-
-1. Zig unit tests (Devtool runtime)
-
-- Add to `src/devtool/evm.zig` alongside existing tests:
-  - Test: mapping consistency for a small program with PUSH/JUMPDEST/JUMP
-    - Load `0x6003565b00` (PUSH1 3; JUMP; JUMPDEST; STOP)
-    - After `resetExecution()`, assert that `serializeEvmState()` includes:
-      - `blocks[?].pcs` containing 3 for the block starting at the JUMPDEST
-      - `jumpdests` contains `[3]`
-    - Step once; assert `currentPc` equals the mapped PC for the executed instruction
-
-2. Zig unit tests (JSON shape)
-
-- Extend `DevtoolEvm.serializeEvmState returns valid JSON` to parse and assert presence and types of `currentPc` and `jumpdests`
-
-3. Visual smoke test (manual)
-
-- Load sample contracts (e.g., “Jump and Control Flow”) from `sampleContracts`
-- Verify:
-  - Current instruction row highlights in the steps table
-  - Current PC byte highlights in the bytecode grid
-  - JUMPDEST bytes have visible markers
-
-### Performance and safety notes
-
-- Analysis artifacts are computed once on load via `CodeAnalysis.from_code` and retained on `DevtoolEvm`
-- Packed jumpdest array is tiny (u15 per dest). Copying to JSON per refresh is fine for devtool; cache if needed
-- Always guard indexes; treat `maxInt(u16)` as a sentinel “unknown PC”
-- Memory ownership:
-  - `serializeEvmState` currently allocates slices for JSON, then frees via `debug_state.freeEvmStateJson`. Keep additions consistent (use allocator, then include in state so they are freed alongside)
-
-### Acceptance criteria
-
-- UI highlights the current instruction row and the exact byte at `currentPc` in the byte grid
-- Valid jumpdest positions are visually marked in the byte grid
-- The state JSON contains `currentPc` and `jumpdests`
-- Mapping remains correct across steps, including through fused instructions and meta BEGINBLOCK boundaries
-
-### FAQ / gotchas
-
-- Why can `inst_to_pc[idx]` be unknown? Fused/meta instructions (e.g., BEGINBLOCK, certain optimized patterns) may not have a 1:1 original PC. Use the fallback derivation based on the previous known PC and opcode immediate size
-- Are `currentPc` and “originalPc” different? No. `inst_to_pc` maps to original bytecode; we expose it directly
-- Can we highlight the entire span for PUSH (opcode + immediates)? You can, but it’s optional. Start with highlighting the opcode byte at `currentPc`
-- Do we need to modify the interpreter? No. Devtool uses the analysis-stepper path; the interpreter already traces PCs in `build_options.enable_tracing` mode for external tracers
-
-### Reference snippets (for quick copy/paste during implementation)
-
-Derive instruction index from pointer:
-
-```118:126:/Users/polarzero/code/tevm/guillotine/src/evm/evm/interpret.zig
-    var instruction: *const Instruction = &frame.analysis.instructions[0];
-    // ...
-    const analysis = frame.analysis;
-    // ...
-    const base: [*]const Instruction = analysis.instructions.ptr;
-    const idx = (@intFromPtr(instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
+// Map instruction index to original PC
+const mapped_u16: u16 = if (j < a.inst_to_pc.len) a.inst_to_pc[j] else std.math.maxInt(u16);
+var pc: usize = 0;
+if (mapped_u16 != std.math.maxInt(u16)) {
+    pc = mapped_u16;  // Direct mapping available
+    last_pc_opt = pc;
+} else if (last_pc_opt) |prev_pc| {
+    // Derive PC from previous known PC + opcode size
+    const prev_op: u8 = if (prev_pc < a.code_len) a.code[prev_pc] else 0;
+    const imm_len: usize = if (prev_op >= 0x60 and prev_op <= 0x7f) 
+        @intCast(prev_op - 0x5f) else 0;
+    pc = prev_pc + 1 + imm_len;
+    last_pc_opt = pc;
+}
 ```
 
-Jumpdest validation:
+## Detailed Implementation Plan
 
-```60:88:/Users/polarzero/code/tevm/guillotine/src/evm/jumpdest_array.zig
-pub fn is_valid_jumpdest(self: *const JumpdestArray, pc: usize) bool { /* … */ }
+### Phase 1: Devtool Runtime Extensions
+
+#### 1.1) Add `currentPc` and `jumpdests` to JSON State
+
+**File**: `src/devtool/evm.zig`  
+**Function**: `serializeEvmState()` (around line 253)
+
+**Step 1**: Compute current PC after deriving instruction index
+
+```zig
+// Around line 284-289, after deriving current instruction index
+if (self.current_frame) |f| {
+    const base: [*]const @TypeOf(instrs[0]) = instrs.ptr;
+    derived_idx = (@intFromPtr(f.instruction) - @intFromPtr(base)) / @sizeOf(@TypeOf(instrs[0]));
+    self.instr_index = derived_idx;
+}
+
+// NEW: Compute current PC using the same logic as blocks
+var current_pc: usize = 0;
+if (self.analysis) |a| {
+    if (derived_idx < a.inst_to_pc.len) {
+        const pc_u16 = a.inst_to_pc[derived_idx];
+        if (pc_u16 != std.math.maxInt(u16)) {
+            current_pc = pc_u16;
+        }
+        // Fallback: Use the same PC derivation logic as the block building
+        // (This matches the existing pattern in lines 343-348)
+    }
+}
 ```
 
-Access to mapping arrays:
+**Step 2**: Extract jumpdests array
 
-```268:281:/Users/polarzero/code/tevm/guillotine/src/evm/code_analysis.zig
-    .pc_to_block_start = gen.pc_to_block_start,
-    .jumpdest_array = jumpdest_array,
-    .code = code,
-    .code_len = code.len,
-    .inst_jump_type = gen.inst_jump_type,
-    .inst_to_pc = gen.inst_to_pc,
+```zig
+// NEW: Build jumpdests list from analysis
+var jumpdests_list = std.ArrayList(usize).init(self.allocator);
+defer jumpdests_list.deinit(); // Will transfer ownership to state
+
+if (self.analysis) |a| {
+    // Convert u15 positions to usize for JSON
+    for (a.jumpdest_array.positions) |pos_u15| {
+        try jumpdests_list.append(@as(usize, pos_u15));
+    }
+}
 ```
 
-UI active row logic (already present):
+**Step 3**: Extend EvmStateJson structure
 
-```111:121:/Users/polarzero/code/tevm/guillotine/src/devtool/solid/components/evm-debugger/ExecutionStepsView.tsx
-const isActive =
-  blk.beginIndex === props.currentBlockStartIndex &&
-  idx() === Math.max(0, props.currentInstructionIndex - blk.beginIndex - 1)
+**File**: `src/devtool/debug_state.zig`  
+**Struct**: `EvmStateJson` (line 73)
+
+```zig
+pub const EvmStateJson = struct {
+    gasLeft: u64,
+    depth: u32,
+    stack: [][]const u8,
+    memory: []const u8,
+    storage: []StorageEntry,
+    logs: [][]const u8,
+    returnData: []const u8,
+    codeHex: []const u8,
+    completed: bool,
+    currentInstructionIndex: usize,
+    currentBlockStartIndex: usize,
+    blocks: []BlockJson,
+    
+    // NEW FIELDS
+    currentPc: usize,           // Current bytecode PC
+    jumpdests: []usize,         // Valid JUMPDEST positions
+};
 ```
 
-### Rollout checklist
+**Step 4**: Update state construction in `serializeEvmState()`
 
-- Implement runtime fields (`currentPc`, `jumpdests`) and run:
-  - `zig build && zig build test`
-- Update TS types and UI props; run web UI with sample programs
-- Verify mapping on dispatcher-y bytecode (PUSH..JUMPI..JUMPDEST) and a longer runtime (ERC20)
+```zig
+// Around line 453, when constructing the state object
+const state = debug_state.EvmStateJson{
+    .gasLeft = frame.gas_remaining,
+    .depth = frame.depth,
+    .stack = try debug_state.serializeStack(self.allocator, &frame.stack),
+    .memory = try debug_state.serializeMemory(self.allocator, &frame.memory),
+    .storage = try storage_entries.toOwnedSlice(),
+    .logs = try self.allocator.alloc([]const u8, 0),
+    .returnData = blk: {
+        // existing returnData logic...
+    },
+    .codeHex = try debug_state.formatBytesHex(self.allocator, self.analysis.?.code),
+    .completed = self.is_completed,
+    .currentInstructionIndex = self.instr_index,
+    .currentBlockStartIndex = current_block_start_index,
+    .blocks = try blocks.toOwnedSlice(),
+    
+    // NEW FIELDS
+    .currentPc = current_pc,
+    .jumpdests = try jumpdests_list.toOwnedSlice(),
+};
+```
 
-This should give you a complete, precise path to implement PC mapping in the UI with confidence, using the existing analysis data and without touching hot execution paths.
+**Step 5**: Update cleanup function
+
+**File**: `src/devtool/debug_state.zig`  
+**Function**: `freeEvmStateJson()` (line 310)
+
+```zig
+pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void {
+    // ... existing cleanup code ...
+    
+    // NEW: Clean up jumpdests array
+    allocator.free(state.jumpdests);
+    
+    // Free code hex string
+    allocator.free(state.codeHex);
+}
+```
+
+#### 1.2) Optional: Extend DebugStepResult with PC
+
+**File**: `src/devtool/evm.zig`  
+**Struct**: `DebugStepResult` (line 41)
+
+```zig
+pub const DebugStepResult = struct {
+    gas_before: u64,
+    gas_after: u64,
+    completed: bool,
+    error_occurred: bool,
+    execution_error: ?anyerror,
+    
+    // NEW: Current PC after step execution
+    pc: usize,  
+};
+```
+
+**Update**: `stepExecute()` to populate PC field (around line 754)
+
+```zig
+// After syncing UI index from pointer (line 748-749)
+const base_ptr: [*]const @TypeOf(instructions[0]) = instructions.ptr;
+self.instr_index = (@intFromPtr(frame.instruction) - @intFromPtr(base_ptr)) / @sizeOf(@TypeOf(instructions[0]));
+
+// NEW: Compute PC for step result
+var step_pc: usize = 0;
+if (self.analysis) |a| {
+    if (self.instr_index < a.inst_to_pc.len) {
+        const pc_u16 = a.inst_to_pc[self.instr_index];
+        if (pc_u16 != std.math.maxInt(u16)) {
+            step_pc = pc_u16;
+        }
+    }
+}
+
+// Update return statement
+return DebugStepResult{
+    .gas_before = gas_before,
+    .gas_after = frame.gas_remaining,
+    .completed = completed,
+    .error_occurred = had_error,
+    .execution_error = if (had_error) exec_err else null,
+    .pc = step_pc,  // NEW
+};
+```
+
+### Phase 2: TypeScript Frontend Integration
+
+#### 2.1) Update Type Definitions
+
+**File**: `src/devtool/solid/lib/types.ts`  
+**Interface**: `EvmState` (line 17)
+
+```typescript
+export interface EvmState {
+    gasLeft: number
+    depth: number
+    stack: string[]
+    memory: string
+    storage: Array<{ key: string; value: string }>
+    logs: string[]
+    returnData: string
+    codeHex: string
+    completed: boolean
+    currentInstructionIndex: number
+    currentBlockStartIndex: number
+    blocks: BlockJson[]
+    
+    // NEW FIELDS
+    currentPc: number        // Current original bytecode PC
+    jumpdests: number[]      // Valid JUMPDEST positions
+}
+```
+
+#### 2.2) Enhance BytecodeBlocksMap Component
+
+**File**: `src/devtool/solid/components/evm-debugger/BytecodeBlocksMap.tsx`
+
+**Step 1**: Update props interface
+
+```typescript
+interface BytecodeBlocksMapProps {
+    codeHex: string
+    blocks: BlockJson[]
+    currentBlockStartIndex: number
+    
+    // NEW PROPS
+    currentPc: number        // Highlight this specific PC
+    jumpdests: number[]      // Mark these as valid JUMPDESTs
+}
+```
+
+**Step 2**: Create jumpdest lookup set
+
+```typescript
+// Add after existing memos (around line 44)
+const jumpdestsSet = createMemo(() => new Set(props.jumpdests))
+```
+
+**Step 3**: Enhanced cell rendering with PC highlighting
+
+```typescript
+// Update the cell rendering in the For loop (around line 74-94)
+return (
+    <div
+        class={cn(
+            'relative flex items-center justify-center border border-border/20 px-1.5 py-1',
+            // Existing block highlighting
+            isCurrent()
+                ? 'bg-amber-500/80 text-black'
+                : sidx() >= 0
+                    ? sidx() % 2 === 0
+                        ? 'bg-amber-100/50 dark:bg-amber-900/50'
+                        : 'bg-amber-100/20 dark:bg-amber-900/20'
+                    : 'text-foreground/70',
+            // NEW: Current PC highlighting (stronger than block highlighting)
+            pc() === props.currentPc && 'ring-2 ring-amber-500 bg-amber-600/90 text-black',
+        )}
+        title={`pc=0x${pc().toString(16)}${
+            beginIndex() >= 0 ? ` • block @${beginIndex()}` : ''
+        }${jumpdestsSet().has(pc()) ? ' • valid JUMPDEST' : ''}`}  // Enhanced tooltip
+    >
+        {/* Existing block start indicator */}
+        {isBlockStart() && sidx() >= 0 && (
+            <span class="absolute top-0.5 left-0.5 text-[9px] text-muted-foreground leading-none">
+                {(sidx() + 1).toString()}
+            </span>
+        )}
+        
+        {/* NEW: JUMPDEST indicator */}
+        {jumpdestsSet().has(pc()) && (
+            <span class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" 
+                  title="Valid JUMPDEST" />
+        )}
+        
+        <span>{b}</span>
+    </div>
+)
+```
+
+#### 2.3) Update Parent Component Props
+
+**Find**: The parent component that renders `BytecodeBlocksMap` (likely in a main debugger component)
+
+**Update**: Pass the new props from the EVM state:
+
+```typescript
+<BytecodeBlocksMap
+    codeHex={state.codeHex}
+    blocks={state.blocks}
+    currentBlockStartIndex={state.currentBlockStartIndex}
+    currentPc={state.currentPc}      // NEW
+    jumpdests={state.jumpdests}      // NEW
+/>
+```
+
+#### 2.4) ExecutionStepsView Remains Unchanged
+
+**File**: `src/devtool/solid/components/evm-debugger/ExecutionStepsView.tsx`
+
+No changes needed! The component already highlights the active instruction correctly using:
+
+```typescript
+const isActive = 
+    blk.beginIndex === props.currentBlockStartIndex &&
+    idx() === Math.max(0, props.currentInstructionIndex - blk.beginIndex - 1)
+```
+
+This provides the "analysis instruction" highlighting while `BytecodeBlocksMap` now provides "original bytecode PC" highlighting.
+
+## Implementation Details and Edge Cases
+
+### Critical Zig Patterns and Memory Management
+
+#### Pointer Arithmetic for Instruction Indexing
+
+Guillotine uses a consistent pattern for deriving instruction indices from pointers:
+
+```zig
+// Pattern used throughout codebase (interpret.zig, devtool/evm.zig)
+const base: [*]const Instruction = analysis.instructions.ptr;
+const idx = (@intFromPtr(current_instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
+```
+
+**Key Points:**
+- `[*]const Instruction` is a many-pointer (unknown length)
+- `@intFromPtr()` converts pointer to integer address 
+- Division by `@sizeOf(Instruction)` gives element index
+- This is safe because instructions array is contiguous
+
+#### Memory Allocation Patterns
+
+**ArrayList Usage:**
+```zig
+// Standard pattern for dynamic arrays in Devtool
+var jumpdests_list = std.ArrayList(usize).init(self.allocator);
+defer jumpdests_list.deinit(); // Always defer cleanup
+
+// Populate the list
+for (a.jumpdest_array.positions) |pos_u15| {
+    try jumpdests_list.append(@as(usize, pos_u15));
+}
+
+// Transfer ownership to struct
+const owned_slice = try jumpdests_list.toOwnedSlice();
+// Note: After toOwnedSlice(), the ArrayList is empty but still needs deinit
+```
+
+**Owned vs Borrowed Memory:**
+- `serializeEvmState()` returns owned memory that caller must free
+- `debug_state.freeEvmStateJson()` properly deallocates all nested structures
+- Always use `errdefer` for early return cleanup
+
+#### PC Mapping Algorithm
+
+**Primary Mapping (Authoritative):**
+```zig
+if (idx < analysis.inst_to_pc.len) {
+    const pc_u16 = analysis.inst_to_pc[idx];
+    if (pc_u16 != std.math.maxInt(u16)) {  // Not sentinel
+        current_pc = pc_u16;  // Direct mapping available
+    }
+}
+```
+
+**Fallback Mapping (Best Effort):**
+```zig
+// For fused/meta instructions without direct mapping
+if (last_pc_opt) |prev_pc| {
+    const prev_op: u8 = if (prev_pc < analysis.code_len) analysis.code[prev_pc] else 0;
+    
+    // Calculate PUSH immediate length
+    const imm_len: usize = if (prev_op == 0x5f)  // PUSH0 
+        0
+    else if (prev_op >= 0x60 and prev_op <= 0x7f)  // PUSH1-PUSH32
+        @intCast(prev_op - 0x5f)  // PUSH1=0x60 has 1 byte, etc.
+    else 
+        0;  // Non-PUSH opcodes
+        
+    current_pc = prev_pc + 1 + imm_len;  // Next instruction PC
+    last_pc_opt = current_pc;
+}
+```
+
+### JUMPDEST Validation Architecture
+
+**Packed Array Design:**
+- Uses `u15` to fit 32KB max contract size while minimizing memory
+- Linear search is faster than hash lookups for sparse data (<50 jumpdests typically)
+- Proportional starting point optimization: `start_idx = (pc * positions.len) / code_len`
+
+**Cache-Friendly Search:**
+```zig
+pub fn is_valid_jumpdest(self: *const JumpdestArray, pc: usize) bool {
+    if (self.positions.len == 0 or pc >= self.code_len) return false;
+    
+    // Smart starting position based on PC proportion
+    const start_idx = (pc * self.positions.len) / self.code_len;
+    const safe_start = @min(start_idx, self.positions.len - 1);
+    
+    // Check exact match first
+    if (self.positions[safe_start] == pc) return true;
+    
+    // Search forward, then backward from calculated position
+    // This maximizes cache hits on consecutive memory
+}
+```
+
+## Exact Implementation Locations
+
+### File-by-File Changes
+
+#### 1. `src/devtool/debug_state.zig`
+
+**Location**: Line 73, `EvmStateJson` struct
+```zig
+pub const EvmStateJson = struct {
+    // ... existing fields ...
+    blocks: []BlockJson,
+    
+    // ADD THESE TWO LINES:
+    currentPc: usize,
+    jumpdests: []usize,
+};
+```
+
+**Location**: Line 310, `freeEvmStateJson` function  
+**Add before** the final `allocator.free(state.codeHex);`:
+```zig
+// Free jumpdests array
+allocator.free(state.jumpdests);
+```
+
+#### 2. `src/devtool/evm.zig`
+
+**Location**: Line 280, in `serializeEvmState()` after computing `derived_idx`  
+**Add this block**:
+```zig
+// Compute current PC using same logic as block building
+var current_pc: usize = 0;
+if (self.analysis) |a| {
+    if (derived_idx < a.inst_to_pc.len) {
+        const pc_u16 = a.inst_to_pc[derived_idx];
+        if (pc_u16 != std.math.maxInt(u16)) {
+            current_pc = pc_u16;
+        }
+        // Could add fallback logic here if needed
+    }
+}
+
+// Build jumpdests list from analysis
+var jumpdests_list = std.ArrayList(usize).init(self.allocator);
+defer jumpdests_list.deinit();
+
+if (self.analysis) |a| {
+    for (a.jumpdest_array.positions) |pos_u15| {
+        try jumpdests_list.append(@as(usize, pos_u15));
+    }
+}
+```
+
+**Location**: Line 453, in the `state` construction  
+**Add these two fields**:
+```zig
+const state = debug_state.EvmStateJson{
+    // ... all existing fields ...
+    .blocks = try blocks.toOwnedSlice(),
+    
+    // ADD THESE:
+    .currentPc = current_pc,
+    .jumpdests = try jumpdests_list.toOwnedSlice(),
+};
+```
+
+#### 3. `src/devtool/solid/lib/types.ts`
+
+**Location**: Line 17, `EvmState` interface  
+**Add after** `blocks: BlockJson[]`:
+```typescript
+currentPc: number
+jumpdests: number[]
+```
+
+#### 4. `src/devtool/solid/components/evm-debugger/BytecodeBlocksMap.tsx`
+
+**Location**: Line 6, `BytecodeBlocksMapProps` interface  
+**Add after** `currentBlockStartIndex: number`:
+```typescript
+currentPc: number
+jumpdests: number[]
+```
+
+**Location**: Line 44, after existing memos  
+**Add**:
+```typescript
+const jumpdestsSet = createMemo(() => new Set(props.jumpdests))
+```
+
+**Location**: Line 76, in the `class={cn(` section  
+**Add after existing classes**:
+```typescript
+// Current PC highlighting (stronger than block highlighting)
+pc() === props.currentPc && 'ring-2 ring-amber-500 bg-amber-600/90 text-black',
+```
+
+**Location**: Line 86, in the `title=` prop  
+**Replace** the title with:
+```typescript
+title={`pc=0x${pc().toString(16)}${beginIndex() >= 0 ? ` • block @${beginIndex()}` : ''}${jumpdestsSet().has(pc()) ? ' • valid JUMPDEST' : ''}`}
+```
+
+**Location**: Line 93, after the block start indicator span  
+**Add**:
+```typescript
+{/* JUMPDEST indicator */}
+{jumpdestsSet().has(pc()) && (
+    <span class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" 
+          title="Valid JUMPDEST" />
+)}
+```
+
+## Comprehensive Testing Strategy
+
+### Zig Unit Tests (Devtool Runtime)
+
+**File**: `src/devtool/evm.zig` (add at end with other tests)
+
+```zig
+test "DevtoolEvm PC mapping and jumpdests serialization" {
+    const allocator = testing.allocator;
+    
+    var devtool_evm = try DevtoolEvm.init(allocator);
+    defer devtool_evm.deinit();
+    
+    // Load bytecode: PUSH1 3; JUMP; JUMPDEST; STOP (PC 3 is JUMPDEST)
+    const bytecode_hex = "0x6003565b00";
+    try devtool_evm.loadBytecodeHex(bytecode_hex);
+    
+    // Get initial state and parse JSON
+    const json_state = try devtool_evm.serializeEvmState();
+    defer allocator.free(json_state);
+    
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, json_state, .{}) catch |err| {
+        std.log.err("Failed to parse JSON: {}", .{err});
+        try testing.expect(false);
+        return;
+    };
+    defer parsed.deinit();
+    
+    const obj = parsed.value.object;
+    
+    // Verify new fields exist and have correct types
+    try testing.expect(obj.contains("currentPc"));
+    try testing.expect(obj.contains("jumpdests"));
+    
+    const current_pc = obj.get("currentPc").?.integer;
+    const jumpdests = obj.get("jumpdests").?.array;
+    
+    // Initially at PC 0 (PUSH1)
+    try testing.expectEqual(@as(i64, 0), current_pc);
+    
+    // Should contain one jumpdest at PC 3
+    try testing.expectEqual(@as(usize, 1), jumpdests.items.len);
+    try testing.expectEqual(@as(i64, 3), jumpdests.items[0].integer);
+    
+    // Step execution and verify PC updates
+    _ = try devtool_evm.stepExecute();  // Execute PUSH1
+    
+    const json_after_step = try devtool_evm.serializeEvmState();
+    defer allocator.free(json_after_step);
+    
+    const parsed_after = std.json.parseFromSlice(std.json.Value, allocator, json_after_step, .{}) catch unreachable;
+    defer parsed_after.deinit();
+    
+    const obj_after = parsed_after.value.object;
+    const current_pc_after = obj_after.get("currentPc").?.integer;
+    
+    // PC should have advanced (exact value depends on analysis optimizations)
+    try testing.expect(current_pc_after >= 0);
+}
+
+test "DevtoolEvm jumpdests array conversion" {
+    const allocator = testing.allocator;
+    
+    var devtool_evm = try DevtoolEvm.init(allocator);
+    defer devtool_evm.deinit();
+    
+    // Complex bytecode with multiple jumpdests
+    // PUSH1 8; JUMPI; JUMPDEST; PUSH1 12; JUMP; JUMPDEST; STOP
+    const bytecode_hex = "0x600857005b600c565b00";
+    try devtool_evm.loadBytecodeHex(bytecode_hex);
+    
+    const json_state = try devtool_evm.serializeEvmState();
+    defer allocator.free(json_state);
+    
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, json_state, .{}) catch unreachable;
+    defer parsed.deinit();
+    
+    const jumpdests = parsed.value.object.get("jumpdests").?.array;
+    
+    // Should find multiple jumpdests and be sorted
+    try testing.expect(jumpdests.items.len >= 1);
+    
+    // Verify all jumpdests are valid PCs
+    for (jumpdests.items) |jd| {
+        const pc = @as(usize, @intCast(jd.integer));
+        try testing.expect(pc < devtool_evm.bytecode.len);
+    }
+}
+```
+
+### JSON Schema Validation Test
+
+```zig
+test "DevtoolEvm EvmStateJson has all required fields" {
+    const allocator = testing.allocator;
+    
+    var devtool_evm = try DevtoolEvm.init(allocator);
+    defer devtool_evm.deinit();
+    
+    try devtool_evm.loadBytecodeHex("0x600160020100");  // Simple ADD
+    
+    const json_state = try devtool_evm.serializeEvmState();
+    defer allocator.free(json_state);
+    
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, json_state, .{}) catch unreachable;
+    defer parsed.deinit();
+    
+    const obj = parsed.value.object;
+    
+    // Verify all existing fields still exist
+    const required_fields = [_][]const u8{
+        "gasLeft", "depth", "stack", "memory", "storage", 
+        "logs", "returnData", "codeHex", "completed",
+        "currentInstructionIndex", "currentBlockStartIndex", "blocks"
+    };
+    
+    for (required_fields) |field| {
+        try testing.expect(obj.contains(field));
+    }
+    
+    // Verify new fields exist with correct types
+    try testing.expect(obj.contains("currentPc"));
+    try testing.expect(obj.get("currentPc").? == .integer);
+    
+    try testing.expect(obj.contains("jumpdests"));
+    try testing.expect(obj.get("jumpdests").? == .array);
+}
+```
+
+## Performance, Safety, and Best Practices
+
+### Memory Management Guidelines
+
+**Allocation Patterns:**
+- `serializeEvmState()` returns owned memory - caller must free with `debug_state.freeEvmStateJson()`
+- All nested allocations use the same allocator for consistency
+- Use `errdefer` for cleanup on early returns
+- `toOwnedSlice()` transfers ownership from ArrayList to struct
+
+**Performance Characteristics:**
+- Analysis computed once at load time via `CodeAnalysis.from_code()` - O(bytecode_length)
+- Jumpdest array copying: O(jumpdest_count) per serialization - typically <50 elements
+- PC mapping lookup: O(1) with `inst_to_pc` array direct indexing
+- Overall serialization: O(instruction_count + jumpdest_count) - acceptable for dev tooling
+
+### Safety Considerations
+
+**Index Bounds Checking:**
+```zig
+// Always guard array access
+if (idx < analysis.inst_to_pc.len) {
+    const pc_u16 = analysis.inst_to_pc[idx];
+    if (pc_u16 != std.math.maxInt(u16)) {  // Check sentinel
+        // Safe to use pc_u16
+    }
+}
+
+// Guard PC bounds for code access
+if (pc < analysis.code_len) {
+    const opcode = analysis.code[pc];
+}
+```
+
+**Sentinel Value Handling:**
+- `std.math.maxInt(u16)` indicates "unknown PC" in `inst_to_pc` mapping
+- Always check for sentinel before using PC value
+- Fallback to best-effort derivation when sentinel encountered
+
+**Type Safety:**
+- `u15` for jumpdest positions (fits 32KB max contract size)
+- `u16` for PC mapping (same size constraint)
+- `usize` for final JSON (platform-independent)
+- Explicit casting with `@as()` and `@intCast()` for clarity
+
+## Acceptance Criteria and Validation
+
+### Functional Requirements
+
+✅ **Dual Highlighting System:**
+- Current analysis instruction highlighted in ExecutionStepsView (existing)
+- Current original bytecode PC highlighted in BytecodeBlocksMap (new)
+- Visual distinction between block-level and PC-level highlighting
+
+✅ **JUMPDEST Visualization:**
+- All valid JUMPDEST positions marked with green dot indicators
+- Tooltip shows "valid JUMPDEST" on hover
+- Positions derived from analysis are authoritative
+
+✅ **JSON API Extensions:**
+- `currentPc: usize` field in EvmStateJson
+- `jumpdests: []usize` array in EvmStateJson
+- Backward compatibility maintained for existing fields
+- Memory properly managed in cleanup functions
+
+✅ **Mapping Accuracy:**
+- PC mapping works across all instruction types (fused, meta, regular)
+- Sentinel values handled gracefully with fallbacks
+- BEGINBLOCK boundaries don't break PC continuity
+- Dynamic jumps resolve to correct target blocks
+
+### Integration Validation
+
+**Manual Testing Procedure:**
+
+1. **Load "Jump and Control Flow" sample contract:**
+   ```
+   Bytecode: 0x600a565b6001600101600a14610012575b00
+   ```
+   - Step through execution
+   - Verify JUMPDEST at PC 3 has green dot
+   - Verify current PC highlights single byte
+   - Verify instruction and PC highlighting are synchronized
+
+2. **Load "Comprehensive Test" sample:**
+   - Complex mix of arithmetic, jumps, memory operations
+   - Multiple JUMPDEST locations should be marked
+   - PC progression should be smooth across different instruction types
+
+3. **Edge Case Testing:**
+   - Empty bytecode (0x) - should not crash
+   - Single instruction (0x00) - PC should be 0
+   - Large contract with many JUMPDESTs - performance should be acceptable
+
+### Performance Acceptance
+
+- Serialization time increase: <10ms for typical contracts
+- Memory overhead: <1KB for jumpdests array
+- UI rendering: <16ms frame time maintained
+- No memory leaks in extended debugging sessions
+
+## FAQ and Implementation Notes
+
+### Common Questions
+
+**Q: Why can `inst_to_pc[idx]` be unknown/sentinel?**  
+A: Fused and meta instructions (BEGINBLOCK, optimized arithmetic) may not correspond 1:1 with original bytecode. Analysis optimizes execution flow, so some instruction indices represent composite operations. Use fallback PC derivation in these cases.
+
+**Q: What's the difference between `currentPc` and `currentInstructionIndex`?**  
+A: 
+- `currentInstructionIndex`: Position in optimized analysis instruction stream
+- `currentPc`: Position in original contract bytecode
+- They often differ due to analysis optimizations and BEGINBLOCK metadata
+
+**Q: Should we highlight entire PUSH spans (opcode + immediate bytes)?**  
+A: Start with single-byte highlighting at `currentPc`. Multi-byte highlighting is possible but requires additional logic to calculate immediate lengths and spans.
+
+**Q: Do we need to modify the core interpreter?**  
+A: No. The interpreter already has PC tracking for external tracers. Devtool uses analysis-first stepping and can derive all needed information from existing structures.
+
+**Q: How does this work with dynamic jumps?**  
+A: 
+- Analysis pre-computes `pc_to_block_start` mapping for all possible jump targets
+- `jumpdest_array` validates if a PC is a legal jump destination
+- UI visualizes state; it doesn't simulate jumps - just shows current position
+
+### Implementation Gotchas
+
+**Zig-Specific Issues:**
+- Always use `@intCast()` when converting between integer types
+- `errdefer` must come immediately after allocation
+- `toOwnedSlice()` empties the ArrayList but still requires `deinit()`
+- Use `std.math.maxInt(u16)` not magic numbers for sentinels
+
+**UI Synchronization:**
+- PC highlighting should be stronger than block highlighting  
+- Use `createMemo()` for expensive computations (jumpdest Set creation)
+- Don't forget to update the parent component's props passing
+
+**JSON Serialization:**
+- Add new fields to both creation and cleanup functions
+- Test JSON parsing to ensure valid output
+- Consider field ordering for readability
+
+## Ready-to-Use Code Snippets
+
+### Zig Implementation Snippets
+
+**Pointer Arithmetic Pattern:**
+```zig
+// Standard pattern for instruction index derivation
+const base: [*]const Instruction = analysis.instructions.ptr;
+const idx = (@intFromPtr(current_instruction) - @intFromPtr(base)) / @sizeOf(Instruction);
+```
+
+**PC Mapping with Fallback:**
+```zig
+// Primary mapping
+var current_pc: usize = 0;
+if (idx < analysis.inst_to_pc.len) {
+    const pc_u16 = analysis.inst_to_pc[idx];
+    if (pc_u16 != std.math.maxInt(u16)) {
+        current_pc = pc_u16;
+    } else {
+        // Fallback derivation logic here if needed
+    }
+}
+```
+
+**ArrayList to Owned Slice:**
+```zig
+// Standard dynamic array pattern
+var jumpdests_list = std.ArrayList(usize).init(allocator);
+defer jumpdests_list.deinit();
+
+for (analysis.jumpdest_array.positions) |pos_u15| {
+    try jumpdests_list.append(@as(usize, pos_u15));
+}
+
+const owned_jumpdests = try jumpdests_list.toOwnedSlice();
+```
+
+**PUSH Immediate Length Calculation:**
+```zig
+const imm_len: usize = if (opcode == 0x5f)  // PUSH0
+    0
+else if (opcode >= 0x60 and opcode <= 0x7f)  // PUSH1-PUSH32  
+    @intCast(opcode - 0x5f)
+else
+    0;
+```
+
+### TypeScript/SolidJS Snippets
+
+**Memoized Set Creation:**
+```typescript
+const jumpdestsSet = createMemo(() => new Set(props.jumpdests))
+```
+
+**Conditional Styling:**
+```typescript
+class={cn(
+    'base-classes',
+    // Block highlighting (existing)
+    isCurrent() ? 'bg-amber-500/80 text-black' : 'text-foreground/70',
+    // PC highlighting (stronger, new)
+    pc() === props.currentPc && 'ring-2 ring-amber-500 bg-amber-600/90 text-black',
+)}
+```
+
+**JUMPDEST Indicator:**
+```typescript
+{jumpdestsSet().has(pc()) && (
+    <span class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" 
+          title="Valid JUMPDEST" />
+)}
+```
+
+## Implementation Checklist
+
+### Phase 1: Backend Implementation
+- [ ] **Add fields to `EvmStateJson`** in `debug_state.zig`
+- [ ] **Implement PC derivation** in `serializeEvmState()` 
+- [ ] **Add jumpdests extraction** from analysis
+- [ ] **Update JSON cleanup** in `freeEvmStateJson()`
+- [ ] **Test with simple bytecode** (PUSH1 3; JUMP; JUMPDEST; STOP)
+- [ ] **Run `zig build && zig build test`** - all tests pass
+- [ ] **Verify JSON output** contains new fields with correct types
+
+### Phase 2: Frontend Integration  
+- [ ] **Update TypeScript types** in `types.ts`
+- [ ] **Add props to BytecodeBlocksMap** interface
+- [ ] **Implement jumpdest Set memoization**
+- [ ] **Add PC highlighting** (stronger than block highlighting)
+- [ ] **Add JUMPDEST indicators** with tooltips
+- [ ] **Wire props in parent component**
+- [ ] **Test with development server** - UI compiles without errors
+
+### Phase 3: Validation Testing
+- [ ] **Load "Jump and Control Flow"** sample contract
+- [ ] **Verify JUMPDEST markers** appear at correct positions
+- [ ] **Step through execution** - PC highlighting follows correctly
+- [ ] **Test complex contract** with multiple jumpdests
+- [ ] **Edge case testing** - empty bytecode, single instruction
+- [ ] **Performance check** - no noticeable slowdown
+- [ ] **Memory leak test** - extended debugging session
+
+### Phase 4: Final Polish
+- [ ] **Add comprehensive unit tests** for PC mapping
+- [ ] **Update documentation** if needed
+- [ ] **Code review** for Zig patterns and memory safety
+- [ ] **Visual design review** for UI indicators
+- [ ] **Cross-browser testing** for rendering consistency
+
+---
+
+**COMPREHENSIVE IMPLEMENTATION GUIDE COMPLETED**
+
+This document now contains:
+- ✅ Complete architecture understanding
+- ✅ Detailed Zig patterns and memory management
+- ✅ Precise implementation locations  
+- ✅ Ready-to-use code snippets
+- ✅ Comprehensive testing strategy
+- ✅ Performance and safety guidelines
+- ✅ Step-by-step checklist
+
+**Ready for implementation with full confidence in the approach and technical details.**
