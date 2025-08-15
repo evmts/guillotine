@@ -490,8 +490,8 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     };
     
     // Call finalize hook for structured tracers
-    if (comptime build_options.enable_tracing) {
-        if (self.inproc_tracer) |tracer_handle| {
+    if (comptime build_options.enable_tracing and self.inproc_tracer != null) {
+        const tracer_handle = self.inproc_tracer.?;
         const initial_gas = call_gas;
         const gas_used = initial_gas - current_frame.gas_remaining;
         const final_result = tracer.FinalResult{
@@ -501,7 +501,6 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
             .status = map_execution_status(exec_err),
         };
         tracer_handle.finalize(final_result);
-        }
     }
     
     // Restore executing flag
