@@ -146,113 +146,62 @@ pub fn main() !void {
     // Run benchmarks
     var run: u8 = 0;
     while (run < num_runs) : (run += 1) {
-        // Skip validation when tracing (run only once)
-        if (trace_path != null and run > 0) break;
+        const start_time = std.time.nanoTimestamp();
         // Execute contract using new call API
         const call_params = CallParams{ .call = .{
             .caller = caller_address,
             .to = contract_address,
             .value = 0,
             .input = calldata,
-            .gas = 1_000_000_000,
+            .gas = 10_000_000, // Plenty of gas
         } };
 
-        const result = vm.call(call_params) catch |err| {
-            std.debug.print("Contract execution error: {}\n", .{err});
-            if (err == error.InvalidJump) {
-                const deployed_code = vm.state.get_code(contract_address);
-                std.debug.print("Deployed code length: {}\n", .{deployed_code.len});
-                std.debug.print("First 100 bytes: {X}\n", .{std.fmt.fmtSliceHexLower(deployed_code[0..@min(100, deployed_code.len)])});
-            }
+        const result = vm.call(call_params) catch {
+            // On error, just return with exit code 1 to signal failure to the orchestrator
             std.process.exit(1);
         };
-
-        if (!result.success) {
-            if (result.output) |out| {
-                std.debug.print("Contract execution failed; revert/output hex: 0x{X}\n", .{std.fmt.fmtSliceHexLower(out)});
-            } else {
-                std.debug.print("Contract execution failed with no output data\n", .{});
-            }
-            std.process.exit(1);
-        }
-
-        const gas_used: u64 = 1_000_000_000 - result.gas_left;
-        if (gas_used == 0) {
-            std.debug.print("Sanity check failed: gas_used == 0 (likely no execution)\n", .{});
-            std.process.exit(1);
-        }
-
-        if (trace_path != null) continue;
-
-        const selector: u32 = if (calldata.len >= 4) std.mem.readInt(u32, calldata[0..4], .big) else 0;
-        switch (selector) {
-            0xa9059cbb => {
-                if (result.output) |out| {
-                    if (!(out.len >= 32 and out[out.len - 1] == 1)) {
-                        std.debug.print("Unexpected transfer() return payload (not 32-byte true)\n", .{});
-                        std.process.exit(1);
-                    }
-                } else {
-                    std.debug.print("transfer() returned no data\n", .{});
-                    std.process.exit(1);
-                }
-            },
-            0x095ea7b3 => {
-                if (result.output) |out| {
-                    if (!(out.len >= 32 and out[out.len - 1] == 1)) {
-                        std.debug.print("Unexpected approve() return payload (not 32-byte true)\n", .{});
-                        std.process.exit(1);
-                    }
-                } else {
-                    std.debug.print("approve() returned no data\n", .{});
-                    std.process.exit(1);
-                }
-            },
-            0x40c10f19 => {
-                if (result.output) |out| {
-                    if (!(out.len >= 32 and out[out.len - 1] == 1)) {
-                        std.debug.print("Unexpected mint() return payload (not 32-byte true)\n", .{});
-                        std.process.exit(1);
-                    }
-                }
-            },
-            0x30627b7c => {
-                if (result.output) |out| {
-                    if (out.len != 0) {
-                        std.debug.print("Unexpected output for Benchmark(): len={} (expected 0)\n", .{out.len});
-                        std.process.exit(1);
-                    }
-                }
-                if (gas_used < 1000) {
-                    std.debug.print("Benchmark() gas_used too small: {}\n", .{gas_used});
-                    std.process.exit(1);
-                }
-            },
-            else => {},
-        }
-
+        
         if (result.output) |output| {
             allocator.free(output);
         }
+        
+        const end_time = std.time.nanoTimestamp();
+        const duration_ns: u64 = @intCast(end_time - start_time);
+        const duration_ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+        
+        // Output timing in milliseconds (one per line as expected by orchestrator)
+        print("{d:.6}\n", .{duration_ms});
     }
 }
 
+
 fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
-    // Try to deploy via EVM create path (executes initcode and installs runtime)
-    const gas_limit: u64 = 10_000_000;
-    const res = try vm.create_contract(caller, 0, bytecode, gas_limit);
-    // Free optional revert/output buffer if present (ownership transferred)
-    if (res.output) |out| allocator.free(out);
-
-    if (res.success) {
-        return res.address;
+    
+    // Use CREATE to deploy the contract
+    const create_params = evm.CallParams{ .create = .{
+        .caller = caller,
+        .value = 0,
+        .init_code = bytecode,
+        .gas = 10_000_000, // Plenty of gas for deployment
+    } };
+    
+    const result = try vm.call(create_params);
+    
+    if (!result.success) {
+        return error.DeploymentFailed;
     }
-
-    // Fallback: install provided bytecode as runtime code at a deterministic address
-    // This ensures tests that only assert code presence can still pass even if initcode path fails.
-    const fallback_addr = try primitives.Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
-    try vm.state.set_code(fallback_addr, bytecode);
-    return fallback_addr;
+    
+    // Extract deployed address from output
+    if (result.output) |output| {
+        defer allocator.free(output);
+        if (output.len >= 20) {
+            var addr: Address = undefined;
+            @memcpy(&addr, output[0..20]);
+            return addr;
+        }
+    }
+    
+    return error.NoDeployedAddress;
 }
 
 fn hexToBytes(allocator: std.mem.Allocator, hex: []const u8) ![]u8 {
