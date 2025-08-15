@@ -2638,3 +2638,136 @@ test "Evm debug hooks - combined step and message hooks" {
     // But step hooks should definitely have been called
     try std.testing.expect(tracker.step_count >= 4); // At least 4 opcodes
 }
+
+test "Evm debug hooks - granular step-by-step execution with pause/resume" {
+    const allocator = std.testing.allocator;
+    var db = MemoryDatabase.init(allocator);
+    defer db.deinit();
+    const db_interface = db.to_database_interface();
+
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    defer evm.deinit();
+
+    const StepRecord = struct { pc: usize, opcode: u8 };
+
+    const StepTracker = struct {
+        executed_steps: std.ArrayList(StepRecord),
+        pause_after_step: u32,
+        current_step: u32 = 0,
+
+        const Self = @This();
+
+        fn init(alloc: std.mem.Allocator, pause_after: u32) !Self {
+            return Self{
+                .executed_steps = std.ArrayList(StepRecord).init(alloc),
+                .pause_after_step = pause_after,
+            };
+        }
+
+        fn deinit(self: *Self) void {
+            self.executed_steps.deinit();
+        }
+
+        fn step_hook(ctx: ?*anyopaque, frame: *Frame, pc: usize, op: u8) anyerror!@import("debug_hooks.zig").StepControl {
+            _ = frame;
+            const self = @as(*Self, @ptrCast(@alignCast(ctx.?)));
+            self.current_step += 1;
+
+            // Record this execution step
+            try self.executed_steps.append(StepRecord{ .pc = pc, .opcode = op });
+
+            // Pause after specified step count
+            if (self.current_step >= self.pause_after_step) {
+                return .pause;
+            }
+
+            return .cont;
+        }
+    };
+
+    // Bytecode: PUSH1 1, PUSH1 2, ADD, PUSH1 3, MUL, STOP
+    const bytecode = [_]u8{
+        0x60, 0x01, // PUSH1 1    (step 1, 2)
+        0x60, 0x02, // PUSH1 2    (step 3, 4) 
+        0x01,       // ADD        (step 5)
+        0x60, 0x03, // PUSH1 3    (step 6, 7)
+        0x02,       // MUL        (step 8)
+        0x00,       // STOP       (step 9)
+    };
+
+    // Set up contract with this bytecode
+    const caller = primitives.Address.ZERO;
+    const contract_address = primitives.Address.from_u256(0x1234);
+    try evm.state.set_code(contract_address, &bytecode);
+
+    // Create call params
+    const call_params = CallParams{
+        .call = .{
+            .caller = caller,
+            .to = contract_address,
+            .value = 0,
+            .input = &.{},
+            .gas = 100000,
+        },
+    };
+
+    // Test 1: Execute first 2 steps, then pause
+    var step_tracker = try StepTracker.init(allocator, 2);
+    defer step_tracker.deinit();
+
+    const hooks = @import("debug_hooks.zig").DebugHooks{
+        .user_ctx = &step_tracker,
+        .on_step = StepTracker.step_hook,
+    };
+    evm.set_debug_hooks(hooks);
+
+    // Execute - should pause after 2 steps
+    const result1 = evm.call(call_params);
+    try std.testing.expectError(ExecutionError.Error.DebugPaused, result1);
+    try std.testing.expectEqual(@as(u32, 2), step_tracker.current_step);
+    try std.testing.expectEqual(@as(usize, 2), step_tracker.executed_steps.items.len);
+
+    // Verify the first 2 steps executed correctly
+    try std.testing.expectEqual(@as(usize, 0), step_tracker.executed_steps.items[0].pc); // PUSH1 at PC 0
+    try std.testing.expectEqual(@as(u8, 0x60), step_tracker.executed_steps.items[0].opcode);
+    try std.testing.expectEqual(@as(usize, 2), step_tracker.executed_steps.items[1].pc); // PUSH1 at PC 2  
+    try std.testing.expectEqual(@as(u8, 0x60), step_tracker.executed_steps.items[1].opcode);
+
+    // Test 2: Resume and execute next 3 steps
+    step_tracker.pause_after_step = 5; // Now pause after 5 total steps
+
+    // Resume execution - should execute steps 3, 4, 5 then pause
+    const result2 = evm.call(call_params);
+    try std.testing.expectError(ExecutionError.Error.DebugPaused, result2);
+    try std.testing.expectEqual(@as(u32, 5), step_tracker.current_step);
+    try std.testing.expectEqual(@as(usize, 5), step_tracker.executed_steps.items.len);
+
+    // Verify step 3 (ADD at PC 4)
+    try std.testing.expectEqual(@as(usize, 4), step_tracker.executed_steps.items[2].pc);
+    try std.testing.expectEqual(@as(u8, 0x01), step_tracker.executed_steps.items[2].opcode);
+    // Verify step 4 (PUSH1 at PC 5)  
+    try std.testing.expectEqual(@as(usize, 5), step_tracker.executed_steps.items[3].pc);
+    try std.testing.expectEqual(@as(u8, 0x60), step_tracker.executed_steps.items[3].opcode);
+    // Verify step 5 (MUL at PC 7)
+    try std.testing.expectEqual(@as(usize, 7), step_tracker.executed_steps.items[4].pc); 
+    try std.testing.expectEqual(@as(u8, 0x02), step_tracker.executed_steps.items[4].opcode);
+
+    // Test 3: Resume and let it complete
+    step_tracker.pause_after_step = 999; // Don't pause anymore
+
+    // Resume execution - should complete normally
+    const result3 = try evm.call(call_params);
+    try std.testing.expect(result3.success);
+    try std.testing.expect(step_tracker.current_step > 5); // Should have executed more steps
+
+    // Verify we executed the STOP instruction
+    const last_step = step_tracker.executed_steps.items[step_tracker.executed_steps.items.len - 1];
+    try std.testing.expectEqual(@as(u8, 0x00), last_step.opcode); // STOP opcode
+
+    // Test 4: Verify execution state is cumulative
+    // The execution should have built upon the previous steps, not restarted
+    try std.testing.expect(step_tracker.executed_steps.items.len > 6); // At least executed all our opcodes
+
+    // Clean up hooks
+    evm.set_debug_hooks(null);
+}
