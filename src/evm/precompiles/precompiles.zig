@@ -8,16 +8,6 @@ const PrecompileError = @import("precompile_result.zig").PrecompileError;
 const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 
 // Import all precompile modules
-const ecrecover = @import("ecrecover.zig");
-const sha256 = @import("sha256.zig");
-const ripemd160 = @import("ripemd160.zig");
-const identity = @import("identity.zig");
-const modexp = @import("modexp.zig");
-const ecadd = @import("ecadd.zig");
-const ecmul = @import("ecmul.zig");
-const ecpairing = @import("ecpairing.zig");
-const blake2f = @import("blake2f.zig");
-const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 
 /// Compile-time flag to disable all precompiles
 /// Set via build options: -Dno_precompiles=true
@@ -39,25 +29,35 @@ const PrecompileHandler = union(enum) {
 /// Index is (precompile_id - 1) since precompile IDs start at 1
 const PRECOMPILE_TABLE = blk: {
     var table: [10]?PrecompileHandler = .{null} ** 10;
-    
+
     if (!no_precompiles) {
+        const ecrecover = @import("ecrecover.zig");
+        const sha256 = @import("sha256.zig");
+        const ripemd160 = @import("ripemd160.zig");
+        const identity = @import("identity.zig");
+        const modexp = @import("modexp.zig");
+        const ecadd = @import("ecadd.zig");
+        const ecmul = @import("ecmul.zig");
+        const ecpairing = @import("ecpairing.zig");
+        const blake2f = @import("blake2f.zig");
+        const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
         // Standard precompiles (no chain rules)
         table[0] = PrecompileHandler{ .standard = &ecrecover.execute }; // ID 1: ECRECOVER
         table[1] = PrecompileHandler{ .standard = &sha256.execute }; // ID 2: SHA256
         table[2] = PrecompileHandler{ .standard = &ripemd160.execute }; // ID 3: RIPEMD160
         table[3] = PrecompileHandler{ .standard = &identity.execute }; // ID 4: IDENTITY
         table[4] = PrecompileHandler{ .standard = &modexp.execute }; // ID 5: MODEXP
-        
+
         // EC precompiles (require chain rules)
         table[5] = PrecompileHandler{ .with_chain_rules = &ecadd.execute }; // ID 6: ECADD
         table[6] = PrecompileHandler{ .with_chain_rules = &ecmul.execute }; // ID 7: ECMUL
         table[7] = PrecompileHandler{ .with_chain_rules = &ecpairing.execute }; // ID 8: ECPAIRING
-        
+
         // Standard precompiles
         table[8] = PrecompileHandler{ .standard = &blake2f.execute }; // ID 9: BLAKE2F
         table[9] = PrecompileHandler{ .standard = &kzg_point_evaluation.execute }; // ID 10: POINT_EVALUATION
     }
-    
+
     break :blk table;
 };
 
@@ -236,6 +236,18 @@ pub fn estimate_gas(address: primitives.Address.Address, input_size: usize, chai
 
     const precompile_id = addresses.get_precompile_id(address);
 
+    // Import precompile modules only when needed
+    const ecrecover = @import("ecrecover.zig");
+    const sha256 = @import("sha256.zig");
+    const ripemd160 = @import("ripemd160.zig");
+    const identity = @import("identity.zig");
+    const modexp = @import("modexp.zig");
+    const ecadd = @import("ecadd.zig");
+    const ecmul = @import("ecmul.zig");
+    const ecpairing = @import("ecpairing.zig");
+    const blake2f = @import("blake2f.zig");
+    const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
+
     return switch (precompile_id) {
         1 => ecrecover.calculate_gas_checked(input_size),
         2 => sha256.calculate_gas_checked(input_size),
@@ -265,6 +277,14 @@ pub fn get_output_size(address: primitives.Address.Address, input_size: usize, c
     if (comptime no_precompiles) {
         return error.InvalidPrecompile;
     }
+    
+    // Import precompile modules only when needed (only those actually used in this function)
+    const ecrecover = @import("ecrecover.zig");
+    const sha256 = @import("sha256.zig");
+    const ripemd160 = @import("ripemd160.zig");
+    const identity = @import("identity.zig");
+    const blake2f = @import("blake2f.zig");
+    const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 
     if (!is_precompile(address)) {
         @branchHint(.cold);
@@ -305,6 +325,14 @@ pub fn get_output_size_by_id(precompile_id: u8, input_size: usize, chain_rules: 
     if (comptime no_precompiles) {
         return error.InvalidPrecompile;
     }
+    
+    // Import precompile modules only when needed
+    const ecrecover = @import("ecrecover.zig");
+    const sha256 = @import("sha256.zig");
+    const ripemd160 = @import("ripemd160.zig");
+    const identity = @import("identity.zig");
+    const blake2f = @import("blake2f.zig");
+    const kzg_point_evaluation = @import("kzg_point_evaluation.zig");
 
     if (!is_available_by_id(precompile_id, chain_rules)) {
         @branchHint(.cold);
@@ -362,15 +390,15 @@ pub fn validate_call(address: primitives.Address.Address, input_size: usize, gas
 /// @return true if the precompile has a fixed output size
 pub fn has_fixed_output_size(precompile_id: u8) bool {
     return switch (precompile_id) {
-        1 => true,  // ECRECOVER - always 32 bytes
-        2 => true,  // SHA256 - always 32 bytes
-        3 => true,  // RIPEMD160 - always 32 bytes (padded to 32)
+        1 => true, // ECRECOVER - always 32 bytes
+        2 => true, // SHA256 - always 32 bytes
+        3 => true, // RIPEMD160 - always 32 bytes (padded to 32)
         4 => false, // IDENTITY - output size matches input
         5 => false, // MODEXP - output size depends on modulus
-        6 => true,  // ECADD - always 64 bytes
-        7 => true,  // ECMUL - always 64 bytes
-        8 => true,  // ECPAIRING - always 32 bytes
-        9 => true,  // BLAKE2F - always 64 bytes
+        6 => true, // ECADD - always 64 bytes
+        7 => true, // ECMUL - always 64 bytes
+        8 => true, // ECPAIRING - always 32 bytes
+        9 => true, // BLAKE2F - always 64 bytes
         10 => true, // KZG_POINT_EVALUATION - always 64 bytes
         else => false,
     };
@@ -384,13 +412,13 @@ pub fn has_fixed_output_size(precompile_id: u8) bool {
 /// @return The fixed output size in bytes
 pub fn get_fixed_output_size(precompile_id: u8) usize {
     return switch (precompile_id) {
-        1 => 32,  // ECRECOVER
-        2 => 32,  // SHA256
-        3 => 32,  // RIPEMD160 (padded to 32)
-        6 => 64,  // ECADD
-        7 => 64,  // ECMUL
-        8 => 32,  // ECPAIRING
-        9 => 64,  // BLAKE2F
+        1 => 32, // ECRECOVER
+        2 => 32, // SHA256
+        3 => 32, // RIPEMD160 (padded to 32)
+        6 => 64, // ECADD
+        7 => 64, // ECMUL
+        8 => 32, // ECPAIRING
+        9 => 64, // BLAKE2F
         10 => 64, // KZG_POINT_EVALUATION
         else => unreachable, // Should only be called for fixed-size precompiles
     };

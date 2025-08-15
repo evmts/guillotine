@@ -115,14 +115,14 @@ mini_output: ?[]u8 = null,
 frame_stack: ?[]Frame = null, // 8 bytes - frame storage pointer
 /// LRU cache for code analysis to avoid redundant analysis during nested calls
 analysis_cache: ?AnalysisCache = null, // 8 bytes - analysis cache pointer
-/// Optional tracer for capturing execution traces
-tracer: ?std.io.AnyWriter = null, // 16 bytes - debugging only
-/// Open file handle used by tracer when tracing to file
-trace_file: ?std.fs.File = null, // 8 bytes - debugging only
+/// Optional tracer for capturing execution traces (not available on WASM)
+tracer: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.io.AnyWriter = null, // 16 bytes - debugging only
+/// Open file handle used by tracer when tracing to file (not available on WASM)
+trace_file: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.fs.File = null, // 8 bytes - debugging only
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
-initial_thread_id: std.Thread.Id, // Thread tracking
+initial_thread_id: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) u32 else std.Thread.Id, // Thread tracking
 /// Pool for lazily reusing temporary Frames (e.g., constructor frames)
 frame_pool: FramePool,
 
@@ -168,7 +168,7 @@ pub fn init(
     context: ?Context,
     depth: u16,
     read_only: bool,
-    tracer: ?std.io.AnyWriter,
+    tracer: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.io.AnyWriter,
 ) !Evm {
     // std.debug.print("[Evm.init] Starting initialization...\n", .{});
     Log.debug("Evm.init: Initializing EVM with configuration", .{});
@@ -240,7 +240,7 @@ pub fn init(
         .analysis_cache = AnalysisCache.init(allocator, AnalysisCache.DEFAULT_CACHE_SIZE),
         .tracer = tracer,
         .trace_file = null,
-        .initial_thread_id = std.Thread.getCurrentId(),
+        .initial_thread_id = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) 0 else std.Thread.getCurrentId(),
         .frame_pool = try FramePool.init(allocator, MAX_CALL_DEPTH),
     };
 
@@ -263,10 +263,12 @@ pub fn deinit(self: *Evm) void {
         self.allocator.free(buf);
         self.mini_output = null;
     }
-    if (self.trace_file) |f| {
-        // Best-effort close
-        f.close();
-        self.trace_file = null;
+    if (comptime !(builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding)) {
+        if (self.trace_file) |f| {
+            // Best-effort close
+            f.close();
+            self.trace_file = null;
+        }
     }
     self.state.deinit();
     self.access_list.deinit();

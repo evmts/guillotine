@@ -135,13 +135,9 @@ export fn evm_execute(
     
     var contract = Contract.init(
         caller_address,
-        target_address,
         @as(u256, value),
-        gas_limit,
         bytecode,
-        code_hash,
-        &[_]u8{},  // empty input
-        false      // not static
+        gas_limit
     );
     defer contract.deinit(allocator, null);
 
@@ -327,13 +323,9 @@ export fn guillotine_execute(
     
     var contract = Contract.init(
         from_addr,
-        to_addr,
         value_u256,
-        gas_limit,
         &[_]u8{},         // empty code for calls
-        empty_code_hash,
-        input_slice,
-        false             // not static
+        gas_limit
     );
     defer contract.deinit(state.allocator, null);
     

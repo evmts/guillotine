@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ExecutionError = @import("execution/execution_error.zig");
 const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
 
@@ -47,17 +48,27 @@ pub fn InstructionType(comptime tag: Tag) type {
 
 /// Returns the size category for a given tag
 pub fn getInstructionSize(comptime tag: Tag) usize {
-    return switch (tag) {
-        // 0-byte group (no data needed, tag is sufficient)
-        .noop, .conditional_jump_unresolved, .conditional_jump_invalid => 0,
-        // 2-byte group
-        .jump_pc, .conditional_jump_pc, .pc => 2,
-        // 8-byte group
-        .exec, .block_info => 8,
-        // 16-byte group
-        .dynamic_gas, .word => 16,
+    const size = switch (tag) {
+        .noop => @sizeOf(NoopInstruction),
+        .conditional_jump_unresolved => @sizeOf(ConditionalJumpUnresolvedInstruction),
+        .conditional_jump_invalid => @sizeOf(ConditionalJumpInvalidInstruction),
+        .jump_pc => @sizeOf(JumpPcInstruction),
+        .conditional_jump_pc => @sizeOf(ConditionalJumpPcInstruction),
+        .pc => @sizeOf(PcInstruction),
+        .exec => @sizeOf(ExecInstruction),
+        .block_info => @sizeOf(BlockInstruction),
+        .dynamic_gas => @sizeOf(DynamicGasInstruction),
+        .word => @sizeOf(WordInstruction),
         .jump_unresolved, .conditional_jump_idx => 0, // Special handling
     };
+    
+    // Validate that the size is a valid bucket size
+    // Valid bucket sizes are: 0, 2, 4, 8, 16
+    if (size != 0 and size != 2 and size != 4 and size != 8 and size != 16) {
+        @compileError("Invalid instruction size - must be 0, 2, 4, 8, or 16 bytes");
+    }
+    
+    return size;
 }
 
 // Compact reference to bytes in analyzed contract `code`.
@@ -156,13 +167,21 @@ comptime {
     if (@sizeOf(ConditionalJumpPcInstruction) != 2) @compileError("ConditionalJumpPcInstruction must be 2 bytes");
     if (@sizeOf(PcInstruction) != 2) @compileError("PcInstruction must be 2 bytes");
 
-    // 8-byte bucket group
-    if (@sizeOf(ExecInstruction) != 8) @compileError("ExecInstruction must be 8 bytes");
+    // Validate instruction sizes fit in bucket system
+    // ExecInstruction: single function pointer (4 or 8 bytes)
+    const exec_size = @sizeOf(ExecInstruction);
+    if (exec_size != 4 and exec_size != 8) @compileError("ExecInstruction must be 4 or 8 bytes");
+    
+    // BlockInstruction: u32 + u16 + u16 = 8 bytes
     if (@sizeOf(BlockInstruction) != 8) @compileError("BlockInstruction must be 8 bytes");
 
-    // 16-byte bucket group
-    if (@sizeOf(DynamicGasInstruction) != 16) @compileError("DynamicGasInstruction must be 16 bytes");
-    if (@sizeOf(WordInstruction) != 16) @compileError("WordInstruction must be 16 bytes");
+    // DynamicGasInstruction: two function pointers (8 or 16 bytes)
+    const dynamic_size = @sizeOf(DynamicGasInstruction);
+    if (dynamic_size != 8 and dynamic_size != 16) @compileError("DynamicGasInstruction must be 8 or 16 bytes");
+    
+    // WordInstruction: slice (8 or 16 bytes)
+    const word_size = @sizeOf(WordInstruction);
+    if (word_size != 8 and word_size != 16) @compileError("WordInstruction must be 8 or 16 bytes");
 
     // Size table sanity check
     if (getInstructionSize(.noop) != @sizeOf(NoopInstruction)) @compileError("noop size mismatch");
