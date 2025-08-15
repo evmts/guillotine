@@ -73,37 +73,39 @@ inline fn pre_step(self: *Evm, frame: *Frame, inst: *const Instruction, loop_ite
         }
         
         // Handle structured tracer
-        if (comptime build_options.enable_tracing and self.inproc_tracer) |tracer_handle| {
-            const struct_analysis = frame.analysis;
-            // Derive index of current instruction for tracing
-            const base: [*]const @TypeOf(inst.*) = struct_analysis.instructions.ptr;
-            const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
-            
-            if (idx < struct_analysis.inst_to_pc.len) {
-                const pc_u16 = struct_analysis.inst_to_pc[idx];
-                if (pc_u16 != std.math.maxInt(u16)) {
-                    const pc: usize = pc_u16;
-                    const opcode: u8 = if (pc < struct_analysis.code_len) frame.analysis.code[pc] else 0x00;
-                    
-                    // Get opcode name
-                    const op_enum = std.meta.intToEnum(opcodes.Enum, opcode) catch opcodes.Enum.INVALID;
-                    const op_name = opcodes.get_name(op_enum);
-                    
-                    // Build StepInfo for structured tracer
-                    const step_info = tracer.StepInfo{
-                        .pc = pc,
-                        .opcode = opcode,
-                        .op_name = op_name,
-                        .gas_before = frame.gas_remaining,
-                        .depth = frame.depth,
-                        .address = frame.contract_address,
-                        .caller = frame.caller,
-                        .is_static = frame.is_static,
-                        .stack_size = frame.stack.size(),
-                        .memory_size = frame.memory.context_size(),
-                    };
-                    
-                    tracer_handle.stepBefore(step_info);
+        if (comptime build_options.enable_tracing) {
+            if (self.inproc_tracer) |tracer_handle| {
+                const struct_analysis = frame.analysis;
+                // Derive index of current instruction for tracing
+                const base: [*]const @TypeOf(inst.*) = struct_analysis.instructions.ptr;
+                const idx = (@intFromPtr(inst) - @intFromPtr(base)) / @sizeOf(@TypeOf(inst.*));
+                
+                if (idx < struct_analysis.inst_to_pc.len) {
+                    const pc_u16 = struct_analysis.inst_to_pc[idx];
+                    if (pc_u16 != std.math.maxInt(u16)) {
+                        const pc: usize = pc_u16;
+                        const opcode: u8 = if (pc < struct_analysis.code_len) frame.analysis.code[pc] else 0x00;
+                        
+                        // Get opcode name
+                        const op_enum = std.meta.intToEnum(opcodes.Enum, opcode) catch opcodes.Enum.INVALID;
+                        const op_name = opcodes.get_name(op_enum);
+                        
+                        // Build StepInfo for structured tracer
+                        const step_info = tracer.StepInfo{
+                            .pc = pc,
+                            .opcode = opcode,
+                            .op_name = op_name,
+                            .gas_before = frame.gas_remaining,
+                            .depth = frame.depth,
+                            .address = frame.contract_address,
+                            .caller = frame.caller,
+                            .is_static = frame.is_static,
+                            .stack_size = frame.stack.size(),
+                            .memory_size = frame.memory.context_size(),
+                        };
+                        
+                        tracer_handle.stepBefore(step_info);
+                    }
                 }
             }
         }
@@ -125,55 +127,57 @@ inline fn post_step(
     _ = _journal_size_before;
     _ = _log_count_before;
     
-    if (comptime build_options.enable_tracing and self.inproc_tracer) |tracer_handle| {
-        // Get the last step info to extract opcode for gas cost lookup
-        // For now, calculate gas cost based on actual consumption
-        const gas_after = frame.gas_remaining;
-        const gas_cost = if (gas_before >= gas_after) gas_before - gas_after else 0;
-        
-        // Capture bounded snapshots using EVM's allocator
-        const allocator = self.allocator;
-        
-        // Stack snapshot - pass raw data, let tracer apply bounds
-        const stack_len = frame.stack.size();
-        const stack_view: []const u256 = if (stack_len > 0) frame.stack.data[0..stack_len] else &.{};
-        const stack_snapshot = if (stack_view.len > 0) allocator.dupe(u256, stack_view) catch null else null;
-        
-        // Memory snapshot (no specific accessed region info available here)
-        const memory_snapshot = capture_utils.copy_memory_bounded(allocator, &frame.memory, 1024, null) catch null;
-        
-        // Storage changes (would need access to journal - simplified for now)
-        const storage_changes = capture_utils.create_empty_storage_changes(allocator) catch @constCast(&[_]tracer.StorageChange{});
-        
-        // Log entries (would need access to evm state logs - simplified for now)  
-        const logs_emitted = capture_utils.create_empty_log_entries(allocator) catch @constCast(&[_]tracer.LogEntry{});
-        
-        // Create empty stack and memory changes (simplified for now)
-        const stack_changes = tracer.createEmptyStackChanges(allocator) catch tracer.StackChanges{
-            .items_pushed = @constCast(&[_]u256{}),
-            .items_popped = @constCast(&[_]u256{}), 
-            .current_stack = @constCast(&[_]u256{}),
-        };
-        const memory_changes = tracer.createEmptyMemoryChanges(allocator) catch tracer.MemoryChanges{
-            .offset = 0,
-            .data = @constCast(&[_]u8{}),
-            .current_memory = @constCast(&[_]u8{}),
-        };
-        
-        // Build StepResult with new structure
-        const step_result = tracer.StepResult{
-            .gas_after = gas_after,
-            .gas_cost = gas_cost,
-            .stack_snapshot = stack_snapshot,
-            .memory_snapshot = memory_snapshot,
-            .stack_changes = stack_changes,
-            .memory_changes = memory_changes,
-            .storage_changes = storage_changes,
-            .logs_emitted = logs_emitted,
-            .error_info = null, // Set this if there was an error
-        };
-        
-        tracer_handle.stepAfter(step_result);
+    if (comptime build_options.enable_tracing) {
+        if (self.inproc_tracer) |tracer_handle| {
+            // Get the last step info to extract opcode for gas cost lookup
+            // For now, calculate gas cost based on actual consumption
+            const gas_after = frame.gas_remaining;
+            const gas_cost = if (gas_before >= gas_after) gas_before - gas_after else 0;
+            
+            // Capture bounded snapshots using EVM's allocator
+            const allocator = self.allocator;
+            
+            // Stack snapshot - pass raw data, let tracer apply bounds
+            const stack_len = frame.stack.size();
+            const stack_view: []const u256 = if (stack_len > 0) frame.stack.data[0..stack_len] else &.{};
+            const stack_snapshot = if (stack_view.len > 0) allocator.dupe(u256, stack_view) catch null else null;
+            
+            // Memory snapshot (no specific accessed region info available here)
+            const memory_snapshot = capture_utils.copy_memory_bounded(allocator, &frame.memory, 1024, null) catch null;
+            
+            // Storage changes (would need access to journal - simplified for now)
+            const storage_changes = capture_utils.create_empty_storage_changes(allocator) catch @constCast(&[_]tracer.StorageChange{});
+            
+            // Log entries (would need access to evm state logs - simplified for now)  
+            const logs_emitted = capture_utils.create_empty_log_entries(allocator) catch @constCast(&[_]tracer.LogEntry{});
+            
+            // Create empty stack and memory changes (simplified for now)
+            const stack_changes = tracer.createEmptyStackChanges(allocator) catch tracer.StackChanges{
+                .items_pushed = @constCast(&[_]u256{}),
+                .items_popped = @constCast(&[_]u256{}), 
+                .current_stack = @constCast(&[_]u256{}),
+            };
+            const memory_changes = tracer.createEmptyMemoryChanges(allocator) catch tracer.MemoryChanges{
+                .offset = 0,
+                .data = @constCast(&[_]u8{}),
+                .current_memory = @constCast(&[_]u8{}),
+            };
+            
+            // Build StepResult with new structure
+            const step_result = tracer.StepResult{
+                .gas_after = gas_after,
+                .gas_cost = gas_cost,
+                .stack_snapshot = stack_snapshot,
+                .memory_snapshot = memory_snapshot,
+                .stack_changes = stack_changes,
+                .memory_changes = memory_changes,
+                .storage_changes = storage_changes,
+                .logs_emitted = logs_emitted,
+                .error_info = null, // Set this if there was an error
+            };
+            
+            tracer_handle.stepAfter(step_result);
+        }
     }
 }
 
