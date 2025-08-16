@@ -35,6 +35,9 @@ pub fn build(b: *std.Build) void {
     // Compile-time tracing toggle (no runtime checks). Usage: zig build -Denable-tracing=true
     const enable_tracing = b.option(bool, "enable-tracing", "Enable EVM instruction tracing (compile-time)") orelse false;
     build_options.addOption(bool, "enable_tracing", enable_tracing);
+    // Shadow execution comparison (debug builds only). Usage: zig build -Denable-shadow-compare=true
+    const enable_shadow_compare = b.option(bool, "enable-shadow-compare", "Enable EVM shadow execution comparison (debug builds only)") orelse false;
+    build_options.addOption(bool, "enable_shadow_compare", enable_shadow_compare);
     const build_options_mod = build_options.createModule();
 
     const lib_mod = b.createModule(.{
@@ -856,6 +859,13 @@ pub fn build(b: *std.Build) void {
         run_trace_types_test = b.addRunArtifact(trace_types_test);
         const trace_types_test_step = b.step("test-trace-types", "Run trace types tests");
         trace_types_test_step.dependOn(&run_trace_types_test.?.step);
+        
+        // Create a comprehensive tracer test step that includes all tracer tests
+        const tracer_all_test_step = b.step("test-tracer", "Run all tracer tests");
+        tracer_all_test_step.dependOn(&run_memory_tracer_test.?.step);
+        tracer_all_test_step.dependOn(&run_trace_types_test.?.step);
+        
+        // Note: Shadow tracer test is included via test-shadow step when shadow comparison is enabled
     }
     
     // Stepping tests (require enable-tracing flag)
@@ -1254,6 +1264,107 @@ pub fn build(b: *std.Build) void {
     const run_deployment_test = b.addRunArtifact(deployment_test);
     const deployment_test_step = b.step("test-deployment", "Run deployment tests");
     deployment_test_step.dependOn(&run_deployment_test.step);
+    
+    // Add shadow execution tests (declare run artifacts as optional)
+    var run_shadow_basic_test: ?*std.Build.Step.Run = null;
+    var run_shadow_call_test: ?*std.Build.Step.Run = null;
+    var run_shadow_mismatch_test: ?*std.Build.Step.Run = null;
+    var run_shadow_per_step_test: ?*std.Build.Step.Run = null;
+    
+    // Run all with `zig build test-shadow -Denable-shadow-compare=true`
+    if (enable_shadow_compare) {
+        // Basic shadow functionality test
+        const shadow_basic_test = b.addTest(.{
+            .name = "shadow-basic-test",
+            .root_source_file = b.path("test/shadow/basic_functionality_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_basic_test.root_module.addImport("evm", evm_mod);
+        shadow_basic_test.root_module.addImport("primitives", primitives_mod);
+        shadow_basic_test.root_module.addImport("build_options", build_options_mod);
+        run_shadow_basic_test = b.addRunArtifact(shadow_basic_test);
+        const shadow_basic_test_step = b.step("test-shadow-basic", "Run shadow basic functionality tests");
+        shadow_basic_test_step.dependOn(&run_shadow_basic_test.?.step);
+        
+        // Shadow call comparison test
+        const shadow_call_test = b.addTest(.{
+            .name = "shadow-call-test",
+            .root_source_file = b.path("test/shadow/call_comparison_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_call_test.root_module.addImport("evm", evm_mod);
+        shadow_call_test.root_module.addImport("primitives", primitives_mod);
+        shadow_call_test.root_module.addImport("build_options", build_options_mod);
+        run_shadow_call_test = b.addRunArtifact(shadow_call_test);
+        const shadow_call_test_step = b.step("test-shadow-call", "Run shadow call comparison tests");
+        shadow_call_test_step.dependOn(&run_shadow_call_test.?.step);
+        
+        // Shadow mismatch detection test
+        const shadow_mismatch_test = b.addTest(.{
+            .name = "shadow-mismatch-test",
+            .root_source_file = b.path("test/shadow/mismatch_detection_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_mismatch_test.root_module.addImport("evm", evm_mod);
+        shadow_mismatch_test.root_module.addImport("primitives", primitives_mod);
+        shadow_mismatch_test.root_module.addImport("build_options", build_options_mod);
+        run_shadow_mismatch_test = b.addRunArtifact(shadow_mismatch_test);
+        const shadow_mismatch_test_step = b.step("test-shadow-mismatch", "Run shadow mismatch detection tests");
+        shadow_mismatch_test_step.dependOn(&run_shadow_mismatch_test.?.step);
+        
+        // Shadow tracer test
+        const shadow_tracer_test = b.addTest(.{
+            .name = "shadow-tracer-test",
+            .root_source_file = b.path("test/shadow/shadow_tracer_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_tracer_test.root_module.addImport("evm", evm_mod);
+        shadow_tracer_test.root_module.addImport("primitives", primitives_mod);
+        shadow_tracer_test.root_module.addImport("build_options", build_options_mod);
+        run_shadow_per_step_test = b.addRunArtifact(shadow_tracer_test);
+        const shadow_tracer_test_step = b.step("test-shadow-tracer", "Run shadow tracer tests");
+        shadow_tracer_test_step.dependOn(&run_shadow_per_step_test.?.step);
+        
+        // Add test for shadow.zig itself
+        const shadow_module_test = b.addTest(.{
+            .name = "shadow-module-test",
+            .root_source_file = b.path("src/evm/shadow/shadow.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_module_test.root_module.addImport("build_options", build_options_mod);
+        const run_shadow_module_test = b.addRunArtifact(shadow_module_test);
+        const shadow_module_test_step = b.step("test-shadow-module", "Run shadow module unit tests");
+        shadow_module_test_step.dependOn(&run_shadow_module_test.step);
+        
+        // Shadow integration test
+        const shadow_integration_test = b.addTest(.{
+            .name = "shadow-integration-test",
+            .root_source_file = b.path("test/shadow/integration_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_integration_test.root_module.addImport("evm", evm_mod);
+        shadow_integration_test.root_module.addImport("Address", primitives_mod);
+        shadow_integration_test.root_module.addImport("primitives", primitives_mod);
+        shadow_integration_test.root_module.addImport("build_options", build_options_mod);
+        const run_shadow_integration_test = b.addRunArtifact(shadow_integration_test);
+        const shadow_integration_test_step = b.step("test-shadow-integration", "Run shadow integration tests");
+        shadow_integration_test_step.dependOn(&run_shadow_integration_test.step);
+        
+        // Create a combined shadow test step
+        const shadow_all_test_step = b.step("test-shadow", "Run all shadow execution tests");
+        // shadow_all_test_step.dependOn(&run_shadow_module_test.step); // Disabled: module imports issue
+        shadow_all_test_step.dependOn(&run_shadow_basic_test.?.step);
+        shadow_all_test_step.dependOn(&run_shadow_call_test.?.step);
+        shadow_all_test_step.dependOn(&run_shadow_mismatch_test.?.step);
+        shadow_all_test_step.dependOn(&run_shadow_per_step_test.?.step);
+        shadow_all_test_step.dependOn(&run_shadow_integration_test.step);
+    }
 
     // Add comprehensive opcodes tests package
     const opcodes_package_test = b.addTest(.{
@@ -2112,6 +2223,20 @@ pub fn build(b: *std.Build) void {
     erc20_deployment_test.root_module.addImport("primitives", primitives_mod);
     const run_erc20_deployment_test = b.addRunArtifact(erc20_deployment_test);
     test_step.dependOn(&run_erc20_deployment_test.step);
+    
+    // Add shadow execution tests to main test step (if enabled)
+    if (run_shadow_basic_test) |shadow_test| {
+        test_step.dependOn(&shadow_test.step);
+    }
+    if (run_shadow_call_test) |shadow_test| {
+        test_step.dependOn(&shadow_test.step);
+    }
+    if (run_shadow_mismatch_test) |shadow_test| {
+        test_step.dependOn(&shadow_test.step);
+    }
+    if (run_shadow_per_step_test) |shadow_test| {
+        test_step.dependOn(&shadow_test.step);
+    }
 
     // Add benchmark tests to main test step
     test_step.dependOn(&run_thousand_hashes_test.step);

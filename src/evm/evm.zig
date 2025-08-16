@@ -36,6 +36,21 @@ const AnalysisCache = @import("analysis_cache.zig");
 const ExecutionStateManager = @import("tracing/execution_state.zig").ExecutionStateManager;
 const step_types = @import("tracing/step_types.zig");
 
+/// Shadow execution module (conditionally compiled)
+pub const DebugShadow = if (@hasDecl(@import("build_options"), "enable_shadow_compare") and @import("build_options").enable_shadow_compare) 
+    @import("shadow/shadow.zig") 
+else 
+    struct {
+        pub const ShadowMode = enum { off };
+        pub const ShadowConfig = struct {};
+        pub const ShadowMismatch = struct {
+            pub fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                _ = self;
+                _ = allocator;
+            }
+        };
+    };
+
 /// Virtual Machine for executing Ethereum bytecode.
 ///
 /// Manages contract execution, gas accounting, state access, and protocol enforcement
@@ -123,6 +138,15 @@ tracer: ?std.io.AnyWriter = null, // 16 bytes - debugging only
 trace_file: ?std.fs.File = null, // 8 bytes - debugging only
 /// Optional in-process tracer for structured data collection
 inproc_tracer: ?@import("tracing/trace_types.zig").TracerHandle = null, // 24 bytes - debugging only
+
+// === SHADOW EXECUTION STATE (DEBUG ONLY) ===
+/// Shadow execution mode configuration
+shadow_mode: DebugShadow.ShadowMode = .off,
+/// Shadow execution configuration settings
+shadow_cfg: DebugShadow.ShadowConfig = .{},
+/// Last detected shadow mismatch (owned by EVM, must be freed)
+last_shadow_mismatch: ?DebugShadow.ShadowMismatch = null,
+
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
@@ -288,6 +312,13 @@ pub fn deinit(self: *Evm) void {
         cache.deinit();
     }
 
+    // Clean up shadow mismatch data if present
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        if (self.last_shadow_mismatch) |*mismatch| {
+            mismatch.deinit(self.allocator);
+        }
+    }
+
     // Clean up self-destruct tracking
     self.self_destruct.deinit();
     // Clean up created contracts tracking
@@ -370,6 +401,35 @@ pub fn set_tracer(self: *Evm, tracer_handle: ?@import("tracing/trace_types.zig")
     if (!comptime build_options.enable_tracing) return;
     self.inproc_tracer = tracer_handle;
 }
+
+/// Configure shadow execution mode (runtime API)
+/// Shadow execution compares main EVM with Mini EVM for validation
+pub fn set_shadow_mode(self: *Evm, mode: DebugShadow.ShadowMode) void {
+    if (!comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        return; // No-op when disabled at build time
+    }
+    if (comptime builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) {
+        self.shadow_mode = .off;
+        return;
+    }
+    self.shadow_mode = mode;
+}
+
+/// Get last shadow mismatch (transfers ownership to caller)
+/// Caller must call deinit() on the returned mismatch to free memory
+pub fn take_last_shadow_mismatch(self: *Evm) ?DebugShadow.ShadowMismatch {
+    if (!comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) return null;
+    const mismatch = self.last_shadow_mismatch;
+    self.last_shadow_mismatch = null;
+    return mismatch;
+}
+
+/// Check if shadow execution is active
+pub fn is_shadow_enabled(self: *Evm) bool {
+    if (!comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) return false;
+    return self.shadow_mode != .off;
+}
+
 
 /// Reset the EVM for reuse without deallocating memory.
 /// This is efficient for executing multiple contracts in sequence.

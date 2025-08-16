@@ -5,6 +5,8 @@ const build_options = @import("build_options");
 const Frame = @import("../frame.zig").Frame;
 const Evm = @import("../evm.zig");
 const Vm = Evm; // Alias for compatibility
+const call_mini = @import("../evm/call_mini.zig");
+const DebugShadow = @import("../shadow/shadow.zig");
 const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
@@ -13,6 +15,7 @@ const Host = @import("../host.zig").Host;
 const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
+const EvmCallResult = @import("../evm/call_result.zig").CallResult;
 
 // Tracing types for message hooks
 const MessageEvent = @import("../tracing/trace_types.zig").MessageEvent;
@@ -661,6 +664,33 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
         return;
     };
 
+    // SHADOW COMPARISON: Compare main EVM result with Mini EVM
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.shadow_mode == .per_call) {
+            const mini_result = call_mini.call_mini(evm_ptr, call_params) catch |err| blk: {
+                // Treat Mini EVM error as mismatch condition
+                Log.debug("Mini EVM error during shadow comparison: {}", .{err});
+                break :blk EvmCallResult{ .success = false, .gas_left = 0, .output = &.{} };
+            };
+            
+            // Compare results - ignore formatting errors
+            if (DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch_opt| {
+                if (mismatch_opt) |mismatch| {
+                    evm_ptr.last_shadow_mismatch = mismatch;
+                    if (comptime builtin.mode == .Debug) {
+                        // In debug builds, abort on mismatch
+                        return ExecutionError.Error.ShadowMismatch;
+                    }
+                    // In release builds, log and continue
+                    Log.err("Shadow mismatch detected: {} vs {}", .{ mismatch.lhs_summary, mismatch.rhs_summary });
+                }
+            } else |err| {
+                Log.debug("Shadow comparison allocation failed: {}", .{err});
+            }
+        }
+    }
+
     // Handle result based on success/failure
     if (call_result.success) {
         // Commit the snapshot on success (no-op in current implementation)
@@ -853,6 +883,33 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
         frame.stack.append_unsafe(0);
         return;
     };
+
+    // SHADOW COMPARISON: Compare main EVM result with Mini EVM
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.shadow_mode == .per_call) {
+            const mini_result = call_mini.call_mini(evm_ptr, call_params) catch |err| blk: {
+                // Treat Mini EVM error as mismatch condition
+                Log.debug("Mini EVM error during shadow comparison: {}", .{err});
+                break :blk EvmCallResult{ .success = false, .gas_left = 0, .output = &.{} };
+            };
+            
+            // Compare results - ignore formatting errors
+            if (DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch_opt| {
+                if (mismatch_opt) |mismatch| {
+                    evm_ptr.last_shadow_mismatch = mismatch;
+                    if (comptime builtin.mode == .Debug) {
+                        // In debug builds, abort on mismatch
+                        return ExecutionError.Error.ShadowMismatch;
+                    }
+                    // In release builds, log and continue
+                    Log.err("Shadow mismatch detected: {} vs {}", .{ mismatch.lhs_summary, mismatch.rhs_summary });
+                }
+            } else |err| {
+                Log.debug("Shadow comparison allocation failed: {}", .{err});
+            }
+        }
+    }
 
     // Handle result based on success/failure
     if (call_result.success) {
@@ -1050,6 +1107,33 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         return;
     };
 
+    // SHADOW COMPARISON: Compare main EVM result with Mini EVM
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.shadow_mode == .per_call) {
+            const mini_result = call_mini.call_mini(evm_ptr, call_params) catch |err| blk: {
+                // Treat Mini EVM error as mismatch condition
+                Log.debug("Mini EVM error during shadow comparison: {}", .{err});
+                break :blk EvmCallResult{ .success = false, .gas_left = 0, .output = &.{} };
+            };
+            
+            // Compare results - ignore formatting errors
+            if (DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch_opt| {
+                if (mismatch_opt) |mismatch| {
+                    evm_ptr.last_shadow_mismatch = mismatch;
+                    if (comptime builtin.mode == .Debug) {
+                        // In debug builds, abort on mismatch
+                        return ExecutionError.Error.ShadowMismatch;
+                    }
+                    // In release builds, log and continue
+                    Log.err("Shadow mismatch detected: {} vs {}", .{ mismatch.lhs_summary, mismatch.rhs_summary });
+                }
+            } else |err| {
+                Log.debug("Shadow comparison allocation failed: {}", .{err});
+            }
+        }
+    }
+
     // Handle result based on success/failure
     if (call_result.success) {
         // Commit the snapshot on success (no-op in current implementation)
@@ -1215,6 +1299,33 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
         return;
     };
 
+    // SHADOW COMPARISON: Compare main EVM result with Mini EVM
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.shadow_mode == .per_call) {
+            const mini_result = call_mini.call_mini(evm_ptr, call_params) catch |err| blk: {
+                // Treat Mini EVM error as mismatch condition
+                Log.debug("Mini EVM error during shadow comparison: {}", .{err});
+                break :blk EvmCallResult{ .success = false, .gas_left = 0, .output = &.{} };
+            };
+            
+            // Compare results - ignore formatting errors
+            if (DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch_opt| {
+                if (mismatch_opt) |mismatch| {
+                    evm_ptr.last_shadow_mismatch = mismatch;
+                    if (comptime builtin.mode == .Debug) {
+                        // In debug builds, abort on mismatch
+                        return ExecutionError.Error.ShadowMismatch;
+                    }
+                    // In release builds, log and continue
+                    Log.err("Shadow mismatch detected: {} vs {}", .{ mismatch.lhs_summary, mismatch.rhs_summary });
+                }
+            } else |err| {
+                Log.debug("Shadow comparison allocation failed: {}", .{err});
+            }
+        }
+    }
+
     // Commit or revert snapshot based on success
     if (!call_result.success) {
         frame.host.revert_to_snapshot(snapshot);
@@ -1365,6 +1476,33 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
         frame.stack.append_unsafe(0);
         return;
     };
+
+    // SHADOW COMPARISON: Compare main EVM result with Mini EVM
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
+        if (evm_ptr.shadow_mode == .per_call) {
+            const mini_result = call_mini.call_mini(evm_ptr, call_params) catch |err| blk: {
+                // Treat Mini EVM error as mismatch condition
+                Log.debug("Mini EVM error during shadow comparison: {}", .{err});
+                break :blk EvmCallResult{ .success = false, .gas_left = 0, .output = &.{} };
+            };
+            
+            // Compare results - ignore formatting errors
+            if (DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch_opt| {
+                if (mismatch_opt) |mismatch| {
+                    evm_ptr.last_shadow_mismatch = mismatch;
+                    if (comptime builtin.mode == .Debug) {
+                        // In debug builds, abort on mismatch
+                        return ExecutionError.Error.ShadowMismatch;
+                    }
+                    // In release builds, log and continue
+                    Log.err("Shadow mismatch detected: {} vs {}", .{ mismatch.lhs_summary, mismatch.rhs_summary });
+                }
+            } else |err| {
+                Log.debug("Shadow comparison allocation failed: {}", .{err});
+            }
+        }
+    }
 
     // Handle result based on success/failure
     if (call_result.success) {
@@ -1564,6 +1702,32 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
         frame.stack.append_unsafe(0);
         return;
     };
+
+    // SHADOW COMPARISON: Compare main EVM result with Mini EVM
+    if (comptime (@hasDecl(build_options, "enable_shadow_compare") and build_options.enable_shadow_compare)) {
+        if (evm_ptr.shadow_mode == .per_call) {
+            const mini_result = call_mini.call_mini(evm_ptr, call_params) catch |err| blk: {
+                // Treat Mini EVM error as mismatch condition
+                Log.debug("Mini EVM error during shadow comparison: {}", .{err});
+                break :blk EvmCallResult{ .success = false, .gas_left = 0, .output = &.{} };
+            };
+            
+            // Compare results - ignore formatting errors
+            if (DebugShadow.compare_call_results(call_result, mini_result, evm_ptr.allocator)) |mismatch_opt| {
+                if (mismatch_opt) |mismatch| {
+                    evm_ptr.last_shadow_mismatch = mismatch;
+                    if (comptime builtin.mode == .Debug) {
+                        // In debug builds, abort on mismatch
+                        return ExecutionError.Error.ShadowMismatch;
+                    }
+                    // In release builds, log and continue
+                    Log.err("Shadow mismatch detected: {} vs {}", .{ mismatch.lhs_summary, mismatch.rhs_summary });
+                }
+            } else |err| {
+                Log.debug("Shadow comparison allocation failed: {}", .{err});
+            }
+        }
+    }
 
     // Debug: capture stack/frame state after call
     const evm_depth_after = evm_ptr.current_frame_depth;

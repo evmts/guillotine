@@ -178,6 +178,9 @@ pub const Error = error{
     /// Execution aborted for debugging/stepping
     /// Used by stepping API to abort execution
     DebugAbort,
+    /// Shadow execution mismatch detected between main and mini EVM
+    /// Only raised in debug builds when shadow comparison is enabled
+    ShadowMismatch,
 };
 
 /// Get a human-readable description for an execution error
@@ -243,6 +246,7 @@ pub fn get_description(err: Error) []const u8 {
         Error.SelfDestructNotAvailable => "SELFDESTRUCT opcode not available in current hardfork",
         Error.DebugPaused => "Execution paused for debugging/stepping",
         Error.DebugAbort => "Execution aborted for debugging/stepping",
+        Error.ShadowMismatch => "Shadow execution mismatch between main and mini EVM",
     };
 }
 
@@ -457,6 +461,7 @@ const all_errors = [_]Error{
     Error.InvalidAddress,        Error.DatabaseCorrupted,       Error.NetworkError,       Error.PermissionDenied,
     Error.InvalidSnapshot,       Error.NoBatchInProgress,       Error.SnapshotNotFound,   Error.InstructionLimitExceeded,
     Error.OpcodeNotImplemented,  Error.InputSizeExceeded,       Error.CodeSizeMismatch,   Error.SelfDestructNotAvailable,
+    Error.ShadowMismatch,
 };
 
 // test "fuzz_error_enumeration_completeness" {

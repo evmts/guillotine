@@ -14,6 +14,13 @@ const UnreachableHandler = @import("../analysis.zig").UnreachableHandler;
 const Instruction = @import("../instruction.zig").Instruction;
 const Tag = @import("../instruction.zig").Tag;
 
+// Conditional import for shadow comparison
+const shadow_compare_block = if (@hasDecl(build_options, "enable_shadow_compare") and 
+                                build_options.enable_shadow_compare)
+    @import("../shadow/shadow_compare_block.zig")
+else
+    struct {};
+
 /// Tracks state before instruction execution for comparison (only when tracing enabled)
 const PreStepState = if (build_options.enable_tracing) struct {
     stack_snapshot: ?[]const u256 = null,
@@ -289,6 +296,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             // Set to next instruction right away
             i += 1;
+            if (i >= instructions.len) {
+                // We've reached the end of instructions without a terminator
+                @panic("Instruction analysis error: reached end without terminator");
+            }
             const next_instruction = &instructions[i];
             instruction = next_instruction;
 
@@ -332,10 +343,23 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             // Set to next instruction right away
             i += 1;
+            if (i >= instructions.len) {
+                // We've reached the end of instructions without a terminator
+                @panic("Instruction analysis error: reached end without terminator");
+            }
             const next_instruction = &instructions[i];
             instruction = next_instruction;
 
             try params.exec_fn(frame);
+
+            // Shadow comparison for per-block mode if enabled
+            if (comptime (@hasDecl(build_options, "enable_shadow_compare") and 
+                          build_options.enable_shadow_compare)) {
+                // Only compare if we're in per_block mode (set by tracer)
+                if (self.shadow_mode == .per_block) {
+                    shadow_compare_block.shadow_compare_block(self, frame, instruction, frame.analysis);
+                }
+            }
 
             // Post-step tracing for structured tracers
             if (comptime build_options.enable_tracing) {
@@ -382,6 +406,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             // Set to next instruction right away
             i += 1;
+            if (i >= instructions.len) {
+                // We've reached the end of instructions without a terminator
+                @panic("Instruction analysis error: reached end without terminator");
+            }
             const next_instruction = &instructions[i];
             instruction = next_instruction;
 
@@ -400,6 +428,15 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             }
             frame.gas_remaining -= additional_gas;
             try params.exec_fn(frame);
+
+            // Shadow comparison for per-block mode if enabled
+            if (comptime (@hasDecl(build_options, "enable_shadow_compare") and 
+                          build_options.enable_shadow_compare)) {
+                // Only compare if we're in per_block mode (set by tracer)
+                if (self.shadow_mode == .per_block) {
+                    shadow_compare_block.shadow_compare_block(self, frame, instruction, frame.analysis);
+                }
+            }
 
             // Post-step tracing for structured tracers
             if (comptime build_options.enable_tracing) {
