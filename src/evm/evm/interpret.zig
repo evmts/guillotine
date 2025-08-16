@@ -8,6 +8,7 @@ const opcodes = @import("../opcodes/opcode.zig");
 const Frame = @import("../frame.zig").Frame;
 const Log = @import("../log.zig");
 const Evm = @import("../evm.zig");
+const step_types = @import("../tracing/step_types.zig");
 const builtin = @import("builtin");
 const UnreachableHandler = @import("../analysis.zig").UnreachableHandler;
 const Instruction = @import("../instruction.zig").Instruction;
@@ -254,7 +255,21 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         std.debug.assert(frame.analysis.instructions.len >= 2);
     }
 
-    var i: u16 = 0;
+    // Check if we're resuming from a paused state (only when tracing enabled)
+    var i: u16 = if (comptime build_options.enable_tracing) blk: {
+        if (self.execution_state_manager.get_state() == .paused and self.execution_state_manager.can_resume_with_frame(frame)) {
+            break :blk self.execution_state_manager.get_resume_index();
+        } else {
+            break :blk 0;
+        }
+    } else 0;
+
+    // Mark execution as started (unless resuming) - only when tracing enabled
+    if (comptime build_options.enable_tracing) {
+        if (self.execution_state_manager.get_state() != .paused) {
+            self.execution_state_manager.start_execution();
+        }
+    }
     var loop_iterations: usize = 0;
     const analysis = frame.analysis;
     const instructions = analysis.instructions;
@@ -331,7 +346,15 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     const control = tracer_handle.get_step_control();
                     switch (control) {
                         .cont => {},  // Continue normally
-                        .pause => return ExecutionError.Error.DebugPaused,
+                        .pause => {
+                            // Save state for resumption
+                            const current_pc = if (i < analysis.inst_to_pc.len) 
+                                analysis.inst_to_pc[i] 
+                            else 
+                                analysis.code_len;
+                            self.execution_state_manager.pause_execution(frame, i, current_pc);
+                            return ExecutionError.Error.DebugPaused;
+                        },
                         .abort => return ExecutionError.Error.DebugAbort,
                     }
                 }
@@ -387,7 +410,15 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     const control = tracer_handle.get_step_control();
                     switch (control) {
                         .cont => {},  // Continue normally
-                        .pause => return ExecutionError.Error.DebugPaused,
+                        .pause => {
+                            // Save state for resumption
+                            const current_pc = if (i < analysis.inst_to_pc.len) 
+                                analysis.inst_to_pc[i] 
+                            else 
+                                analysis.code_len;
+                            self.execution_state_manager.pause_execution(frame, i, current_pc);
+                            return ExecutionError.Error.DebugPaused;
+                        },
                         .abort => return ExecutionError.Error.DebugAbort,
                     }
                 }
@@ -569,7 +600,15 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     const control = tracer_handle.get_step_control();
                     switch (control) {
                         .cont => {},  // Continue normally
-                        .pause => return ExecutionError.Error.DebugPaused,
+                        .pause => {
+                            // Save state for resumption
+                            const current_pc = if (i < analysis.inst_to_pc.len) 
+                                analysis.inst_to_pc[i] 
+                            else 
+                                analysis.code_len;
+                            self.execution_state_manager.pause_execution(frame, i, current_pc);
+                            return ExecutionError.Error.DebugPaused;
+                        },
                         .abort => return ExecutionError.Error.DebugAbort,
                     }
                 }
@@ -611,7 +650,15 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
                     const control = tracer_handle.get_step_control();
                     switch (control) {
                         .cont => {},  // Continue normally
-                        .pause => return ExecutionError.Error.DebugPaused,
+                        .pause => {
+                            // Save state for resumption
+                            const current_pc = if (i < analysis.inst_to_pc.len) 
+                                analysis.inst_to_pc[i] 
+                            else 
+                                analysis.code_len;
+                            self.execution_state_manager.pause_execution(frame, i, current_pc);
+                            return ExecutionError.Error.DebugPaused;
+                        },
                         .abort => return ExecutionError.Error.DebugAbort,
                     }
                 }
@@ -619,6 +666,11 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             continue :dispatch next_instruction.tag;
         },
+    }
+    
+    // On successful completion - mark execution as completed
+    if (comptime build_options.enable_tracing) {
+        self.execution_state_manager.complete_execution();
     }
 }
 

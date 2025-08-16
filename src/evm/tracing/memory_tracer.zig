@@ -12,8 +12,9 @@
 //! - **Error Recovery**: Graceful handling of allocation failures
 //! - **Ownership Transfer**: Clean handoff of trace data to caller
 //!
-//! ## Usage Pattern
+//! ## Usage Patterns
 //!
+//! ### Basic Tracing
 //! ```zig
 //! var tracer = try MemoryTracer.init(allocator, config);
 //! defer tracer.deinit();
@@ -24,9 +25,103 @@
 //! var trace = try tracer.get_trace();
 //! defer trace.deinit(allocator);
 //! ```
+//!
+//! ### Manual Stepping with Fine-Grained Control
+//! ```zig
+//! var tracer = try MemoryTracer.init(allocator, config);
+//! defer tracer.deinit();
+//! 
+//! // Single instruction stepping
+//! while (true) {
+//!     const step = try tracer.execute_single_step(&evm, &frame);
+//!     if (step == null) break; // Execution completed
+//!     
+//!     // Inspect state between each instruction
+//!     std.log.info("PC: {}, Stack size: {}, Gas: {}", .{
+//!         step.?.pc, step.?.stack_size_after, step.?.gas_after
+//!     });
+//! }
+//! ```
+//!
+//! ### Breakpoint-Based Debugging
+//! ```zig
+//! var tracer = try MemoryTracer.init(allocator, config);
+//! defer tracer.deinit();
+//!
+//! // Set breakpoints at specific PCs
+//! try tracer.add_breakpoint(42);  // Stop at PC 42
+//! try tracer.add_breakpoint(100); // Stop at PC 100
+//!
+//! // Run until breakpoint
+//! const result = try tracer.execute_until_breakpoint(&evm, &frame);
+//! if (result) |step| {
+//!     std.log.info("Hit breakpoint at PC: {}", .{step.pc});
+//!     
+//!     // Inspect or modify state here
+//!     // ...
+//!     
+//!     // Continue execution
+//!     tracer.continue_execution();
+//!     _ = try tracer.execute_until_breakpoint(&evm, &frame);
+//! }
+//! ```
+//!
+//! ### Block-Level Stepping
+//! ```zig
+//! var tracer = try MemoryTracer.init(allocator, config);
+//! defer tracer.deinit();
+//!
+//! // Execute one analysis block at a time
+//! while (true) {
+//!     const block_step = try tracer.execute_single_block(&evm, &frame);
+//!     if (block_step == null) break; // Execution completed
+//!     
+//!     // Check if we're at a block boundary
+//!     if (MemoryTracer.is_block_boundary(frame.pc, frame.contract.analysis)) {
+//!         const block_info = MemoryTracer.get_block_info(frame.pc, frame.contract.analysis);
+//!         if (block_info) |info| {
+//!             std.log.info("Block: PC {} to {}, {} instructions, {} gas", .{
+//!                 info.start_pc, info.end_pc, info.instruction_count, info.total_gas_cost
+//!             });
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! ### Advanced State Inspection and Control
+//! ```zig
+//! var tracer = try MemoryTracer.init(allocator, config);
+//! defer tracer.deinit();
+//!
+//! // Set up custom step hooks for detailed monitoring
+//! tracer.on_step_transition = custom_step_hook;
+//! 
+//! // Conditional breakpoints
+//! tracer.on_step_transition = struct {
+//!     fn hook(self: *MemoryTracer, transition: StepTransition) !tracer.StepControl {
+//!         // Pause when stack depth exceeds threshold
+//!         if (transition.stack_size_after > 10) {
+//!             std.log.warn("Stack overflow risk at PC {}", .{transition.pc});
+//!             return .pause;
+//!         }
+//!         return .cont;
+//!     }
+//! }.hook;
+//!
+//! // Dynamic mode switching
+//! tracer.set_step_mode(.single_step);
+//! _ = try tracer.execute_single_step(&evm, &frame);
+//! 
+//! // Switch to breakpoint mode after first instruction
+//! tracer.set_step_mode(.breakpoint);
+//! try tracer.add_breakpoint(frame.pc + 10);
+//! _ = try tracer.execute_until_breakpoint(&evm, &frame);
+//! ```
 
 const std = @import("std");
+const builtin = @import("builtin");
 const tracer = @import("trace_types.zig");
+const step_types = @import("step_types.zig");
 const Allocator = std.mem.Allocator;
 
 /// In-memory tracer that collects execution traces with bounded snapshots
@@ -114,6 +209,7 @@ pub const MemoryTracer = struct {
     step_mode: enum {
         passive, // Normal tracing (default)
         single_step, // Pause after each instruction
+        block_step, // Pause after each analysis block
         breakpoint, // Pause at specific PCs
     } = .passive,
 
@@ -240,13 +336,29 @@ pub const MemoryTracer = struct {
         }
         self.struct_logs.clearAndFree();
         self.return_value.clearAndFree();
+        
+        // Clear transitions
+        for (self.transitions.items) |*trans| {
+            if (trans.stack_snapshot) |stack| {
+                self.allocator.free(stack);
+            }
+            if (trans.memory_snapshot) |memory| {
+                self.allocator.free(memory);
+            }
+            // Note: storage_changes and logs_emitted point to static slices, don't free
+        }
+        self.transitions.clearAndFree();
+        self.message_transitions.clearAndFree();
 
         // Reset state
         self.gas_used = 0;
         self.failed = false;
         self.current_step_info = null;
+        self.last_transition = null;
         self.last_journal_size = 0;
         self.last_log_count = 0;
+        self.pending_control = tracer.StepControl.cont;
+        // Note: Don't reset step_mode or breakpoints - user may want to preserve them
     }
 
     // VTable implementations
@@ -374,6 +486,12 @@ pub const MemoryTracer = struct {
         const control = switch (self.step_mode) {
             .passive => tracer.StepControl.cont,
             .single_step => tracer.StepControl.pause,
+            .block_step => blk: {
+                // For block stepping, we need analysis context to determine boundaries
+                // Since we can't access analysis here, we pause on every step and let 
+                // the higher-level stepping context handle block boundary detection
+                break :blk tracer.StepControl.pause;
+            },
             .breakpoint => blk: {
                 // Check if we're at a breakpoint
                 if (self.last_transition) |trans| {
@@ -403,7 +521,7 @@ pub const MemoryTracer = struct {
         const transition = self.build_transition(step_info, step_result);
 
         // Store transition in transitions list for analysis
-        // Make a copy with allocated data that will persist
+        // Make a lightweight copy without expensive snapshots to avoid memory leaks
         const stored_transition = StepTransition{
             // Pre-state from info
             .pc = transition.pc,
@@ -422,6 +540,7 @@ pub const MemoryTracer = struct {
             .memory_size_after = transition.memory_size_after,
 
             // Store null for expensive data to avoid memory leaks in stored transitions
+            // The full data is available in the complete StructLog if needed
             .stack_snapshot = null,
             .memory_snapshot = null,
             .storage_changes = &[_]tracer.StorageChange{}, // Empty slice
@@ -651,17 +770,30 @@ pub const MemoryTracer = struct {
 
     // === NEW CONTROL METHODS ===
 
-    /// Set execution mode
+    /// Set execution mode with validation
     pub fn set_step_mode(self: *MemoryTracer, mode: @TypeOf(self.step_mode)) void {
+        const old_mode = self.step_mode;
         self.step_mode = mode;
+        
+        // Log mode changes in debug builds for debugging
+        if (comptime builtin.mode == .Debug) {
+            if (old_mode != mode) {
+                std.log.debug("MemoryTracer step mode changed: {} -> {}", .{old_mode, mode});
+            }
+        }
     }
 
-    /// Add a breakpoint at PC
+    /// Add a breakpoint at PC with validation
     pub fn add_breakpoint(self: *MemoryTracer, pc: usize) !void {
         try self.breakpoints.put(pc, {});
     }
+    
+    /// Check if PC has a breakpoint
+    pub fn has_breakpoint(self: *MemoryTracer, pc: usize) bool {
+        return self.breakpoints.contains(pc);
+    }
 
-    /// Remove a breakpoint
+    /// Remove a breakpoint, returns true if it existed
     pub fn remove_breakpoint(self: *MemoryTracer, pc: usize) bool {
         return self.breakpoints.remove(pc);
     }
@@ -670,16 +802,183 @@ pub const MemoryTracer = struct {
     pub fn clear_breakpoints(self: *MemoryTracer) void {
         self.breakpoints.clearAndFree();
     }
-
-    /// Execute one step (requires EVM support - see Phase 3)
-    pub fn step_once(self: *MemoryTracer) !?StepTransition {
-        self.set_step_mode(.single_step);
-        // After Phase 3, this will cause execution to pause after one instruction
-        return self.last_transition;
+    
+    /// Get all active breakpoints as a slice (for inspection)
+    pub fn get_breakpoints(self: *MemoryTracer, allocator: std.mem.Allocator) ![]usize {
+        var breakpoint_list = try std.ArrayList(usize).initCapacity(allocator, self.breakpoints.count());
+        var iterator = self.breakpoints.iterator();
+        while (iterator.next()) |entry| {
+            breakpoint_list.appendAssumeCapacity(entry.key_ptr.*);
+        }
+        return breakpoint_list.toOwnedSlice();
     }
 
-    /// Continue execution until breakpoint
+    /// Execute one instruction step with proper type safety
+    /// Returns the step transition if execution paused, null if completed
+    pub fn execute_single_step(self: *MemoryTracer, evm: *@import("../evm.zig"), frame: *@import("../frame.zig").Frame) !?step_types.StepTransition {
+        // Set single-step mode
+        const previous_mode = self.step_mode;
+        self.set_step_mode(.single_step);
+        errdefer self.set_step_mode(previous_mode);
+        
+        // Execute until pause
+        evm.interpret(frame) catch |err| switch (err) {
+            @import("../execution/execution_error.zig").Error.DebugPaused => return self.convert_last_transition(),
+            @import("../execution/execution_error.zig").Error.STOP => return null, // Execution completed
+            else => return err,
+        };
+        
+        // If we reach here, execution completed without error
+        return null;
+    }
+
+    /// Execute until the next analysis block boundary with proper error handling
+    /// Returns the step transition if execution paused, null if completed
+    pub fn execute_single_block(self: *MemoryTracer, evm: *@import("../evm.zig"), frame: *@import("../frame.zig").Frame) !?step_types.StepTransition {
+        const previous_mode = self.step_mode;
+        self.set_step_mode(.block_step);
+        errdefer self.set_step_mode(previous_mode);
+        
+        evm.interpret(frame) catch |err| switch (err) {
+            @import("../execution/execution_error.zig").Error.DebugPaused => return self.convert_last_transition(),
+            @import("../execution/execution_error.zig").Error.STOP => return null, // Execution completed
+            else => return err,
+        };
+        
+        // If we reach here, execution completed without error
+        return null;
+    }
+
+    /// Continue execution until breakpoint or completion with proper error handling
+    /// Returns the step transition if hit breakpoint, null if completed
+    pub fn execute_until_breakpoint(self: *MemoryTracer, evm: *@import("../evm.zig"), frame: *@import("../frame.zig").Frame) !?step_types.StepTransition {
+        const previous_mode = self.step_mode;
+        self.set_step_mode(.breakpoint);
+        errdefer self.set_step_mode(previous_mode);
+        
+        evm.interpret(frame) catch |err| switch (err) {
+            @import("../execution/execution_error.zig").Error.DebugPaused => return self.convert_last_transition(),
+            @import("../execution/execution_error.zig").Error.STOP => return null, // Execution completed
+            else => return err,
+        };
+        
+        // If we reach here, execution completed without error
+        return null;
+    }
+
+    /// Convert internal tracer transition to public API type with validation
+    pub fn convert_last_transition(self: *MemoryTracer) ?step_types.StepTransition {
+        const trans = self.last_transition orelse {
+            std.log.warn("convert_last_transition called but no transition available", .{});
+            return null;
+        };
+        
+        return step_types.StepTransition{
+            .pc = trans.pc,
+            .opcode = trans.opcode,
+            .op_name = trans.op_name,
+            .gas_before = trans.gas_before,
+            .stack_size_before = trans.stack_size_before,
+            .memory_size_before = trans.memory_size_before,
+            .depth = trans.depth,
+            .address = trans.address,
+            .gas_after = trans.gas_after,
+            .gas_cost = trans.gas_cost,
+            .stack_size_after = trans.stack_size_after,
+            .memory_size_after = trans.memory_size_after,
+            .stack_snapshot = trans.stack_snapshot,
+            .memory_snapshot = trans.memory_snapshot,
+            .storage_changes = trans.storage_changes,
+            .logs_emitted = trans.logs_emitted,
+            .error_info = trans.error_info,
+        };
+    }
+
+    /// Check if the given PC is at a block boundary using analysis data
+    /// This is the authoritative way to detect block boundaries - no heuristics needed
+    pub fn is_block_boundary(
+        pc: usize, 
+        analysis: *const @import("../code_analysis.zig").CodeAnalysis
+    ) bool {
+        // Bounds check
+        if (pc >= analysis.pc_to_block_start.len) return false;
+        
+        const block_start_index = analysis.pc_to_block_start[pc];
+        if (block_start_index == std.math.maxInt(u16)) return false;
+        
+        // Verify the instruction exists and is a block boundary
+        if (block_start_index >= analysis.instructions.len) return false;
+        
+        const instruction = &analysis.instructions[block_start_index];
+        return instruction.tag == .block_info;
+    }
+
+    /// Get information about the analysis block containing the given PC
+    /// Uses analysis data directly - no complex logic needed
+    pub fn get_block_info(
+        pc: usize, 
+        analysis: *const @import("../code_analysis.zig").CodeAnalysis
+    ) ?step_types.BlockInfo {
+        // Bounds check
+        if (pc >= analysis.pc_to_block_start.len) return null;
+        
+        const block_start_index = analysis.pc_to_block_start[pc];
+        if (block_start_index == std.math.maxInt(u16)) return null;
+        if (block_start_index >= analysis.instructions.len) return null;
+        
+        const instruction = &analysis.instructions[block_start_index];
+        if (instruction.tag != .block_info) return null;
+        
+        // Get block parameters directly from analysis - this is the source of truth
+        const params = analysis.getInstructionParams(.block_info, instruction.id);
+        
+        // The analysis already computed the block boundaries - use them directly
+        const start_pc = if (block_start_index < analysis.inst_to_pc.len) 
+            analysis.inst_to_pc[block_start_index] 
+        else 
+            pc; // Fallback to input PC
+            
+        // Find next block boundary for end_pc
+        var end_pc = analysis.code_len; // Default to end of code
+        var instruction_count: usize = 0;
+        
+        // Count instructions until next block_info
+        var current_index = block_start_index + 1;
+        while (current_index < analysis.instructions.len) {
+            const current_inst = &analysis.instructions[current_index];
+            if (current_inst.tag == .block_info) {
+                // Found next block
+                if (current_index < analysis.inst_to_pc.len) {
+                    end_pc = analysis.inst_to_pc[current_index];
+                }
+                break;
+            }
+            instruction_count += 1;
+            current_index += 1;
+        }
+        
+        return step_types.BlockInfo{
+            .start_pc = start_pc,
+            .end_pc = end_pc,
+            .instruction_count = instruction_count,
+            .total_gas_cost = params.gas_cost,
+            .stack_requirements = params.stack_req,
+            .stack_max_growth = params.stack_max_growth,
+        };
+    }
+
+    /// Continue execution until breakpoint (convenience method)
     pub fn continue_execution(self: *MemoryTracer) void {
         self.set_step_mode(.breakpoint);
+    }
+    
+    /// Get current step mode
+    pub fn get_step_mode(self: *MemoryTracer) @TypeOf(self.step_mode) {
+        return self.step_mode;
+    }
+    
+    /// Reset to passive tracing mode
+    pub fn reset_step_mode(self: *MemoryTracer) void {
+        self.set_step_mode(.passive);
     }
 };

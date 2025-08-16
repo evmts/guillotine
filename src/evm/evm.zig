@@ -33,6 +33,8 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const AnalysisCache = @import("analysis_cache.zig");
+const ExecutionStateManager = @import("tracing/execution_state.zig").ExecutionStateManager;
+const step_types = @import("tracing/step_types.zig");
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -127,6 +129,10 @@ inproc_tracer: ?@import("tracing/trace_types.zig").TracerHandle = null, // 24 by
 initial_thread_id: std.Thread.Id, // Thread tracking
 /// Pool for lazily reusing temporary Frames (e.g., constructor frames)
 frame_pool: FramePool,
+
+// === Execution State Management ===
+/// Manages execution state for pause/resume functionality in stepping (only when tracing enabled)
+execution_state_manager: if (build_options.enable_tracing) ExecutionStateManager else void,
 
 // Compile-time validation and optimizations
 comptime {
@@ -244,6 +250,7 @@ pub fn init(
         .trace_file = null,
         .initial_thread_id = std.Thread.getCurrentId(),
         .frame_pool = try FramePool.init(allocator, MAX_CALL_DEPTH),
+        .execution_state_manager = if (comptime build_options.enable_tracing) ExecutionStateManager.init() else {},
     };
 
     // Debug: verify tracer was stored correctly
@@ -293,6 +300,34 @@ pub fn deinit(self: *Evm) void {
     }
 
     // created_contracts is initialized in init(); single deinit above is sufficient
+}
+
+/// Get current execution state (only available when tracing enabled)
+pub fn get_execution_state(self: *Evm) step_types.ExecutionState {
+    if (comptime build_options.enable_tracing) {
+        return self.execution_state_manager.get_state();
+    } else {
+        // Return a default state when tracing is disabled
+        return .ready;
+    }
+}
+
+/// Reset execution state to ready (only available when tracing enabled)
+pub fn reset_execution_state(self: *Evm) void {
+    if (comptime build_options.enable_tracing) {
+        self.execution_state_manager.reset();
+    }
+    // No-op when tracing is disabled
+}
+
+/// Check if execution can be resumed with the given frame (only available when tracing enabled)
+pub fn can_resume_execution(self: *Evm, frame: *Frame) bool {
+    if (comptime build_options.enable_tracing) {
+        return self.execution_state_manager.can_resume_with_frame(frame);
+    } else {
+        // Always return false when tracing is disabled
+        return false;
+    }
 }
 
 const build_options = @import("build_options");
