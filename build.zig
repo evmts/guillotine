@@ -1329,6 +1329,20 @@ pub fn build(b: *std.Build) void {
         const shadow_tracer_test_step = b.step("test-shadow-tracer", "Run shadow tracer tests");
         shadow_tracer_test_step.dependOn(&run_shadow_per_step_test.?.step);
         
+        // Shadow tracer stepping test
+        const shadow_tracer_stepping_test = b.addTest(.{
+            .name = "shadow-tracer-stepping-test",
+            .root_source_file = b.path("test/shadow/shadow_tracer_stepping_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        shadow_tracer_stepping_test.root_module.addImport("evm", evm_mod);
+        shadow_tracer_stepping_test.root_module.addImport("primitives", primitives_mod);
+        shadow_tracer_stepping_test.root_module.addImport("build_options", build_options_mod);
+        const run_shadow_stepping_test = b.addRunArtifact(shadow_tracer_stepping_test);
+        const shadow_stepping_test_step = b.step("test-shadow-stepping", "Run shadow tracer stepping tests");
+        shadow_stepping_test_step.dependOn(&run_shadow_stepping_test.step);
+        
         // Add test for shadow.zig itself
         const shadow_module_test = b.addTest(.{
             .name = "shadow-module-test",
@@ -1363,6 +1377,7 @@ pub fn build(b: *std.Build) void {
         shadow_all_test_step.dependOn(&run_shadow_call_test.?.step);
         shadow_all_test_step.dependOn(&run_shadow_mismatch_test.?.step);
         shadow_all_test_step.dependOn(&run_shadow_per_step_test.?.step);
+        shadow_all_test_step.dependOn(&run_shadow_stepping_test.step);
         shadow_all_test_step.dependOn(&run_shadow_integration_test.step);
     }
 
