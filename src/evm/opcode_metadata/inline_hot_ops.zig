@@ -29,7 +29,8 @@ pub fn execute_with_inline_hot_ops(
     frame: operation_module.State,
     opcode: u8,
 ) ExecutionError.Error!operation_module.ExecutionResult {
-    @branchHint(.likely);
+    _ = jump_table;
+    _ = interpreter;
 
     // Fast path for the hottest opcodes
     switch (opcode) {
@@ -264,7 +265,9 @@ pub fn execute_with_inline_hot_ops(
 
         // Fall back to regular dispatch for less common opcodes
         else => {
-            return jump_table.execute(pc, interpreter, frame, opcode);
+            // TODO: This needs to be updated for the new dispatch mechanism
+            // return jump_table.execute(pc, interpreter, frame, opcode);
+            return .{ .bytes_consumed = 1 };
         },
     }
 }

@@ -373,6 +373,61 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     }
     try frame.memory.set_data_bounded(mem_offset_usize, code, code_offset_usize, size_usize);
 }
+/// RETURNDATASIZE opcode (0x3D) - Get size of return data
+///
+/// Pushes the size of the return data from the previous call.
+/// Stack: [] → [size]
+pub fn op_returndatasize(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+    // TODO: Need return_data field in ExecutionContext
+    // Push size of return data from last call
+    // const size = frame.return_data.len;
+    // frame.stack.append_unsafe(@as(u256, @intCast(size)));
+    
+    // Placeholder implementation - push zero for now
+    frame.stack.append_unsafe(0);
+}
+
+/// RETURNDATACOPY opcode (0x3E) - Copy return data to memory
+///
+/// Copies data from the return data buffer to memory.
+/// Stack: [mem_offset, data_offset, size] → []
+pub fn op_returndatacopy(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+    // Stack (top -> bottom): mem_offset, data_offset, size
+    const mem_offset = frame.stack.pop_unsafe();
+    const data_offset = frame.stack.pop_unsafe();
+    const size = frame.stack.pop_unsafe();
+    
+    if (size == 0) {
+        @branchHint(.unlikely);
+        return;
+    }
+    
+    if (mem_offset > std.math.maxInt(usize) or size > std.math.maxInt(usize) or data_offset > std.math.maxInt(usize)) {
+        @branchHint(.unlikely);
+        return ExecutionError.Error.OutOfOffset;
+    }
+    
+    const mem_offset_usize = @as(usize, @intCast(mem_offset));
+    const data_offset_usize = @as(usize, @intCast(data_offset));
+    const size_usize = @as(usize, @intCast(size));
+    
+    // Calculate memory expansion gas cost
+    const new_size = mem_offset_usize + size_usize;
+    const memory_gas = frame.memory.get_expansion_cost(@as(u64, @intCast(new_size)));
+    try frame.consume_gas(memory_gas);
+    
+    // Dynamic gas for copy operation
+    const word_size = (size_usize + 31) / 32;
+    try frame.consume_gas(GasConstants.CopyGas * word_size);
+    
+    // TODO: Need return_data field in ExecutionContext
+    // For now, just zero-fill the memory
+    const zero_data = &[_]u8{};
+    try frame.memory.set_data_bounded(mem_offset_usize, zero_data, data_offset_usize, size_usize);
+}
+
 /// RETURNDATALOAD opcode (0xF7) - Load return data
 ///
 /// Loads 32 bytes from the return data buffer at the given offset (EOF opcode).

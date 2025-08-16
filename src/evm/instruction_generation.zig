@@ -701,11 +701,9 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
             .dynamic_gas => c_dyn += 1,
             .word => c_word += 1,
             .jump_unresolved, .conditional_jump_idx => {},
-            // Real opcodes will be counted as exec or dynamic_gas for now
+            // Real opcodes are counted as exec (8-byte instructions)
             else => if (isRealOpcode(hdr.tag)) {
-                // For now, real opcodes are still emitted as exec/dynamic_gas
-                // This is transitional code
-                unreachable;
+                c_exec += 1;
             } else {},
         }
     }
@@ -836,11 +834,14 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 idx16 += 1;
             },
             .jump_unresolved, .conditional_jump_idx => {},
-            // Real opcodes will be handled as exec or dynamic_gas for now
+            // Real opcodes are handled as exec instructions
             else => if (isRealOpcode(hdr.tag)) {
-                // For now, real opcodes are still emitted as exec/dynamic_gas
-                // This is transitional code
-                unreachable;
+                // Real opcodes use the same format as exec instructions
+                var exec_bytes: [8]u8 = [_]u8{0} ** 8;
+                const hdr_bytes = std.mem.asBytes(&hdr);
+                @memcpy(exec_bytes[0..@sizeOf(@TypeOf(hdr))], hdr_bytes);
+                size8_instructions[@intCast(idx8)] = .{ .bytes = exec_bytes };
+                idx8 += 1;
             } else {},
         }
     }

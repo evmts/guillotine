@@ -88,7 +88,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         // to self. Because of this state on self should only ever be modified
         // by a single evm run at a time
         self.require_one_thread();
-        
+
         // Handle empty bytecode - valid case that executes successfully (implicit STOP)
         // Also handle single instruction case (just block_info with no opcodes)
         if (frame.analysis.instructions.len <= 1) {
@@ -370,7 +370,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Comparison opcodes
         .op_lt => {
             try execution.comparison.op_lt(frame);
@@ -402,7 +402,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Bitwise opcodes
         .op_and => {
             try execution.bitwise.op_and(frame);
@@ -444,7 +444,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Crypto opcodes
         .op_keccak256 => {
             // KECCAK256 already handles its own gas internally
@@ -452,7 +452,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Stack operations
         .op_pop => {
             try execution.stack.op_pop(frame);
@@ -464,39 +464,167 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             Log.err("PUSH0 reached in direct dispatch - should be handled via .word tag", .{});
             unreachable;
         },
-        .op_dup1 => { try execution.stack.op_dup1(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup2 => { try execution.stack.op_dup2(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup3 => { try execution.stack.op_dup3(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup4 => { try execution.stack.op_dup4(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup5 => { try execution.stack.op_dup5(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup6 => { try execution.stack.op_dup6(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup7 => { try execution.stack.op_dup7(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup8 => { try execution.stack.op_dup8(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup9 => { try execution.stack.op_dup9(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup10 => { try execution.stack.op_dup10(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup11 => { try execution.stack.op_dup11(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup12 => { try execution.stack.op_dup12(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup13 => { try execution.stack.op_dup13(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup14 => { try execution.stack.op_dup14(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup15 => { try execution.stack.op_dup15(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_dup16 => { try execution.stack.op_dup16(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap1 => { try execution.stack.op_swap1(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap2 => { try execution.stack.op_swap2(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap3 => { try execution.stack.op_swap3(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap4 => { try execution.stack.op_swap4(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap5 => { try execution.stack.op_swap5(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap6 => { try execution.stack.op_swap6(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap7 => { try execution.stack.op_swap7(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap8 => { try execution.stack.op_swap8(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap9 => { try execution.stack.op_swap9(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap10 => { try execution.stack.op_swap10(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap11 => { try execution.stack.op_swap11(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap12 => { try execution.stack.op_swap12(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap13 => { try execution.stack.op_swap13(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap14 => { try execution.stack.op_swap14(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap15 => { try execution.stack.op_swap15(frame); i += 1; continue :dispatch instructions[i].tag; },
-        .op_swap16 => { try execution.stack.op_swap16(frame); i += 1; continue :dispatch instructions[i].tag; },
-        
+        .op_dup1 => {
+            try execution.stack.op_dup1(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup2 => {
+            try execution.stack.op_dup2(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup3 => {
+            try execution.stack.op_dup3(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup4 => {
+            try execution.stack.op_dup4(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup5 => {
+            try execution.stack.op_dup5(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup6 => {
+            try execution.stack.op_dup6(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup7 => {
+            try execution.stack.op_dup7(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup8 => {
+            try execution.stack.op_dup8(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup9 => {
+            try execution.stack.op_dup9(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup10 => {
+            try execution.stack.op_dup10(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup11 => {
+            try execution.stack.op_dup11(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup12 => {
+            try execution.stack.op_dup12(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup13 => {
+            try execution.stack.op_dup13(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup14 => {
+            try execution.stack.op_dup14(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup15 => {
+            try execution.stack.op_dup15(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_dup16 => {
+            try execution.stack.op_dup16(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap1 => {
+            try execution.stack.op_swap1(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap2 => {
+            try execution.stack.op_swap2(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap3 => {
+            try execution.stack.op_swap3(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap4 => {
+            try execution.stack.op_swap4(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap5 => {
+            try execution.stack.op_swap5(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap6 => {
+            try execution.stack.op_swap6(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap7 => {
+            try execution.stack.op_swap7(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap8 => {
+            try execution.stack.op_swap8(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap9 => {
+            try execution.stack.op_swap9(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap10 => {
+            try execution.stack.op_swap10(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap11 => {
+            try execution.stack.op_swap11(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap12 => {
+            try execution.stack.op_swap12(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap13 => {
+            try execution.stack.op_swap13(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap14 => {
+            try execution.stack.op_swap14(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap15 => {
+            try execution.stack.op_swap15(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+        .op_swap16 => {
+            try execution.stack.op_swap16(frame);
+            i += 1;
+            continue :dispatch instructions[i].tag;
+        },
+
         // Memory operations
         .op_mload => {
             try execution.memory.op_mload(frame);
@@ -523,7 +651,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Storage operations
         .op_sload => {
             try execution.storage.op_sload(frame);
@@ -535,7 +663,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").sstore_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.storage.op_sstore(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
@@ -550,7 +678,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Control flow
         .op_jump => {
             // JUMP is handled via synthetic tags, shouldn't reach here
@@ -575,16 +703,13 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Push operations (handled via .word synthetic tag)
-        .op_push1, .op_push2, .op_push3, .op_push4, .op_push5, .op_push6, .op_push7, .op_push8,
-        .op_push9, .op_push10, .op_push11, .op_push12, .op_push13, .op_push14, .op_push15, .op_push16,
-        .op_push17, .op_push18, .op_push19, .op_push20, .op_push21, .op_push22, .op_push23, .op_push24,
-        .op_push25, .op_push26, .op_push27, .op_push28, .op_push29, .op_push30, .op_push31, .op_push32 => {
+        .op_push1, .op_push2, .op_push3, .op_push4, .op_push5, .op_push6, .op_push7, .op_push8, .op_push9, .op_push10, .op_push11, .op_push12, .op_push13, .op_push14, .op_push15, .op_push16, .op_push17, .op_push18, .op_push19, .op_push20, .op_push21, .op_push22, .op_push23, .op_push24, .op_push25, .op_push26, .op_push27, .op_push28, .op_push29, .op_push30, .op_push31, .op_push32 => {
             // PUSH instructions are handled via .word tag, shouldn't reach here
             unreachable;
         },
-        
+
         // Environment opcodes
         .op_address => {
             try execution.environment.op_address(frame);
@@ -671,7 +796,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Block opcodes
         .op_blockhash => {
             try execution.block.op_blockhash(frame);
@@ -704,7 +829,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             continue :dispatch instructions[i].tag;
         },
         .op_chainid => {
-            try execution.block.op_chainid(frame);
+            try execution.environment.op_chainid(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
@@ -723,41 +848,41 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // Log operations
         .op_log0 => {
-            try execution.log.op_log0(frame);
+            try execution.log.log_0(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
         .op_log1 => {
-            try execution.log.op_log1(frame);
+            try execution.log.log_1(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
         .op_log2 => {
-            try execution.log.op_log2(frame);
+            try execution.log.log_2(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
         .op_log3 => {
-            try execution.log.op_log3(frame);
+            try execution.log.log_3(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
         .op_log4 => {
-            try execution.log.op_log4(frame);
+            try execution.log.log_4(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
-        
+
         // System operations
         .op_create => {
             // Dynamic gas for CREATE
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").create_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.system.op_create(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
@@ -767,7 +892,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").call_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.system.op_call(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
@@ -777,13 +902,13 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").callcode_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.system.op_callcode(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
         .op_return => {
-            try execution.system.op_return(frame);
+            try execution.control.op_return(frame);
             return error.RETURN;
         },
         .op_delegatecall => {
@@ -791,7 +916,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").delegatecall_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.system.op_delegatecall(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
@@ -801,7 +926,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").create2_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.system.op_create2(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
@@ -811,20 +936,21 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").staticcall_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
-            
+
             try execution.system.op_staticcall(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },
         .op_revert => {
-            try execution.system.op_revert(frame);
+            try execution.control.op_revert(frame);
             return error.REVERT;
         },
         .op_invalid => {
             return error.INVALID;
         },
         .op_selfdestruct => {
-            try execution.system.op_selfdestruct(frame);
+            @branchHint(.cold);
+            try execution.control.op_selfdestruct(frame);
             i += 1;
             continue :dispatch instructions[i].tag;
         },

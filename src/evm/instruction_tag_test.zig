@@ -99,13 +99,13 @@ test "WordInstruction with bytecode slice" {
     try std.testing.expectEqual(@as(u8, 0x40), word_inst.word_bytes[0]);
 }
 
-test "Maximum ID value for 24-bit field" {
-    const max_id: u24 = std.math.maxInt(u24);
+test "Maximum ID value for 16-bit field" {
+    const max_id: u16 = std.math.maxInt(u16);
     const inst = Instruction{
         .tag = .exec,
         .id = max_id,
     };
     
-    try std.testing.expectEqual(@as(u24, 16777215), inst.id); // 2^24 - 1
+    try std.testing.expectEqual(@as(u16, 65535), inst.id); // 2^16 - 1
     try std.testing.expectEqual(Tag.exec, inst.tag);
 }
