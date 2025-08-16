@@ -119,6 +119,8 @@ analysis_cache: ?AnalysisCache = null, // 8 bytes - analysis cache pointer
 tracer: ?std.io.AnyWriter = null, // 16 bytes - debugging only
 /// Open file handle used by tracer when tracing to file
 trace_file: ?std.fs.File = null, // 8 bytes - debugging only
+/// Optional in-process tracer for structured data collection
+inproc_tracer: ?@import("tracing/trace_types.zig").TracerHandle = null, // 24 bytes - debugging only
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
@@ -325,6 +327,13 @@ pub fn disable_tracing(self: *Evm) void {
         f.close();
         self.trace_file = null;
     }
+}
+
+/// Set structured tracer for in-process trace collection
+/// Replaces any existing in-process tracer
+pub fn set_tracer(self: *Evm, tracer_handle: ?@import("tracing/trace_types.zig").TracerHandle) void {
+    if (!comptime build_options.enable_tracing) return;
+    self.inproc_tracer = tracer_handle;
 }
 
 /// Reset the EVM for reuse without deallocating memory.
