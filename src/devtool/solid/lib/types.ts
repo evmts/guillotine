@@ -3,6 +3,8 @@ export interface BlockJson {
 	gasCost: number
 	stackReq: number
 	stackMaxGrowth: number
+	blockStartPc: number
+	blockEndPcExclusive: number
 	pcs: number[]
 	opcodes: string[]
 	hex: string[]
@@ -17,6 +19,7 @@ export interface EvmState {
 	storage: Array<{ key: string; value: string }>
 	logs: string[]
 	returnData: string
+	codeHex: string
 	completed: boolean
 	currentInstructionIndex: number
 	currentBlockStartIndex: number
