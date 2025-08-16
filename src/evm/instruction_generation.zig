@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const Instruction = @import("instruction.zig").Instruction;
 const Tag = @import("instruction.zig").Tag;
 const JumpType = @import("instruction.zig").JumpType;
+const isRealOpcode = @import("instruction.zig").isRealOpcode;
+const opcodeToTag = @import("instruction.zig").opcodeToTag;
 const WordRef = @import("instruction.zig").WordRef;
 const DynamicGas = @import("instruction.zig").DynamicGas;
 const BlockInfo = @import("instruction.zig").BlockInfo;
@@ -149,7 +151,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
     var block_count: usize = 0;
 
     // Start first block with BEGINBLOCK instruction
-    const begin_block_id: u24 = @intCast(blocks_builder.items.len);
+    const begin_block_id: u16 = @intCast(blocks_builder.items.len);
     try blocks_builder.append(.{});
     instructions[instruction_count] = .{ .tag = .block_info, .id = begin_block_id };
     var block = BlockAnalysis.init(instruction_count);
@@ -194,7 +196,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 blocks_builder.items[block_payload_id] = block.close();
 
                 // Start new block with BEGINBLOCK
-                const nbid_start: u24 = @intCast(blocks_builder.items.len);
+                const nbid_start: u16 = @intCast(blocks_builder.items.len);
                 try blocks_builder.append(.{});
                 instructions[instruction_count] = .{ .tag = .block_info, .id = nbid_start };
                 block = BlockAnalysis.init(instruction_count);
@@ -210,9 +212,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 // Record PC to instruction mapping for JUMPDEST
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
-                const eid_jd: u24 = @intCast(exec_builder.items.len);
-                try exec_builder.append(operation.execute);
-                instructions[instruction_count] = .{ .tag = .exec, .id = eid_jd };
+                // Emit per-opcode tag for JUMPDEST
+                instructions[instruction_count] = .{ .tag = opcodeToTag(@intFromEnum(Opcode.Enum.JUMPDEST)), .id = 0 };
                 Log.debug("[analysis] JUMPDEST at pc={}", .{pc});
                 instruction_count += 1;
                 pc += 1;
@@ -234,9 +235,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                     instructions[instruction_count] = .{ .tag = .jump_unresolved, .id = 0 };
                     inst_jump_type[instruction_count] = .jump;
                 } else {
-                    const eid_term: u24 = @intCast(exec_builder.items.len);
-                    try exec_builder.append(operation.execute);
-                    instructions[instruction_count] = .{ .tag = .exec, .id = eid_term };
+                    // Emit per-opcode tag for terminal instructions (STOP, RETURN, etc.)
+                    instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 }
                 instruction_count += 1;
                 pc += 1;
@@ -249,7 +249,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 // that is only reached via computed jumps. We conservatively
                 // continue analysis instead of skipping until a JUMPDEST.
                 if (pc < code.len) {
-                    const nbid_after: u24 = @intCast(blocks_builder.items.len);
+                    const nbid_after: u16 = @intCast(blocks_builder.items.len);
                     try blocks_builder.append(.{});
                     instructions[instruction_count] = .{ .tag = .block_info, .id = nbid_after };
                     block = BlockAnalysis.init(instruction_count);
@@ -280,7 +280,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
 
                 // Close current block and start new one (for fall-through path)
                 blocks_builder.items[block_payload_id] = block.close();
-                const nbid_fall: u24 = @intCast(blocks_builder.items.len);
+                const nbid_fall: u16 = @intCast(blocks_builder.items.len);
                 try blocks_builder.append(.{});
                 instructions[instruction_count] = .{ .tag = .block_info, .id = nbid_fall };
                 block = BlockAnalysis.init(instruction_count);
@@ -298,7 +298,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 // Record PC to instruction mapping for PUSH0
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
-                const wid0: u24 = @intCast(words_builder.items.len);
+                const wid0: u16 = @intCast(words_builder.items.len);
                 try words_builder.append(.{ .start_pc = 0, .len = 0 });
                 instructions[instruction_count] = .{ .tag = .word, .id = wid0 };
                 instruction_count += 1;
@@ -319,7 +319,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 pc = end;
 
                 pc_to_instruction[original_pc] = @intCast(instruction_count);
-                const wid: u24 = @intCast(words_builder.items.len);
+                const wid: u16 = @intCast(words_builder.items.len);
                 try words_builder.append(.{ .start_pc = @intCast(start), .len = @intCast(end - start) });
                 instructions[instruction_count] = .{ .tag = .word, .id = wid };
                 Log.debug("[analysis] PUSH at pc={} size={} instruction_count={}", .{ original_pc, push_size, instruction_count });
@@ -335,7 +335,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 // Record PC to instruction mapping for PC opcode
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
-                const pid: u24 = @intCast(pcs_builder.items.len);
+                const pid: u16 = @intCast(pcs_builder.items.len);
                 try pcs_builder.append(@intCast(pc));
                 instructions[instruction_count] = .{ .tag = .pc, .id = pid };
                 Log.debug("[analysis] PC opcode at pc={}", .{pc});
@@ -350,7 +350,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 // This reduces the risk that previous fusion/elimination in the same block
                 // makes the validator underestimate the required stack height.
                 blocks_builder.items[block_payload_id] = block.close();
-                const nbid_dyn: u24 = @intCast(blocks_builder.items.len);
+                const nbid_dyn: u16 = @intCast(blocks_builder.items.len);
                 try blocks_builder.append(.{});
                 instructions[instruction_count] = .{ .tag = .block_info, .id = nbid_dyn };
                 block = BlockAnalysis.init(instruction_count);
@@ -366,17 +366,15 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 // Record PC to instruction mapping for special opcodes
                 pc_to_instruction[pc] = @intCast(instruction_count);
 
-                const did: u24 = @intCast(dyn_builder.items.len);
-                const gas_fn = getDynamicGasFunction(opcode) orelse unreachable; // These opcodes should always have dynamic gas
-                try dyn_builder.append(.{ .gas_fn = gas_fn, .exec_fn = operation.execute });
-                instructions[instruction_count] = .{ .tag = .dynamic_gas, .id = did };
+                // Emit per-opcode tag for dynamic gas opcodes
+                instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 instruction_count += 1;
                 pc += 1;
 
                 // Close the block after the dynamic/special op to avoid combining
                 // following instructions into the same validation unit.
                 blocks_builder.items[block_payload_id] = block.close();
-                const nbid_after_dyn: u24 = @intCast(blocks_builder.items.len);
+                const nbid_after_dyn: u16 = @intCast(blocks_builder.items.len);
                 try blocks_builder.append(.{});
                 instructions[instruction_count] = .{ .tag = .block_info, .id = nbid_after_dyn };
                 block = BlockAnalysis.init(instruction_count);
@@ -394,9 +392,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
 
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                const eid_k: u24 = @intCast(exec_builder.items.len);
-                try exec_builder.append(operation.execute);
-                instructions[instruction_count] = .{ .tag = .exec, .id = eid_k };
+                // Emit per-opcode tag for KECCAK256
+                instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 instruction_count += 1;
                 pc += 1;
             },
@@ -411,9 +408,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
 
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                const eid_isz: u24 = @intCast(exec_builder.items.len);
-                try exec_builder.append(operation.execute);
-                instructions[instruction_count] = .{ .tag = .exec, .id = eid_isz };
+                // Emit per-opcode tag for ISZERO
+                instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 if (builtin.mode == .Debug) stats.inline_opcodes += 1;
                 Log.debug("[analysis] Using inline ISZERO at pc={}", .{pc});
                 instruction_count += 1;
@@ -430,9 +426,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
 
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                const eid_eq: u24 = @intCast(exec_builder.items.len);
-                try exec_builder.append(operation.execute);
-                instructions[instruction_count] = .{ .tag = .exec, .id = eid_eq };
+                // Emit per-opcode tag for EQ
+                instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 if (builtin.mode == .Debug) stats.inline_opcodes += 1;
                 Log.debug("[analysis] Using inline EQ at pc={}", .{pc});
                 instruction_count += 1;
@@ -453,9 +448,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                     block.gas_cost += 3 + 3 + 3; // DUP1 + PUSH0 + EQ gas
                     block.updateStackTracking(0x80, 1); // DUP1 needs 1 item
 
-                    const eid3b: u24 = @intCast(exec_builder.items.len);
-                    try exec_builder.append(execution.comparison.op_iszero);
-                    instructions[instruction_count] = .{ .tag = .exec, .id = eid3b };
+                    // Emit per-opcode tag for ISZERO in fused pattern
+                    instructions[instruction_count] = .{ .tag = opcodeToTag(@intFromEnum(Opcode.Enum.ISZERO)), .id = 0 };
                     instruction_count += 1;
                     pc += 3; // Skip DUP1, PUSH0, and EQ
                     if (builtin.mode == .Debug) stats.eliminated_opcodes += 2; // Saved 2 operations
@@ -476,9 +470,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 pc_to_instruction[pc] = @intCast(instruction_count);
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                const eid_dup1: u24 = @intCast(exec_builder.items.len);
-                try exec_builder.append(operation.execute);
-                instructions[instruction_count] = .{ .tag = .exec, .id = eid_dup1 };
+                // Emit per-opcode tag for DUP1
+                instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 instruction_count += 1;
                 pc += 1;
             },
@@ -505,9 +498,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 pc_to_instruction[pc] = @intCast(instruction_count);
                 block.gas_cost += @intCast(operation.constant_gas);
                 block.updateStackTracking(opcode_byte, operation.min_stack);
-                const eid_pop: u24 = @intCast(exec_builder.items.len);
-                try exec_builder.append(operation.execute);
-                instructions[instruction_count] = .{ .tag = .exec, .id = eid_pop };
+                // Emit per-opcode tag for POP
+                instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 instruction_count += 1;
                 pc += 1;
             },
@@ -525,16 +517,14 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                     block.gas_cost += @intCast(invalid_operation.constant_gas);
                     block.updateStackTracking(@intFromEnum(Opcode.Enum.INVALID), invalid_operation.min_stack);
 
-                    const eid4b: u24 = @intCast(exec_builder.items.len);
-                    try exec_builder.append(invalid_operation.execute);
-                    instructions[instruction_count] = .{ .tag = .exec, .id = eid4b };
+                    // Emit per-opcode tag for INVALID
+                    instructions[instruction_count] = .{ .tag = opcodeToTag(@intFromEnum(Opcode.Enum.INVALID)), .id = 0 };
                 } else {
                     block.gas_cost += @intCast(operation.constant_gas);
                     block.updateStackTracking(opcode_byte, operation.min_stack);
 
-                    const eid5b: u24 = @intCast(exec_builder.items.len);
-                    try exec_builder.append(operation.execute);
-                    instructions[instruction_count] = .{ .tag = .exec, .id = eid5b };
+                    // Emit per-opcode tag for regular opcodes
+                    instructions[instruction_count] = .{ .tag = opcodeToTag(opcode_byte), .id = 0 };
                 }
                 instruction_count += 1;
                 pc += 1;
@@ -571,10 +561,8 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
     }
 
     if (needs_stop and instruction_count < instruction_limits.MAX_INSTRUCTIONS) {
-        const stop_operation = jump_table.get_operation(@intFromEnum(Opcode.Enum.STOP));
-        const eid6: u24 = @intCast(exec_builder.items.len);
-        try exec_builder.append(stop_operation.execute);
-        instructions[instruction_count] = .{ .tag = .exec, .id = eid6 };
+        // Emit per-opcode tag for implicit STOP
+        instructions[instruction_count] = .{ .tag = opcodeToTag(@intFromEnum(Opcode.Enum.STOP)), .id = 0 };
         instruction_count += 1;
         Log.debug("[analysis] Added implicit STOP at end, total instructions: {}", .{instruction_count});
     }
@@ -596,7 +584,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                         const end = @min(start + wr.len, code.len);
                         while (k < end - start) : (k += 1) v = (v << 8) | code[start + k];
                         if (v < code.len and jumpdest_bitmap.isSet(v)) {
-                            const jpid: u24 = @intCast(jump_pcs_builder.items.len);
+                            const jpid: u16 = @intCast(jump_pcs_builder.items.len);
                             try jump_pcs_builder.append(@intCast(v));
                             instructions[ji] = .{ .tag = .jump_pc, .id = jpid };
                             // neutralize preceding PUSH
@@ -623,7 +611,7 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                         }
                         
                         if (v2 < code.len and jumpdest_bitmap.isSet(v2)) {
-                            const cid: u24 = @intCast(cond_jump_pcs_builder.items.len);
+                            const cid: u16 = @intCast(cond_jump_pcs_builder.items.len);
                             try cond_jump_pcs_builder.append(@intCast(v2));
                             instructions[ji] = .{ .tag = .conditional_jump_pc, .id = cid };
                             instructions[ji - 1] = .{ .tag = .noop, .id = 0 };
@@ -713,6 +701,12 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
             .dynamic_gas => c_dyn += 1,
             .word => c_word += 1,
             .jump_unresolved, .conditional_jump_idx => {},
+            // Real opcodes will be counted as exec or dynamic_gas for now
+            else => if (isRealOpcode(hdr.tag)) {
+                // For now, real opcodes are still emitted as exec/dynamic_gas
+                // This is transitional code
+                unreachable;
+            } else {},
         }
     }
 
@@ -726,10 +720,10 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
     var size8_instructions = try allocator.alloc(Bucket8, total8);
     var size16_instructions = try allocator.alloc(Bucket16, total16);
 
-    var idx0: u24 = 0; // For 0-byte instructions (tag-only)
-    var idx2: u24 = 0; // For 2-byte instructions
-    var idx8: u24 = 0; // For 8-byte instructions
-    var idx16: u24 = 0; // For 16-byte instructions
+    var idx0: u16 = 0; // For 0-byte instructions (tag-only)
+    var idx2: u16 = 0; // For 2-byte instructions
+    var idx8: u16 = 0; // For 8-byte instructions
+    var idx16: u16 = 0; // For 16-byte instructions
 
     var it_exec: usize = 0;
     var it_cjp_pc: usize = 0;
@@ -842,6 +836,12 @@ pub fn codeToInstructions(allocator: std.mem.Allocator, code: []const u8, jump_t
                 idx16 += 1;
             },
             .jump_unresolved, .conditional_jump_idx => {},
+            // Real opcodes will be handled as exec or dynamic_gas for now
+            else => if (isRealOpcode(hdr.tag)) {
+                // For now, real opcodes are still emitted as exec/dynamic_gas
+                // This is transitional code
+                unreachable;
+            } else {},
         }
     }
 
