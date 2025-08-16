@@ -345,224 +345,401 @@ comptime {
 ///
 /// TODO: Implement lazy analysis approach instead of pre-computed instruction stream.
 pub fn interpret2(self: *Evm, frame: *Frame) ExecutionError.Error!void {
-    // Grab the bytecode from analysis before disabling it
-    const bytecode = frame.analysis.code;
+    // For debugging
+    var opcodes = std.ArrayList(u8).init(self.allocator);
+    defer opcodes.deinit();
+    var pcs = std.ArrayList(u16).init(self.allocator);
+    defer pcs.deinit();
 
-    // Disable pre-computed analysis to force lazy approach
-    frame.analysis = null;
-
-    // Program counter for bytecode execution
-    var pc: u16 = 0;
-
-    // Instruction index for lazy-generated instructions
-    var instruction_index: u16 = 0;
-
-    // Dynamic arrays for lazy evaluation - start empty and grow as needed
+    // Create null-terminated instruction array
     var instructions = std.ArrayList(Instruction2).init(self.allocator);
     defer instructions.deinit();
 
-    var opcodes = std.ArrayList(Opcodes).init(self.allocator);
-    defer opcodes.deinit();
+    var pc: u16 = 0;
+    const bytecode = frame.contract.code;
 
-    // Block validation state
-    var current_gas_cost: u32 = 0;
-    var exec_buffer: [4]u8 = undefined;
-    var exec_count: u8 = 0;
+    var i: usize = 0;
+    while (i < instructions.items.len) : (i += 1) {
+        const opcode = bytecode[pc];
 
-    // Add initial validation blocks
-    try instructions.append(Instruction2{ .STACK_VALIDATION_BLOCK = .{ .stack_req = 0, .stack_max_growth = 0 } });
-    try instructions.append(Instruction2{ .AGGREGATED_GAS = 0 });
+        // Track opcode and pc
+        try opcodes.append(opcode);
+        try pcs.append(pc);
 
-    // Lazy analysis loop
-    while (pc < bytecode.len) {
-        const opcode_byte = bytecode[pc];
+        switch (opcode) {
+            // Arithmetic operations
+            0x00 => return, // STOP
+            0x01 => {
+                pc += 1;
+                continue :dispatch;
+            }, // ADD
+            0x02 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MUL
+            0x03 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SUB
+            0x04 => {
+                pc += 1;
+                continue :dispatch;
+            }, // DIV
+            0x05 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SDIV
+            0x06 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MOD
+            0x07 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SMOD
+            0x08 => {
+                pc += 1;
+                continue :dispatch;
+            }, // ADDMOD
+            0x09 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MULMOD
+            0x0A => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXP
+            0x0B => {
+                pc += 1;
+                continue :dispatch;
+            }, // SIGNEXTEND
 
-        // Check for end instructions first
-        switch (opcode_byte) {
-            0x00, 0xF3, 0xFD, 0xFE, 0xFF => {
-                // Flush any pending EXEC instructions
-                if (exec_count > 0) {
-                    try flushExecBuffer(&instructions, exec_buffer, exec_count);
-                    exec_count = 0;
-                }
+            // Comparison operations
+            0x10 => {
+                pc += 1;
+                continue :dispatch;
+            }, // LT
+            0x11 => {
+                pc += 1;
+                continue :dispatch;
+            }, // GT
+            0x12 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SLT
+            0x13 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SGT
+            0x14 => {
+                pc += 1;
+                continue :dispatch;
+            }, // EQ
+            0x15 => {
+                pc += 1;
+                continue :dispatch;
+            }, // ISZERO
 
-                // Add END instruction
-                const end_type: EndType = switch (opcode_byte) {
-                    0x00 => .STOP,
-                    0xF3 => .RETURN,
-                    0xFD => .REVERT,
-                    0xFE => .INVALID,
-                    0xFF => .SELFDESTRUCT,
-                    else => unreachable,
-                };
-                try instructions.append(Instruction2{ .END = .{ .end_type = end_type, ._padding1 = 0, ._padding2 = 0, ._padding3 = 0 } });
-                try opcodes.append(@enumFromInt(opcode_byte));
-                return ExecutionError.Error.STOP; // Stop analysis at end instruction
+            // Bitwise operations
+            0x16 => {
+                pc += 1;
+                continue :dispatch;
+            }, // AND
+            0x17 => {
+                pc += 1;
+                continue :dispatch;
+            }, // OR
+            0x18 => {
+                pc += 1;
+                continue :dispatch;
+            }, // XOR
+            0x19 => {
+                pc += 1;
+                continue :dispatch;
+            }, // NOT
+            0x1A => {
+                pc += 1;
+                continue :dispatch;
+            }, // BYTE
+            0x1B => {
+                pc += 1;
+                continue :dispatch;
+            }, // SHL
+            0x1C => {
+                pc += 1;
+                continue :dispatch;
+            }, // SHR
+            0x1D => {
+                pc += 1;
+                continue :dispatch;
+            }, // SAR
+
+            // Crypto operations
+            0x20 => {
+                pc += 1;
+                continue :dispatch;
+            }, // KECCAK256
+
+            // Environmental operations
+            0x30 => {
+                pc += 1;
+                continue :dispatch;
+            }, // ADDRESS
+            0x31 => {
+                pc += 1;
+                continue :dispatch;
+            }, // BALANCE
+            0x32 => {
+                pc += 1;
+                continue :dispatch;
+            }, // ORIGIN
+            0x33 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALLER
+            0x34 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALLVALUE
+            0x35 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALLDATALOAD
+            0x36 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALLDATASIZE
+            0x37 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALLDATACOPY
+            0x38 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CODESIZE
+            0x39 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CODECOPY
+            0x3A => {
+                pc += 1;
+                continue :dispatch;
+            }, // GASPRICE
+            0x3B => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXTCODESIZE
+            0x3C => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXTCODECOPY
+            0x3D => {
+                pc += 1;
+                continue :dispatch;
+            }, // RETURNDATASIZE
+            0x3E => {
+                pc += 1;
+                continue :dispatch;
+            }, // RETURNDATACOPY
+            0x3F => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXTCODEHASH
+
+            // Block operations
+            0x40 => {
+                pc += 1;
+                continue :dispatch;
+            }, // BLOCKHASH
+            0x41 => {
+                pc += 1;
+                continue :dispatch;
+            }, // COINBASE
+            0x42 => {
+                pc += 1;
+                continue :dispatch;
+            }, // TIMESTAMP
+            0x43 => {
+                pc += 1;
+                continue :dispatch;
+            }, // NUMBER
+            0x44 => {
+                pc += 1;
+                continue :dispatch;
+            }, // PREVRANDAO
+            0x45 => {
+                pc += 1;
+                continue :dispatch;
+            }, // GASLIMIT
+            0x46 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CHAINID
+            0x47 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SELFBALANCE
+            0x48 => {
+                pc += 1;
+                continue :dispatch;
+            }, // BASEFEE
+            0x49 => {
+                pc += 1;
+                continue :dispatch;
+            }, // BLOBHASH
+            0x4A => {
+                pc += 1;
+                continue :dispatch;
+            }, // BLOBBASEFEE
+
+            // Stack operations
+            0x50 => {
+                pc += 1;
+                continue :dispatch;
+            }, // POP
+
+            // Memory operations
+            0x51 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MLOAD
+            0x52 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MSTORE
+            0x53 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MSTORE8
+
+            // Storage operations
+            0x54 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SLOAD
+            0x55 => {
+                pc += 1;
+                continue :dispatch;
+            }, // SSTORE
+
+            // Control flow operations
+            0x56 => {
+                pc += 1;
+                continue :dispatch;
+            }, // JUMP
+            0x57 => {
+                pc += 1;
+                continue :dispatch;
+            }, // JUMPI
+            0x58 => {
+                pc += 1;
+                continue :dispatch;
+            }, // PC
+            0x59 => {
+                pc += 1;
+                continue :dispatch;
+            }, // MSIZE
+            0x5A => {
+                pc += 1;
+                continue :dispatch;
+            }, // GAS
+            0x5B => {
+                pc += 1;
+                continue :dispatch;
+            }, // JUMPDEST
+            0x5C => {
+                pc += 1;
+                continue :dispatch;
+            }, // TLOAD
+            0x5D => {
+                pc += 1;
+                continue :dispatch;
+            }, // TSTORE
+            0x5E => {
+                pc += 1;
+                continue :dispatch;
+            }, // MCOPY
+
+            // Push operations
+            0x5F => {
+                pc += 1;
+                continue :dispatch;
+            }, // PUSH0
+            0x60...0x7F => |push_op| {
+                const push_size = push_op - 0x5F; // PUSH1=1, PUSH32=32
+                pc += 1 + push_size;
+                continue :dispatch;
             },
-            else => {},
-        }
 
-        // Handle PUSH instructions with lookahead
-        if (opcode_byte >= 0x60 and opcode_byte <= 0x7F) {
-            // Flush any pending EXEC instructions
-            if (exec_count > 0) {
-                try flushExecBuffer(&instructions, exec_buffer, exec_count);
-                exec_count = 0;
-            }
-
-            try handlePushWithLookahead(&instructions, &opcodes, bytecode, &pc);
-        } else {
-            // Handle regular opcodes - pack into EXEC_N
-            if (isStaticGasOpcode(opcode_byte)) {
-                // Add to EXEC buffer
-                exec_buffer[exec_count] = opcode_byte;
-                exec_count += 1;
-
-                // Flush if buffer is full
-                if (exec_count == 4) {
-                    try flushExecBuffer(&instructions, exec_buffer, exec_count);
-                    exec_count = 0;
-                }
-
-                try opcodes.append(@enumFromInt(opcode_byte));
+            // Duplicate operations
+            0x80...0x8F => {
                 pc += 1;
-            } else {
-                // Dynamic gas opcode - flush EXEC buffer and handle separately
-                if (exec_count > 0) {
-                    try flushExecBuffer(&instructions, exec_buffer, exec_count);
-                    exec_count = 0;
-                }
+                continue :dispatch;
+            }, // DUP1-DUP16
 
-                // Add gas validation block after dynamic gas opcodes
-                try instructions.append(Instruction2{ .AGGREGATED_GAS = current_gas_cost });
-                current_gas_cost = 0;
-
-                // Handle jump instructions
-                if (opcode_byte == 0x56 or opcode_byte == 0x57) {
-                    try instructions.append(Instruction2{ .UNKNOWN_JUMP = 0 });
-                } else {
-                    // Other dynamic gas opcodes go in EXEC_1
-                    try instructions.append(Instruction2{ .EXEC_1 = .{ .opcode = opcode_byte, ._padding1 = 0, ._padding2 = 0, ._padding3 = 0 } });
-                }
-
-                try opcodes.append(@enumFromInt(opcode_byte));
+            // Swap operations
+            0x90...0x9F => {
                 pc += 1;
-            }
+                continue :dispatch;
+            }, // SWAP1-SWAP16
+
+            // Log operations
+            0xA0...0xA4 => {
+                pc += 1;
+                continue :dispatch;
+            }, // LOG0-LOG4
+
+            // System operations
+            0xF0 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CREATE
+            0xF1 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALL
+            0xF2 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CALLCODE
+            0xF3 => return, // RETURN
+            0xF4 => {
+                pc += 1;
+                continue :dispatch;
+            }, // DELEGATECALL
+            0xF5 => {
+                pc += 1;
+                continue :dispatch;
+            }, // CREATE2
+            0xF7 => {
+                pc += 1;
+                continue :dispatch;
+            }, // RETURNDATALOAD
+            0xF8 => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXTCALL
+            0xF9 => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXTDELEGATECALL
+            0xFA => {
+                pc += 1;
+                continue :dispatch;
+            }, // STATICCALL
+            0xFB => {
+                pc += 1;
+                continue :dispatch;
+            }, // EXTSTATICCALL
+            0xFD => return, // REVERT
+            0xFE => return, // INVALID
+            0xFF => return, // SELFDESTRUCT
+
+            // Invalid opcode
+            else => return,
         }
     }
 
-    // Flush any remaining EXEC instructions
-    if (exec_count > 0) {
-        try flushExecBuffer(&instructions, exec_buffer, exec_count);
-    }
-
-    return ExecutionError.Error.STOP;
-}
-
-/// Flush accumulated EXEC opcodes to instructions array
-fn flushExecBuffer(instructions: *std.ArrayList(Instruction2), exec_buffer: [4]u8, count: u8) !void {
-    switch (count) {
-        1 => try instructions.append(Instruction2{ .EXEC_1 = .{ .opcode = exec_buffer[0], ._padding1 = 0, ._padding2 = 0, ._padding3 = 0 } }),
-        2 => try instructions.append(Instruction2{ .EXEC_2 = .{ .opcode1 = exec_buffer[0], .opcode2 = exec_buffer[1], ._padding = 0 } }),
-        3 => try instructions.append(Instruction2{ .EXEC_3 = .{ .opcode1 = exec_buffer[0], .opcode2 = exec_buffer[1], .opcode3 = exec_buffer[2], ._padding = 0 } }),
-        4 => try instructions.append(Instruction2{ .EXEC_4 = .{ .opcode1 = exec_buffer[0], .opcode2 = exec_buffer[1], .opcode3 = exec_buffer[2], .opcode4 = exec_buffer[3] } }),
-        else => unreachable,
-    }
-}
-
-/// Check if opcode has static gas cost (can be batched in EXEC_N)
-fn isStaticGasOpcode(opcode: u8) bool {
-    return switch (opcode) {
-        // Dynamic gas opcodes
-        0x20, // KECCAK256
-        0x31, // BALANCE
-        0x3C, // EXTCODESIZE
-        0x3D, // EXTCODECOPY
-        0x3F, // EXTCODEHASH
-        0x40, // BLOCKHASH
-        0x51, // MLOAD
-        0x52, // MSTORE
-        0x53, // MSTORE8
-        0x54, // SLOAD
-        0x55, // SSTORE
-        0x56, // JUMP
-        0x57, // JUMPI
-        0x5C, // TLOAD
-        0x5D, // TSTORE
-        0x5E, // MCOPY
-        0xF0, // CREATE
-        0xF1, // CALL
-        0xF2, // CALLCODE
-        0xF4, // DELEGATECALL
-        0xF5, // CREATE2
-        0xFA, // STATICCALL
-        => false,
-        else => true,
-    };
-}
-
-/// Handle PUSH instruction with lookahead for optimization
-fn handlePushWithLookahead(instructions: *std.ArrayList(Instruction2), opcodes: *std.ArrayList(Opcodes), bytecode: []const u8, pc: *u16) !void {
-    const opcode_byte = bytecode[pc.*];
-    const push_size = opcode_byte - 0x5F; // PUSH1=1 byte, PUSH32=32 bytes
-    const data_start = pc.* + 1;
-    const data_end = @min(data_start + push_size, bytecode.len);
-    const push_data = bytecode[data_start..data_end];
-
-    // Look ahead to see what comes after the PUSH
-    const next_pc = pc.* + 1 + push_size;
-    if (next_pc < bytecode.len) {
-        const next_opcode = bytecode[next_pc];
-
-        // Check for JUMP/JUMPI patterns (highest priority)
-        if (next_opcode == 0x56 or next_opcode == 0x57) {
-            // Look for PUSH+JUMP pattern - try to resolve jump target
-            if (push_size <= 2) { // Jump targets are typically small
-                var target: u16 = 0;
-                for (push_data, 0..) |byte, i| {
-                    target |= (@as(u16, byte) << @intCast((push_data.len - 1 - i) * 8));
-                }
-
-                // For now, treat as UNKNOWN_JUMP since we don't have full analysis
-                if (next_opcode == 0x56) {
-                    try instructions.append(Instruction2{ .UNKNOWN_JUMP = 0 });
-                } else {
-                    try instructions.append(Instruction2{ .UNKNOWN_JUMPI = 0 });
-                }
-                try opcodes.append(@enumFromInt(opcode_byte));
-                try opcodes.append(@enumFromInt(next_opcode));
-                pc.* = next_pc + 1;
-                return;
-            }
-        }
-
-        // Check for PUSH_VALUE_FUSED pattern (second priority)
-        if (push_size <= 2) { // Small values that fit in u16
-            var value: u16 = 0;
-            for (push_data, 0..) |byte, i| {
-                value |= (@as(u16, byte) << @intCast((push_data.len - 1 - i) * 8));
-            }
-            try instructions.append(Instruction2{ .PUSH_VALUE_FUSED = .{ .push_value = value, .next_opcode = next_opcode, ._padding = 0 } });
-            try opcodes.append(@enumFromInt(opcode_byte));
-            try opcodes.append(@enumFromInt(next_opcode));
-            pc.* = next_pc + 1;
-            return;
-        }
-    }
-
-    // Fall back to regular PUSH handling
-    if (push_size <= 4) {
-        // PUSH_VALUE for small values
-        var value: u32 = 0;
-        for (push_data, 0..) |byte, i| {
-            value |= (@as(u32, byte) << @intCast((push_data.len - 1 - i) * 8));
-        }
-        try instructions.append(Instruction2{ .PUSH_VALUE = value });
-    } else {
-        // PUSH_PC for large values
-        try instructions.append(Instruction2{ .PUSH_PC = pc.* });
-    }
-
-    try opcodes.append(@enumFromInt(opcode_byte));
-    pc.* = @intCast(next_pc);
+    // Add null terminator to instructions array before returning
+    try instructions.append(Instruction2{ .END = .{ .end_type = .INVALID, ._padding1 = 0, ._padding2 = 0, ._padding3 = 0 } });
 }
