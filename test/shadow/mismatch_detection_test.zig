@@ -92,6 +92,7 @@ test "shadow mismatch detection: error propagation" {
     // Code that will fail in both EVMs (invalid opcode)
     const invalid_code = [_]u8{
         0xFE, // Invalid opcode
+        0x00, // STOP (won't be reached but needed for analysis)
     };
     
     const call_params = CallParams{ .call = .{

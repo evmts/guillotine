@@ -220,6 +220,15 @@ pub const opcode = @import("opcodes/opcode.zig");
 /// Logger for EVM operations
 pub const Log = @import("log.zig");
 
+/// Shadow execution for debugging and comparison
+pub const shadow = struct {
+    pub const DebugShadow = @import("shadow/shadow.zig");
+    pub const ShadowMode = @import("shadow/shadow.zig").ShadowMode;
+    pub const ShadowConfig = @import("shadow/shadow.zig").ShadowConfig;
+    pub const ShadowMismatch = @import("shadow/shadow.zig").ShadowMismatch;
+    pub const shadow_compare_block = @import("shadow/shadow_compare_block.zig");
+};
+
 /// Structured tracing for devtools and debugging
 pub const tracing = struct {
     pub const TracerConfig = @import("tracing/trace_types.zig").TracerConfig;

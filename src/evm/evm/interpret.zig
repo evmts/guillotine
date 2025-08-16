@@ -296,10 +296,6 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             // Set to next instruction right away
             i += 1;
-            if (i >= instructions.len) {
-                // We've reached the end of instructions without a terminator
-                @panic("Instruction analysis error: reached end without terminator");
-            }
             const next_instruction = &instructions[i];
             instruction = next_instruction;
 
@@ -343,10 +339,6 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             // Set to next instruction right away
             i += 1;
-            if (i >= instructions.len) {
-                // We've reached the end of instructions without a terminator
-                @panic("Instruction analysis error: reached end without terminator");
-            }
             const next_instruction = &instructions[i];
             instruction = next_instruction;
 
@@ -406,10 +398,6 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
             // Set to next instruction right away
             i += 1;
-            if (i >= instructions.len) {
-                // We've reached the end of instructions without a terminator
-                @panic("Instruction analysis error: reached end without terminator");
-            }
             const next_instruction = &instructions[i];
             instruction = next_instruction;
 

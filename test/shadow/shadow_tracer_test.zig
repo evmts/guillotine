@@ -626,10 +626,10 @@ test "shadow tracer: step-by-step execution with state verification" {
     
     // Reset execution tracking and test initial state
     shadow_tracer.reset_execution_tracking();
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_main_step());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_main_block());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_mini_step());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_mini_block());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_primary_step());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_primary_block());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_shadow_step());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_shadow_block());
     
     evm.set_tracer(shadow_tracer.handle());
     evm.set_shadow_mode(.per_block);
@@ -869,17 +869,17 @@ test "shadow tracer: execution state tracking and position verification" {
     defer shadow_tracer.deinit();
     
     // Verify initial state
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_main_step());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_main_block());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_mini_step());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_mini_block());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_primary_step());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_primary_block());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_shadow_step());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_shadow_block());
     
     // Reset and verify
     shadow_tracer.reset_execution_tracking();
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_main_step());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_main_block());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_mini_step());
-    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_mini_block());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_primary_step());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_primary_block());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_shadow_step());
+    try testing.expectEqual(@as(usize, 0), shadow_tracer.get_shadow_block());
     
     // Test step mode setting
     try testing.expectEqual(shadow_tracer.get_step_mode(), .passive);
@@ -952,7 +952,7 @@ test "shadow tracer: mini EVM synchronization in step and block modes" {
         if (mode == .per_block) {
             try testing.expect(shadow_tracer.blocks_compared > 0);
             // In block mode, mini EVM should catch up per block
-            try testing.expectEqual(shadow_tracer.get_main_block(), shadow_tracer.get_mini_block());
+            try testing.expectEqual(shadow_tracer.get_primary_block(), shadow_tracer.get_shadow_block());
         }
         
         // Clear tracer for next iteration

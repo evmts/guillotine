@@ -47,6 +47,7 @@ const REVERT_CODE = [_]u8{
 const INVALID_JUMP = [_]u8{
     0x60, 0xFF, // PUSH1 255 (invalid jump destination)
     0x56,       // JUMP
+    0x00,       // STOP (won't be reached but needed for analysis)
 };
 
 test "shadow comparison: simple arithmetic operation match" {
