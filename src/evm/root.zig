@@ -220,6 +220,15 @@ pub const opcode = @import("opcodes/opcode.zig");
 /// Logger for EVM operations
 pub const Log = @import("log.zig");
 
+/// Shadow execution for debugging and comparison
+pub const shadow = struct {
+    pub const DebugShadow = @import("shadow/shadow.zig");
+    pub const ShadowMode = @import("shadow/shadow.zig").ShadowMode;
+    pub const ShadowConfig = @import("shadow/shadow.zig").ShadowConfig;
+    pub const ShadowMismatch = @import("shadow/shadow.zig").ShadowMismatch;
+    pub const shadow_compare_block = @import("shadow/shadow_compare_block.zig");
+};
+
 /// Structured tracing for devtools and debugging
 pub const tracing = struct {
     pub const TracerConfig = @import("tracing/trace_types.zig").TracerConfig;
@@ -227,6 +236,8 @@ pub const tracing = struct {
     pub const TracerVTable = @import("tracing/trace_types.zig").TracerVTable;
     pub const JSONTracer = @import("tracing/json_tracer.zig").JSONTracer; // for capturing revm-compatible execution traces
     pub const MemoryTracer = @import("tracing/memory_tracer.zig").MemoryTracer;
+    pub const ShadowTracer = @import("tracing/shadow_tracer.zig").ShadowTracer;
+    pub const ExecutionResult = @import("execution/execution_result.zig");
     pub const ExecutionTrace = @import("tracing/trace_types.zig").ExecutionTrace;
     pub const StructLog = @import("tracing/trace_types.zig").StructLog;
     pub const StepInfo = @import("tracing/trace_types.zig").StepInfo;
