@@ -11,10 +11,6 @@ pub const JumpType = enum { jump, jumpi, other };
 // 1. Real EVM opcodes (0x00-0xFF) - will replace exec/dynamic_gas
 // 2. Synthetic tags (>0xFF) - for control flow and special handling
 pub const Tag = enum(u16) {
-    // Keep legacy tags for backward compatibility (will be removed later)
-    exec = 0xFFF0,
-    dynamic_gas = 0xFFF1,
-    
     // Synthetic tags for control flow (start at 0x100)
     noop = 0x100,
     word = 0x101,
@@ -204,9 +200,8 @@ pub const Instruction = packed struct(u32) {
 pub fn InstructionType(comptime tag: Tag) type {
     // Check if it's a real opcode first
     if (comptime isRealOpcode(tag)) {
-        // Real opcodes are still mapped to exec/dynamic_gas during transition
-        // This is a placeholder that will be removed
-        return ExecInstruction;
+        // Real opcodes don't have payload types - they use direct dispatch
+        return void;
     }
     
     return switch (tag) {
@@ -214,15 +209,13 @@ pub fn InstructionType(comptime tag: Tag) type {
         .jump_pc => JumpPcInstruction,
         .conditional_jump_unresolved => ConditionalJumpUnresolvedInstruction,
         .conditional_jump_invalid => ConditionalJumpInvalidInstruction,
-        .exec => ExecInstruction,
         .conditional_jump_pc => ConditionalJumpPcInstruction,
         .word => WordInstruction,
         .pc => PcInstruction,
         .block_info => BlockInstruction,
-        .dynamic_gas => DynamicGasInstruction,
         .jump_unresolved => unreachable, // Handled specially
         .conditional_jump_idx => unreachable, // Not used
-        else => unreachable,
+        else => unreachable, // Real opcodes don't have payloads
     };
 }
 
@@ -235,9 +228,7 @@ pub fn getInstructionSize(comptime tag: Tag) usize {
         .jump_pc => @sizeOf(JumpPcInstruction),
         .conditional_jump_pc => @sizeOf(ConditionalJumpPcInstruction),
         .pc => @sizeOf(PcInstruction),
-        .exec => @sizeOf(ExecInstruction),
         .block_info => @sizeOf(BlockInstruction),
-        .dynamic_gas => @sizeOf(DynamicGasInstruction),
         .word => @sizeOf(WordInstruction),
         .jump_unresolved, .conditional_jump_idx => 0, // Special handling
         // All real opcodes don't have instruction sizes (will use direct dispatch)
@@ -278,11 +269,6 @@ pub const DynamicGas = struct {
     exec_fn: ExecutionFunc,
 };
 
-/// Execution instruction with function pointer only
-pub const ExecInstruction = struct {
-    exec_fn: ExecutionFunc,
-};
-
 /// Noop instruction (no data needed, tag is sufficient)
 pub const NoopInstruction = struct {};
 
@@ -291,12 +277,6 @@ pub const BlockInstruction = struct {
     gas_cost: u32,
     stack_req: u16,
     stack_max_growth: u16,
-};
-
-/// Dynamic gas instruction with gas function and exec function
-pub const DynamicGasInstruction = struct {
-    gas_fn: DynamicGasFunc,
-    exec_fn: ExecutionFunc,
 };
 
 /// Conditional jump to invalid destination (no data needed, tag is sufficient)
@@ -369,16 +349,8 @@ comptime {
     if (@sizeOf(PcInstruction) != 2) @compileError("PcInstruction must be 2 bytes");
 
     // Validate instruction sizes fit in bucket system
-    // ExecInstruction: single function pointer (4 or 8 bytes)
-    const exec_size = @sizeOf(ExecInstruction);
-    if (exec_size != 4 and exec_size != 8) @compileError("ExecInstruction must be 4 or 8 bytes");
-    
     // BlockInstruction: u32 + u16 + u16 = 8 bytes
     if (@sizeOf(BlockInstruction) != 8) @compileError("BlockInstruction must be 8 bytes");
-
-    // DynamicGasInstruction: two function pointers (8 or 16 bytes)
-    const dynamic_size = @sizeOf(DynamicGasInstruction);
-    if (dynamic_size != 8 and dynamic_size != 16) @compileError("DynamicGasInstruction must be 8 or 16 bytes");
     
     // WordInstruction: slice (8 or 16 bytes)
     const word_size = @sizeOf(WordInstruction);
@@ -389,10 +361,8 @@ comptime {
     if (getInstructionSize(.jump_pc) != @sizeOf(JumpPcInstruction)) @compileError("jump_pc size mismatch");
     if (getInstructionSize(.conditional_jump_unresolved) != @sizeOf(ConditionalJumpUnresolvedInstruction)) @compileError("conditional_jump_unresolved size mismatch");
     if (getInstructionSize(.conditional_jump_invalid) != @sizeOf(ConditionalJumpInvalidInstruction)) @compileError("conditional_jump_invalid size mismatch");
-    if (getInstructionSize(.exec) != @sizeOf(ExecInstruction)) @compileError("exec size mismatch");
     if (getInstructionSize(.conditional_jump_pc) != @sizeOf(ConditionalJumpPcInstruction)) @compileError("conditional_jump_pc size mismatch");
     if (getInstructionSize(.pc) != @sizeOf(PcInstruction)) @compileError("pc size mismatch");
     if (getInstructionSize(.block_info) != @sizeOf(BlockInstruction)) @compileError("block_info size mismatch");
-    if (getInstructionSize(.dynamic_gas) != @sizeOf(DynamicGasInstruction)) @compileError("dynamic_gas size mismatch");
     if (getInstructionSize(.word) != @sizeOf(WordInstruction)) @compileError("word size mismatch");
 }

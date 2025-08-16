@@ -23,7 +23,7 @@ pub const Size2Counts = struct {
 };
 
 pub const Size8Counts = struct {
-    exec: u24 = 0,
+    real_opcodes: u24 = 0, // Real EVM opcodes (direct dispatch)
     block_info: u24 = 0,
 };
 
@@ -39,7 +39,6 @@ comptime {
 }
 pub const Size16Counts = struct {
     word: u24 = 0,
-    dynamic_gas: u24 = 0,
 };
 
 /// Generic function to get instruction parameters from size-based arrays

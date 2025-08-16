@@ -135,52 +135,7 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             }
             continue :dispatch instructions[i].tag;
         },
-        // .exec runs a ExecutionFunction type instruction
-        // 1. Execute the attatched function with frame
-        // 2. Goto the next instruction next
-        .exec => {
-            @branchHint(.likely);
-            const instruction = &instructions[i];
-            pre_step(self, frame, instruction, &loop_iterations);
 
-            const params = analysis.getInstructionParams(.exec, instruction.id);
-
-            // Set to next instruction right away
-            i += 1;
-
-            try params.exec_fn(frame);
-
-            continue :dispatch instructions[i].tag;
-        },
-        // .dynamic_gas is like .exec but it also dynamically charges gas that couldn't be statically analyzed
-        .dynamic_gas => {
-            @branchHint(.likely);
-            const instruction = &instructions[i];
-            pre_step(self, frame, instruction, &loop_iterations);
-
-            const params = analysis.getInstructionParams(.dynamic_gas, instruction.id);
-
-            // Set to next instruction right away
-            i += 1;
-
-            const additional_gas = params.gas_fn(frame) catch |err| {
-                @branchHint(.cold);
-                if (err == ExecutionError.Error.OutOfOffset) {
-                    return err;
-                }
-                frame.gas_remaining = 0;
-                return ExecutionError.Error.OutOfGas;
-            };
-            if (frame.gas_remaining < additional_gas) {
-                @branchHint(.cold);
-                frame.gas_remaining = 0;
-                return ExecutionError.Error.OutOfGas;
-            }
-            frame.gas_remaining -= additional_gas;
-            try params.exec_fn(frame);
-
-            continue :dispatch instructions[i].tag;
-        },
         // .noop does nothing but go to next instruction
         // In future this will get optimized away to not needing to exist
         .noop => {
@@ -316,148 +271,175 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             return error.STOP;
         },
         .op_add => {
-            try execution.arithmetic.op_add(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_add(frame);
+            continue :dispatch next_tag;
         },
         .op_mul => {
-            try execution.arithmetic.op_mul(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_mul(frame);
+            continue :dispatch next_tag;
         },
         .op_sub => {
-            try execution.arithmetic.op_sub(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_sub(frame);
+            continue :dispatch next_tag;
         },
         .op_div => {
-            try execution.arithmetic.op_div(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_div(frame);
+            continue :dispatch next_tag;
         },
         .op_sdiv => {
-            try execution.arithmetic.op_sdiv(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_sdiv(frame);
+            continue :dispatch next_tag;
         },
         .op_mod => {
-            try execution.arithmetic.op_mod(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_mod(frame);
+            continue :dispatch next_tag;
         },
         .op_smod => {
-            try execution.arithmetic.op_smod(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_smod(frame);
+            continue :dispatch next_tag;
         },
         .op_addmod => {
-            try execution.arithmetic.op_addmod(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_addmod(frame);
+            continue :dispatch next_tag;
         },
         .op_mulmod => {
-            try execution.arithmetic.op_mulmod(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_mulmod(frame);
+            continue :dispatch next_tag;
         },
         .op_exp => {
-            try execution.arithmetic.op_exp(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_exp(frame);
+            continue :dispatch next_tag;
         },
         .op_signextend => {
-            try execution.arithmetic.op_signextend(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.arithmetic.op_signextend(frame);
+            continue :dispatch next_tag;
         },
 
         // Comparison opcodes
         .op_lt => {
-            try execution.comparison.op_lt(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.comparison.op_lt(frame);
+            continue :dispatch next_tag;
         },
         .op_gt => {
-            try execution.comparison.op_gt(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.comparison.op_gt(frame);
+            continue :dispatch next_tag;
         },
         .op_slt => {
-            try execution.comparison.op_slt(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.comparison.op_slt(frame);
+            continue :dispatch next_tag;
         },
         .op_sgt => {
-            try execution.comparison.op_sgt(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.comparison.op_sgt(frame);
+            continue :dispatch next_tag;
         },
         .op_eq => {
-            try execution.comparison.op_eq(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.comparison.op_eq(frame);
+            continue :dispatch next_tag;
         },
         .op_iszero => {
-            try execution.comparison.op_iszero(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.comparison.op_iszero(frame);
+            continue :dispatch next_tag;
         },
 
         // Bitwise opcodes
         .op_and => {
-            try execution.bitwise.op_and(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_and(frame);
+            continue :dispatch next_tag;
         },
         .op_or => {
-            try execution.bitwise.op_or(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_or(frame);
+            continue :dispatch next_tag;
         },
         .op_xor => {
-            try execution.bitwise.op_xor(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_xor(frame);
+            continue :dispatch next_tag;
         },
         .op_not => {
-            try execution.bitwise.op_not(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_not(frame);
+            continue :dispatch next_tag;
         },
         .op_byte => {
-            try execution.bitwise.op_byte(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_byte(frame);
+            continue :dispatch next_tag;
         },
         .op_shl => {
-            try execution.bitwise.op_shl(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_shl(frame);
+            continue :dispatch next_tag;
         },
         .op_shr => {
-            try execution.bitwise.op_shr(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_shr(frame);
+            continue :dispatch next_tag;
         },
         .op_sar => {
-            try execution.bitwise.op_sar(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.bitwise.op_sar(frame);
+            continue :dispatch next_tag;
         },
 
         // Crypto opcodes
         .op_keccak256 => {
             // KECCAK256 already handles its own gas internally
-            try execution.crypto.op_keccak256(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.crypto.op_keccak256(frame);
+            continue :dispatch next_tag;
         },
 
         // Stack operations
         .op_pop => {
-            try execution.stack.op_pop(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_pop(frame);
+            continue :dispatch next_tag;
         },
         .op_push0 => {
             // PUSH0 is handled via .word tag, shouldn't reach here
@@ -465,198 +447,236 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             unreachable;
         },
         .op_dup1 => {
-            try execution.stack.op_dup1(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup1(frame);
+            continue :dispatch next_tag;
         },
         .op_dup2 => {
-            try execution.stack.op_dup2(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup2(frame);
+            continue :dispatch next_tag;
         },
         .op_dup3 => {
-            try execution.stack.op_dup3(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup3(frame);
+            continue :dispatch next_tag;
         },
         .op_dup4 => {
-            try execution.stack.op_dup4(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup4(frame);
+            continue :dispatch next_tag;
         },
         .op_dup5 => {
-            try execution.stack.op_dup5(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup5(frame);
+            continue :dispatch next_tag;
         },
         .op_dup6 => {
-            try execution.stack.op_dup6(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup6(frame);
+            continue :dispatch next_tag;
         },
         .op_dup7 => {
-            try execution.stack.op_dup7(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup7(frame);
+            continue :dispatch next_tag;
         },
         .op_dup8 => {
-            try execution.stack.op_dup8(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup8(frame);
+            continue :dispatch next_tag;
         },
         .op_dup9 => {
-            try execution.stack.op_dup9(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup9(frame);
+            continue :dispatch next_tag;
         },
         .op_dup10 => {
-            try execution.stack.op_dup10(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup10(frame);
+            continue :dispatch next_tag;
         },
         .op_dup11 => {
-            try execution.stack.op_dup11(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup11(frame);
+            continue :dispatch next_tag;
         },
         .op_dup12 => {
-            try execution.stack.op_dup12(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup12(frame);
+            continue :dispatch next_tag;
         },
         .op_dup13 => {
-            try execution.stack.op_dup13(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup13(frame);
+            continue :dispatch next_tag;
         },
         .op_dup14 => {
-            try execution.stack.op_dup14(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup14(frame);
+            continue :dispatch next_tag;
         },
         .op_dup15 => {
-            try execution.stack.op_dup15(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup15(frame);
+            continue :dispatch next_tag;
         },
         .op_dup16 => {
-            try execution.stack.op_dup16(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_dup16(frame);
+            continue :dispatch next_tag;
         },
         .op_swap1 => {
-            try execution.stack.op_swap1(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap1(frame);
+            continue :dispatch next_tag;
         },
         .op_swap2 => {
-            try execution.stack.op_swap2(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap2(frame);
+            continue :dispatch next_tag;
         },
         .op_swap3 => {
-            try execution.stack.op_swap3(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap3(frame);
+            continue :dispatch next_tag;
         },
         .op_swap4 => {
-            try execution.stack.op_swap4(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap4(frame);
+            continue :dispatch next_tag;
         },
         .op_swap5 => {
-            try execution.stack.op_swap5(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap5(frame);
+            continue :dispatch next_tag;
         },
         .op_swap6 => {
-            try execution.stack.op_swap6(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap6(frame);
+            continue :dispatch next_tag;
         },
         .op_swap7 => {
-            try execution.stack.op_swap7(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap7(frame);
+            continue :dispatch next_tag;
         },
         .op_swap8 => {
-            try execution.stack.op_swap8(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap8(frame);
+            continue :dispatch next_tag;
         },
         .op_swap9 => {
-            try execution.stack.op_swap9(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap9(frame);
+            continue :dispatch next_tag;
         },
         .op_swap10 => {
-            try execution.stack.op_swap10(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap10(frame);
+            continue :dispatch next_tag;
         },
         .op_swap11 => {
-            try execution.stack.op_swap11(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap11(frame);
+            continue :dispatch next_tag;
         },
         .op_swap12 => {
-            try execution.stack.op_swap12(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap12(frame);
+            continue :dispatch next_tag;
         },
         .op_swap13 => {
-            try execution.stack.op_swap13(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap13(frame);
+            continue :dispatch next_tag;
         },
         .op_swap14 => {
-            try execution.stack.op_swap14(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap14(frame);
+            continue :dispatch next_tag;
         },
         .op_swap15 => {
-            try execution.stack.op_swap15(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap15(frame);
+            continue :dispatch next_tag;
         },
         .op_swap16 => {
-            try execution.stack.op_swap16(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.stack.op_swap16(frame);
+            continue :dispatch next_tag;
         },
 
         // Memory operations
         .op_mload => {
-            try execution.memory.op_mload(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.memory.op_mload(frame);
+            continue :dispatch next_tag;
         },
         .op_mstore => {
-            try execution.memory.op_mstore(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.memory.op_mstore(frame);
+            continue :dispatch next_tag;
         },
         .op_mstore8 => {
-            try execution.memory.op_mstore8(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.memory.op_mstore8(frame);
+            continue :dispatch next_tag;
         },
         .op_msize => {
-            try execution.memory.op_msize(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.memory.op_msize(frame);
+            continue :dispatch next_tag;
         },
         .op_mcopy => {
-            try execution.memory.op_mcopy(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.memory.op_mcopy(frame);
+            continue :dispatch next_tag;
         },
 
         // Storage operations
         .op_sload => {
-            try execution.storage.op_sload(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.storage.op_sload(frame);
+            continue :dispatch next_tag;
         },
         .op_sstore => {
             // Dynamic gas for SSTORE
@@ -664,19 +684,22 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.storage.op_sstore(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.storage.op_sstore(frame);
+            continue :dispatch next_tag;
         },
         .op_tload => {
-            try execution.storage.op_tload(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.storage.op_tload(frame);
+            continue :dispatch next_tag;
         },
         .op_tstore => {
-            try execution.storage.op_tstore(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.storage.op_tstore(frame);
+            continue :dispatch next_tag;
         },
 
         // Control flow
@@ -712,180 +735,214 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
 
         // Environment opcodes
         .op_address => {
-            try execution.environment.op_address(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_address(frame);
+            continue :dispatch next_tag;
         },
         .op_balance => {
-            try execution.environment.op_balance(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_balance(frame);
+            continue :dispatch next_tag;
         },
         .op_origin => {
-            try execution.environment.op_origin(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_origin(frame);
+            continue :dispatch next_tag;
         },
         .op_caller => {
-            try execution.environment.op_caller(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_caller(frame);
+            continue :dispatch next_tag;
         },
         .op_callvalue => {
-            try execution.environment.op_callvalue(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_callvalue(frame);
+            continue :dispatch next_tag;
         },
         .op_calldataload => {
-            try execution.environment.op_calldataload(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_calldataload(frame);
+            continue :dispatch next_tag;
         },
         .op_calldatasize => {
-            try execution.environment.op_calldatasize(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_calldatasize(frame);
+            continue :dispatch next_tag;
         },
         .op_calldatacopy => {
-            try execution.environment.op_calldatacopy(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_calldatacopy(frame);
+            continue :dispatch next_tag;
         },
         .op_codesize => {
-            try execution.environment.op_codesize(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_codesize(frame);
+            continue :dispatch next_tag;
         },
         .op_codecopy => {
-            try execution.environment.op_codecopy(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_codecopy(frame);
+            continue :dispatch next_tag;
         },
         .op_gasprice => {
-            try execution.environment.op_gasprice(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_gasprice(frame);
+            continue :dispatch next_tag;
         },
         .op_extcodesize => {
-            try execution.environment.op_extcodesize(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_extcodesize(frame);
+            continue :dispatch next_tag;
         },
         .op_extcodecopy => {
-            try execution.environment.op_extcodecopy(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_extcodecopy(frame);
+            continue :dispatch next_tag;
         },
         .op_returndatasize => {
-            try execution.environment.op_returndatasize(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_returndatasize(frame);
+            continue :dispatch next_tag;
         },
         .op_returndatacopy => {
-            try execution.environment.op_returndatacopy(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_returndatacopy(frame);
+            continue :dispatch next_tag;
         },
         .op_extcodehash => {
-            try execution.environment.op_extcodehash(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_extcodehash(frame);
+            continue :dispatch next_tag;
         },
         .op_selfbalance => {
-            try execution.environment.op_selfbalance(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_selfbalance(frame);
+            continue :dispatch next_tag;
         },
 
         // Block opcodes
         .op_blockhash => {
-            try execution.block.op_blockhash(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_blockhash(frame);
+            continue :dispatch next_tag;
         },
         .op_coinbase => {
-            try execution.block.op_coinbase(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_coinbase(frame);
+            continue :dispatch next_tag;
         },
         .op_timestamp => {
-            try execution.block.op_timestamp(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_timestamp(frame);
+            continue :dispatch next_tag;
         },
         .op_number => {
-            try execution.block.op_number(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_number(frame);
+            continue :dispatch next_tag;
         },
         .op_difficulty => {
-            try execution.block.op_difficulty(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_difficulty(frame);
+            continue :dispatch next_tag;
         },
         .op_gaslimit => {
-            try execution.block.op_gaslimit(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_gaslimit(frame);
+            continue :dispatch next_tag;
         },
         .op_chainid => {
-            try execution.environment.op_chainid(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.environment.op_chainid(frame);
+            continue :dispatch next_tag;
         },
         .op_basefee => {
-            try execution.block.op_basefee(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_basefee(frame);
+            continue :dispatch next_tag;
         },
         .op_blobhash => {
-            try execution.block.op_blobhash(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_blobhash(frame);
+            continue :dispatch next_tag;
         },
         .op_blobbasefee => {
-            try execution.block.op_blobbasefee(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.block.op_blobbasefee(frame);
+            continue :dispatch next_tag;
         },
 
         // Log operations
         .op_log0 => {
-            try execution.log.log_0(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.log.log_0(frame);
+            continue :dispatch next_tag;
         },
         .op_log1 => {
-            try execution.log.log_1(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.log.log_1(frame);
+            continue :dispatch next_tag;
         },
         .op_log2 => {
-            try execution.log.log_2(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.log.log_2(frame);
+            continue :dispatch next_tag;
         },
         .op_log3 => {
-            try execution.log.log_3(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.log.log_3(frame);
+            continue :dispatch next_tag;
         },
         .op_log4 => {
-            try execution.log.log_4(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.log.log_4(frame);
+            continue :dispatch next_tag;
         },
 
         // System operations
         .op_create => {
+            @branchHint(.cold);
             // Dynamic gas for CREATE
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").create_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.system.op_create(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.system.op_create(frame);
+            continue :dispatch next_tag;
         },
         .op_call => {
             // Dynamic gas for CALL
@@ -893,9 +950,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.system.op_call(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.system.op_call(frame);
+            continue :dispatch next_tag;
         },
         .op_callcode => {
             // Dynamic gas for CALLCODE
@@ -903,9 +961,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.system.op_callcode(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.system.op_callcode(frame);
+            continue :dispatch next_tag;
         },
         .op_return => {
             try execution.control.op_return(frame);
@@ -917,19 +976,22 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.system.op_delegatecall(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.system.op_delegatecall(frame);
+            continue :dispatch next_tag;
         },
         .op_create2 => {
+            @branchHint(.cold);
             // Dynamic gas for CREATE2
             const dynamic_gas_fn = @import("../gas/dynamic_gas.zig").create2_dynamic_gas;
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.system.op_create2(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.system.op_create2(frame);
+            continue :dispatch next_tag;
         },
         .op_staticcall => {
             // Dynamic gas for STATICCALL
@@ -937,9 +999,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
             const gas_cost = try dynamic_gas_fn(frame);
             try frame.consume_gas(gas_cost);
 
-            try execution.system.op_staticcall(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.system.op_staticcall(frame);
+            continue :dispatch next_tag;
         },
         .op_revert => {
             try execution.control.op_revert(frame);
@@ -950,9 +1013,10 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         },
         .op_selfdestruct => {
             @branchHint(.cold);
-            try execution.control.op_selfdestruct(frame);
             i += 1;
-            continue :dispatch instructions[i].tag;
+            const next_tag = instructions[i].tag;
+            try execution.control.op_selfdestruct(frame);
+            continue :dispatch next_tag;
         },
     }
 }

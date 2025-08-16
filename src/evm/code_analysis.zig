@@ -139,19 +139,20 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
         jumpdest_bitmap.deinit(); // Free the temporary bitmap
 
         const empty_instructions = try allocator.alloc(Instruction, 1);
-        empty_instructions[0] = .{ .tag = .exec, .id = 0 };
+        empty_instructions[0] = .{ .tag = .op_stop, .id = 0 };
 
         // Allocate size-based arrays
         const empty_size2 = try allocator.alloc(Bucket2, 0);
-        const empty_size8 = try allocator.alloc(Bucket8, 1); // Need 1 exec instruction for STOP
+        const empty_size8 = try allocator.alloc(Bucket8, 1); // Need 1 instruction for STOP
         const empty_size16 = try allocator.alloc(Bucket16, 0);
 
-        // Create and copy the STOP exec instruction to size8 array
-        const stop_op = jump_table.get_operation(@intFromEnum(Opcode.Enum.STOP));
-        const exec_inst = @import("instruction.zig").ExecInstruction{
-            .exec_fn = stop_op.execute,
-        };
-        @memcpy(empty_size8[0].bytes[0..@sizeOf(@import("instruction.zig").ExecInstruction)], std.mem.asBytes(&exec_inst));
+        // Create and copy the STOP instruction to size8 array
+        // For real opcodes, we just store the instruction header
+        const stop_inst = Instruction{ .tag = .op_stop, .id = 0 };
+        const stop_bytes = std.mem.asBytes(&stop_inst);
+        var bucket_bytes: [8]u8 = [_]u8{0} ** 8;
+        @memcpy(bucket_bytes[0..@sizeOf(Instruction)], stop_bytes);
+        empty_size8[0].bytes = bucket_bytes;
 
         const empty_jump_types = try allocator.alloc(JumpType, 0);
         const empty_pc_map = try allocator.alloc(u16, 0);
@@ -164,7 +165,7 @@ pub fn from_code(allocator: std.mem.Allocator, code: []const u8, jump_table: *co
             .size16_instructions = empty_size16,
             .size0_counts = .{},
             .size2_counts = .{},
-            .size8_counts = .{ .exec = 1 },
+            .size8_counts = .{ .real_opcodes = 1 },
             .size16_counts = .{},
             .pc_to_block_start = empty_pc_map,
             .jumpdest_array = jumpdest_array,
