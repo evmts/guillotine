@@ -22,7 +22,11 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const ExecutionError = @import("../execution/execution_error.zig");
-const Address = primitives.Address.Address;
+pub const Address = primitives.Address.Address;
+
+// Import call types for message hooks
+pub const CallParams = @import("../host.zig").CallParams;
+pub const CallResult = @import("../host.zig").CallResult;
 
 /// Configuration for tracing capture bounds
 pub const TracerConfig = struct {
@@ -32,6 +36,23 @@ pub const TracerConfig = struct {
     stack_max_items: usize = 32,
     /// Maximum bytes to capture from log data per log entry
     log_data_max_bytes: usize = 512,
+};
+
+/// Control flow decision
+pub const StepControl = enum {
+    cont, // Continue execution
+    pause, // Pause execution
+    abort, // Abort execution
+};
+
+/// Message event for CALL/CREATE operations
+pub const MessageEvent = struct {
+    phase: enum { before, after },
+    params: CallParams,
+    result: ?CallResult, // null for 'before' phase
+    depth: u16,
+    gas_before: u64,
+    gas_after: ?u64, // null for 'before' phase
 };
 
 /// Pre-execution step information captured before opcode execution
@@ -408,62 +429,101 @@ pub const ExecutionErrorEnhanced = struct {
     }
 };
 
-/// Complete tracer interface with all methods from original spec
+/// Complete tracer interface with all hook types optional for maximum flexibility
 pub const TracerVTable = struct {
-    /// Called before each opcode execution
-    step_before: *const fn (ptr: *anyopaque, step_info: StepInfo) void,
-    /// Called after each opcode execution
-    step_after: *const fn (ptr: *anyopaque, step_result: StepResult) void,
-    /// Called when execution completes
+    // Step hooks - all optional so users can choose what they need
+    /// Called before each opcode execution (optional)
+    on_step_before: ?*const fn (ptr: *anyopaque, step_info: StepInfo) void = null,
+    /// Called after each opcode execution (optional)
+    on_step_after: ?*const fn (ptr: *anyopaque, step_result: StepResult) void = null,
+    /// Called with complete before→after step transition (optional)
+    on_step_transition: ?*const fn (ptr: *anyopaque, step_info: StepInfo, step_result: StepResult) void = null,
+
+    // Message hooks - all optional for specialized tracers
+    /// Called before CALL/CREATE operations (optional)
+    on_message_before: ?*const fn (ptr: *anyopaque, event: MessageEvent) void = null,
+    /// Called after CALL/CREATE operations (optional)
+    on_message_after: ?*const fn (ptr: *anyopaque, event: MessageEvent) void = null,
+    /// Called with complete before→after message transition (optional)
+    on_message_transition: ?*const fn (ptr: *anyopaque, before_event: MessageEvent, after_event: MessageEvent) void = null,
+
+    // Control flow - optional for debugging tracers
+    /// Get control decision for current step (optional)
+    get_step_control: ?*const fn (ptr: *anyopaque) StepControl = null,
+
+    // Lifecycle hooks - only required hooks for basic functionality
+    /// Called when execution completes (required)
     finalize: *const fn (ptr: *anyopaque, final_result: FinalResult) void,
-    /// Get the complete execution trace
+    /// Get the complete execution trace (required)
     get_trace: *const fn (ptr: *anyopaque, allocator: std.mem.Allocator) anyerror!ExecutionTrace,
-    /// Clean up tracer resources
+    /// Clean up tracer resources (required)
     deinit: *const fn (ptr: *anyopaque, allocator: std.mem.Allocator) void,
 };
 
-/// Enhanced TracerHandle with complete interface
+/// Enhanced TracerHandle with complete interface and consistent naming
 pub const TracerHandle = struct {
     ptr: *anyopaque,
     vtable: *const TracerVTable,
 
-    pub fn stepBefore(self: TracerHandle, step_info: StepInfo) void {
-        self.vtable.step_before(self.ptr, step_info);
+    // Step hooks - all check for null since they're optional
+    pub fn on_step_before(self: TracerHandle, step_info: StepInfo) void {
+        if (self.vtable.on_step_before) |before_fn| {
+            before_fn(self.ptr, step_info);
+        }
     }
 
-    pub fn stepAfter(self: TracerHandle, step_result: StepResult) void {
-        self.vtable.step_after(self.ptr, step_result);
+    pub fn on_step_after(self: TracerHandle, step_result: StepResult) void {
+        if (self.vtable.on_step_after) |after_fn| {
+            after_fn(self.ptr, step_result);
+        }
+        // Note: If no on_step_after hook is implemented, StepResult memory will leak
+        // Tracers that don't implement on_step_after should provide a minimal cleanup hook
     }
 
+    pub fn on_step_transition(self: TracerHandle, step_info: StepInfo, step_result: StepResult) void {
+        if (self.vtable.on_step_transition) |transition_fn| {
+            transition_fn(self.ptr, step_info, step_result);
+        }
+    }
+
+    // Message hooks
+    pub fn on_message_before(self: TracerHandle, event: MessageEvent) void {
+        if (self.vtable.on_message_before) |before_fn| {
+            before_fn(self.ptr, event);
+        }
+    }
+
+    pub fn on_message_after(self: TracerHandle, event: MessageEvent) void {
+        if (self.vtable.on_message_after) |after_fn| {
+            after_fn(self.ptr, event);
+        }
+    }
+
+    pub fn on_message_transition(self: TracerHandle, before_event: MessageEvent, after_event: MessageEvent) void {
+        if (self.vtable.on_message_transition) |transition_fn| {
+            transition_fn(self.ptr, before_event, after_event);
+        }
+    }
+
+    // Control flow
+    pub fn get_step_control(self: TracerHandle) StepControl {
+        if (self.vtable.get_step_control) |get_control| {
+            return get_control(self.ptr);
+        }
+        return .cont; // Default to continue
+    }
+
+    // Lifecycle hooks
     pub fn finalize(self: TracerHandle, final_result: FinalResult) void {
         self.vtable.finalize(self.ptr, final_result);
     }
 
-    pub fn getTrace(self: TracerHandle, allocator: std.mem.Allocator) !ExecutionTrace {
+    pub fn get_trace(self: TracerHandle, allocator: std.mem.Allocator) !ExecutionTrace {
         return self.vtable.get_trace(self.ptr, allocator);
     }
 
     pub fn deinit(self: TracerHandle, allocator: std.mem.Allocator) void {
         self.vtable.deinit(self.ptr, allocator);
-    }
-
-    // Backward compatibility methods
-    pub fn on_pre_step(self: TracerHandle, step_info: StepInfo) void {
-        self.stepBefore(step_info);
-    }
-
-    pub fn on_post_step(self: TracerHandle, step_result: StepResult) void {
-        self.stepAfter(step_result);
-    }
-
-    pub fn on_finish(self: TracerHandle, return_value: []const u8, success: bool) void {
-        const final_result = FinalResult{
-            .gas_used = 0,
-            .failed = !success,
-            .return_value = return_value,
-            .status = if (success) .Success else .Revert,
-        };
-        self.finalize(final_result);
     }
 };
 

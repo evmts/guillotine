@@ -22,13 +22,13 @@ test "TracerHandle interface complete functionality" {
         get_trace_called: bool = false,
         deinit_called: bool = false,
         
-        fn step_before_impl(ptr: *anyopaque, step_info: tracer.StepInfo) void {
+        fn on_step_before_impl(ptr: *anyopaque, step_info: tracer.StepInfo) void {
             const self: *@This() = @ptrCast(@alignCast(ptr));
             self.step_before_called = true;
             _ = step_info;
         }
         
-        fn step_after_impl(ptr: *anyopaque, step_result: tracer.StepResult) void {
+        fn on_step_after_impl(ptr: *anyopaque, step_result: tracer.StepResult) void {
             const self: *@This() = @ptrCast(@alignCast(ptr));
             self.step_after_called = true;
             _ = step_result;
@@ -61,8 +61,8 @@ test "TracerHandle interface complete functionality" {
             return tracer.TracerHandle{
                 .ptr = self,
                 .vtable = &.{
-                    .step_before = step_before_impl,
-                    .step_after = step_after_impl, 
+                    .on_step_before = on_step_before_impl,
+                    .on_step_after = on_step_after_impl, 
                     .finalize = finalize_impl,
                     .get_trace = get_trace_impl,
                     .deinit = deinit_impl,
@@ -88,13 +88,13 @@ test "TracerHandle interface complete functionality" {
         .memory_size = 0,
     };
     
-    tracer_handle.stepBefore(step_info);
+    tracer_handle.on_step_before(step_info);
     try testing.expect(mock_tracer.step_before_called);
     
     var step_result = try tracer.createEmptyStepResult(allocator);
     defer step_result.deinit(allocator);
     
-    tracer_handle.stepAfter(step_result);
+    tracer_handle.on_step_after(step_result);
     try testing.expect(mock_tracer.step_after_called);
     
     const final_result = tracer.FinalResult{
@@ -108,7 +108,7 @@ test "TracerHandle interface complete functionality" {
     try testing.expect(mock_tracer.finalize_called);
     
     // Test trace retrieval
-    var trace = try tracer_handle.getTrace(allocator);
+    var trace = try tracer_handle.get_trace(allocator);
     defer trace.deinit(allocator);
     try testing.expect(mock_tracer.get_trace_called);
     
@@ -235,12 +235,12 @@ test "MemoryTracer interface validation" {
         .memory_size = 0,
     };
     
-    tracer_handle.stepBefore(step_info);
+    tracer_handle.on_step_before(step_info);
     
     var step_result = try tracer.createEmptyStepResult(allocator);
     defer step_result.deinit(allocator);
     
-    tracer_handle.stepAfter(step_result);
+    tracer_handle.on_step_after(step_result);
     
     const final_result = tracer.FinalResult{
         .gas_used = 50,
@@ -252,7 +252,7 @@ test "MemoryTracer interface validation" {
     tracer_handle.finalize(final_result);
     
     // Test trace retrieval
-    var trace = try tracer_handle.getTrace(allocator);
+    var trace = try tracer_handle.get_trace(allocator);
     defer trace.deinit(allocator);
     
     // Trace should contain data from the operations
@@ -390,12 +390,12 @@ test "Memory pressure handling with restrictive bounds" {
     };
     
     // Should handle gracefully without crashing
-    tracer_handle.stepBefore(step_info);
+    tracer_handle.on_step_before(step_info);
     
     var step_result = try tracer.createEmptyStepResult(allocator);
     defer step_result.deinit(allocator);
     
-    tracer_handle.stepAfter(step_result);
+    tracer_handle.on_step_after(step_result);
     
     const final_result = tracer.FinalResult{
         .gas_used = 100,
@@ -407,34 +407,34 @@ test "Memory pressure handling with restrictive bounds" {
     tracer_handle.finalize(final_result);
     
     // Tracer should still work and produce a trace
-    var trace = try tracer_handle.getTrace(allocator);
+    var trace = try tracer_handle.get_trace(allocator);
     defer trace.deinit(allocator);
     try testing.expect(!trace.failed);
 }
 
-test "Backward compatibility methods" {
+test "TracerHandle interface methods" {
     const allocator = testing.allocator;
     
-    const MockOldTracer = struct {
-        old_pre_step_called: bool = false,
-        old_post_step_called: bool = false,
-        old_finish_called: bool = false,
+    const MockTracer = struct {
+        step_before_called: bool = false,
+        step_after_called: bool = false,
+        finalize_called: bool = false,
         
-        fn step_before_impl(ptr: *anyopaque, step_info: tracer.StepInfo) void {
+        fn on_step_before_impl(ptr: *anyopaque, step_info: tracer.StepInfo) void {
             const self: *@This() = @ptrCast(@alignCast(ptr));
-            self.old_pre_step_called = true;
+            self.step_before_called = true;
             _ = step_info;
         }
         
-        fn step_after_impl(ptr: *anyopaque, step_result: tracer.StepResult) void {
+        fn on_step_after_impl(ptr: *anyopaque, step_result: tracer.StepResult) void {
             const self: *@This() = @ptrCast(@alignCast(ptr));
-            self.old_post_step_called = true;
+            self.step_after_called = true;
             _ = step_result;
         }
         
         fn finalize_impl(ptr: *anyopaque, final_result: tracer.FinalResult) void {
             const self: *@This() = @ptrCast(@alignCast(ptr));
-            self.old_finish_called = true;
+            self.finalize_called = true;
             _ = final_result;
         }
         
@@ -457,8 +457,8 @@ test "Backward compatibility methods" {
             return tracer.TracerHandle{
                 .ptr = self,
                 .vtable = &.{
-                    .step_before = step_before_impl,
-                    .step_after = step_after_impl, 
+                    .on_step_before = on_step_before_impl,
+                    .on_step_after = on_step_after_impl, 
                     .finalize = finalize_impl,
                     .get_trace = get_trace_impl,
                     .deinit = deinit_impl,
@@ -467,10 +467,10 @@ test "Backward compatibility methods" {
         }
     };
     
-    var mock_tracer = MockOldTracer{};
+    var mock_tracer = MockTracer{};
     const tracer_handle = mock_tracer.toTracerHandle();
     
-    // Test backward compatibility methods
+    // Test modern interface methods
     const step_info = tracer.StepInfo{
         .pc = 0,
         .opcode = 0x01,
@@ -484,15 +484,21 @@ test "Backward compatibility methods" {
         .memory_size = 0,
     };
     
-    tracer_handle.on_pre_step(step_info);
-    try testing.expect(mock_tracer.old_pre_step_called);
+    tracer_handle.on_step_before(step_info);
+    try testing.expect(mock_tracer.step_before_called);
     
     var step_result = try tracer.createEmptyStepResult(allocator);
     defer step_result.deinit(allocator);
     
-    tracer_handle.on_post_step(step_result);
-    try testing.expect(mock_tracer.old_post_step_called);
+    tracer_handle.on_step_after(step_result);
+    try testing.expect(mock_tracer.step_after_called);
     
-    tracer_handle.on_finish(&[_]u8{0x01}, true);
-    try testing.expect(mock_tracer.old_finish_called);
+    const final_result = tracer.FinalResult{
+        .gas_used = 100,
+        .failed = false,
+        .return_value = &[_]u8{0x01},
+        .status = .Success,
+    };
+    tracer_handle.finalize(final_result);
+    try testing.expect(mock_tracer.finalize_called);
 }

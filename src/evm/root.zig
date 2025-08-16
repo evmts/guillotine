@@ -237,6 +237,8 @@ pub const tracing = struct {
     pub const StackChanges = @import("tracing/trace_types.zig").StackChanges;
     pub const MemoryChanges = @import("tracing/trace_types.zig").MemoryChanges;
     pub const StorageChange = @import("tracing/trace_types.zig").StorageChange;
+    pub const MessageEvent = @import("tracing/trace_types.zig").MessageEvent;
+    pub const StepControl = @import("tracing/trace_types.zig").StepControl;
     pub const LogEntry = @import("tracing/trace_types.zig").LogEntry;
     pub const ExecutionErrorInfo = @import("tracing/trace_types.zig").ExecutionErrorInfo;
     
@@ -244,6 +246,12 @@ pub const tracing = struct {
     pub const createEmptyStackChanges = @import("tracing/trace_types.zig").createEmptyStackChanges;
     pub const createEmptyMemoryChanges = @import("tracing/trace_types.zig").createEmptyMemoryChanges;
     pub const createEmptyStepResult = @import("tracing/trace_types.zig").createEmptyStepResult;
+    
+    // === Manual Stepping API (only available when tracing is enabled) ===
+    pub const SteppingContext = @import("tracing/stepping_context.zig").SteppingContext;
+    pub const SteppingUtils = @import("tracing/stepping_context.zig").SteppingUtils;
+    pub const step_types = @import("tracing/step_types.zig");
+    pub const ExecutionStateManager = @import("tracing/execution_state.zig").ExecutionStateManager;
 };
 
 /// EIP-7702 EOA delegation bytecode format

@@ -858,6 +858,44 @@ pub fn build(b: *std.Build) void {
         trace_types_test_step.dependOn(&run_trace_types_test.?.step);
     }
     
+    // Stepping tests (require enable-tracing flag)
+    // Run with `zig build -Denable-tracing=true test-stepping`
+    var run_stepping_test: ?*std.Build.Step.Run = null;
+    if (enable_tracing) {
+        const stepping_test = b.addTest(.{
+            .name = "stepping-test",
+            .root_source_file = b.path("test/evm/stepping_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        stepping_test.root_module.addImport("evm", evm_mod);
+        stepping_test.root_module.addImport("primitives", primitives_mod);
+        stepping_test.root_module.addImport("build_options", build_options_mod);
+        if (bn254_lib) |bn254| {
+            stepping_test.linkLibrary(bn254);
+            stepping_test.addIncludePath(b.path("src/bn254_wrapper"));
+        }
+        
+        run_stepping_test = b.addRunArtifact(stepping_test);
+        const stepping_test_step = b.step("test-stepping", "Run stepping API tests");
+        stepping_test_step.dependOn(&run_stepping_test.?.step);
+    }
+    
+    // Combined tracing test step (require enable-tracing flag)
+    // Run with `zig build -Denable-tracing=true test-tracing`
+    if (enable_tracing) {
+        const tracing_test_step = b.step("test-tracing", "Run all tracing tests");
+        if (run_memory_tracer_test) |tracer_test| {
+            tracing_test_step.dependOn(&tracer_test.step);
+        }
+        if (run_trace_types_test) |types_test| {
+            tracing_test_step.dependOn(&types_test.step);
+        }
+        if (run_stepping_test) |step_test| {
+            tracing_test_step.dependOn(&step_test.step);
+        }
+    }
+    
     // Interpret comprehensive tests
     const interpret_test = b.addTest(.{
         .name = "interpret-comprehensive-test",

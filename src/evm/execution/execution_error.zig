@@ -170,6 +170,14 @@ pub const Error = error{
     /// SELFDESTRUCT opcode not available in current hardfork
     /// Some hardforks disable SELFDESTRUCT functionality
     SelfDestructNotAvailable,
+    
+    /// Execution paused for debugging/stepping
+    /// Used by stepping API to pause execution at specific points
+    DebugPaused,
+    
+    /// Execution aborted for debugging/stepping
+    /// Used by stepping API to abort execution
+    DebugAbort,
 };
 
 /// Get a human-readable description for an execution error
@@ -233,6 +241,8 @@ pub fn get_description(err: Error) []const u8 {
         Error.InputSizeExceeded => "Contract input size exceeds maximum allowed size",
         Error.CodeSizeMismatch => "Contract code size mismatch between expected and actual size",
         Error.SelfDestructNotAvailable => "SELFDESTRUCT opcode not available in current hardfork",
+        Error.DebugPaused => "Execution paused for debugging/stepping",
+        Error.DebugAbort => "Execution aborted for debugging/stepping",
     };
 }
 
