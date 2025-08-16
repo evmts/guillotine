@@ -31,10 +31,10 @@ const MAX_STACK_BUFFER_SIZE = 43008; // 42KB with alignment padding
 // 128 KB is about the limit most rpc providers limit call data to so we use it as the default
 pub const MAX_INPUT_SIZE: u18 = 128 * 1024; // 128 kb
 
-pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
     Log.debug("[call] Starting call execution, is_executing={}, has_tracer={}, self_ptr=0x{x}, frame_depth={}", .{ self.is_currently_executing(), self.tracer != null, @intFromPtr(self), self.current_frame_depth });
-    
+
     // Debug: log the call parameters to understand what's being called
     switch (params) {
         .call => |c| {
@@ -285,7 +285,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
 
         Log.debug("[call] Clearing current_output for top-level call (was {})", .{self.current_output.len});
         self.current_output = &.{}; // Clear output buffer from previous calls
-        
+
         // Clear owned output buffer to avoid double-free issues
         if (self.owned_output) |buf| {
             self.allocator.free(buf);
@@ -502,7 +502,7 @@ pub inline fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResu
     Log.debug("[call] About to get output, current_frame_depth={}, frame_stack={}", .{ self.current_frame_depth, self.frame_stack != null });
     if (self.frame_stack) |frames| {
         if (self.current_frame_depth < frames.len) {
-            Log.debug("[call] Frame output_buffer before get: len={}", .{ frames[self.current_frame_depth].output_buffer.len });
+            Log.debug("[call] Frame output_buffer before get: len={}", .{frames[self.current_frame_depth].output_buffer.len});
         }
     }
     const output: []const u8 = host.get_output();
@@ -655,7 +655,7 @@ test "nested call snapshot revert on code analysis failure" {
 
     const addr = primitives.Address.ZERO_ADDRESS;
     const code_hash = try memory_db.set_code(oversized_code);
-    
+
     // Create an account with this code hash
     var account = Account.zero();
     account.code_hash = code_hash;

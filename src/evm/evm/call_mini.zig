@@ -18,7 +18,7 @@ const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
 
 /// Simplified EVM execution without analysis - performs lazy jumpdest validation
 /// This is a simpler alternative to the analysis-based approach used in call()
-pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+pub fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
     const opcode_mod = @import("../opcodes/opcode.zig");
 
@@ -104,17 +104,17 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
     if (is_top_level_call) {
         self.current_frame_depth = 0;
         self.access_list.clear();
-        
+
         self.self_destruct.deinit();
         self.self_destruct = SelfDestruct.init(self.allocator);
-        
+
         self.created_contracts.deinit();
         self.created_contracts = CreatedContracts.init(self.allocator);
-        
+
         // Clear output and input state
         self.current_output = &.{};
         self.current_input = &.{};
-        
+
         if (self.frame_stack == null) {
             self.frame_stack = try std.heap.page_allocator.alloc(Frame, MAX_CALL_DEPTH);
         }
@@ -241,32 +241,32 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
             },
             @intFromEnum(opcode_mod.Enum.JUMP) => {
                 const dest = try frame.stack.pop();
-                
+
                 // Check if destination fits in usize and is within bounds
                 if (dest > call_code.len) {
                     exec_err = ExecutionError.Error.InvalidJump;
                     break;
                 }
-                
+
                 const dest_usize = @as(usize, @intCast(dest));
-                
+
                 // Check if destination is valid jumpdest
                 if (dest_usize >= call_code.len or call_code[dest_usize] != @intFromEnum(opcode_mod.Enum.JUMPDEST)) {
                     exec_err = ExecutionError.Error.InvalidJump;
                     break;
                 }
-                
+
                 pc = dest_usize;
                 continue;
             },
             @intFromEnum(opcode_mod.Enum.JUMPI) => {
                 Log.debug("[JUMPI_DEBUG] PC={}, stack_size={}", .{ pc, frame.stack.size() });
-                
+
                 const dest = try frame.stack.pop();
                 const cond = try frame.stack.pop();
-                
+
                 Log.debug("[JUMPI_DEBUG] dest={}, cond={}, taking_jump={}", .{ dest, cond, cond != 0 });
-                
+
                 if (cond != 0) {
                     // Check if destination fits in usize and is within bounds
                     if (dest > call_code.len) {
@@ -274,9 +274,9 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                         exec_err = ExecutionError.Error.InvalidJump;
                         break;
                     }
-                    
+
                     const dest_usize = @as(usize, @intCast(dest));
-                    
+
                     // Check if destination is valid jumpdest
                     if (dest_usize >= call_code.len or call_code[dest_usize] != @intFromEnum(opcode_mod.Enum.JUMPDEST)) {
                         const byte_at_dest = if (dest_usize < call_code.len) call_code[dest_usize] else 0;
@@ -284,13 +284,13 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                         exec_err = ExecutionError.Error.InvalidJump;
                         break;
                     }
-                    
+
                     Log.debug("[JUMPI_DEBUG] Valid jump to {}", .{dest_usize});
                     pc = dest_usize;
                     continue;
                 }
-                
-                Log.debug("[JUMPI_DEBUG] Not taking jump, continuing to PC={}", .{ pc + 1 });
+
+                Log.debug("[JUMPI_DEBUG] Not taking jump, continuing to PC={}", .{pc + 1});
                 pc += 1;
                 continue;
             },
@@ -355,9 +355,9 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                 // Handle PUSH opcodes
                 if (opcode_mod.is_push(op)) {
                     const push_size = opcode_mod.get_push_size(op);
-                    
+
                     Log.debug("[PUSH_DEBUG] PC={}, opcode=0x{x:0>2}, push_size={}", .{ pc, op, push_size });
-                    
+
                     if (pc + push_size >= call_code.len) {
                         Log.debug("[PUSH_DEBUG] Out of bounds: pc={}, push_size={}, code_len={}", .{ pc, push_size, call_code.len });
                         exec_err = ExecutionError.Error.OutOfOffset;
@@ -369,14 +369,14 @@ pub inline fn call_mini(self: *Evm, params: CallParams) ExecutionError.Error!Cal
                     const data_start = pc + 1;
                     const data_end = @min(data_start + push_size, call_code.len);
                     const data = call_code[data_start..data_end];
-                    
+
                     Log.debug("[PUSH_DEBUG] Reading bytes from [{}..{}]: {x}", .{ data_start, data_end, std.fmt.fmtSliceHexLower(data) });
 
                     // Convert bytes to u256 (big-endian)
                     for (data) |byte| {
                         value = (value << 8) | byte;
                     }
-                    
+
                     Log.debug("[PUSH_DEBUG] Final value pushed: {}", .{value});
 
                     try frame.stack.append(value);

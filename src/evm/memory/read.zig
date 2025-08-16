@@ -11,7 +11,7 @@ const SAFE_MEMORY_BOUNDS = builtin.mode != .ReleaseFast and builtin.mode != .Rel
 
 /// Read 32 bytes as u256 at context-relative offset.
 /// Includes bounds checking in Debug/ReleaseSafe modes.
-pub inline fn get_u256(self: *const memory.Memory, relative_offset: usize) errors.MemoryError!u256 {
+pub fn get_u256(self: *const memory.Memory, relative_offset: usize) errors.MemoryError!u256 {
     if (SAFE_MEMORY_BOUNDS) {
         if (relative_offset + 32 > self.context_size()) {
             @branchHint(.cold);
@@ -26,7 +26,7 @@ pub inline fn get_u256(self: *const memory.Memory, relative_offset: usize) error
 /// Read 32 bytes as u256 at context-relative offset without bounds checking.
 /// SAFETY: Caller must ensure offset + 32 <= context_size()
 /// Use only for operations pre-validated by analysis.zig
-pub inline fn get_u256_unsafe(self: *const memory.Memory, relative_offset: usize) u256 {
+pub fn get_u256_unsafe(self: *const memory.Memory, relative_offset: usize) u256 {
     if (SAFE_MEMORY_BOUNDS) {
         std.debug.assert(relative_offset + 32 <= self.context_size());
     }
@@ -37,9 +37,9 @@ pub inline fn get_u256_unsafe(self: *const memory.Memory, relative_offset: usize
 
 /// Read arbitrary slice of memory at context-relative offset.
 /// Includes bounds checking in Debug/ReleaseSafe modes.
-pub inline fn get_slice(self: *const memory.Memory, relative_offset: usize, len: usize) errors.MemoryError![]const u8 {
+pub fn get_slice(self: *const memory.Memory, relative_offset: usize, len: usize) errors.MemoryError![]const u8 {
     if (len == 0) return &[_]u8{};
-    
+
     if (SAFE_MEMORY_BOUNDS) {
         const end = std.math.add(usize, relative_offset, len) catch {
             @branchHint(.cold);
@@ -50,7 +50,7 @@ pub inline fn get_slice(self: *const memory.Memory, relative_offset: usize, len:
             return errors.MemoryError.InvalidOffset;
         }
     }
-    
+
     const abs_offset = self.my_checkpoint + relative_offset;
     const abs_end = abs_offset + len;
     return self.shared_buffer_ref.items[abs_offset..abs_end];
@@ -59,20 +59,20 @@ pub inline fn get_slice(self: *const memory.Memory, relative_offset: usize, len:
 /// Read arbitrary slice without bounds checking.
 /// SAFETY: Caller must ensure offset + len <= context_size() and no overflow
 /// Use only for operations pre-validated by analysis.zig
-pub inline fn get_slice_unsafe(self: *const memory.Memory, relative_offset: usize, len: usize) []const u8 {
+pub fn get_slice_unsafe(self: *const memory.Memory, relative_offset: usize, len: usize) []const u8 {
     if (len == 0) return &[_]u8{};
-    
+
     if (SAFE_MEMORY_BOUNDS) {
         std.debug.assert(relative_offset + len <= self.context_size());
     }
-    
+
     const abs_offset = self.my_checkpoint + relative_offset;
     const abs_end = abs_offset + len;
     return self.shared_buffer_ref.items[abs_offset..abs_end];
 }
 
 /// Read a single byte at context-relative offset (for test compatibility)
-pub inline fn get_byte(self: *const memory.Memory, relative_offset: usize) errors.MemoryError!u8 {
+pub fn get_byte(self: *const memory.Memory, relative_offset: usize) errors.MemoryError!u8 {
     if (SAFE_MEMORY_BOUNDS) {
         if (relative_offset >= self.context_size()) {
             @branchHint(.cold);

@@ -493,7 +493,7 @@ pub fn set_output(self: *Evm, output: []const u8) !void {
     if (output.len > 0 and output.len <= 32) {
         Log.debug("[Evm.set_output] Output data: {x}", .{std.fmt.fmtSliceHexLower(output)});
     }
-    
+
     // Check if this is the same buffer we already own
     if (self.owned_output) |buf| {
         if (output.ptr == buf.ptr and output.len == buf.len) {
@@ -505,7 +505,7 @@ pub fn set_output(self: *Evm, output: []const u8) !void {
         self.allocator.free(buf);
         self.owned_output = null;
     }
-    
+
     // Always make an owned copy so data survives child frame teardown
     if (output.len > 0) {
         const copy = try self.allocator.dupe(u8, output);
@@ -526,12 +526,8 @@ pub fn set_output(self: *Evm, output: []const u8) !void {
 
 /// Get the output buffer for the current frame (Host interface)
 pub fn get_output(self: *Evm) []const u8 {
-    Log.debug("[Evm.get_output] Getting output: frame_stack={}, current_frame_depth={}, current_output.len={}", .{ 
-        self.frame_stack != null, 
-        self.current_frame_depth, 
-        self.current_output.len 
-    });
-    
+    Log.debug("[Evm.get_output] Getting output: frame_stack={}, current_frame_depth={}, current_output.len={}", .{ self.frame_stack != null, self.current_frame_depth, self.current_output.len });
+
     if (self.frame_stack) |frames| {
         if (self.current_frame_depth < frames.len) {
             const result = frames[self.current_frame_depth].output_buffer;
@@ -583,7 +579,7 @@ pub fn get_hardfork(self: *Evm) Hardfork {
 }
 
 // Inline helpers to keep boolean fields and packed flags in sync
-inline fn set_flag(self: *Evm, bit_index: u3, on: bool) void {
+fn set_flag(self: *Evm, bit_index: u3, on: bool) void {
     const mask: u8 = @as(u8, 1) << bit_index;
     if (on) {
         self.flags |= mask;
@@ -592,22 +588,22 @@ inline fn set_flag(self: *Evm, bit_index: u3, on: bool) void {
     }
 }
 
-pub inline fn set_read_only(self: *Evm, on: bool) void {
+pub fn set_read_only(self: *Evm, on: bool) void {
     self.read_only = on;
     set_flag(self, 0, on);
 }
 
-pub inline fn set_is_executing(self: *Evm, on: bool) void {
+pub fn set_is_executing(self: *Evm, on: bool) void {
     self.is_executing = on;
     set_flag(self, 1, on);
 }
 
-pub inline fn is_read_only(self: *const Evm) bool {
+pub fn is_read_only(self: *const Evm) bool {
     // Read from canonical boolean to avoid desync with tests that set read_only directly
     return self.read_only;
 }
 
-pub inline fn is_currently_executing(self: *const Evm) bool {
+pub fn is_currently_executing(self: *const Evm) bool {
     // Read from canonical boolean to avoid desync with direct writes
     return self.is_executing;
 }
@@ -671,7 +667,7 @@ pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, 
         }
         std.debug.print("\n", .{});
     }
-    
+
     // CREATE uses sender address + nonce to calculate contract address
     // Get the nonce before incrementing it
     const nonce = self.state.get_nonce(caller);
@@ -728,7 +724,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[CREATE_DEBUG]   gas: {}", .{gas});
     Log.debug("[CREATE_DEBUG]   new_address: {any}", .{std.fmt.fmtSliceHexLower(&new_address)});
     Log.debug("[CREATE_DEBUG]   current_frame_depth: {}", .{self.current_frame_depth});
-    
+
     if (bytecode.len > 0) {
         Log.debug("[CREATE_DEBUG]   bytecode first 32 bytes: {any}", .{std.fmt.fmtSliceHexLower(bytecode[0..@min(bytecode.len, 32)])});
     }
@@ -798,7 +794,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[CREATE_DEBUG]   InitcodeWordGas: {}", .{GasC.InitcodeWordGas});
     Log.debug("[CREATE_DEBUG]   CreateDataGas: {}", .{GasC.CreateDataGas});
     Log.debug("[CREATE_DEBUG]   precharge total: {}", .{precharge});
-    
+
     if (remaining_gas <= precharge) {
         // Not enough gas to even pay creation overhead
         Log.debug("[CREATE_DEBUG] OutOfGas: remaining_gas {} <= precharge {}", .{ remaining_gas, precharge });

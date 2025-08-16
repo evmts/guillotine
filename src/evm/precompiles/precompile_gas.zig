@@ -117,7 +117,7 @@ pub fn calculate_dynamic_cost(input_data: []const u8, base_cost: u64, calculate_
 /// @param output Output buffer to write result
 /// @param gas_limit Maximum gas available for execution
 /// @return PrecompileOutput with success/failure status and gas usage
-pub inline fn executeHashPrecompile(
+pub fn executeHashPrecompile(
     comptime base_cost: u64,
     comptime per_word_cost: u64,
     comptime hash_fn: fn ([]const u8, []u8) void,
@@ -148,7 +148,7 @@ pub inline fn executeHashPrecompile(
     // Compute hash directly into output buffer (avoids intermediate allocation)
     // Most hash functions can write directly to the output buffer
     hash_fn(input, output);
-    
+
     // Format output in-place if needed (e.g., for padding)
     format_output(output, output);
 
@@ -162,13 +162,13 @@ pub inline fn executeHashPrecompile(
 ///
 /// @param hash_bytes The 20-byte hash to format
 /// @param output The 32-byte output buffer to fill
-pub inline fn formatLeftPaddedHash(comptime hash_size: usize, hash_bytes: []const u8, output: []u8) void {
+pub fn formatLeftPaddedHash(comptime hash_size: usize, hash_bytes: []const u8, output: []u8) void {
     const output_size = 32;
     const padding_size = output_size - hash_size;
-    
+
     // Zero out the entire output buffer
     @memset(output[0..output_size], 0);
-    
+
     // Copy hash to the right position (after padding)
     @memcpy(output[padding_size..output_size], hash_bytes[0..hash_size]);
 }
@@ -180,7 +180,7 @@ pub inline fn formatLeftPaddedHash(comptime hash_size: usize, hash_bytes: []cons
 ///
 /// @param hash_bytes The 32-byte hash to copy
 /// @param output The 32-byte output buffer to fill
-pub inline fn formatDirectHash(comptime hash_size: usize, hash_bytes: []const u8, output: []u8) void {
+pub fn formatDirectHash(comptime hash_size: usize, hash_bytes: []const u8, output: []u8) void {
     @memcpy(output[0..hash_size], hash_bytes[0..hash_size]);
 }
 
@@ -192,12 +192,12 @@ pub inline fn formatDirectHash(comptime hash_size: usize, hash_bytes: []const u8
 /// @param input Source input data
 /// @param padded_buffer Target buffer to fill (must be pre-allocated)
 /// @param target_size Size to pad to
-pub inline fn padInput(input: []const u8, padded_buffer: []u8, target_size: usize) void {
+pub fn padInput(input: []const u8, padded_buffer: []u8, target_size: usize) void {
     std.debug.assert(padded_buffer.len >= target_size);
-    
+
     // Zero out the entire buffer
     @memset(padded_buffer[0..target_size], 0);
-    
+
     // Copy input data (truncate if longer than target)
     const copy_len = @min(input.len, target_size);
     @memcpy(padded_buffer[0..copy_len], input[0..copy_len]);
@@ -210,14 +210,14 @@ pub inline fn padInput(input: []const u8, padded_buffer: []u8, target_size: usiz
 ///
 /// @param bytes Input bytes (up to 32 bytes)
 /// @return u256 value in big-endian representation
-pub inline fn bytesToU256(bytes: []const u8) u256 {
+pub fn bytesToU256(bytes: []const u8) u256 {
     var result: u256 = 0;
     const len = @min(bytes.len, 32);
-    
+
     for (bytes[0..len]) |byte| {
         result = (result << 8) | @as(u256, byte);
     }
-    
+
     return result;
 }
 
@@ -228,12 +228,12 @@ pub inline fn bytesToU256(bytes: []const u8) u256 {
 ///
 /// @param value u256 value to convert
 /// @param output Output buffer (must be at least 32 bytes)
-pub inline fn u256ToBytes(value: u256, output: []u8) void {
+pub fn u256ToBytes(value: u256, output: []u8) void {
     std.debug.assert(output.len >= 32);
-    
+
     var temp_value = value;
     var i: usize = 32;
-    
+
     while (i > 0) {
         i -= 1;
         output[i] = @as(u8, @intCast(temp_value & 0xFF));

@@ -16,7 +16,7 @@ const LARGE_BUFFER_SIZE = 1024; // Reasonable max for stack allocation
 
 /// Optimized hash function using tiered stack buffers for small inputs.
 /// Falls back to memory system for larger inputs.
-inline fn hash_with_stack_buffer(data: []const u8) [32]u8 {
+fn hash_with_stack_buffer(data: []const u8) [32]u8 {
     var hash: [32]u8 = undefined;
 
     if (data.len <= SMALL_BUFFER_SIZE) {

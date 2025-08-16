@@ -149,7 +149,7 @@ pub const OperationView = struct {
 /// ```zig
 /// const op = table.get_operation(0x01); // Get ADD operation
 /// ```
-pub inline fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationView {
+pub fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationView {
     return OperationView{
         .execute = self.execute_funcs[opcode],
         .constant_gas = self.constant_gas[opcode],
