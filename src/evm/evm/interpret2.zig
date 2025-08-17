@@ -225,21 +225,21 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
         while (i < ops_slice.len - 1) : (i += 1) {
             // Skip if not a PUSH instruction
             if (ops_slice[i] != &tailcalls.op_push) continue;
-            
+
             // Get the PC for this instruction
             const inst_pc = analysis.getPc(i);
             if (inst_pc == SimpleAnalysis.MAX_USIZE or inst_pc >= code.len) continue;
-            
+
             // Check if it's a valid PUSH opcode
             const opcode = code[inst_pc];
             if (opcode < 0x60 or opcode > 0x7F) continue;
-            
+
             // Get the next operation
             const next_op = ops_slice[i + 1];
-            
+
             // Determine which fusion to apply
             var fused_op: ?*const anyopaque = null;
-            
+
             // Special handling for jumps - need to validate destination
             if (next_op == &tailcalls.op_jump or next_op == &tailcalls.op_jumpi) {
                 // Read the push value to validate jump destination
@@ -250,7 +250,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
                 while (j < push_size and value_start + j < code.len) : (j += 1) {
                     push_value = (push_value << 8) | code[value_start + j];
                 }
-                
+
                 // Only fuse if destination is a valid JUMPDEST
                 if (push_value < code.len and code[push_value] == 0x5B) {
                     fused_op = if (next_op == &tailcalls.op_jump)
@@ -258,25 +258,37 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
                     else
                         &tailcalls.op_push_then_jumpi;
                 }
+            } else if (next_op == &tailcalls.op_mload) {
+                fused_op = &tailcalls.op_push_then_mload;
+            } else if (next_op == &tailcalls.op_mstore) {
+                fused_op = &tailcalls.op_push_then_mstore;
+            } else if (next_op == &tailcalls.op_eq) {
+                fused_op = &tailcalls.op_push_then_eq;
+            } else if (next_op == &tailcalls.op_lt) {
+                fused_op = &tailcalls.op_push_then_lt;
+            } else if (next_op == &tailcalls.op_gt) {
+                fused_op = &tailcalls.op_push_then_gt;
+            } else if (next_op == &tailcalls.op_and) {
+                fused_op = &tailcalls.op_push_then_and;
+            } else if (next_op == &tailcalls.op_add) {
+                fused_op = &tailcalls.op_push_then_add;
+            } else if (next_op == &tailcalls.op_sub) {
+                fused_op = &tailcalls.op_push_then_sub;
+            } else if (next_op == &tailcalls.op_mul) {
+                fused_op = &tailcalls.op_push_then_mul;
+            } else if (next_op == &tailcalls.op_div) {
+                fused_op = &tailcalls.op_push_then_div;
+            } else if (next_op == &tailcalls.op_sload) {
+                fused_op = &tailcalls.op_push_then_sload;
+            } else if (next_op == &tailcalls.op_dup1) {
+                fused_op = &tailcalls.op_push_then_dup1;
+            } else if (next_op == &tailcalls.op_swap1) {
+                fused_op = &tailcalls.op_push_then_swap1;
             }
-            // Simple fusion mappings for other operations
-            else if (next_op == &tailcalls.op_mload) fused_op = &tailcalls.op_push_then_mload
-            else if (next_op == &tailcalls.op_mstore) fused_op = &tailcalls.op_push_then_mstore
-            else if (next_op == &tailcalls.op_eq) fused_op = &tailcalls.op_push_then_eq
-            else if (next_op == &tailcalls.op_lt) fused_op = &tailcalls.op_push_then_lt
-            else if (next_op == &tailcalls.op_gt) fused_op = &tailcalls.op_push_then_gt
-            else if (next_op == &tailcalls.op_and) fused_op = &tailcalls.op_push_then_and
-            else if (next_op == &tailcalls.op_add) fused_op = &tailcalls.op_push_then_add
-            else if (next_op == &tailcalls.op_sub) fused_op = &tailcalls.op_push_then_sub
-            else if (next_op == &tailcalls.op_mul) fused_op = &tailcalls.op_push_then_mul
-            else if (next_op == &tailcalls.op_div) fused_op = &tailcalls.op_push_then_div
-            else if (next_op == &tailcalls.op_sload) fused_op = &tailcalls.op_push_then_sload
-            else if (next_op == &tailcalls.op_dup1) fused_op = &tailcalls.op_push_then_dup1
-            else if (next_op == &tailcalls.op_swap1) fused_op = &tailcalls.op_push_then_swap1;
-            
+
             // Skip if no fusion found
             if (fused_op == null) continue;
-            
+
             // Apply the fusion
             ops_slice[i] = @as(TailcallFunc, @ptrCast(@alignCast(fused_op.?)));
             ops_slice[i + 1] = &tailcalls.op_nop;
