@@ -21,38 +21,44 @@ const SimpleAnalysis = struct {
     opcodes: []Opcode, // Opcode at each position (0xFF for data bytes)
     jump_table: []JumpEntry, // Sorted list of jump destinations to function pointers
     push_values: []u256, // Values for PUSH operations (indexed by instruction)
-    allocator: std.mem.Allocator,
 
     const JumpEntry = struct {
         dest: usize,
         fn_index: usize, // Index into ops array
     };
-
-    pub fn deinit(self: *SimpleAnalysis) void {
-        self.allocator.free(self.jumpdest_bitvec);
-        self.allocator.free(self.opcodes);
-        self.allocator.free(self.jump_table);
-        self.allocator.free(self.push_values);
-    }
 };
 
-// Perform simple analysis on bytecode
-fn analyzeCode(allocator: std.mem.Allocator, code: []const u8) !SimpleAnalysis {
+// Main interpret function
+pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
+    // Pre-allocate a fixed buffer for all memory needs
+    // Estimate:
+    // - jumpdest_bitvec: code.len * 1 byte (bool)
+    // - opcodes: code.len * 1 byte (u8 enum)
+    // - jump_dests: up to code.len/2 * 16 bytes (JumpEntry is ~16 bytes)
+    // - push_values: up to code.len/2 * 32 bytes (u256 is 32 bytes)
+    // - ops: code.len * 8 bytes (function pointer)
+    // Total rough estimate: code.len * (1 + 1 + 8 + 16 + 32) = code.len * 58
+    // Add 50% safety margin: code.len * 87
+    const estimated_size = code.len * 87 + 4096; // Extra 4KB for overhead
+
+    const buffer = try std.heap.page_allocator.alloc(u8, estimated_size);
+    defer std.heap.page_allocator.free(buffer);
+
+    var fba = std.heap.FixedBufferAllocator.init(buffer);
+    const allocator = fba.allocator();
+
     var jumpdest_bitvec = try allocator.alloc(bool, code.len);
-    errdefer allocator.free(jumpdest_bitvec);
     @memset(jumpdest_bitvec, false);
 
     var opcodes = try allocator.alloc(Opcode, code.len);
-    errdefer allocator.free(opcodes);
-    @memset(opcodes, @enumFromInt(0xFF)); // Invalid opcode for data bytes
+    @memset(opcodes, @enumFromInt(0xFF));
 
     var jump_dests = std.ArrayList(SimpleAnalysis.JumpEntry).init(allocator);
     defer jump_dests.deinit();
 
     var push_values = std.ArrayList(u256).init(allocator);
-    errdefer push_values.deinit();
+    defer push_values.deinit();
 
-    // First pass: identify opcodes and jump destinations
     var pc: usize = 0;
     var instruction_index: usize = 0;
     while (pc < code.len) : (instruction_index += 1) {
@@ -60,7 +66,6 @@ fn analyzeCode(allocator: std.mem.Allocator, code: []const u8) !SimpleAnalysis {
         const opcode = @as(Opcode, @enumFromInt(byte));
         opcodes[pc] = opcode;
 
-        // Check if this is a JUMPDEST
         if (opcode == .JUMPDEST) {
             jumpdest_bitvec[pc] = true;
             try jump_dests.append(.{
@@ -69,12 +74,10 @@ fn analyzeCode(allocator: std.mem.Allocator, code: []const u8) !SimpleAnalysis {
             });
         }
 
-        // Handle PUSH operations and collect values
         if (byte >= 0x60 and byte <= 0x7F) {
-            const push_size = byte - 0x5F; // PUSH1 = 0x60, so size = 1
+            const push_size = byte - 0x5F;
             pc += 1;
 
-            // Read push value
             var value: u256 = 0;
             var i: usize = 0;
             while (i < push_size and pc + i < code.len) : (i += 1) {
@@ -82,11 +85,9 @@ fn analyzeCode(allocator: std.mem.Allocator, code: []const u8) !SimpleAnalysis {
             }
             try push_values.append(value);
 
-            // Mark data bytes as invalid
             const end = @min(pc + push_size, code.len);
             pc = end;
         } else if (byte == 0x5F) {
-            // PUSH0
             try push_values.append(0);
             pc += 1;
         } else {
@@ -94,26 +95,22 @@ fn analyzeCode(allocator: std.mem.Allocator, code: []const u8) !SimpleAnalysis {
         }
     }
 
-    return SimpleAnalysis{
+    // Store analysis data for potential future use
+    _ = SimpleAnalysis{
         .jumpdest_bitvec = jumpdest_bitvec,
         .opcodes = opcodes,
         .jump_table = try jump_dests.toOwnedSlice(),
         .push_values = try push_values.toOwnedSlice(),
-        .allocator = allocator,
     };
-}
 
-// Build ops array of tailcall functions
-fn buildOpsArray(allocator: std.mem.Allocator, code: []const u8) ![]TailcallFunc {
     var ops = std.ArrayList(TailcallFunc).init(allocator);
     defer ops.deinit();
 
-    var pc: usize = 0;
+    pc = 0;
     while (pc < code.len) {
         const byte = code[pc];
         const opcode = @as(Opcode, @enumFromInt(byte));
 
-        // Map opcode to tailcall function
         const fn_ptr = switch (opcode) {
             .STOP => &tailcalls.op_stop,
             .ADD => &tailcalls.op_add,
@@ -233,7 +230,7 @@ fn buildOpsArray(allocator: std.mem.Allocator, code: []const u8) ![]TailcallFunc
             .REVERT => &tailcalls.op_revert,
             .INVALID => &tailcalls.op_invalid,
             .SELFDESTRUCT => &tailcalls.op_selfdestruct,
-            else => &tailcalls.op_invalid, // Unknown opcodes are invalid
+            else => &tailcalls.op_invalid,
         };
 
         try ops.append(fn_ptr);
@@ -247,27 +244,18 @@ fn buildOpsArray(allocator: std.mem.Allocator, code: []const u8) ![]TailcallFunc
         }
     }
 
-    return ops.toOwnedSlice();
-}
+    // Always append a STOP at the end to ensure proper termination
+    // This handles both empty code and code that doesn't end with STOP
+    try ops.append(&tailcalls.op_stop);
 
-// Main interpret function
-pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
-    // Code is already stored in frame.analysis.code
+    const ops_slice = try ops.toOwnedSlice();
 
-    // Use stack allocator - Frame is init'd with this allocator for all its allocations
-    const allocator = std.heap.page_allocator; // Simple allocator for prototype
-
-    // Perform simple analysis
-    var analysis = analyzeCode(allocator, code) catch return Error.OutOfMemory;
-    defer analysis.deinit();
-
-    // Build ops array
-    const ops = buildOpsArray(allocator, code) catch return Error.OutOfMemory;
-    defer allocator.free(ops);
-
-    frame.tailcall_ops = @ptrCast(ops.ptr);
+    frame.tailcall_ops = @ptrCast(ops_slice.ptr);
     frame.tailcall_index = 0;
 
     var ip: usize = 0;
-    return @call(.always_tail, ops[0], .{ frame, ops.ptr, &ip });
+    const ops_ptr = @as([*]const *const anyopaque, @ptrCast(ops_slice.ptr));
+    const first_op = ops_slice[0];
+    _ = first_op(frame, ops_ptr, &ip) catch |err| return err;
+    unreachable;
 }
