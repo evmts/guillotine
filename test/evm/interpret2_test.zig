@@ -375,3 +375,50 @@ test "interpret2: arithmetic operations" {
         try testing.expectEqual(@as(u256, 5), top);
     }
 }
+
+test "interpret2: PUSH+JUMP fusion for known jumps" {
+    const allocator = testing.allocator;
+    
+    // Bytecode: PUSH1 0x04 JUMP STOP JUMPDEST PUSH1 0x42 STOP
+    const code = [_]u8{
+        0x60, 0x04, // PUSH1 0x04
+        0x56,       // JUMP
+        0x00,       // STOP
+        0x5B,       // JUMPDEST
+        0x60, 0x42, // PUSH1 0x42
+        0x00,       // STOP
+    };
+    
+    var memory_db = evm.MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    
+    var mock_host = evm.MockHost.init(allocator);
+    defer mock_host.deinit();
+    const host = mock_host.to_host();
+    
+    const metadata = evm.OpcodeMetadata.init();
+    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
+    defer analysis.deinit();
+    
+    var frame = try evm.Frame.init(
+        1_000_000,
+        false,
+        0,
+        primitives.Address.ZERO_ADDRESS,
+        primitives.Address.ZERO_ADDRESS,
+        0,
+        &analysis,
+        host,
+        memory_db.to_database_interface(),
+        allocator
+    );
+    defer frame.deinit(allocator);
+    
+    // Execute - should jump to JUMPDEST and push 0x42
+    const result = interpret2.interpret2(&frame, &code);
+    try testing.expectError(evm.ExecutionError.Error.STOP, result);
+    
+    // Stack should have 0x42 (jumped to JUMPDEST, then pushed 0x42)
+    try testing.expectEqual(@as(usize, 1), frame.stack.size());
+    try testing.expectEqual(@as(u256, 0x42), try frame.stack.pop());
+}
