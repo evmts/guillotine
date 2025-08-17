@@ -18,7 +18,7 @@ const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 pub const Error = ExecutionError.Error;
 
 // Function pointer type for tailcall dispatch - interpret2 uses a different signature
-const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn;
+const TailcallFunc = *const fn (frame: *anyopaque, analysis: *const anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn;
 
 // Removed - now using SimpleAnalysis from analysis2.zig
 
@@ -36,7 +36,6 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
 
     var analysis = try SimpleAnalysis.analyze(allocator, code);
     defer analysis.deinit(allocator);
-    frame.tailcall_analysis = &analysis;
 
     var ops = std.ArrayList(TailcallFunc).init(allocator);
     defer ops.deinit();
@@ -316,5 +315,6 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
 
     // This Evm will recursively tail-call functions until an Error is thrown. Error will be thrown even in success cases
     const first_op = ops_slice[0];
-    return try first_op(frame, ops_ptr, &ip);
+    const analysis_ptr = @as(*const anyopaque, @ptrCast(&analysis));
+    return try first_op(frame, analysis_ptr, ops_ptr, &ip);
 }

@@ -48,7 +48,6 @@ pub const Frame = struct {
     // Every single instruction accesses these fields
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
     stack: Stack, // 32 bytes - accessed by every opcode (4 pointers)
-    analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
     host: Host, // 16 bytes - needed for hardfork checks, gas costs
     // === SECOND CACHE LINE - MEMORY OPERATIONS ===
     memory: Memory, // 72 bytes - MLOAD/MSTORE/MCOPY/LOG*/KECCAK256
@@ -73,9 +72,9 @@ pub const Frame = struct {
     tailcall_index: usize = undefined,
     tailcall_iterations: usize = 0, // Track number of iterations for safety
     tailcall_max_iterations: usize = 10_000_000, // Maximum allowed iterations
-    
+
     // Cached analysis for O(1) lookups in tailcall dispatch
-    tailcall_analysis: *const SimpleAnalysis = undefined,
+    analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
 
     /// Initialize a Frame with required parameters
     pub fn init(
