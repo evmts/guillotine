@@ -731,6 +731,120 @@ pub fn op_jumpdest(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize
     return next(frame, ops, ip);
 }
 
+pub fn op_nop(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    // No-op for replaced instructions in fusion patterns
+    return next(frame, ops, ip);
+}
+
+// Fused PUSH+JUMP operation
+pub fn op_push_then_jump(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const analysis = f.tailcall_analysis;
+    
+    // Get the PC for this instruction to read the push value
+    const pc = analysis.getPc(ip.*);
+    if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        return Error.InvalidJump;
+    }
+    
+    const bytecode = analysis.bytecode;
+    if (pc >= bytecode.len) {
+        return Error.InvalidJump;
+    }
+    
+    const opcode = bytecode[pc];
+    if (opcode < 0x60 or opcode > 0x7F) {
+        return Error.InvalidJump;
+    }
+    
+    const push_size = opcode - 0x5F;
+    const value_start = pc + 1;
+    
+    // Read the push value (the jump destination)
+    var dest: usize = 0;
+    var i: usize = 0;
+    while (i < push_size and value_start + i < bytecode.len) : (i += 1) {
+        dest = (dest << 8) | bytecode[value_start + i];
+    }
+    
+    // Convert PC destination to instruction index
+    const dest_inst_idx = analysis.getInstIdx(dest);
+    if (dest_inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        return Error.InvalidJump;
+    }
+    
+    // In Debug/ReleaseSafe, validate it's a JUMPDEST
+    if (comptime SAFE) {
+        if (dest >= f.analysis.code.len or f.analysis.code[dest] != 0x5B) {
+            return Error.InvalidJump;
+        }
+    }
+    
+    // Jump directly to the destination
+    ip.* = dest_inst_idx;
+    const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
+    return @call(.always_tail, func_ptr, .{ frame, ops, ip });
+}
+
+// Fused PUSH+JUMPI operation
+pub fn op_push_then_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const analysis = f.tailcall_analysis;
+    
+    // Get the PC for this instruction to read the push value
+    const pc = analysis.getPc(ip.*);
+    if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        return Error.InvalidJump;
+    }
+    
+    const bytecode = analysis.bytecode;
+    if (pc >= bytecode.len) {
+        return Error.InvalidJump;
+    }
+    
+    const opcode = bytecode[pc];
+    if (opcode < 0x60 or opcode > 0x7F) {
+        return Error.InvalidJump;
+    }
+    
+    const push_size = opcode - 0x5F;
+    const value_start = pc + 1;
+    
+    // Read the push value (the jump destination)
+    var dest: usize = 0;
+    var i: usize = 0;
+    while (i < push_size and value_start + i < bytecode.len) : (i += 1) {
+        dest = (dest << 8) | bytecode[value_start + i];
+    }
+    
+    // Pop the condition value
+    const condition = try f.stack.pop();
+    
+    // If condition is non-zero, take the jump
+    if (condition != 0) {
+        // Convert PC destination to instruction index
+        const dest_inst_idx = analysis.getInstIdx(dest);
+        if (dest_inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+            return Error.InvalidJump;
+        }
+        
+        // In Debug/ReleaseSafe, validate it's a JUMPDEST
+        if (comptime SAFE) {
+            if (dest >= f.analysis.code.len or f.analysis.code[dest] != 0x5B) {
+                return Error.InvalidJump;
+            }
+        }
+        
+        // Jump to the destination
+        ip.* = dest_inst_idx;
+        const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
+        return @call(.always_tail, func_ptr, .{ frame, ops, ip });
+    } else {
+        // Condition is zero, continue to next instruction
+        return next(frame, ops, ip);
+    }
+}
+
 // Log operations
 pub fn op_log0(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));

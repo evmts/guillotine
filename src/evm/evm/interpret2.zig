@@ -218,6 +218,53 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
 
     const ops_slice = try ops.toOwnedSlice();
 
+    // Phase 2: Fusion pass - replace patterns in-place
+    // Look for PUSH+JUMP sequences and replace them
+    if (ops_slice.len > 1) {
+        var i: usize = 0;
+        while (i < ops_slice.len - 1) : (i += 1) {
+            // Check if this is a PUSH followed by JUMP or JUMPI
+            if (ops_slice[i] == &tailcalls.op_push) {
+                const is_jump = ops_slice[i + 1] == &tailcalls.op_jump;
+                const is_jumpi = ops_slice[i + 1] == &tailcalls.op_jumpi;
+                
+                if (is_jump or is_jumpi) {
+                    // Check if this is a static jump we can fuse
+                    const inst_pc = analysis.getPc(i);
+                    if (inst_pc != SimpleAnalysis.MAX_USIZE and inst_pc < code.len) {
+                        const opcode = code[inst_pc];
+                        if (opcode >= 0x60 and opcode <= 0x7F) {
+                            // It's a PUSH instruction
+                            const push_size = opcode - 0x5F;
+                            const value_start = inst_pc + 1;
+                            
+                            // Read the push value
+                            var push_value: usize = 0;
+                            var j: usize = 0;
+                            while (j < push_size and value_start + j < code.len) : (j += 1) {
+                                push_value = (push_value << 8) | code[value_start + j];
+                            }
+                            
+                            // Check if the destination is a valid JUMPDEST
+                            if (push_value < code.len and code[push_value] == 0x5B) {
+                                // Valid static jump - fuse it!
+                                if (is_jump) {
+                                    ops_slice[i] = &tailcalls.op_push_then_jump;
+                                } else {
+                                    ops_slice[i] = &tailcalls.op_push_then_jumpi;
+                                }
+                                ops_slice[i + 1] = &tailcalls.op_nop;
+                                
+                                // Skip the next instruction since we just processed it
+                                i += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     frame.tailcall_ops = @ptrCast(ops_slice.ptr);
     frame.tailcall_index = 0;
 
