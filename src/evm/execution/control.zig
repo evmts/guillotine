@@ -52,6 +52,15 @@ pub fn op_pc(context: *anyopaque) ExecutionError.Error!void {
     unreachable;
 }
 
+/// GAS opcode (0x5A) - Get amount of available gas
+///
+/// Pushes the amount of gas remaining in the current execution context.
+/// Stack: [] → [gas_remaining]
+pub fn op_gas(context: *anyopaque) ExecutionError.Error!void {
+    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+    frame.stack.append_unsafe(@as(u256, @intCast(frame.gas_remaining)));
+}
+
 /// JUMPDEST opcode (0x5B) - Mark valid jump destination
 ///
 /// This is a no-op that marks a valid destination for JUMP/JUMPI.
