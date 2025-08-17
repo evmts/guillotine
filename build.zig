@@ -902,6 +902,22 @@ pub fn build(b: *std.Build) void {
     const tailcall_benchmark_step = b.step("test-tailcall-benchmark", "Run tailcall dispatch benchmark");
     tailcall_benchmark_step.dependOn(&run_tailcall_benchmark.step);
 
+    // Interpret2 test
+    const interpret2_test = b.addTest(.{
+        .name = "interpret2-test",
+        .root_source_file = b.path("src/evm/evm/interpret2.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    interpret2_test.root_module.addImport("evm", evm_mod);
+    interpret2_test.root_module.addImport("primitives", primitives_mod);
+    interpret2_test.root_module.addImport("crypto", crypto_mod);
+    interpret2_test.root_module.addImport("build_options", build_options_mod);
+    
+    const run_interpret2_test = b.addRunArtifact(interpret2_test);
+    const interpret2_test_step = b.step("test-interpret2", "Run interpret2 tests");
+    interpret2_test_step.dependOn(&run_interpret2_test.step);
+
     // Add new EVM tests
     const newevm_test = b.addTest(.{
         .name = "newevm-test",
@@ -1940,6 +1956,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_differential_test.step);
     test_step.dependOn(&run_staticcall_test.step);
     test_step.dependOn(&run_evm_core_test.step);
+    test_step.dependOn(&run_interpret2_test.step);
     // benchmark runner test removed - file no longer exists
 
     // Add inline ops test
