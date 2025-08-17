@@ -45,6 +45,7 @@ EVMONE_RUNNER="${ROOT_DIR}/bench/official/evms/evmone/build/evmone-runner"
 ETHJS_RUNNER="${ROOT_DIR}/bench/official/evms/ethereumjs/runner.js"
 ZIG_RUNNER="${ROOT_DIR}/zig-out/bin/evm-runner"
 ZIG_RUNNER_SMALL="${ROOT_DIR}/zig-out/bin/evm-runner-small"
+ZIG_RUNNER_CALL2="${ROOT_DIR}/zig-out/bin/evm-runner-call2"
 
 for path in \
   "${REVM_RUNNER}" \
@@ -52,7 +53,8 @@ for path in \
   "${EVMONE_RUNNER}" \
   "${ETHJS_RUNNER}" \
   "${ZIG_RUNNER}" \
-  "${ZIG_RUNNER_SMALL}"; do
+  "${ZIG_RUNNER_SMALL}" \
+  "${ZIG_RUNNER_CALL2}"; do
   if [[ ! -e "${path}" ]]; then
     log "NOTE: Runner missing: ${path}"
   else
@@ -60,9 +62,10 @@ for path in \
   fi
 done
 
-log "Building Zig runners (ReleaseFast and ReleaseSmall)"
+log "Building Zig runners (ReleaseFast, ReleaseSmall, and call2)"
 time zig build build-evm-runner -Doptimize=ReleaseFast 2>&1 | tee -a "${LOG_FILE}"
 time zig build build-evm-runner-small -Doptimize=ReleaseSmall 2>&1 | tee -a "${LOG_FILE}"
+time zig build build-evm-runner-call2 -Doptimize=ReleaseFast 2>&1 | tee -a "${LOG_FILE}"
 
 log "Building orchestrator (ReleaseFast)"
 time zig build build-orchestrator -Doptimize=ReleaseFast 2>&1 | tee -a "${LOG_FILE}"
