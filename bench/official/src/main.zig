@@ -19,7 +19,8 @@ pub fn main() !void {
         \\--export <FORMAT>          Export results (json, markdown, detailed)
         \\--compare                  Compare all available EVM implementations
         \\--all                      Include all test cases (by default only working benchmarks are included)
-        \\--next                     Use block-based execution for Zig EVM (new optimized interpreter)
+        \\--next                     Use call_mini for Zig EVM (simplified lazy jumpdest validation)
+        \\--call2                    Use call2 for Zig EVM (interpret2 with tailcall dispatch)
         \\--show-output              Show output from hyperfine
         \\--diff <TEST>              Run differential trace comparison between REVM and Zig for a specific test case
         \\--diff-output <DIR>        Output directory for differential traces (default: differential_traces)
@@ -62,6 +63,7 @@ pub fn main() !void {
     const compare_mode = res.args.compare != 0;
     const include_all_cases = res.args.all != 0;
     const use_next = res.args.next != 0;
+    const use_call2 = res.args.call2 != 0;
     const show_output = res.args.@"show-output" != 0;
     const diff_test = res.args.diff;
     const diff_output_dir = res.args.@"diff-output" orelse "differential_traces";
@@ -70,7 +72,7 @@ pub fn main() !void {
 
     if (diff_test) |test_name| {
         // Differential trace mode
-        var orchestrator = try Orchestrator.init(allocator, "zig", 1, 1, 1, 1, 1, 1, false, use_next, show_output);
+        var orchestrator = try Orchestrator.init(allocator, "zig", 1, 1, 1, 1, 1, 1, false, use_next, use_call2, show_output);
         defer orchestrator.deinit();
 
         try orchestrator.discoverTestCases();
@@ -104,7 +106,7 @@ pub fn main() !void {
         for (evms) |evm| {
             std.debug.print("\n=== Running benchmarks for {s} ===\n", .{evm});
 
-            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, show_output);
+            var orchestrator = try Orchestrator.init(allocator, evm, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, use_call2, show_output);
             defer orchestrator.deinit();
 
             try orchestrator.discoverTestCases();
@@ -138,7 +140,7 @@ pub fn main() !void {
         }
     } else {
         // Single EVM mode
-        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, show_output);
+        var orchestrator = try Orchestrator.init(allocator, evm_name, num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, use_call2, show_output);
         defer orchestrator.deinit();
 
         // Discover test cases
