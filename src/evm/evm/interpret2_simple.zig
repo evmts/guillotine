@@ -506,23 +506,23 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
             
             // Log opcodes
             .LOG0 => {
-                try execution.log.op_log0(frame);
+                try execution.log.log_0(frame);
                 pc += 1;
             },
             .LOG1 => {
-                try execution.log.op_log1(frame);
+                try execution.log.log_1(frame);
                 pc += 1;
             },
             .LOG2 => {
-                try execution.log.op_log2(frame);
+                try execution.log.log_2(frame);
                 pc += 1;
             },
             .LOG3 => {
-                try execution.log.op_log3(frame);
+                try execution.log.log_3(frame);
                 pc += 1;
             },
             .LOG4 => {
-                try execution.log.op_log4(frame);
+                try execution.log.log_4(frame);
                 pc += 1;
             },
             
