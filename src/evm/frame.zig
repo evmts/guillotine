@@ -27,7 +27,7 @@ const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 
 /// Function type for tailcall dispatch
-pub const TailcallFunc = *const fn (context: *anyopaque) ExecutionError.Error!void;
+pub const TailcallFunc = *const fn (context: *anyopaque) ExecutionError.Error!noreturn;
 
 // Safety check constants - only enabled in Debug and ReleaseSafe modes
 // These checks are redundant after analysis.zig validates blocks
@@ -63,7 +63,7 @@ pub const Frame = struct {
     // Per-frame I/O buffers exposed via Host
     input_buffer: []const u8 = &.{},
     output_buffer: []const u8 = &.{},
-    
+
     // Tailcall dispatch fields (only used when tailcall dispatch is enabled)
     // Store function array and current index for minimal indirection
     tailcall_ops: [*]const TailcallFunc = undefined,
