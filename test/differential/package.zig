@@ -31,6 +31,7 @@ pub const storage_edge_cases_differential_test = @import("storage_edge_cases_dif
 pub const call_edge_cases_differential_test = @import("call_edge_cases_differential_test.zig");
 pub const create_edge_cases_differential_test = @import("create_edge_cases_differential_test.zig");
 pub const selfdestruct_edge_cases_differential_test = @import("selfdestruct_edge_cases_differential_test.zig");
+pub const call2_differential_test = @import("call2_differential_test.zig");
 
 test {
     _ = arithmetic_differential_test;
@@ -64,4 +65,5 @@ test {
     _ = call_edge_cases_differential_test;
     _ = create_edge_cases_differential_test;
     _ = selfdestruct_edge_cases_differential_test;
+    _ = call2_differential_test;
 }

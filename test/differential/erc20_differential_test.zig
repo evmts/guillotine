@@ -90,7 +90,7 @@ fn run_case_with_call2(case_name: []const u8) !void {
     var revm_vm = try revm_wrapper.Revm.init(allocator, .{});
     defer revm_vm.deinit();
     const deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const contract_addr = try Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
+    _ = try Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
     try revm_vm.setBalance(deployer, std.math.maxInt(u256));
     
     // Deploy with REVM
@@ -118,21 +118,24 @@ fn run_case_with_call2(case_name: []const u8) !void {
     
     const create_result = try vm.call2(create_params);
     std.debug.print("[call2 test] Create result: success={}, gas_left={}, output_len={}\n", 
-        .{create_result.success, create_result.gas_left, create_result.output.len});
+        .{create_result.success, create_result.gas_left, if (create_result.output) |o| o.len else 0});
     
     // Compare runtime if creation succeeded
     if (create_result.success) {
-        try testing.expectEqual(@as(usize, revm_runtime.len), create_result.output.len);
-        try testing.expectEqualSlices(u8, revm_runtime, create_result.output);
+        if (create_result.output) |output| {
+            try testing.expectEqual(@as(usize, revm_runtime.len), output.len);
+            try testing.expectEqualSlices(u8, revm_runtime, output);
+        } else {
+            return error.NoOutputFromCreate;
+        }
         std.debug.print("[call2 test] Runtime bytecode matches REVM!\n", .{});
     } else {
         std.debug.print("[call2 test] Contract creation failed!\n", .{});
         return error.CreationFailed;
     }
     
-    if (create_result.output.len > 0) {
-        allocator.free(create_result.output);
-    }
+    // Don't free output - it's VM-owned memory per CallResult documentation
+    _ = create_result.output;
 }
 
 test "erc20 differential: erc20-transfer" {
