@@ -27,7 +27,7 @@ const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 
 /// Function type for tailcall dispatch - using opaque to break circular dependency
-pub const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) ExecutionError.Error!noreturn;
+pub const TailcallFunc = @import("tailcall_execution_func.zig").TailcallExecutionFunc;
 
 // Forward declaration for SimpleAnalysis
 const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
@@ -69,7 +69,7 @@ pub const Frame = struct {
 
     // Tailcall dispatch fields (only used when tailcall dispatch is enabled)
     // Store function array and current index for minimal indirection
-    tailcall_ops: [*]const TailcallFunc = undefined,
+    tailcall_ops: [*]*const anyopaque = undefined,
     tailcall_index: usize = undefined,
     tailcall_iterations: usize = 0, // Track number of iterations for safety
     tailcall_max_iterations: usize = 10_000_000, // Maximum allowed iterations
