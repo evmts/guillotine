@@ -552,7 +552,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
                 pc += 1;
             },
             .SELFDESTRUCT => {
-                try execution.system.op_selfdestruct(frame);
+                try execution.control.op_selfdestruct(frame);
                 return Error.STOP; // SELFDESTRUCT terminates execution
             },
             
