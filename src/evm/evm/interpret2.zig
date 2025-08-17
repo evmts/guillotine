@@ -26,6 +26,46 @@ const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaqu
 
 const EXTRA_BUFFER = 8192;
 
+// Helper function to determine if a PUSH can be fused with the next operation
+fn tryFusePush(next_op: TailcallFunc, code: []const u8, inst_pc: usize, opcode: u8) ?*const anyopaque {
+    // Special handling for jumps - need to validate destination
+    if (next_op == &tailcalls.op_jump or next_op == &tailcalls.op_jumpi) {
+        // Read the push value to validate jump destination
+        const push_size = opcode - 0x5F;
+        const value_start = inst_pc + 1;
+        var push_value: usize = 0;
+        var j: usize = 0;
+        while (j < push_size and value_start + j < code.len) : (j += 1) {
+            push_value = (push_value << 8) | code[value_start + j];
+        }
+        
+        // Only fuse if destination is a valid JUMPDEST
+        if (push_value >= code.len or code[push_value] != 0x5B) return null;
+        
+        return if (next_op == &tailcalls.op_jump)
+            &tailcalls.op_push_then_jump
+        else
+            &tailcalls.op_push_then_jumpi;
+    }
+    
+    // Simple fusion mappings for other operations
+    if (next_op == &tailcalls.op_mload) return &tailcalls.op_push_then_mload;
+    if (next_op == &tailcalls.op_mstore) return &tailcalls.op_push_then_mstore;
+    if (next_op == &tailcalls.op_eq) return &tailcalls.op_push_then_eq;
+    if (next_op == &tailcalls.op_lt) return &tailcalls.op_push_then_lt;
+    if (next_op == &tailcalls.op_gt) return &tailcalls.op_push_then_gt;
+    if (next_op == &tailcalls.op_and) return &tailcalls.op_push_then_and;
+    if (next_op == &tailcalls.op_add) return &tailcalls.op_push_then_add;
+    if (next_op == &tailcalls.op_sub) return &tailcalls.op_push_then_sub;
+    if (next_op == &tailcalls.op_mul) return &tailcalls.op_push_then_mul;
+    if (next_op == &tailcalls.op_div) return &tailcalls.op_push_then_div;
+    if (next_op == &tailcalls.op_sload) return &tailcalls.op_push_then_sload;
+    if (next_op == &tailcalls.op_dup1) return &tailcalls.op_push_then_dup1;
+    if (next_op == &tailcalls.op_swap1) return &tailcalls.op_push_then_swap1;
+    
+    return null;
+}
+
 // Main interpret function
 pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
     const estimated_size = code.len * 100 + EXTRA_BUFFER;
@@ -220,87 +260,33 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
 
     // Phase 2: Fusion pass - replace patterns in-place
     // Look for PUSH+opcode sequences and replace them
-    if (ops_slice.len > 1) {
+    if (ops_slice.len <= 1) {
+        // Nothing to fuse
+    } else {
         var i: usize = 0;
         while (i < ops_slice.len - 1) : (i += 1) {
-            // Check if this is a PUSH instruction
-            if (ops_slice[i] == &tailcalls.op_push) {
-                const inst_pc = analysis.getPc(i);
-                if (inst_pc != SimpleAnalysis.MAX_USIZE and inst_pc < code.len) {
-                    const opcode = code[inst_pc];
-                    if (opcode >= 0x60 and opcode <= 0x7F) {
-                        // It's a PUSH instruction, check what follows
-                        const next_op = ops_slice[i + 1];
-                        var fused_op: ?*const anyopaque = null;
-                        
-                        // Control flow fusions (need special handling for jump validation)
-                        if (next_op == &tailcalls.op_jump or next_op == &tailcalls.op_jumpi) {
-                            // Read the push value for jump validation
-                            const push_size = opcode - 0x5F;
-                            const value_start = inst_pc + 1;
-                            var push_value: usize = 0;
-                            var j: usize = 0;
-                            while (j < push_size and value_start + j < code.len) : (j += 1) {
-                                push_value = (push_value << 8) | code[value_start + j];
-                            }
-                            // Only fuse if destination is a valid JUMPDEST
-                            if (push_value < code.len and code[push_value] == 0x5B) {
-                                if (next_op == &tailcalls.op_jump) {
-                                    fused_op = &tailcalls.op_push_then_jump;
-                                } else {
-                                    fused_op = &tailcalls.op_push_then_jumpi;
-                                }
-                            }
-                        }
-                        // Memory operations
-                        else if (next_op == &tailcalls.op_mload) {
-                            fused_op = &tailcalls.op_push_then_mload;
-                        } else if (next_op == &tailcalls.op_mstore) {
-                            fused_op = &tailcalls.op_push_then_mstore;
-                        }
-                        // Comparison operations
-                        else if (next_op == &tailcalls.op_eq) {
-                            fused_op = &tailcalls.op_push_then_eq;
-                        } else if (next_op == &tailcalls.op_lt) {
-                            fused_op = &tailcalls.op_push_then_lt;
-                        } else if (next_op == &tailcalls.op_gt) {
-                            fused_op = &tailcalls.op_push_then_gt;
-                        }
-                        // Bitwise operations
-                        else if (next_op == &tailcalls.op_and) {
-                            fused_op = &tailcalls.op_push_then_and;
-                        }
-                        // Arithmetic operations
-                        else if (next_op == &tailcalls.op_add) {
-                            fused_op = &tailcalls.op_push_then_add;
-                        } else if (next_op == &tailcalls.op_sub) {
-                            fused_op = &tailcalls.op_push_then_sub;
-                        } else if (next_op == &tailcalls.op_mul) {
-                            fused_op = &tailcalls.op_push_then_mul;
-                        } else if (next_op == &tailcalls.op_div) {
-                            fused_op = &tailcalls.op_push_then_div;
-                        }
-                        // Storage operations
-                        else if (next_op == &tailcalls.op_sload) {
-                            fused_op = &tailcalls.op_push_then_sload;
-                        }
-                        // Stack operations
-                        else if (next_op == &tailcalls.op_dup1) {
-                            fused_op = &tailcalls.op_push_then_dup1;
-                        } else if (next_op == &tailcalls.op_swap1) {
-                            fused_op = &tailcalls.op_push_then_swap1;
-                        }
-                        
-                        // Apply the fusion if we found a match
-                        if (fused_op != null) {
-                            ops_slice[i] = @as(TailcallFunc, @ptrCast(@alignCast(fused_op.?)));
-                            ops_slice[i + 1] = &tailcalls.op_nop;
-                            // Skip the next instruction since we just processed it
-                            i += 1;
-                        }
-                    }
-                }
-            }
+            // Skip if not a PUSH instruction
+            if (ops_slice[i] != &tailcalls.op_push) continue;
+            
+            // Get the PC for this instruction
+            const inst_pc = analysis.getPc(i);
+            if (inst_pc == SimpleAnalysis.MAX_USIZE or inst_pc >= code.len) continue;
+            
+            // Check if it's a valid PUSH opcode
+            const opcode = code[inst_pc];
+            if (opcode < 0x60 or opcode > 0x7F) continue;
+            
+            // Get the next operation
+            const next_op = ops_slice[i + 1];
+            
+            // Try to fuse the PUSH with the next operation
+            const fused_op = tryFusePush(next_op, code, inst_pc, opcode);
+            if (fused_op == null) continue;
+            
+            // Apply the fusion
+            ops_slice[i] = @as(TailcallFunc, @ptrCast(@alignCast(fused_op.?)));
+            ops_slice[i + 1] = &tailcalls.op_nop;
+            i += 1; // Skip the next instruction since we just fused it
         }
     }
 
