@@ -26,8 +26,8 @@ const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 
-/// Function type for tailcall dispatch
-pub const TailcallFunc = *const fn (context: *anyopaque) ExecutionError.Error!noreturn;
+/// Function type for tailcall dispatch - using opaque to break circular dependency
+pub const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) ExecutionError.Error!noreturn;
 
 // Safety check constants - only enabled in Debug and ReleaseSafe modes
 // These checks are redundant after analysis.zig validates blocks
