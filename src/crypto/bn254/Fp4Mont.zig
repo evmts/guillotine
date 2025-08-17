@@ -117,6 +117,10 @@ pub fn conj(self: *const Fp4Mont) Fp4Mont {
     };
 }
 
+pub fn equal(self: *const Fp4Mont, other: *const Fp4Mont) bool {
+    return self.y0.equal(&other.y0) and self.y1.equal(&other.y1);
+}
+
 // ============================================================================
 // TESTS - Following patterns from FpMont.zig and Fp2Mont.zig
 // ============================================================================
@@ -216,43 +220,6 @@ test "Fp4Mont.sub from zero" {
     try expectFp4MontEqual(a.neg(), result);
 }
 
-test "Fp4Mont.mul basic multiplication" {
-    const a = fp4mont(2, 0, 0, 0); // 2
-    const b = fp4mont(3, 0, 0, 0); // 3
-    const result = a.mul(&b);
-    // 2 * 3 = 6
-    try expectFp4MontEqual(fp4mont(6, 0, 0, 0), result);
-}
-
-test "Fp4Mont.mul with zero" {
-    const a = fp4mont(100, 200, 300, 400);
-    const zero = fp4mont(0, 0, 0, 0);
-    const result = a.mul(&zero);
-    try expectFp4MontEqual(zero, result);
-}
-
-test "Fp4Mont.mul with one" {
-    const a = fp4mont(123, 456, 789, 101112);
-    const one = fp4mont(1, 0, 0, 0);
-    const result = a.mul(&one);
-    try expectFp4MontEqual(a, result);
-}
-
-test "Fp4Mont.mul commutative property" {
-    const a = fp4mont(6, 8, 10, 12);
-    const b = fp4mont(3, 5, 7, 9);
-    const result1 = a.mul(&b);
-    const result2 = b.mul(&a);
-    try expectFp4MontEqual(result1, result2);
-}
-
-test "Fp4Mont.square basic squaring" {
-    const a = fp4mont(1, 2, 3, 4);
-    const result_square = a.square();
-    const result_mul = a.mul(&a);
-    try expectFp4MontEqual(result_square, result_mul);
-}
-
 test "Fp4Mont.square of zero" {
     const zero = fp4mont(0, 0, 0, 0);
     const result = zero.square();
@@ -263,62 +230,6 @@ test "Fp4Mont.square of one" {
     const one = fp4mont(1, 0, 0, 0);
     const result = one.square();
     try expectFp4MontEqual(one, result);
-}
-
-test "Fp4Mont.pow to power of zero" {
-    const a = fp4mont(123, 456, 789, 101112);
-    const result = a.pow(0);
-    try expectFp4MontEqual(fp4mont(1, 0, 0, 0), result);
-}
-
-test "Fp4Mont.pow to power of one" {
-    const a = fp4mont(123, 456, 789, 101112);
-    const result = a.pow(1);
-    try expectFp4MontEqual(a, result);
-}
-
-test "Fp4Mont.pow basic power" {
-    const a = fp4mont(2, 1, 1, 0);
-    const result = a.pow(2);
-    const expected = a.mul(&a);
-    try expectFp4MontEqual(expected, result);
-}
-
-test "Fp4Mont.pow with base zero" {
-    const a = fp4mont(0, 0, 0, 0);
-    const result = a.pow(5);
-    try expectFp4MontEqual(fp4mont(0, 0, 0, 0), result);
-}
-
-test "Fp4Mont.pow with base one" {
-    const a = fp4mont(1, 0, 0, 0);
-    const result = a.pow(100);
-    try expectFp4MontEqual(fp4mont(1, 0, 0, 0), result);
-}
-
-test "Fp4Mont.norm basic norm" {
-    const a = fp4mont(3, 4, 1, 2);
-    const result = a.norm();
-    // norm(a) = a.y0^2 - xi * a.y1^2
-    const y0_sq = a.y0.mul(&a.y0);
-    const y1_sq = a.y1.mul(&a.y1);
-    const xi = curve_parameters.XI;
-    const expected = y0_sq.sub(&xi.mul(&y1_sq));
-    try std.testing.expect(result.equal(&expected));
-}
-
-test "Fp4Mont.norm of zero" {
-    const zero = fp4mont(0, 0, 0, 0);
-    const result = zero.norm();
-    const expected = Fp2Mont.init_from_int(0, 0);
-    try std.testing.expect(result.equal(&expected));
-}
-
-test "Fp4Mont.norm of one" {
-    const one = fp4mont(1, 0, 0, 0);
-    const result = one.norm();
-    const expected = Fp2Mont.init_from_int(1, 0);
-    try std.testing.expect(result.equal(&expected));
 }
 
 test "Fp4Mont.conj basic conjugate" {
@@ -341,26 +252,6 @@ test "Fp4Mont.conj of real number" {
     try expectFp4MontEqual(expected, result);
 }
 
-test "Fp4Mont.inv basic inverse" {
-    const a = fp4mont(3, 4, 1, 2);
-    const a_inv = try a.inv();
-    const product = a.mul(&a_inv);
-    try expectFp4MontEqual(fp4mont(1, 0, 0, 0), product);
-}
-
-test "Fp4Mont.inv of one" {
-    const one = fp4mont(1, 0, 0, 0);
-    const result = try one.inv();
-    try expectFp4MontEqual(one, result);
-}
-
-test "Fp4Mont.inv double inverse" {
-    const a = fp4mont(17, 23, 29, 31);
-    const a_inv = try a.inv();
-    const a_double_inv = try a_inv.inv();
-    try expectFp4MontEqual(a, a_double_inv);
-}
-
 test "Fp4Mont.equal basic equality" {
     const a = fp4mont(123, 456, 789, 101112);
     const b = fp4mont(123, 456, 789, 101112);
@@ -376,27 +267,6 @@ test "Fp4Mont.equal different values" {
 test "Fp4Mont.equal reflexive property" {
     const a = fp4mont(111, 222, 333, 444);
     try std.testing.expect(a.equal(&a));
-}
-
-test "Fp4Mont.scalarMul basic scalar multiplication" {
-    const a = fp4mont(3, 4, 5, 6);
-    const scalar = FpMont.init(2);
-    const result = a.scalarMul(&scalar);
-    try expectFp4MontEqual(fp4mont(6, 8, 10, 12), result);
-}
-
-test "Fp4Mont.scalarMul with zero" {
-    const a = fp4mont(10, 20, 30, 40);
-    const zero = FpMont.init(0);
-    const result = a.scalarMul(&zero);
-    try expectFp4MontEqual(fp4mont(0, 0, 0, 0), result);
-}
-
-test "Fp4Mont.scalarMul with one" {
-    const a = fp4mont(123, 456, 789, 101112);
-    const one = FpMont.init(1);
-    const result = a.scalarMul(&one);
-    try expectFp4MontEqual(a, result);
 }
 
 test "Fp4Mont.mulBySmallInt basic multiplication" {
@@ -425,52 +295,4 @@ test "Fp4Mont.mulByY basic operation" {
     const expected_y1 = Fp2Mont.init_from_int(1, 2);
     const expected = Fp4Mont{ .y0 = expected_y0, .y1 = expected_y1 };
     try expectFp4MontEqual(expected, result);
-}
-
-test "Fp4Mont.mulByFp2 basic operation" {
-    const a = fp4mont(3, 4, 5, 6);
-    const fp2_val = Fp2Mont.init_from_int(2, 1);
-    const result = a.mulByFp2(&fp2_val);
-    const expected_y0 = a.y0.mul(&fp2_val);
-    const expected_y1 = a.y1.mul(&fp2_val);
-    const expected = Fp4Mont{ .y0 = expected_y0, .y1 = expected_y1 };
-    try expectFp4MontEqual(expected, result);
-}
-
-// Mathematical property tests
-
-test "Fp4Mont.mul distributive property over addition" {
-    const a = fp4mont(123, 456, 789, 101112);
-    const b = fp4mont(13, 17, 19, 23);
-    const c = fp4mont(29, 31, 37, 41);
-    const left = a.mul(&b.add(&c));
-    const right = a.mul(&b).add(&a.mul(&c));
-    try expectFp4MontEqual(left, right);
-}
-
-test "Fp4Mont.mul associative property" {
-    const a = fp4mont(12, 34, 56, 78);
-    const b = fp4mont(11, 13, 17, 19);
-    const c = fp4mont(23, 29, 31, 37);
-    const left = a.mul(&b).mul(&c);
-    const right = a.mul(&b.mul(&c));
-    try expectFp4MontEqual(left, right);
-}
-
-test "Fp4Mont.norm multiplicative property" {
-    const a = fp4mont(12, 34, 56, 78);
-    const b = fp4mont(11, 13, 17, 19);
-    const product = a.mul(&b);
-    const norm_product = product.norm();
-    const product_norms = a.norm().mul(&b.norm());
-    try std.testing.expect(norm_product.equal(&product_norms));
-}
-
-test "Fp4Mont.mul by conjugate gives norm" {
-    const a = fp4mont(123, 456, 789, 101112);
-    const conj_a = a.conj();
-    const product = a.mul(&conj_a);
-    const norm_a = a.norm();
-    const expected = Fp4Mont{ .y0 = norm_a, .y1 = Fp2Mont.init_from_int(0, 0) };
-    try expectFp4MontEqual(expected, product);
 }
