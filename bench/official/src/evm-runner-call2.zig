@@ -5,7 +5,7 @@ const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 
 pub const std_options: std.Options = .{
-    .log_level = .debug,
+    .log_level = .err,
 };
 
 fn hex_decode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
