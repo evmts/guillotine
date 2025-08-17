@@ -173,7 +173,7 @@ pub fn main() !void {
                     try vm.state.set_code(contract_address, contract_code);
                 }
             }
-            allocator.free(output);
+            // Don't free - output is VM-owned memory
         } else {
             // No output, use bytecode directly
             try vm.state.set_code(contract_address, contract_code);
@@ -307,9 +307,7 @@ pub fn main() !void {
             }
         }
         
-        if (result.output) |output| {
-            allocator.free(output);
-        }
+        // Don't free output - it's VM-owned memory per CallResult documentation
         
         // Validate the call actually succeeded
         if (!result.success) {
@@ -324,6 +322,7 @@ pub fn main() !void {
 
 
 fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, bytecode: []const u8) !Address {
+    _ = allocator; // Not used after removing free calls
     
     // Use CREATE to deploy the contract
     const create_params = evm.CallParams{ .create = .{
@@ -341,7 +340,7 @@ fn deployContract(allocator: std.mem.Allocator, vm: *evm.Evm, caller: Address, b
     
     // Extract deployed address from output
     if (result.output) |output| {
-        defer allocator.free(output);
+        // Don't free output - it's VM-owned memory
         if (output.len >= 20) {
             var addr: Address = undefined;
             @memcpy(&addr, output[0..20]);
