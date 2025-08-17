@@ -13,6 +13,8 @@ const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
 const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
 
+const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
+
 pub const Error = ExecutionError.Error;
 
 // Function pointer type for tailcall dispatch - interpret2 uses a different signature
@@ -227,8 +229,10 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
     }
 
     // Add frame fields for tailcall system
-    frame.tailcall_max_iterations = 100_000_000; // Increase for complex contracts like snailtracer
-    frame.tailcall_iterations = 0;
+    if (comptime SAFE) {
+        frame.tailcall_max_iterations = 100_000_000; // Increase for complex contracts like snailtracer
+        frame.tailcall_iterations = 0;
+    }
 
     Log.debug("[interpret2] Starting execution with {} ops", .{ops_slice.len});
 
