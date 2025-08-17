@@ -219,45 +219,84 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
     const ops_slice = try ops.toOwnedSlice();
 
     // Phase 2: Fusion pass - replace patterns in-place
-    // Look for PUSH+JUMP sequences and replace them
+    // Look for PUSH+opcode sequences and replace them
     if (ops_slice.len > 1) {
         var i: usize = 0;
         while (i < ops_slice.len - 1) : (i += 1) {
-            // Check if this is a PUSH followed by JUMP or JUMPI
+            // Check if this is a PUSH instruction
             if (ops_slice[i] == &tailcalls.op_push) {
-                const is_jump = ops_slice[i + 1] == &tailcalls.op_jump;
-                const is_jumpi = ops_slice[i + 1] == &tailcalls.op_jumpi;
-                
-                if (is_jump or is_jumpi) {
-                    // Check if this is a static jump we can fuse
-                    const inst_pc = analysis.getPc(i);
-                    if (inst_pc != SimpleAnalysis.MAX_USIZE and inst_pc < code.len) {
-                        const opcode = code[inst_pc];
-                        if (opcode >= 0x60 and opcode <= 0x7F) {
-                            // It's a PUSH instruction
+                const inst_pc = analysis.getPc(i);
+                if (inst_pc != SimpleAnalysis.MAX_USIZE and inst_pc < code.len) {
+                    const opcode = code[inst_pc];
+                    if (opcode >= 0x60 and opcode <= 0x7F) {
+                        // It's a PUSH instruction, check what follows
+                        const next_op = ops_slice[i + 1];
+                        var fused_op: ?*const anyopaque = null;
+                        
+                        // Control flow fusions (need special handling for jump validation)
+                        if (next_op == &tailcalls.op_jump or next_op == &tailcalls.op_jumpi) {
+                            // Read the push value for jump validation
                             const push_size = opcode - 0x5F;
                             const value_start = inst_pc + 1;
-                            
-                            // Read the push value
                             var push_value: usize = 0;
                             var j: usize = 0;
                             while (j < push_size and value_start + j < code.len) : (j += 1) {
                                 push_value = (push_value << 8) | code[value_start + j];
                             }
-                            
-                            // Check if the destination is a valid JUMPDEST
+                            // Only fuse if destination is a valid JUMPDEST
                             if (push_value < code.len and code[push_value] == 0x5B) {
-                                // Valid static jump - fuse it!
-                                if (is_jump) {
-                                    ops_slice[i] = &tailcalls.op_push_then_jump;
+                                if (next_op == &tailcalls.op_jump) {
+                                    fused_op = &tailcalls.op_push_then_jump;
                                 } else {
-                                    ops_slice[i] = &tailcalls.op_push_then_jumpi;
+                                    fused_op = &tailcalls.op_push_then_jumpi;
                                 }
-                                ops_slice[i + 1] = &tailcalls.op_nop;
-                                
-                                // Skip the next instruction since we just processed it
-                                i += 1;
                             }
+                        }
+                        // Memory operations
+                        else if (next_op == &tailcalls.op_mload) {
+                            fused_op = &tailcalls.op_push_then_mload;
+                        } else if (next_op == &tailcalls.op_mstore) {
+                            fused_op = &tailcalls.op_push_then_mstore;
+                        }
+                        // Comparison operations
+                        else if (next_op == &tailcalls.op_eq) {
+                            fused_op = &tailcalls.op_push_then_eq;
+                        } else if (next_op == &tailcalls.op_lt) {
+                            fused_op = &tailcalls.op_push_then_lt;
+                        } else if (next_op == &tailcalls.op_gt) {
+                            fused_op = &tailcalls.op_push_then_gt;
+                        }
+                        // Bitwise operations
+                        else if (next_op == &tailcalls.op_and) {
+                            fused_op = &tailcalls.op_push_then_and;
+                        }
+                        // Arithmetic operations
+                        else if (next_op == &tailcalls.op_add) {
+                            fused_op = &tailcalls.op_push_then_add;
+                        } else if (next_op == &tailcalls.op_sub) {
+                            fused_op = &tailcalls.op_push_then_sub;
+                        } else if (next_op == &tailcalls.op_mul) {
+                            fused_op = &tailcalls.op_push_then_mul;
+                        } else if (next_op == &tailcalls.op_div) {
+                            fused_op = &tailcalls.op_push_then_div;
+                        }
+                        // Storage operations
+                        else if (next_op == &tailcalls.op_sload) {
+                            fused_op = &tailcalls.op_push_then_sload;
+                        }
+                        // Stack operations
+                        else if (next_op == &tailcalls.op_dup1) {
+                            fused_op = &tailcalls.op_push_then_dup1;
+                        } else if (next_op == &tailcalls.op_swap1) {
+                            fused_op = &tailcalls.op_push_then_swap1;
+                        }
+                        
+                        // Apply the fusion if we found a match
+                        if (fused_op != null) {
+                            ops_slice[i] = @as(TailcallFunc, @ptrCast(@alignCast(fused_op.?)));
+                            ops_slice[i + 1] = &tailcalls.op_nop;
+                            // Skip the next instruction since we just processed it
+                            i += 1;
                         }
                     }
                 }

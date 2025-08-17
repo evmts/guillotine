@@ -818,7 +818,7 @@ pub fn op_push_then_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip:
     }
     
     // Pop the condition value
-    const condition = try f.stack.pop();
+    const condition = f.stack.pop_unsafe();
     
     // If condition is non-zero, take the jump
     if (condition != 0) {
@@ -843,6 +843,183 @@ pub fn op_push_then_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip:
         // Condition is zero, continue to next instruction
         return next(frame, ops, ip);
     }
+}
+
+// Helper function to read push value from bytecode
+inline fn readPushValue(analysis: *const @import("analysis2.zig").SimpleAnalysis, ip_val: usize) !u256 {
+    const pc = analysis.getPc(ip_val);
+    if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        return Error.InvalidJump;
+    }
+    
+    const bytecode = analysis.bytecode;
+    if (pc >= bytecode.len) {
+        return Error.InvalidJump;
+    }
+    
+    const opcode = bytecode[pc];
+    if (opcode < 0x60 or opcode > 0x7F) {
+        return Error.InvalidJump;
+    }
+    
+    const push_size = opcode - 0x5F;
+    const value_start = pc + 1;
+    
+    // Read the push value
+    var value: u256 = 0;
+    var i: usize = 0;
+    while (i < push_size and value_start + i < bytecode.len) : (i += 1) {
+        value = (value << 8) | bytecode[value_start + i];
+    }
+    
+    return value;
+}
+
+// Memory operation fusions
+pub fn op_push_then_mload(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const offset = try readPushValue(f.tailcall_analysis, ip.*);
+    
+    // Push offset to stack then call mload
+    f.stack.append_unsafe(offset);
+    try execution.memory.op_mload(frame);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_mstore(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const offset = try readPushValue(f.tailcall_analysis, ip.*);
+    const value = f.stack.pop_unsafe();
+    
+    // Push value and offset to stack then call mstore
+    f.stack.append_unsafe(value);
+    f.stack.append_unsafe(offset);
+    try execution.memory.op_mstore(frame);
+    return next(frame, ops, ip);
+}
+
+// Comparison operation fusions
+pub fn op_push_then_eq(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    const result: u256 = if (other == push_val) 1 else 0;
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_lt(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    // Note: In EVM, LT pops a then b, and checks if a < b
+    // PUSH pushes the value that becomes 'a', so we check push_val < other
+    const result: u256 = if (push_val < other) 1 else 0;
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_gt(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    // Note: In EVM, GT pops a then b, and checks if a > b
+    // PUSH pushes the value that becomes 'a', so we check push_val > other
+    const result: u256 = if (push_val > other) 1 else 0;
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+// Bitwise operation fusions
+pub fn op_push_then_and(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    const result = other & push_val;
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+// Arithmetic operation fusions
+pub fn op_push_then_add(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    const result = other +% push_val; // Wrapping add
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_sub(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    // Note: In EVM, SUB pops a then b, and computes a - b
+    // PUSH pushes the value that becomes 'a', so we compute push_val - other
+    const result = push_val -% other; // Wrapping sub
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_mul(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    const result = other *% push_val; // Wrapping mul
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_div(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const other = try f.stack.peek_unsafe();
+    
+    // Note: In EVM, DIV pops a then b, and computes a / b
+    // PUSH pushes the value that becomes 'a', so we compute push_val / other
+    const result = if (other == 0) 0 else push_val / other;
+    f.stack.set_top_unsafe(result);
+    return next(frame, ops, ip);
+}
+
+// Storage operation fusions
+pub fn op_push_then_sload(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const key = try readPushValue(f.tailcall_analysis, ip.*);
+    
+    // Push key to stack then call sload
+    f.stack.append_unsafe(key);
+    try execution.storage.op_sload(frame);
+    return next(frame, ops, ip);
+}
+
+// Stack operation fusions
+pub fn op_push_then_dup1(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const value = try readPushValue(f.tailcall_analysis, ip.*);
+    
+    // Push the value twice (PUSH then DUP1 effect)
+    f.stack.append_unsafe(value);
+    f.stack.append_unsafe(value);
+    return next(frame, ops, ip);
+}
+
+pub fn op_push_then_swap1(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const push_val = try readPushValue(f.tailcall_analysis, ip.*);
+    const top = f.stack.pop_unsafe();
+    
+    // Push in swapped order
+    f.stack.append_unsafe(push_val);
+    f.stack.append_unsafe(top);
+    return next(frame, ops, ip);
 }
 
 // Log operations
