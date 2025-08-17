@@ -57,7 +57,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
             };
             
             return CallResult{
-                .success = result.status == .success,
+                .success = result.status == .Success,
                 .gas_left = result.gas_left,
                 .output = result.output orelse &.{},
             };
