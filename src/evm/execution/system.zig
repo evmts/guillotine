@@ -1445,7 +1445,10 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
     // EIP-2929: Check if recipient is cold and add extra gas cost
     if (frame.host.is_hardfork_at_least(.BERLIN)) {
-        const access_cost = try frame.access_list.get_call_cost(recipient_address);
+        const access_cost = frame.host.access_address(recipient_address) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.DatabaseCorrupted,
+        };
         gas_cost += access_cost;
     }
 
@@ -1475,8 +1478,8 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
         };
     }
 
-    // SELFDESTRUCT terminates execution immediately - we would signal this
-    // to the execution loop, but for now we'll just return
+    // SELFDESTRUCT terminates execution immediately
+    return ExecutionError.Error.STOP;
 }
 
 /// EXTCALL opcode (0xF8): External call with EOF validation
