@@ -100,19 +100,18 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
     if (comptime !build_options.disable_tailcall_dispatch) {
         // Import tailcall modules only when enabled to avoid circular dependencies
         const threadify = @import("threadify.zig");
-        const TailcallExecutionFunc = @import("../tailcall_execution_func.zig").TailcallExecutionFunc;
         
-        const prog = try threadify.build(self.allocator, frame.analysis);
-        defer prog.deinit();
+        const ops = try threadify.build(self.allocator, frame.analysis);
+        defer self.allocator.free(ops);
         
-        // Store ops base and current ip in frame for tailcall dispatch
-        frame.tailcall_ops_base = @ptrCast(prog.ops.ptr);
-        frame.tailcall_ip = @ptrCast(prog.ops.ptr);
+        // Store ops array and starting index in frame for tailcall dispatch
+        frame.tailcall_ops = @ptrCast(ops.ptr);
+        frame.tailcall_index = 0;
         
         // Start execution with first instruction
         // Use .auto to let compiler decide between tail call and regular call
         const frame_ptr = @as(*anyopaque, @ptrCast(frame));
-        const first_fn = @as(*const TailcallExecutionFunc, @ptrCast(@alignCast(prog.ops.ptr[0])));
+        const first_fn = ops[0];
         return @call(.auto, first_fn, .{frame_ptr});
     }
 
