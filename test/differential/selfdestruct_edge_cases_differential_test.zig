@@ -331,7 +331,7 @@ test "SELFDESTRUCT multiple times in same transaction" {
     // try memory_db.set_balance(contract_a_address, 500); // TODO: Fix this
     // try memory_db.set_balance(contract_b_address, 700); // TODO: Fix this
 
-    const call_params = Evm.CallParams{ .call = .{
+    const call_params = CallParams{ .call = .{
         .caller = deployer,
         .to = contract_b_address,
         .value = 0,

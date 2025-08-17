@@ -213,33 +213,33 @@ test "Size2Counts initialization and modification" {
 test "Size8Counts initialization and modification" {
     // Test default initialization
     var counts: Size8Counts = .{};
-    try std.testing.expectEqual(@as(u24, 0), counts.exec);
+    try std.testing.expectEqual(@as(u24, 0), counts.real_opcodes);
     try std.testing.expectEqual(@as(u24, 0), counts.block_info);
 
     // Test modification
-    counts.exec = 100;
+    counts.real_opcodes = 100;
     counts.block_info = 200;
 
-    try std.testing.expectEqual(@as(u24, 100), counts.exec);
+    try std.testing.expectEqual(@as(u24, 100), counts.real_opcodes);
     try std.testing.expectEqual(@as(u24, 200), counts.block_info);
 
     // Test max value
-    counts.exec = std.math.maxInt(u24);
-    try std.testing.expectEqual(@as(u24, 16777215), counts.exec);
+    counts.real_opcodes = std.math.maxInt(u24);
+    try std.testing.expectEqual(@as(u24, 16777215), counts.real_opcodes);
 }
 
 test "Size16Counts initialization and modification" {
     // Test default initialization
     var counts: Size16Counts = .{};
     try std.testing.expectEqual(@as(u24, 0), counts.word);
-    try std.testing.expectEqual(@as(u24, 0), counts.dynamic_gas);
+    // Size16Counts only has word field now
 
     // Test modification
     counts.word = 1000;
-    counts.dynamic_gas = 2000;
+    // Only word field exists
 
     try std.testing.expectEqual(@as(u24, 1000), counts.word);
-    try std.testing.expectEqual(@as(u24, 2000), counts.dynamic_gas);
+    // Test with just word field
 }
 
 test "Size0Counts initialization and modification" {
@@ -259,34 +259,11 @@ test "Size0Counts initialization and modification" {
     try std.testing.expectEqual(@as(u24, 7000), counts.conditional_jump_invalid);
 }
 
-test "getInstructionParams with 8-byte instruction" {
-    const allocator = std.testing.allocator;
-    const ExecInstruction = @import("instruction.zig").ExecInstruction;
-    const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
-
-    // Allocate size arrays
-    const size2 = try allocator.alloc(Bucket2, 1);
-    defer allocator.free(size2);
-    const size8 = try allocator.alloc(Bucket8, 2);
-    defer allocator.free(size8);
-    const size16 = try allocator.alloc(Bucket16, 1);
-    defer allocator.free(size16);
-
-    // Create dummy function
-    const dummy_fn: ExecutionFunc = @import("analysis.zig").UnreachableHandler;
-
-    // Create an ExecInstruction in the first bucket
-    const exec_inst = ExecInstruction{
-        .exec_fn = dummy_fn,
-    };
-
-    // Copy the instruction data into the bucket
-    @memcpy(size8[0].bytes[0..@sizeOf(ExecInstruction)], std.mem.asBytes(&exec_inst));
-
-    // Retrieve and verify
-    const retrieved = getInstructionParams(size2, size8, size16, .exec, 0);
-    try std.testing.expectEqual(dummy_fn, retrieved.exec_fn);
-}
+// This test is temporarily disabled as ExecInstruction has been removed
+// in favor of direct opcode dispatch through tailcall mechanism
+// test "getInstructionParams with 8-byte instruction" {
+//     // Test removed - ExecInstruction no longer exists
+// }
 
 test "getInstructionParams with 16-byte instruction" {
     const allocator = std.testing.allocator;

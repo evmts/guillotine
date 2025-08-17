@@ -770,8 +770,8 @@ test "SHA3 precomputation - detect PUSH followed by SHA3" {
     try std.testing.expectEqual(@as(usize, 6), analysis.instructions.len); // 5 opcodes + 1 STOP
 
     const sha3_inst = &analysis.instructions[4];
-    // SHA3/KECCAK256 is handled as regular .exec, not .dynamic_gas
-    try std.testing.expect(sha3_inst.tag == .exec);
+    // SHA3/KECCAK256 uses its real opcode tag
+    try std.testing.expect(sha3_inst.tag == .op_keccak256);
 }
 
 test "SHA3 precomputation - various sizes" {
@@ -804,8 +804,8 @@ test "SHA3 precomputation - various sizes" {
 
         const sha3_idx = if (tc.size <= 255) 4 else 5;
         const sha3_inst = &analysis.instructions[sha3_idx];
-        // SHA3/KECCAK256 is handled as regular .exec, not .dynamic_gas
-        try std.testing.expect(sha3_inst.tag == .exec);
+        // SHA3/KECCAK256 uses its real opcode tag
+        try std.testing.expect(sha3_inst.tag == .op_keccak256);
     }
 }
 
@@ -826,8 +826,8 @@ test "SHA3 precomputation - with memory expansion" {
     defer analysis.deinit();
 
     const sha3_inst = &analysis.instructions[5];
-    // SHA3/KECCAK256 is handled as regular .exec, not .dynamic_gas
-    try std.testing.expect(sha3_inst.tag == .exec);
+    // SHA3/KECCAK256 uses its real opcode tag
+    try std.testing.expect(sha3_inst.tag == .op_keccak256);
 }
 
 test "SHA3 precomputation - not applied when size unknown" {
@@ -847,9 +847,8 @@ test "SHA3 precomputation - not applied when size unknown" {
     // The SHA3 instruction should NOT have precomputed values
     const sha3_inst = &analysis.instructions[3]; // BEGINBLOCK + DUP1 + DUP1 + SHA3
 
-    // Should not have dynamic_gas with precomputed static component; may still have gas_fn
-    // SHA3 without known size should be .exec
-    try std.testing.expect(sha3_inst.tag == .exec);
+    // SHA3 always uses its real opcode tag, regardless of whether size is known
+    try std.testing.expect(sha3_inst.tag == .op_keccak256);
 }
 
 // === Additional Unit Tests for analysis.zig ===
@@ -1598,30 +1597,10 @@ test "analysis: balance and extcode operations" {
 }
 
 // Tests for the size_buckets module functionality
-test "size_buckets: getInstructionParams for 8-byte instructions" {
-    const allocator = std.testing.allocator;
-    
-    // Create test arrays
-    const size2 = try allocator.alloc(Bucket2, 1);
-    defer allocator.free(size2);
-    const size8 = try allocator.alloc(Bucket8, 2);
-    defer allocator.free(size8);
-    const size16 = try allocator.alloc(Bucket16, 1);
-    defer allocator.free(size16);
-    
-    // Create an exec instruction
-    const dummy_fn = @import("code_analysis.zig").UnreachableHandler;
-    const exec_params = @import("instruction.zig").ExecInstruction{
-        .exec_fn = dummy_fn,
-    };
-    @memcpy(size8[0].bytes[0..@sizeOf(@TypeOf(exec_params))], std.mem.asBytes(&exec_params));
-    
-    // Test retrieval
-    const retrieved = @import("size_buckets.zig").getInstructionParams(
-        size2, size8, size16, .exec, 0
-    );
-    try std.testing.expectEqual(exec_params.exec_fn, retrieved.exec_fn);
-}
+// Test disabled - ExecInstruction has been removed in favor of tailcall dispatch
+// test "size_buckets: getInstructionParams for 8-byte instructions" {
+//     // ExecInstruction no longer exists
+// }
 
 test "size_buckets: getInstructionParams for 16-byte instructions" {
     const allocator = std.testing.allocator;

@@ -26,6 +26,9 @@ const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 
+/// Function type for tailcall dispatch
+pub const TailcallFunc = *const fn (context: *anyopaque) ExecutionError.Error!void;
+
 // Safety check constants - only enabled in Debug and ReleaseSafe modes
 // These checks are redundant after analysis.zig validates blocks
 const SAFE_GAS_CHECK = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
@@ -60,6 +63,11 @@ pub const Frame = struct {
     // Per-frame I/O buffers exposed via Host
     input_buffer: []const u8 = &.{},
     output_buffer: []const u8 = &.{},
+    
+    // Tailcall dispatch fields (only used when tailcall dispatch is enabled)
+    // Store function array and current index for minimal indirection
+    tailcall_ops: [*]const TailcallFunc = undefined,
+    tailcall_index: usize = undefined,
 
     /// Initialize a Frame with required parameters
     pub fn init(

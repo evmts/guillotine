@@ -35,6 +35,9 @@ pub fn build(b: *std.Build) void {
     // Compile-time tracing toggle (no runtime checks). Usage: zig build -Denable-tracing=true
     const enable_tracing = b.option(bool, "enable-tracing", "Enable EVM instruction tracing (compile-time)") orelse false;
     build_options.addOption(bool, "enable_tracing", enable_tracing);
+    // Compile-time option to disable tailcall dispatch (disabled by default due to circular dependency). Usage: zig build -Ddisable-tailcall-dispatch=false
+    const disable_tailcall_dispatch = b.option(bool, "disable-tailcall-dispatch", "Disable tailcall-based interpreter dispatch (use switch instead)") orelse true;
+    build_options.addOption(bool, "disable_tailcall_dispatch", disable_tailcall_dispatch);
     const build_options_mod = build_options.createModule();
 
     const lib_mod = b.createModule(.{
@@ -880,6 +883,24 @@ pub fn build(b: *std.Build) void {
     const run_system_test = b.addRunArtifact(system_test);
     const system_test_step = b.step("test-system", "Run System comprehensive tests");
     system_test_step.dependOn(&run_system_test.step);
+
+    // Tailcall dispatch benchmark test
+    const tailcall_benchmark = b.addTest(.{
+        .name = "tailcall-benchmark",
+        .root_source_file = b.path("test/evm/tailcall_benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tailcall_benchmark.root_module.addImport("evm", evm_mod);
+    tailcall_benchmark.root_module.addImport("primitives", primitives_mod);
+    if (bn254_lib) |bn254| {
+        tailcall_benchmark.linkLibrary(bn254);
+        tailcall_benchmark.addIncludePath(b.path("src/bn254_wrapper"));
+    }
+    
+    const run_tailcall_benchmark = b.addRunArtifact(tailcall_benchmark);
+    const tailcall_benchmark_step = b.step("test-tailcall-benchmark", "Run tailcall dispatch benchmark");
+    tailcall_benchmark_step.dependOn(&run_tailcall_benchmark.step);
 
     // Add new EVM tests
     const newevm_test = b.addTest(.{
