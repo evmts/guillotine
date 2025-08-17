@@ -68,6 +68,8 @@ pub const Frame = struct {
     // Store function array and current index for minimal indirection
     tailcall_ops: [*]const TailcallFunc = undefined,
     tailcall_index: usize = undefined,
+    tailcall_iterations: usize = 0, // Track number of iterations for safety
+    tailcall_max_iterations: usize = 10_000_000, // Maximum allowed iterations
 
     /// Initialize a Frame with required parameters
     pub fn init(
@@ -206,7 +208,7 @@ pub const Frame = struct {
         const Log = @import("log.zig");
         Log.debug("[Frame.set_output] Called with {} bytes at depth={}", .{ data.len, self.depth });
         self.host.set_output(data) catch |err| {
-            Log.debug("[Frame.set_output] host.set_output failed: {}", .{err});
+            Log.debug("[Frame.set_output] host.set_output failed: {any}", .{err});
             return ExecutionError.Error.OutOfMemory;
         };
         Log.debug("[Frame.set_output] Successfully set output", .{});

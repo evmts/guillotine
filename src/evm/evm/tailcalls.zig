@@ -11,7 +11,16 @@ const TailcallFunc = frame_mod.TailcallFunc;
 
 // Helper to advance to next instruction
 pub inline fn next(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    // Safety check for infinite loops
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    f.tailcall_iterations += 1;
+    if (f.tailcall_iterations > f.tailcall_max_iterations) {
+        return Error.OutOfGas; // Use OutOfGas to indicate we've run too long
+    }
+    
     ip.* += 1;
+    
+    
     const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
     return @call(.always_tail, func_ptr, .{ frame, ops, ip });
 }
@@ -367,14 +376,16 @@ pub fn op_push(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
     // Calculate actual PC from instruction index
     var pc: usize = 0;
     var inst_idx: usize = 0;
-    while (inst_idx < ip.*) : (inst_idx += 1) {
-        const byte = code[pc];
-        if (byte >= 0x60 and byte <= 0x7F) {
-            pc += 1 + (byte - 0x5F);
-        } else if (byte == 0x5F) {
-            pc += 1;
-        } else {
-            pc += 1;
+    if (ip.* != 0) {
+        while (inst_idx < ip.*) : (inst_idx += 1) {
+            const byte = code[pc];
+            if (byte >= 0x60 and byte <= 0x7F) {
+                pc += 1 + (byte - 0x5F);
+            } else if (byte == 0x5F) {
+                pc += 1;
+            } else {
+                pc += 1;
+            }
         }
     }
 
@@ -392,8 +403,8 @@ pub fn op_push(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
 
     try f.stack.append(value);
 
-    // Skip over the data bytes in instruction stream
-    ip.* += push_size;
+    // Move to next instruction (ip is instruction index, not PC!)
+    // The ops array already has the push data bytes handled by interpret2
     return next(frame, ops, ip);
 }
 

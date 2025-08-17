@@ -170,7 +170,7 @@ pub fn get_storage(self: *const EvmState, address: Address, slot: u256) u256 {
     // Use database interface to get storage value
     const value = self.database.get_storage(address, slot) catch |err| {
         @branchHint(.cold);
-        Log.debug("EvmState.get_storage: Database error {}, returning 0", .{err});
+        Log.debug("EvmState.get_storage: Database error {any}, returning 0", .{err});
         return 0;
     };
 
@@ -213,7 +213,7 @@ pub fn get_balance(self: *const EvmState, address: Address) u256 {
     // Get account from database
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
-        Log.debug("EvmState.get_balance: Database error {}, returning 0", .{err});
+        Log.debug("EvmState.get_balance: Database error {any}, returning 0", .{err});
         return 0;
     };
 
@@ -290,7 +290,7 @@ pub fn get_code(self: *const EvmState, address: Address) []const u8 {
     // Get account to find code hash
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
-        Log.debug("EvmState.get_code: Database error {}, returning empty", .{err});
+        Log.debug("EvmState.get_code: Database error {any}, returning empty", .{err});
         return &[_]u8{};
     };
 
@@ -306,7 +306,7 @@ pub fn get_code(self: *const EvmState, address: Address) []const u8 {
         // Get code by hash
         const code = self.database.get_code(acc.code_hash) catch |err| {
             @branchHint(.cold);
-            Log.debug("EvmState.get_code: Code fetch error {}, returning empty", .{err});
+            Log.debug("EvmState.get_code: Code fetch error {any}, returning empty", .{err});
             return &[_]u8{};
         };
 
@@ -384,7 +384,7 @@ pub fn get_nonce(self: *const EvmState, address: Address) u64 {
     // Get account from database
     const account = self.database.get_account(address) catch |err| {
         @branchHint(.cold);
-        Log.debug("EvmState.get_nonce: Database error {}, returning 0", .{err});
+        Log.debug("EvmState.get_nonce: Database error {any}, returning 0", .{err});
         return 0;
     };
 

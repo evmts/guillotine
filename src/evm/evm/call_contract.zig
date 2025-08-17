@@ -107,7 +107,7 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
 
     // Create code analysis for the contract bytecode
     var analysis = CodeAnalysis.from_code(self.allocator, code, &self.table) catch |err| {
-        Log.debug("VM.call_contract: Code analysis failed with error: {}", .{err});
+        Log.debug("VM.call_contract: Code analysis failed with error: {any}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
     defer analysis.deinit();
@@ -130,7 +130,7 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
         self.state.database, // database interface
         self.allocator // allocator
     ) catch |err| {
-        Log.debug("VM.call_contract: Frame creation failed with error: {}", .{err});
+        Log.debug("VM.call_contract: Frame creation failed with error: {any}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
     defer context.deinit(self.allocator);

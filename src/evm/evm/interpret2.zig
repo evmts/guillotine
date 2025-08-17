@@ -9,6 +9,7 @@ const Memory = @import("../memory/memory.zig");
 const execution = @import("../execution/package.zig");
 const primitives = @import("primitives");
 const tailcalls = @import("tailcalls.zig");
+const Log = @import("../log.zig");
 
 pub const Error = ExecutionError.Error;
 
@@ -35,21 +36,21 @@ fn isValidOpcode(byte: u8) bool {
     // 0x10-0x1d: LT to SAR
     // 0x20: KECCAK256
     // 0x30-0x3f: ADDRESS to EXTCODECOPY
-    // 0x40-0x48: BLOCKHASH to BASEFEE
-    // 0x50-0x5b: POP to JUMPDEST
+    // 0x40-0x4a: BLOCKHASH to BLOBBASEFEE (includes 0x49 BLOBHASH and 0x4A BLOBBASEFEE)
+    // 0x50-0x5e: POP to MCOPY (includes 0x5c TLOAD, 0x5d TSTORE, 0x5e MCOPY)
     // 0x5f-0x7f: PUSH0 to PUSH32
     // 0x80-0x8f: DUP1 to DUP16
     // 0x90-0x9f: SWAP1 to SWAP16
     // 0xa0-0xa4: LOG0 to LOG4
-    // 0xf0-0xff: CREATE to SELFDESTRUCT
+    // 0xf0-0xff: CREATE to SELFDESTRUCT (includes 0xfe INVALID)
     
     return switch (byte) {
         0x00...0x0b => true,
         0x10...0x1d => true,
         0x20 => true,
         0x30...0x3f => true,
-        0x40...0x48 => true,
-        0x50...0x5b => true,
+        0x40...0x4a => true,
+        0x50...0x5e => true,
         0x5f...0x7f => true,
         0x80...0x8f => true,
         0x90...0x9f => true,
@@ -159,63 +160,52 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     defer ops.deinit();
 
     pc = 0;
+    var op_count: usize = 0;
     while (pc < code.len) {
         const byte = code[pc];
         
         // Check if this is a PUSH instruction and skip its data bytes
         if (byte >= 0x60 and byte <= 0x7F) {
-            // PUSH1 through PUSH32
+            // PUSH1 through PUSH32 - all use the same generic push function
             const push_size = byte - 0x5F;
-            try ops.append(switch (@as(Opcode, @enumFromInt(byte))) {
-                .PUSH1 => &tailcalls.op_push1,
-                .PUSH2 => &tailcalls.op_push2,
-                .PUSH3 => &tailcalls.op_push3,
-                .PUSH4 => &tailcalls.op_push4,
-                .PUSH5 => &tailcalls.op_push5,
-                .PUSH6 => &tailcalls.op_push6,
-                .PUSH7 => &tailcalls.op_push7,
-                .PUSH8 => &tailcalls.op_push8,
-                .PUSH9 => &tailcalls.op_push9,
-                .PUSH10 => &tailcalls.op_push10,
-                .PUSH11 => &tailcalls.op_push11,
-                .PUSH12 => &tailcalls.op_push12,
-                .PUSH13 => &tailcalls.op_push13,
-                .PUSH14 => &tailcalls.op_push14,
-                .PUSH15 => &tailcalls.op_push15,
-                .PUSH16 => &tailcalls.op_push16,
-                .PUSH17 => &tailcalls.op_push17,
-                .PUSH18 => &tailcalls.op_push18,
-                .PUSH19 => &tailcalls.op_push19,
-                .PUSH20 => &tailcalls.op_push20,
-                .PUSH21 => &tailcalls.op_push21,
-                .PUSH22 => &tailcalls.op_push22,
-                .PUSH23 => &tailcalls.op_push23,
-                .PUSH24 => &tailcalls.op_push24,
-                .PUSH25 => &tailcalls.op_push25,
-                .PUSH26 => &tailcalls.op_push26,
-                .PUSH27 => &tailcalls.op_push27,
-                .PUSH28 => &tailcalls.op_push28,
-                .PUSH29 => &tailcalls.op_push29,
-                .PUSH30 => &tailcalls.op_push30,
-                .PUSH31 => &tailcalls.op_push31,
-                .PUSH32 => &tailcalls.op_push32,
-                else => unreachable,
-            });
+            try ops.append(&tailcalls.op_push);
             // Skip past the PUSH opcode and its data bytes
             pc += 1 + push_size;
+            op_count += 1;
             continue;
         } else if (byte == 0x5F) {
             // PUSH0
             try ops.append(&tailcalls.op_push0);
             pc += 1;
+            op_count += 1;
+            continue;
+        }
+        
+        // Check for INVALID opcode (0xfe)
+        // Note: INVALID can appear in legitimate code as a trap/revert mechanism
+        // Don't stop processing as there may be JUMPDESTs after it
+        if (byte == 0xfe) {
+            try ops.append(&tailcalls.op_invalid);
+            pc += 1;
+            op_count += 1;
             continue;
         }
         
         // For non-PUSH instructions, check if it's a valid opcode
         if (!isValidOpcode(byte)) {
-            // This shouldn't happen if we're properly tracking PUSH data bytes
-            std.debug.print("[interpret2] Unexpected invalid opcode at pc={}: 0x{x:0>2}\n", .{ pc, byte });
-            return error.InvalidOpcode;
+            // Check for Solidity metadata markers (0xa1 or 0xa2 followed by 0x65)
+            if ((byte == 0xa1 or byte == 0xa2) and pc + 1 < code.len and code[pc + 1] == 0x65) {
+                Log.debug("[interpret2] Found Solidity metadata marker at PC={}, stopping", .{pc});
+                break; // Stop processing - we've hit metadata
+            }
+            
+            // Some contracts may contain invalid opcodes as part of their logic
+            // Treat them as INVALID opcodes rather than failing
+            Log.debug("[interpret2] WARNING: Unknown opcode 0x{x:0>2} at PC={}, treating as INVALID", .{ byte, pc });
+            try ops.append(&tailcalls.op_invalid);
+            pc += 1;
+            op_count += 1;
+            continue;
         }
         
         const opcode = @as(Opcode, @enumFromInt(byte));
@@ -343,14 +333,8 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
         };
 
         try ops.append(fn_ptr);
-
-        // Skip PUSH data bytes
-        if (byte >= 0x60 and byte <= 0x7F) {
-            const push_size = byte - 0x5F;
-            pc += 1 + push_size;
-        } else {
-            pc += 1;
-        }
+        pc += 1;
+        op_count += 1;
     }
 
     // Always append a STOP at the end to ensure proper termination
@@ -358,12 +342,26 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     try ops.append(&tailcalls.op_stop);
 
     const ops_slice = try ops.toOwnedSlice();
+    
 
     frame.tailcall_ops = @ptrCast(ops_slice.ptr);
     frame.tailcall_index = 0;
 
     var ip: usize = 0;
     const ops_ptr = @as([*]const *const anyopaque, @ptrCast(ops_slice.ptr));
+    
+    // Safety check
+    if (ops_slice.len == 0) {
+        Log.debug("[interpret2] No ops to execute", .{});
+        return;
+    }
+    
+    // Add frame fields for tailcall system
+    frame.tailcall_max_iterations = 100_000_000; // Increase for complex contracts like snailtracer
+    frame.tailcall_iterations = 0;
+    
+    Log.debug("[interpret2] Starting execution with {} ops", .{ops_slice.len});
+    
     const first_op = ops_slice[0];
     _ = first_op(frame, ops_ptr, &ip) catch |err| return err;
     unreachable;

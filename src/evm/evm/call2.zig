@@ -44,18 +44,18 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
             // For CREATE operations, delegate to the standard create_contract method
             // as interpret2 isn't designed to handle deployment bytecode
             Log.debug("[call2] CREATE operation - delegating to standard create_contract", .{});
-            
+
             const caller = if (params == .create) params.create.caller else params.create2.caller;
             const value = if (params == .create) params.create.value else params.create2.value;
             const init_code = if (params == .create) params.create.init_code else params.create2.init_code;
             const gas = if (params == .create) params.create.gas else params.create2.gas;
-            
+
             // Use the standard create_contract for deployment
             const result = self.create_contract(caller, value, init_code, gas) catch |err| {
-                Log.debug("[call2] create_contract failed: {}", .{err});
+                Log.debug("[call2] create_contract failed: {any}", .{err});
                 return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
             };
-            
+
             return CallResult{
                 .success = result.status == .Success,
                 .gas_left = result.gas_left,
@@ -65,7 +65,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .call => |call_data| {
             call_address = call_data.to;
             call_code = self.state.get_code(call_data.to);
-            Log.debug("[call2] Retrieved code for address {}: len={}", .{ call_data.to, call_code.len });
+            Log.debug("[call2] Retrieved code for address: len={}", .{call_code.len});
             if (call_code.len > 0) {
                 Log.debug("[call2] First 10 bytes of code: {any}", .{std.fmt.fmtSliceHexLower(call_code[0..@min(10, call_code.len)])});
             }
@@ -157,7 +157,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     if (self.chain_rules.is_berlin) {
         const addresses_to_warm = [_]primitives.Address.Address{ call_address, call_caller };
         self.access_list.pre_warm_addresses(&addresses_to_warm) catch |err| {
-            Log.debug("[call2] Failed to warm addresses: {}", .{err});
+            Log.debug("[call2] Failed to warm addresses: {any}", .{err});
         };
     }
 
@@ -166,7 +166,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const analysis_mod = @import("../analysis.zig");
     const CodeAnalysis = analysis_mod.CodeAnalysis;
     const size_buckets = @import("../size_buckets.zig");
-    
+
     // Create empty size buckets for dummy analysis
     const empty_size0_counts = size_buckets.Size0Counts{
         .noop = 0,
@@ -185,7 +185,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const empty_size16_counts = size_buckets.Size16Counts{
         .word = 0,
     };
-    
+
     var dummy_analysis = CodeAnalysis{
         .code = call_code,
         .code_len = call_code.len,
@@ -206,7 +206,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .inst_to_pc = &.{},
         .allocator = self.allocator,
     };
-    
+
     // Create frame - interpret2 doesn't use CodeAnalysis, but Frame requires it
     const contract_addr_for_frame = call_address;
     var frame = try Frame.init(
@@ -238,13 +238,10 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
 
     // Main execution with interpret2
     var exec_err: ?ExecutionError.Error = null;
-    const was_executing = self.is_currently_executing();
-    self.set_is_executing(true);
-    defer self.set_is_executing(was_executing);
-
     // Call interpret2 which will handle its own analysis and tailcall dispatch
+    Log.debug("[call2] About to call interpret2 with code.len={}", .{call_code.len});
     interpret2(&frame, call_code) catch |err| {
-        Log.debug("[call2] interpret2 ended with error: {}", .{err});
+        Log.debug("[call2] interpret2 ended with error: {any}", .{err});
         exec_err = err;
     };
 

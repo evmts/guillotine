@@ -1,10 +1,11 @@
 const std = @import("std");
+const print = std.debug.print;
 const evm = @import("evm");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 
 pub const std_options: std.Options = .{
-    .log_level = .err,
+    .log_level = .debug,
 };
 
 fn hex_decode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
@@ -95,22 +96,10 @@ pub fn main() !void {
 
     // Run benchmarks
     for (0..num_runs) |_| {
-        const start_time = std.time.nanoTimestamp();
-        
-        // Create fresh VM for each run
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        
-        var vm = try evm.Evm.init(
-            allocator,
-            memory_db.to_database_interface(),
-            null,
-            null,
-            null,
-            0,
-            false,
-            null
-        );
+
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
         defer vm.deinit();
 
         // Set deployer balance
@@ -122,17 +111,20 @@ pub fn main() !void {
             .value = 0,
             .init_code = init_code,
             .gas = 10_000_000,
-        }};
+        } };
 
         const create_result = vm.call2(create_params) catch |err| {
             std.debug.print("Error calling vm.call2 for CREATE: {}\n", .{err});
             std.process.exit(1);
         };
-        
+
         if (!create_result.success) {
             std.debug.print("Contract deployment failed\n", .{});
             std.process.exit(1);
         }
+
+        // Debug: confirm CREATE succeeded
+        // std.debug.print("CREATE succeeded, gas_left={}\n", .{create_result.gas_left});
 
         const runtime_code = create_result.output orelse {
             std.debug.print("No runtime code returned\n", .{});
@@ -140,14 +132,6 @@ pub fn main() !void {
         };
 
         // Set the runtime code at the contract address
-        std.debug.print("[DEBUG] Runtime code length: {}\n", .{runtime_code.len});
-        if (runtime_code.len > 0) {
-            std.debug.print("[DEBUG] First 10 bytes of runtime: ", .{});
-            for (runtime_code[0..@min(10, runtime_code.len)]) |byte| {
-                std.debug.print("{x:0>2} ", .{byte});
-            }
-            std.debug.print("\n", .{});
-        }
         try vm.state.set_code(contract_addr, runtime_code);
 
         // Set up ERC20 state if this looks like an ERC20 operation
@@ -160,12 +144,12 @@ pub fn main() !void {
                 @memset(&caller_slot_data, 0);
                 @memcpy(caller_slot_data[12..32], &deployer);
                 @memset(caller_slot_data[32..64], 0);
-                
+
                 var caller_slot_hash: [32]u8 = undefined;
                 const Keccak256 = std.crypto.hash.sha3.Keccak256;
                 Keccak256.hash(&caller_slot_data, &caller_slot_hash, .{});
                 const slot_key = std.mem.readInt(u256, &caller_slot_hash, .big);
-                
+
                 const balance: u256 = 10_000_000 * std.math.pow(u256, 10, 18);
                 try vm.state.set_storage(contract_addr, slot_key, balance);
                 try vm.state.set_storage(contract_addr, 2, balance); // total supply
@@ -173,29 +157,30 @@ pub fn main() !void {
         }
 
         // Step 2: Call contract using call2 CALL
+        // std.debug.print("Starting CALL to contract...\n", .{});
         const call_params = evm.CallParams{ .call = .{
             .caller = deployer,
             .to = contract_addr,
             .value = 0,
             .input = calldata,
             .gas = 100_000_000,
-        }};
+        } };
 
+        const start_time = std.time.nanoTimestamp();
         const call_result = vm.call2(call_params) catch |err| {
             std.debug.print("Error calling vm.call2 for CALL: {}\n", .{err});
             std.process.exit(1);
         };
-        
         const end_time = std.time.nanoTimestamp();
-        const duration_ns: u64 = @intCast(end_time - start_time);
-        const duration_ms = @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
-        
+        // std.debug.print("CALL completed, success={}\n", .{call_result.success});
+
         if (!call_result.success) {
             std.debug.print("Contract call failed\n", .{});
             std.process.exit(1);
         }
         
-        // Output timing in milliseconds (one per line as expected by orchestrator)
-        std.debug.print("{d:.6}\n", .{duration_ms});
+        const elapsed_ns = @as(u64, @intCast(end_time - start_time));
+        const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
+        print("{d:.6}\n", .{elapsed_ms});
     }
 }
