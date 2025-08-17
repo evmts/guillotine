@@ -661,7 +661,7 @@ pub fn op_jump(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
         const byte = code[pc];
         if (byte >= 0x60 and byte <= 0x7F) {
             pc += 1 + (byte - 0x5F);
-            inst_idx += 1 + (byte - 0x5F); // Account for data bytes in ops array
+            inst_idx += 1; // Only one op per instruction, even for PUSH
         } else if (byte == 0x5F) {
             pc += 1;
             inst_idx += 1;
@@ -697,7 +697,7 @@ pub fn op_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) E
             const byte = code[pc];
             if (byte >= 0x60 and byte <= 0x7F) {
                 pc += 1 + (byte - 0x5F);
-                inst_idx += 1 + (byte - 0x5F); // Account for data bytes in ops array
+                inst_idx += 1; // Only one op per instruction, even for PUSH
             } else if (byte == 0x5F) {
                 pc += 1;
                 inst_idx += 1;
