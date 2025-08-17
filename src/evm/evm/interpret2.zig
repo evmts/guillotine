@@ -43,28 +43,11 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
 
     var pc: usize = 0;
     var op_count: usize = 0;
-    
     while (pc < code.len) {
         const byte = code[pc];
 
         if (opcode_mod.is_push(byte)) {
             const push_size = opcode_mod.get_push_size(byte);
-            
-            // Check if this PUSH has a known jump (PUSH+JUMP fusion optimization)
-            const inst_idx = analysis.getInstIdx(pc);
-            if (inst_idx != SimpleAnalysis.MAX_USIZE) {
-                const known_jump_dest = analysis.getKnownJump(inst_idx);
-                if (known_jump_dest != SimpleAnalysis.MAX_USIZE) {
-                    // This is a fusable PUSH+JUMP pattern
-                    try ops.append(&tailcalls.op_push_then_jump);
-                    // Skip both the PUSH bytes AND the JUMP instruction
-                    pc += 1 + push_size + 1; // +1 for PUSH opcode, +push_size for data, +1 for JUMP
-                    op_count += 1;
-                    continue;
-                }
-            }
-            
-            // Regular PUSH instruction (not fusable)
             try ops.append(&tailcalls.op_push);
             pc += 1 + push_size;
             op_count += 1;

@@ -178,7 +178,7 @@ pub const ecmul = @import("precompiles/ecmul.zig");
 pub const ecpairing = @import("precompiles/ecpairing.zig");
 
 /// Tailcall interpreter prototype (simplified version)
-pub const interpret2 = @import("evm/interpret2.zig");
+pub const interpret2 = @import("evm/interpret2_simple.zig");
 
 /// EIP-4844 blob transaction support (blobs, KZG verification, gas market)
 pub const blob = @import("blob/index.zig");

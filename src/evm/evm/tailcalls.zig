@@ -731,37 +731,6 @@ pub fn op_jumpdest(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize
     return next(frame, ops, ip);
 }
 
-// Optimized PUSH+JUMP fusion - validates jump at analysis time, not runtime
-pub fn op_push_then_jump(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
-    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
-    const analysis = f.tailcall_analysis;
-    
-    // Get the known jump destination for this PUSH instruction
-    const dest_inst_idx = analysis.getKnownJump(ip.*);
-    if (dest_inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
-        // This shouldn't happen - we only use this opcode for known jumps
-        return Error.InvalidJump;
-    }
-    
-    // We don't need to read or push the value since we already know the jump destination
-    // The JUMP opcode would consume it anyway, so we skip both operations
-    
-    // In Debug/ReleaseSafe modes, validate the jump destination
-    if (comptime SAFE) {
-        const dest_pc = analysis.getPc(dest_inst_idx);
-        if (dest_pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or 
-            dest_pc >= f.analysis.code.len or 
-            f.analysis.code[dest_pc] != 0x5B) {
-            return Error.InvalidJump;
-        }
-    }
-    
-    // Jump to the JUMPDEST instruction (it will call next() itself)
-    ip.* = dest_inst_idx;
-    const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
-    return @call(.always_tail, func_ptr, .{ frame, ops, ip });
-}
-
 // Log operations
 pub fn op_log0(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));
