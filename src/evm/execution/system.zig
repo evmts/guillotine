@@ -1441,7 +1441,7 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
     const recipient_address = from_u256(recipient);
 
     // Calculate gas cost
-    var gas_cost = GasConstants.SelfDestructCost;
+    var gas_cost = GasConstants.SelfdestructGas;
 
     // EIP-2929: Check if recipient is cold and add extra gas cost
     if (frame.host.is_hardfork_at_least(.BERLIN)) {
