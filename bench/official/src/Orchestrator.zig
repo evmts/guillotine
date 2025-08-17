@@ -183,7 +183,7 @@ pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir
         zig_trace_path,
     });
     if (self.use_next) try zig_argv.append("--next");
-    if (self.use_call2) try zig_argv.append("--call2");
+    if (self.use_call2 and !std.mem.eql(u8, self.evm_name, "zig-call2")) try zig_argv.append("--call2");
 
     print("Running Zig command: ", .{});
     for (zig_argv.items) |arg| {
@@ -832,6 +832,8 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     var runner_path: []const u8 = undefined;
     if (std.mem.eql(u8, self.evm_name, "zig")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+    } else if (std.mem.eql(u8, self.evm_name, "zig-call2")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
     } else if (std.mem.eql(u8, self.evm_name, "zig-small")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-small" });
     } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
@@ -1239,6 +1241,8 @@ fn buildRunnerCommand(self: *Orchestrator, test_case: TestCase) ![]const u8 {
     var runner_path: []const u8 = undefined;
     if (std.mem.eql(u8, self.evm_name, "zig")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+    } else if (std.mem.eql(u8, self.evm_name, "zig-call2")) {
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
     } else if (std.mem.eql(u8, self.evm_name, "zig-small")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-small" });
     } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
@@ -1264,7 +1268,7 @@ fn buildRunnerCommand(self: *Orchestrator, test_case: TestCase) ![]const u8 {
     defer self.allocator.free(num_runs_str);
     
     const next_flag = if (self.use_next) " --next" else "";
-    const call2_flag = if (self.use_call2) " --call2" else "";
+    const call2_flag = if (self.use_call2 and std.mem.eql(u8, self.evm_name, "zig")) " --call2" else "";
     
     // For EthereumJS, invoke via bun explicitly
     const js_prefix = if (std.mem.eql(u8, self.evm_name, "ethereumjs")) "bun " else "";
@@ -1374,14 +1378,21 @@ fn exportJSON(self: *Orchestrator) !void {
     defer file.close();
 
     try file.writeAll("{\n");
+    try file.writer().print("  \"evm\": \"{s}\",\n", .{self.evm_name});
+    try file.writer().print("  \"runs\": {},\n", .{self.num_runs});
+    try file.writer().print("  \"timestamp\": {},\n", .{std.time.timestamp()});
     try file.writeAll("  \"benchmarks\": [\n");
 
-    for (self.test_cases, 0..) |tc, i| {
+    for (self.results.items, 0..) |result, i| {
         try file.writer().print("    {{\n", .{});
-        try file.writer().print("      \"name\": \"{s}\",\n", .{tc.name});
-        try file.writer().print("      \"evm\": \"{s}\",\n", .{self.evm_name});
-        try file.writer().print("      \"runs\": {}\n", .{self.num_runs});
-        try file.writer().print("    }}{s}\n", .{if (i < self.test_cases.len - 1) "," else ""});
+        try file.writer().print("      \"name\": \"{s}\",\n", .{result.test_case});
+        try file.writer().print("      \"mean_ms\": {d:.6},\n", .{result.mean_ms});
+        try file.writer().print("      \"median_ms\": {d:.6},\n", .{result.median_ms});
+        try file.writer().print("      \"min_ms\": {d:.6},\n", .{result.min_ms});
+        try file.writer().print("      \"max_ms\": {d:.6},\n", .{result.max_ms});
+        try file.writer().print("      \"std_dev_ms\": {d:.6},\n", .{result.std_dev_ms});
+        try file.writer().print("      \"internal_runs\": {}\n", .{result.internal_runs});
+        try file.writer().print("    }}{s}\n", .{if (i < self.results.items.len - 1) "," else ""});
     }
 
     try file.writeAll("  ]\n");
