@@ -162,11 +162,60 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     while (pc < code.len) {
         const byte = code[pc];
         
-        // Skip invalid opcodes (data bytes)
-        if (!isValidOpcode(byte)) {
-            // This is a data byte from a PUSH instruction, skip it
+        // Check if this is a PUSH instruction and skip its data bytes
+        if (byte >= 0x60 and byte <= 0x7F) {
+            // PUSH1 through PUSH32
+            const push_size = byte - 0x5F;
+            try ops.append(switch (@as(Opcode, @enumFromInt(byte))) {
+                .PUSH1 => &tailcalls.op_push1,
+                .PUSH2 => &tailcalls.op_push2,
+                .PUSH3 => &tailcalls.op_push3,
+                .PUSH4 => &tailcalls.op_push4,
+                .PUSH5 => &tailcalls.op_push5,
+                .PUSH6 => &tailcalls.op_push6,
+                .PUSH7 => &tailcalls.op_push7,
+                .PUSH8 => &tailcalls.op_push8,
+                .PUSH9 => &tailcalls.op_push9,
+                .PUSH10 => &tailcalls.op_push10,
+                .PUSH11 => &tailcalls.op_push11,
+                .PUSH12 => &tailcalls.op_push12,
+                .PUSH13 => &tailcalls.op_push13,
+                .PUSH14 => &tailcalls.op_push14,
+                .PUSH15 => &tailcalls.op_push15,
+                .PUSH16 => &tailcalls.op_push16,
+                .PUSH17 => &tailcalls.op_push17,
+                .PUSH18 => &tailcalls.op_push18,
+                .PUSH19 => &tailcalls.op_push19,
+                .PUSH20 => &tailcalls.op_push20,
+                .PUSH21 => &tailcalls.op_push21,
+                .PUSH22 => &tailcalls.op_push22,
+                .PUSH23 => &tailcalls.op_push23,
+                .PUSH24 => &tailcalls.op_push24,
+                .PUSH25 => &tailcalls.op_push25,
+                .PUSH26 => &tailcalls.op_push26,
+                .PUSH27 => &tailcalls.op_push27,
+                .PUSH28 => &tailcalls.op_push28,
+                .PUSH29 => &tailcalls.op_push29,
+                .PUSH30 => &tailcalls.op_push30,
+                .PUSH31 => &tailcalls.op_push31,
+                .PUSH32 => &tailcalls.op_push32,
+                else => unreachable,
+            });
+            // Skip past the PUSH opcode and its data bytes
+            pc += 1 + push_size;
+            continue;
+        } else if (byte == 0x5F) {
+            // PUSH0
+            try ops.append(&tailcalls.op_push0);
             pc += 1;
             continue;
+        }
+        
+        // For non-PUSH instructions, check if it's a valid opcode
+        if (!isValidOpcode(byte)) {
+            // This shouldn't happen if we're properly tracking PUSH data bytes
+            std.debug.print("[interpret2] Unexpected invalid opcode at pc={}: 0x{x:0>2}\n", .{ pc, byte });
+            return error.InvalidOpcode;
         }
         
         const opcode = @as(Opcode, @enumFromInt(byte));
