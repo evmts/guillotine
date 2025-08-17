@@ -139,12 +139,14 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
             self.frame_stack = try std.heap.page_allocator.alloc(Frame, MAX_CALL_DEPTH);
         }
     } else {
-        // Nested call - check depth
+        // Nested call - check depth and increment
         const new_depth = self.current_frame_depth + 1;
         if (new_depth >= MAX_CALL_DEPTH) {
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
         }
+        // CRITICAL: Actually update the frame depth for nested calls
+        self.current_frame_depth = new_depth;
     }
 
     // Prewarm addresses for Berlin
@@ -261,14 +263,16 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         else => false,
     } else false;
 
-    // Store output if any
-    const output = if (self.current_output.len > 0) blk: {
-        const copy = try self.allocator.dupe(u8, self.current_output);
-        break :blk copy;
-    } else &.{};
+    // Return VM-owned view; callers must not free (same as standard call)
+    const output = if (self.current_output.len > 0) self.current_output else &.{};
 
     // Clear current_input to avoid interference
     self.current_input = &.{};
+
+    // Restore frame depth for nested calls
+    if (!is_top_level_call) {
+        self.current_frame_depth -= 1;
+    }
 
     return CallResult{
         .success = success,
