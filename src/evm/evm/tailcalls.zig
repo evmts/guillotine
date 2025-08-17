@@ -17,10 +17,9 @@ pub inline fn next(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize
     if (f.tailcall_iterations > f.tailcall_max_iterations) {
         return Error.OutOfGas; // Use OutOfGas to indicate we've run too long
     }
-    
+
     ip.* += 1;
-    
-    
+
     const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
     return @call(.always_tail, func_ptr, .{ frame, ops, ip });
 }
@@ -370,7 +369,7 @@ pub fn op_push0(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) E
 // Handle PUSH operations with data bytes
 pub fn op_push(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));
-    
+
     // Use cached analysis for O(1) lookup
     if (f.tailcall_analysis) |analysis| {
         const pc = analysis.getPc(ip.*);
@@ -381,7 +380,7 @@ pub fn op_push(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
             }
         }
     }
-    
+
     // Fallback to old O(n) method if analysis not available
     const code = f.analysis.code;
     var pc: usize = 0;
@@ -633,8 +632,7 @@ pub fn op_msize(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) E
 }
 
 pub fn op_mcopy(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
-    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
-    try execution.memory.op_mcopy(f);
+    try execution.memory.op_mcopy(@as(*Frame, @ptrCast(@alignCast(frame))));
     return next(frame, ops, ip);
 }
 
@@ -667,7 +665,7 @@ pub fn op_tstore(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) 
 pub fn op_jump(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));
     const dest = try f.stack.pop();
-    
+
     // Use cached analysis for O(1) lookup
     if (f.tailcall_analysis) |analysis| {
         const inst_idx = analysis.getInstIdx(@intCast(dest));
@@ -731,7 +729,7 @@ pub fn op_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) E
             }
             return Error.InvalidJump;
         }
-        
+
         // Fallback to old O(n) method if analysis not available
         const code = f.analysis.code;
         var pc: usize = 0;
@@ -766,7 +764,7 @@ pub fn op_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) E
 
 pub fn op_pc(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));
-    
+
     // Use cached analysis for O(1) lookup
     if (f.tailcall_analysis) |analysis| {
         const pc = analysis.getPc(ip.*);
@@ -775,7 +773,7 @@ pub fn op_pc(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Erro
             return next(frame, ops, ip);
         }
     }
-    
+
     // Fallback: calculate PC from instruction index
     const code = f.analysis.code;
     var pc: usize = 0;
@@ -790,7 +788,7 @@ pub fn op_pc(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Erro
             pc += 1;
         }
     }
-    
+
     try f.stack.append(pc);
     return next(frame, ops, ip);
 }
