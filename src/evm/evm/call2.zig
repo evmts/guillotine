@@ -65,6 +65,10 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .call => |call_data| {
             call_address = call_data.to;
             call_code = self.state.get_code(call_data.to);
+            Log.debug("[call2] Retrieved code for address {}: len={}", .{ call_data.to, call_code.len });
+            if (call_code.len > 0) {
+                Log.debug("[call2] First 10 bytes of code: {any}", .{std.fmt.fmtSliceHexLower(call_code[0..@min(10, call_code.len)])});
+            }
             call_input = call_data.input;
             call_gas = call_data.gas;
             call_is_static = false;
