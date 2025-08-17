@@ -6,16 +6,13 @@ const ExecutionError = @import("execution/execution_error.zig");
 /// creating an efficient dispatch chain without returning to a central loop.
 ///
 /// Parameters:
-/// - frame: The execution frame containing stack, memory, gas, state, and now also:
-///          - ops: Base pointer to the ops array (for calculating jump targets)
-///          - ip: Current instruction pointer (handlers can modify for control flow)
+/// - context: The execution frame (*Frame) cast to *anyopaque
 ///
 /// The handler should:
-/// 1. Execute its operation using the frame
-/// 2. Update frame.ip if needed (jumps) or increment it (sequential)
-/// 3. Tailcall the next instruction via @call(.always_tail, frame.ip[0], ...)
+/// 1. Cast context back to *Frame
+/// 2. Execute its operation using the frame
+/// 3. Update frame.tailcall_index if needed (jumps) or increment it (sequential)
+/// 4. Tailcall the next instruction via @call(.always_tail, frame.tailcall_ops[frame.tailcall_index], .{context})
 ///
 /// Halting instructions (STOP, RETURN, REVERT) return instead of tailcalling.
-pub const TailcallExecutionFunc = *const fn (
-    frame: *anyopaque,
-) ExecutionError.Error!void;
+pub const TailcallExecutionFunc = fn (context: *anyopaque) ExecutionError.Error!void;
