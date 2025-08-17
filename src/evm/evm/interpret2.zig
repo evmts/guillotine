@@ -33,7 +33,7 @@ fn isValidOpcode(byte: u8) bool {
     // 0x90-0x9f: SWAP1 to SWAP16
     // 0xa0-0xa4: LOG0 to LOG4
     // 0xf0-0xff: CREATE to SELFDESTRUCT (includes 0xfe INVALID)
-    
+
     return switch (byte) {
         0x00...0x0b => true,
         0x10...0x1d => true,
@@ -60,11 +60,11 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
 
     var fba = std.heap.FixedBufferAllocator.init(buffer);
     const allocator = fba.allocator();
-    
+
     // Build the analysis with precomputed mappings
     var analysis = try SimpleAnalysis.analyze(allocator, code);
     defer analysis.deinit(allocator);
-    
+
     // Store analysis in frame for tailcall functions to use
     frame.tailcall_analysis = &analysis;
 
@@ -75,7 +75,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     var op_count: usize = 0;
     while (pc < code.len) {
         const byte = code[pc];
-        
+
         // Check if this is a PUSH instruction and skip its data bytes
         if (byte >= 0x60 and byte <= 0x7F) {
             // PUSH1 through PUSH32 - all use the same generic push function
@@ -92,7 +92,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
             op_count += 1;
             continue;
         }
-        
+
         // Check for INVALID opcode (0xfe)
         // Note: INVALID can appear in legitimate code as a trap/revert mechanism
         // Don't stop processing as there may be JUMPDESTs after it
@@ -102,7 +102,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
             op_count += 1;
             continue;
         }
-        
+
         // For non-PUSH instructions, check if it's a valid opcode
         if (!isValidOpcode(byte)) {
             // Check for Solidity metadata markers (0xa1 or 0xa2 followed by 0x65)
@@ -110,7 +110,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
                 Log.debug("[interpret2] Found Solidity metadata marker at PC={}, stopping", .{pc});
                 break; // Stop processing - we've hit metadata
             }
-            
+
             // Some contracts may contain invalid opcodes as part of their logic
             // Treat them as INVALID opcodes rather than failing
             Log.debug("[interpret2] WARNING: Unknown opcode 0x{x:0>2} at PC={}, treating as INVALID", .{ byte, pc });
@@ -119,7 +119,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
             op_count += 1;
             continue;
         }
-        
+
         const opcode = @as(Opcode, @enumFromInt(byte));
 
         const fn_ptr = switch (opcode) {
@@ -254,27 +254,25 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     try ops.append(&tailcalls.op_stop);
 
     const ops_slice = try ops.toOwnedSlice();
-    
 
     frame.tailcall_ops = @ptrCast(ops_slice.ptr);
     frame.tailcall_index = 0;
 
     var ip: usize = 0;
     const ops_ptr = @as([*]const *const anyopaque, @ptrCast(ops_slice.ptr));
-    
+
     // Safety check
     if (ops_slice.len == 0) {
         Log.debug("[interpret2] No ops to execute", .{});
         return;
     }
-    
+
     // Add frame fields for tailcall system
     frame.tailcall_max_iterations = 100_000_000; // Increase for complex contracts like snailtracer
     frame.tailcall_iterations = 0;
-    
+
     Log.debug("[interpret2] Starting execution with {} ops", .{ops_slice.len});
-    
+
     const first_op = ops_slice[0];
-    _ = first_op(frame, ops_ptr, &ip) catch |err| return err;
-    unreachable;
+    return try first_op(frame, ops_ptr, &ip);
 }
