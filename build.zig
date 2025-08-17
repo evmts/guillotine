@@ -905,7 +905,7 @@ pub fn build(b: *std.Build) void {
     // Interpret2 test
     const interpret2_test = b.addTest(.{
         .name = "interpret2-test",
-        .root_source_file = b.path("src/evm/evm/interpret2.zig"),
+        .root_source_file = b.path("test/evm/interpret2_test.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -917,6 +917,70 @@ pub fn build(b: *std.Build) void {
     const run_interpret2_test = b.addRunArtifact(interpret2_test);
     const interpret2_test_step = b.step("test-interpret2", "Run interpret2 tests");
     interpret2_test_step.dependOn(&run_interpret2_test.step);
+    
+    // Interpret2 simple test
+    const interpret2_simple_test = b.addTest(.{
+        .name = "interpret2-simple-test",
+        .root_source_file = b.path("test/evm/interpret2_simple_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    interpret2_simple_test.root_module.addImport("evm", evm_mod);
+    interpret2_simple_test.root_module.addImport("primitives", primitives_mod);
+    interpret2_simple_test.root_module.addImport("crypto", crypto_mod);
+    interpret2_simple_test.root_module.addImport("build_options", build_options_mod);
+    
+    const run_interpret2_simple_test = b.addRunArtifact(interpret2_simple_test);
+    const interpret2_simple_test_step = b.step("test-interpret2-simple", "Run interpret2 simple tests");
+    interpret2_simple_test_step.dependOn(&run_interpret2_simple_test.step);
+    
+    // Interpret2 comprehensive test
+    const interpret2_comprehensive_test = b.addTest(.{
+        .name = "interpret2-comprehensive-test",
+        .root_source_file = b.path("test/evm/interpret2_comprehensive_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    interpret2_comprehensive_test.root_module.addImport("evm", evm_mod);
+    interpret2_comprehensive_test.root_module.addImport("primitives", primitives_mod);
+    interpret2_comprehensive_test.root_module.addImport("crypto", crypto_mod);
+    interpret2_comprehensive_test.root_module.addImport("build_options", build_options_mod);
+    
+    const run_interpret2_comprehensive_test = b.addRunArtifact(interpret2_comprehensive_test);
+    const interpret2_comprehensive_test_step = b.step("test-interpret2-comprehensive", "Run interpret2 comprehensive tests");
+    interpret2_comprehensive_test_step.dependOn(&run_interpret2_comprehensive_test.step);
+    
+    // Environment and block opcodes test for interpret2
+    const environment_block_opcodes_test = b.addTest(.{
+        .name = "environment-block-opcodes-test",
+        .root_source_file = b.path("test/evm/opcodes/environment_block_opcodes_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    environment_block_opcodes_test.root_module.addImport("evm", evm_mod);
+    environment_block_opcodes_test.root_module.addImport("primitives", primitives_mod);
+    environment_block_opcodes_test.root_module.addImport("crypto", crypto_mod);
+    environment_block_opcodes_test.root_module.addImport("build_options", build_options_mod);
+    
+    const run_environment_block_opcodes_test = b.addRunArtifact(environment_block_opcodes_test);
+    const environment_block_opcodes_test_step = b.step("test-environment-block-opcodes", "Run environment and block opcodes tests");
+    environment_block_opcodes_test_step.dependOn(&run_environment_block_opcodes_test.step);
+    
+    // RETURN opcode test
+    const return_opcode_test = b.addTest(.{
+        .name = "return-opcode-test",
+        .root_source_file = b.path("test/evm/return_opcode_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    return_opcode_test.root_module.addImport("evm", evm_mod);
+    return_opcode_test.root_module.addImport("primitives", primitives_mod);
+    return_opcode_test.root_module.addImport("crypto", crypto_mod);
+    return_opcode_test.root_module.addImport("build_options", build_options_mod);
+    
+    const run_return_opcode_test = b.addRunArtifact(return_opcode_test);
+    const return_opcode_test_step = b.step("test-return-opcode", "Run RETURN opcode tests");
+    return_opcode_test_step.dependOn(&run_return_opcode_test.step);
 
     // Add new EVM tests
     const newevm_test = b.addTest(.{
@@ -945,6 +1009,19 @@ pub fn build(b: *std.Build) void {
     const run_newevm_arithmetic_test = b.addRunArtifact(newevm_arithmetic_test);
     newevm_test_step.dependOn(&run_newevm_arithmetic_test.step);
 
+    // Add comprehensive arithmetic opcode tests for interpret2
+    const newevm_arithmetic_opcodes_test = b.addTest(.{
+        .name = "newevm-arithmetic-opcodes-test",
+        .root_source_file = b.path("test/evm/opcodes/arithmetic_opcodes_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    newevm_arithmetic_opcodes_test.root_module.addImport("evm", evm_mod);
+    newevm_arithmetic_opcodes_test.root_module.addImport("primitives", primitives_mod);
+
+    const run_newevm_arithmetic_opcodes_test = b.addRunArtifact(newevm_arithmetic_opcodes_test);
+    newevm_test_step.dependOn(&run_newevm_arithmetic_opcodes_test.step);
+
     // Add bitwise opcode tests for new EVM
     const newevm_bitwise_test = b.addTest(.{
         .name = "newevm-bitwise-test",
@@ -970,6 +1047,19 @@ pub fn build(b: *std.Build) void {
 
     const run_newevm_comparison_test = b.addRunArtifact(newevm_comparison_test);
     newevm_test_step.dependOn(&run_newevm_comparison_test.step);
+
+    // Add comparison and bitwise opcodes test for interpret2
+    const comparison_bitwise_opcodes_test = b.addTest(.{
+        .name = "comparison-bitwise-opcodes-test",
+        .root_source_file = b.path("test/evm/opcodes/comparison_bitwise_opcodes_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    comparison_bitwise_opcodes_test.root_module.addImport("evm", evm_mod);
+    comparison_bitwise_opcodes_test.root_module.addImport("primitives", primitives_mod);
+
+    const run_comparison_bitwise_opcodes_test = b.addRunArtifact(comparison_bitwise_opcodes_test);
+    newevm_test_step.dependOn(&run_comparison_bitwise_opcodes_test.step);
 
     // Add block opcode tests for new EVM
     const newevm_block_test = b.addTest(.{
