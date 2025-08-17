@@ -75,7 +75,7 @@ pub const Frame = struct {
     tailcall_max_iterations: usize = 10_000_000, // Maximum allowed iterations
     
     // Cached analysis for O(1) lookups in tailcall dispatch
-    tailcall_analysis: ?*const SimpleAnalysis = null,
+    tailcall_analysis: *const SimpleAnalysis = undefined,
 
     /// Initialize a Frame with required parameters
     pub fn init(

@@ -9,8 +9,8 @@ const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
 pub const Error = ExecutionError.Error;
 
-// Function pointer type for tailcall dispatch - use the same type as Frame
-const TailcallFunc = frame_mod.TailcallFunc;
+// Function pointer type for tailcall dispatch - interpret2 uses a different signature
+const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn;
 
 // Helper to advance to next instruction
 pub inline fn next(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
@@ -375,45 +375,17 @@ pub fn op_push(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));
 
     // Use cached analysis for O(1) lookup
-    if (f.tailcall_analysis) |analysis| {
-        const pc = analysis.getPc(ip.*);
-        if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
-            if (analysis.getPushValue(pc)) |value| {
-                try f.stack.append(value);
-                return next(frame, ops, ip);
-            }
+    const analysis = f.tailcall_analysis;
+    const pc = analysis.getPc(ip.*);
+    if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        if (analysis.getPushValue(pc)) |value| {
+            try f.stack.append(value);
+            return next(frame, ops, ip);
         }
     }
 
-    // Fallback to old O(n) method if analysis not available
-    const code = f.analysis.code;
-    var pc: usize = 0;
-    var inst_idx: usize = 0;
-    if (ip.* != 0) {
-        while (inst_idx < ip.*) : (inst_idx += 1) {
-            const byte = code[pc];
-            if (byte >= 0x60 and byte <= 0x7F) {
-                pc += 1 + (byte - 0x5F);
-            } else if (byte == 0x5F) {
-                pc += 1;
-            } else {
-                pc += 1;
-            }
-        }
-    }
-
-    const push_opcode = code[pc];
-    const push_size = push_opcode - 0x5F;
-    pc += 1;
-
-    var value: u256 = 0;
-    var i: usize = 0;
-    while (i < push_size and pc + i < code.len) : (i += 1) {
-        value = (value << 8) | code[pc + i];
-    }
-
-    try f.stack.append(value);
-    return next(frame, ops, ip);
+    // If we get here, something is wrong with the analysis
+    return Error.InvalidOpcode;
 }
 
 // DUP operations
@@ -672,7 +644,28 @@ pub fn op_jump(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
     const dest = try f.stack.pop();
 
     // Use cached analysis for O(1) lookup
-    if (f.tailcall_analysis) |analysis| {
+    const analysis = f.tailcall_analysis;
+    const inst_idx = analysis.getInstIdx(@intCast(dest));
+    if (inst_idx != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        // Verify it's a valid JUMPDEST
+        const code = f.analysis.code;
+        if (dest < code.len and code[@intCast(dest)] == 0x5B) {
+            ip.* = inst_idx;
+            const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
+            return @call(.always_tail, func_ptr, .{ frame, ops, ip });
+        }
+    }
+    return Error.InvalidJump;
+}
+
+pub fn op_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
+    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
+    const dest = try f.stack.pop();
+    const condition = try f.stack.pop();
+
+    if (condition != 0) {
+        // Use cached analysis for O(1) lookup
+        const analysis = f.tailcall_analysis;
         const inst_idx = analysis.getInstIdx(@intCast(dest));
         if (inst_idx != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
             // Verify it's a valid JUMPDEST
@@ -684,83 +677,6 @@ pub fn op_jump(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Er
             }
         }
         return Error.InvalidJump;
-    }
-
-    // Fallback to old O(n) method if analysis not available
-    const code = f.analysis.code;
-    var pc: usize = 0;
-    var inst_idx: usize = 0;
-
-    while (pc < dest and pc < code.len) {
-        const byte = code[pc];
-        if (byte >= 0x60 and byte <= 0x7F) {
-            pc += 1 + (byte - 0x5F);
-            inst_idx += 1;
-        } else if (byte == 0x5F) {
-            pc += 1;
-            inst_idx += 1;
-        } else {
-            pc += 1;
-            inst_idx += 1;
-        }
-    }
-
-    if (pc != dest or pc >= code.len or code[pc] != 0x5B) {
-        return Error.InvalidJump;
-    }
-
-    ip.* = inst_idx;
-    const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
-    return @call(.always_tail, func_ptr, .{ frame, ops, ip });
-}
-
-pub fn op_jumpi(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
-    const f = @as(*Frame, @ptrCast(@alignCast(frame)));
-    const dest = try f.stack.pop();
-    const condition = try f.stack.pop();
-
-    if (condition != 0) {
-        // Use cached analysis for O(1) lookup
-        if (f.tailcall_analysis) |analysis| {
-            const inst_idx = analysis.getInstIdx(@intCast(dest));
-            if (inst_idx != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
-                // Verify it's a valid JUMPDEST
-                const code = f.analysis.code;
-                if (dest < code.len and code[@intCast(dest)] == 0x5B) {
-                    ip.* = inst_idx;
-                    const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
-                    return @call(.always_tail, func_ptr, .{ frame, ops, ip });
-                }
-            }
-            return Error.InvalidJump;
-        }
-
-        // Fallback to old O(n) method if analysis not available
-        const code = f.analysis.code;
-        var pc: usize = 0;
-        var inst_idx: usize = 0;
-
-        while (pc < dest and pc < code.len) {
-            const byte = code[pc];
-            if (byte >= 0x60 and byte <= 0x7F) {
-                pc += 1 + (byte - 0x5F);
-                inst_idx += 1;
-            } else if (byte == 0x5F) {
-                pc += 1;
-                inst_idx += 1;
-            } else {
-                pc += 1;
-                inst_idx += 1;
-            }
-        }
-
-        if (pc != dest or pc >= code.len or code[pc] != 0x5B) {
-            return Error.InvalidJump;
-        }
-
-        ip.* = inst_idx;
-        const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(ops[ip.*])));
-        return @call(.always_tail, func_ptr, .{ frame, ops, ip });
     } else {
         // Condition is false, continue to next instruction
         return next(frame, ops, ip);
@@ -771,31 +687,15 @@ pub fn op_pc(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Erro
     const f = @as(*Frame, @ptrCast(@alignCast(frame)));
 
     // Use cached analysis for O(1) lookup
-    if (f.tailcall_analysis) |analysis| {
-        const pc = analysis.getPc(ip.*);
-        if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
-            try f.stack.append(pc);
-            return next(frame, ops, ip);
-        }
+    const analysis = f.tailcall_analysis;
+    const pc = analysis.getPc(ip.*);
+    if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        try f.stack.append(pc);
+        return next(frame, ops, ip);
     }
 
-    // Fallback: calculate PC from instruction index
-    const code = f.analysis.code;
-    var pc: usize = 0;
-    var inst_idx: usize = 0;
-    while (inst_idx < ip.*) : (inst_idx += 1) {
-        const byte = code[pc];
-        if (byte >= 0x60 and byte <= 0x7F) {
-            pc += 1 + (byte - 0x5F);
-        } else if (byte == 0x5F) {
-            pc += 1;
-        } else {
-            pc += 1;
-        }
-    }
-
-    try f.stack.append(pc);
-    return next(frame, ops, ip);
+    // If we get here, something is wrong with the analysis
+    return Error.InvalidOpcode;
 }
 
 pub fn op_gas(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {
