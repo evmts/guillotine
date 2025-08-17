@@ -662,11 +662,7 @@ pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8
 pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64) !InterprResult {
     Log.debug("[create_contract] Received bytecode.len: {}, ptr: {*}", .{ bytecode.len, bytecode.ptr });
     if (bytecode.len > 0) {
-        std.debug.print("[create_contract] First bytes: ", .{});
-        for (bytecode[0..@min(10, bytecode.len)]) |b| {
-            std.debug.print("{x:0>2} ", .{b});
-        }
-        std.debug.print("\n", .{});
+        Log.debug("[create_contract] First bytes: {any}", .{std.fmt.fmtSliceHexLower(bytecode[0..@min(10, bytecode.len)])});
     }
 
     // CREATE uses sender address + nonce to calculate contract address
@@ -858,7 +854,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         switch (e) {
             ExecutionError.Error.REVERT => {
                 const output = host.get_output();
-                std.debug.print("[create_contract] REVERT with output_len={}\n", .{output.len});
+                Log.debug("[create_contract] REVERT with output_len={}", .{output.len});
                 // Revert state changes since snapshot
                 host.revert_to_snapshot(snapshot_id);
                 // Return view of owned output buffer (no extra allocation)
@@ -876,7 +872,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                 };
             },
             ExecutionError.Error.OutOfGas => {
-                std.debug.print("[create_contract] OutOfGas during constructor\n", .{});
+                Log.debug("[create_contract] OutOfGas during constructor", .{});
                 host.revert_to_snapshot(snapshot_id);
                 frame_ptr.deinit(self.allocator);
                 self.frame_pool.release(frame_ptr);
@@ -890,7 +886,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                 };
             },
             else => {
-                std.debug.print("[create_contract] Failure during constructor: {}\n", .{e});
+                Log.debug("[create_contract] Failure during constructor: {}", .{e});
                 // Treat other errors as failure
                 host.revert_to_snapshot(snapshot_id);
                 frame_ptr.deinit(self.allocator);
@@ -913,7 +909,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     var out: ?[]const u8 = null;
     if (output.len > 0) {
         Log.debug("[CREATE_DEBUG] Deploying runtime code, first 32 bytes: {any}", .{std.fmt.fmtSliceHexLower(output[0..@min(output.len, 32)])});
-        std.debug.print("[create_contract] Success STOP, deploying runtime code len={}, first_bytes={any}\n", .{ output.len, std.fmt.fmtSliceHexLower(output[0..@min(output.len, 32)]) });
+        Log.debug("[create_contract] Success STOP, deploying runtime code len={}, first_bytes={any}", .{ output.len, std.fmt.fmtSliceHexLower(output[0..@min(output.len, 32)]) });
         // Store code at the new address (MemoryDatabase copies the slice)
         self.state.set_code(new_address, output) catch |err| {
             Log.debug("[CREATE_DEBUG] Failed to set code: {}", .{err});
@@ -923,7 +919,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         Log.debug("[CREATE_DEBUG] Code deployed successfully at {any}", .{std.fmt.fmtSliceHexLower(&new_address)});
     } else {
         Log.debug("[CREATE_DEBUG] Empty runtime code - no code deployed", .{});
-        std.debug.print("[create_contract] Success STOP, empty runtime code\n", .{});
+        Log.debug("[create_contract] Success STOP, empty runtime code", .{});
     }
 
     // Add back the unspent frame gas to the caller, but exclude the precharged overhead
