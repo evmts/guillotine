@@ -322,6 +322,7 @@ pub fn get_name(self: Enum) []const u8 {
 }
 
 /// Checks if an opcode is a PUSH operation (PUSH1-PUSH32).
+/// Does not count PUSH0
 ///
 /// PUSH operations place N bytes of immediate data onto the stack,
 /// where N is determined by the specific PUSH opcode.
@@ -445,17 +446,17 @@ pub fn get_log_topic_count(op: u8) u8 {
 /// }
 /// ```
 pub fn is_terminating(op: u8) bool {
-    return op == @intFromEnum(Enum.STOP) or op == @intFromEnum(Enum.RETURN) or 
-           op == @intFromEnum(Enum.REVERT) or op == @intFromEnum(Enum.SELFDESTRUCT) or 
-           op == @intFromEnum(Enum.INVALID);
+    return op == @intFromEnum(Enum.STOP) or op == @intFromEnum(Enum.RETURN) or
+        op == @intFromEnum(Enum.REVERT) or op == @intFromEnum(Enum.SELFDESTRUCT) or
+        op == @intFromEnum(Enum.INVALID);
 }
 
 /// Check if an opcode is a call operation
 pub fn is_call(op: u8) bool {
-    return op == @intFromEnum(Enum.CALL) or op == @intFromEnum(Enum.CALLCODE) or 
-           op == @intFromEnum(Enum.DELEGATECALL) or op == @intFromEnum(Enum.STATICCALL) or
-           op == @intFromEnum(Enum.EXTCALL) or op == @intFromEnum(Enum.EXTDELEGATECALL) or 
-           op == @intFromEnum(Enum.EXTSTATICCALL);
+    return op == @intFromEnum(Enum.CALL) or op == @intFromEnum(Enum.CALLCODE) or
+        op == @intFromEnum(Enum.DELEGATECALL) or op == @intFromEnum(Enum.STATICCALL) or
+        op == @intFromEnum(Enum.EXTCALL) or op == @intFromEnum(Enum.EXTDELEGATECALL) or
+        op == @intFromEnum(Enum.EXTSTATICCALL);
 }
 
 /// Check if an opcode is a create operation
@@ -489,16 +490,80 @@ pub fn is_create(op: u8) bool {
 /// These operations will fail with an error if executed within
 /// a STATICCALL context.
 pub fn modifies_state(op: u8) bool {
-    return op == @intFromEnum(Enum.SSTORE) or op == @intFromEnum(Enum.CREATE) or 
-           op == @intFromEnum(Enum.CREATE2) or op == @intFromEnum(Enum.SELFDESTRUCT) or
-           op == @intFromEnum(Enum.LOG0) or op == @intFromEnum(Enum.LOG1) or 
-           op == @intFromEnum(Enum.LOG2) or op == @intFromEnum(Enum.LOG3) or 
-           op == @intFromEnum(Enum.LOG4);
+    return op == @intFromEnum(Enum.SSTORE) or op == @intFromEnum(Enum.CREATE) or
+        op == @intFromEnum(Enum.CREATE2) or op == @intFromEnum(Enum.SELFDESTRUCT) or
+        op == @intFromEnum(Enum.LOG0) or op == @intFromEnum(Enum.LOG1) or
+        op == @intFromEnum(Enum.LOG2) or op == @intFromEnum(Enum.LOG3) or
+        op == @intFromEnum(Enum.LOG4);
 }
 
 /// Check if an opcode is valid
 pub fn is_valid(op: u8) bool {
     return op != @intFromEnum(Enum.INVALID);
+}
+
+/// Checks if a byte represents a valid EVM opcode.
+///
+/// This function determines whether a given byte value corresponds to a
+/// defined opcode in the EVM instruction set. Invalid opcodes are treated
+/// as the INVALID instruction (0xFE) which always reverts execution.
+///
+/// ## Parameters
+/// - `byte`: The byte value to check (0x00-0xFF)
+///
+/// ## Returns
+/// - `true` if the byte represents a valid opcode
+/// - `false` if the byte is undefined/invalid
+///
+/// ## Valid Opcode Ranges
+/// - 0x00-0x0B: Arithmetic operations (STOP to SIGNEXTEND)
+/// - 0x10-0x1D: Comparison and bitwise operations (LT to SAR)
+/// - 0x20: Cryptographic operations (KECCAK256)
+/// - 0x30-0x3F: Environmental information (ADDRESS to EXTCODEHASH)
+/// - 0x40-0x4A: Block information (BLOCKHASH to BLOBBASEFEE)
+/// - 0x50-0x5E: Stack, Memory, Storage operations (POP to MCOPY)
+/// - 0x5F-0x7F: Push operations (PUSH0 to PUSH32)
+/// - 0x80-0x8F: Duplication operations (DUP1 to DUP16)
+/// - 0x90-0x9F: Exchange operations (SWAP1 to SWAP16)
+/// - 0xA0-0xA4: Logging operations (LOG0 to LOG4)
+/// - 0xF0-0xFF: System operations (CREATE to SELFDESTRUCT, includes INVALID)
+///
+/// ## Usage
+/// ```zig
+/// if (is_valid_opcode(byte)) {
+///     const opcode = @as(Opcode.Enum, @enumFromInt(byte));
+///     // Process valid opcode
+/// } else {
+///     // Handle invalid opcode
+/// }
+/// ```
+pub fn is_valid_opcode(byte: u8) bool {
+    return switch (byte) {
+        // Arithmetic operations
+        0x00...0x0B => true,
+        // Comparison and bitwise operations
+        0x10...0x1D => true,
+        // Cryptographic operations
+        0x20 => true,
+        // Environmental information
+        0x30...0x3F => true,
+        // Block information (includes BLOBHASH 0x49 and BLOBBASEFEE 0x4A)
+        0x40...0x4A => true,
+        // Stack, Memory, Storage operations (includes TLOAD 0x5C, TSTORE 0x5D, MCOPY 0x5E)
+        0x50...0x5E => true,
+        // Push operations (PUSH0 to PUSH32)
+        0x5F...0x7F => true,
+        // Duplication operations
+        0x80...0x8F => true,
+        // Exchange operations
+        0x90...0x9F => true,
+        // Logging operations
+        0xA0...0xA4 => true,
+        // System operations (includes INVALID 0xFE)
+        0xF0...0xFF => true,
+        // All other bytes are invalid
+        else => false,
+    };
 }
 
 // ============================================================================

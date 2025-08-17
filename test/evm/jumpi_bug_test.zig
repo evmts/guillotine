@@ -9,7 +9,7 @@ const Evm = evm.Evm;
 
 // Enable debug logging for all tests
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 
 // Import the instruction mapping test

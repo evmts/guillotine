@@ -222,11 +222,8 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
     var ip: usize = 0;
     const ops_ptr = @as([*]const *const anyopaque, @ptrCast(ops_slice.ptr));
 
-    // Safety check
     if (ops_slice.len == 0) {
-        @branchHint(.cold);
-        Log.debug("[interpret2] No ops to execute", .{});
-        return;
+        unreachable;
     }
 
     // Add frame fields for tailcall system

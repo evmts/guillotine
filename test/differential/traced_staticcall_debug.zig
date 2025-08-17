@@ -8,7 +8,7 @@ const trace_utils = @import("trace_utils.zig");
 
 // This test runs the failing STATICCALL test with tracing enabled to help debug the issue
 test "STATICCALL opcode with tracing - debug differential failure" {
-    testing.log_level = .debug;
+    testing.log_level = .warn;
     const allocator = testing.allocator;
 
     // Create trace directory

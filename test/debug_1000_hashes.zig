@@ -4,7 +4,7 @@ const primitives = @import("primitives");
 
 // Enable debug logging
 test {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
 }
 
 fn hexDecode(allocator: std.mem.Allocator, hex_str: []const u8) ![]u8 {
@@ -73,15 +73,15 @@ test "debug ten-thousand-hashes execution" {
     // First, let's try to deploy the contract using CREATE
     std.debug.print("\n--- Attempting contract deployment ---\n", .{});
     const initial_deploy_gas: u64 = 10_000_000;
-    
+
     const create_result = try vm.create_contract(caller, 0, bytecode, initial_deploy_gas);
-    
+
     std.debug.print("Deployment result: success={}, gas_left={}, address={x}\n", .{
         create_result.success,
         create_result.gas_left,
         primitives.Address.to_u256(create_result.address),
     });
-    
+
     if (create_result.output) |output| {
         std.debug.print("Deployment output length: {} bytes\n", .{output.len});
         if (output.len > 0) {
@@ -119,7 +119,7 @@ test "debug ten-thousand-hashes execution" {
         .input = calldata,
         .gas = initial_gas,
     } };
-    
+
     const call_result = try vm.call(params);
 
     std.debug.print("\nCall result: success={}, gas_left={}\n", .{

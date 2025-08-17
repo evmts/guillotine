@@ -685,7 +685,7 @@ test "CODECOPY opcode copies contract code to memory" {
 }
 
 test "STATICCALL opcode enforces read-only execution" {
-    testing.log_level = .debug;
+    testing.log_level = .warn;
     const allocator = testing.allocator;
 
     // Contract A bytecode: attempts SSTORE (state modification)
@@ -1405,7 +1405,7 @@ test "trace comparison - CREATE2 divergence" {
 }
 
 test "CREATE2 opcode creates contract at deterministic address" {
-    std.testing.log_level = .debug;
+    std.testing.log_level = .warn;
     const allocator = testing.allocator;
 
     // Deployer contract bytecode that uses CREATE2
@@ -1537,7 +1537,7 @@ test "CREATE2 opcode creates contract at deterministic address" {
             revm_call_result.output.len,
             if (guillotine_call_result.output) |output| output.len else 0,
         });
-        
+
         std.log.debug("[CREATE2 test] revm success={}, guillotine success={}", .{
             revm_call_result.success,
             guillotine_call_result.success,
@@ -1557,7 +1557,7 @@ test "CREATE2 opcode creates contract at deterministic address" {
             // Check that both implementations return the same output length
             const guillotine_output_len = if (guillotine_call_result.output) |output| output.len else 0;
             try testing.expectEqual(revm_call_result.output.len, guillotine_output_len);
-            
+
             // If both return data, check it matches
             if (revm_call_result.output.len == 32 and guillotine_output_len == 32) {
                 const revm_return_value = std.mem.readInt(u256, revm_call_result.output[0..32], .big);
