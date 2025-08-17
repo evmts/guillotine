@@ -237,42 +237,41 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
             // Get the next operation
             const next_op = ops_slice[i + 1];
             
-            // Determine which fusion to apply
-            var fused_op: ?*const anyopaque = null;
-            
-            // Special handling for jumps - need to validate destination
-            if (next_op == &tailcalls.op_jump or next_op == &tailcalls.op_jumpi) {
-                // Read the push value to validate jump destination
-                const push_size = opcode - 0x5F;
-                const value_start = inst_pc + 1;
-                var push_value: usize = 0;
-                var j: usize = 0;
-                while (j < push_size and value_start + j < code.len) : (j += 1) {
-                    push_value = (push_value << 8) | code[value_start + j];
-                }
-                
-                // Only fuse if destination is a valid JUMPDEST
-                if (push_value < code.len and code[push_value] == 0x5B) {
-                    fused_op = if (next_op == &tailcalls.op_jump)
+            // Determine which fusion to apply based on the next operation
+            const fused_op = switch (next_op) {
+                &tailcalls.op_jump, &tailcalls.op_jumpi => blk: {
+                    // Special handling for jumps - need to validate destination
+                    const push_size = opcode - 0x5F;
+                    const value_start = inst_pc + 1;
+                    var push_value: usize = 0;
+                    var j: usize = 0;
+                    while (j < push_size and value_start + j < code.len) : (j += 1) {
+                        push_value = (push_value << 8) | code[value_start + j];
+                    }
+                    
+                    // Only fuse if destination is a valid JUMPDEST
+                    if (push_value >= code.len or code[push_value] != 0x5B) break :blk null;
+                    
+                    break :blk if (next_op == &tailcalls.op_jump)
                         &tailcalls.op_push_then_jump
                     else
                         &tailcalls.op_push_then_jumpi;
-                }
-            }
-            // Simple fusion mappings for other operations
-            else if (next_op == &tailcalls.op_mload) fused_op = &tailcalls.op_push_then_mload
-            else if (next_op == &tailcalls.op_mstore) fused_op = &tailcalls.op_push_then_mstore
-            else if (next_op == &tailcalls.op_eq) fused_op = &tailcalls.op_push_then_eq
-            else if (next_op == &tailcalls.op_lt) fused_op = &tailcalls.op_push_then_lt
-            else if (next_op == &tailcalls.op_gt) fused_op = &tailcalls.op_push_then_gt
-            else if (next_op == &tailcalls.op_and) fused_op = &tailcalls.op_push_then_and
-            else if (next_op == &tailcalls.op_add) fused_op = &tailcalls.op_push_then_add
-            else if (next_op == &tailcalls.op_sub) fused_op = &tailcalls.op_push_then_sub
-            else if (next_op == &tailcalls.op_mul) fused_op = &tailcalls.op_push_then_mul
-            else if (next_op == &tailcalls.op_div) fused_op = &tailcalls.op_push_then_div
-            else if (next_op == &tailcalls.op_sload) fused_op = &tailcalls.op_push_then_sload
-            else if (next_op == &tailcalls.op_dup1) fused_op = &tailcalls.op_push_then_dup1
-            else if (next_op == &tailcalls.op_swap1) fused_op = &tailcalls.op_push_then_swap1;
+                },
+                &tailcalls.op_mload => &tailcalls.op_push_then_mload,
+                &tailcalls.op_mstore => &tailcalls.op_push_then_mstore,
+                &tailcalls.op_eq => &tailcalls.op_push_then_eq,
+                &tailcalls.op_lt => &tailcalls.op_push_then_lt,
+                &tailcalls.op_gt => &tailcalls.op_push_then_gt,
+                &tailcalls.op_and => &tailcalls.op_push_then_and,
+                &tailcalls.op_add => &tailcalls.op_push_then_add,
+                &tailcalls.op_sub => &tailcalls.op_push_then_sub,
+                &tailcalls.op_mul => &tailcalls.op_push_then_mul,
+                &tailcalls.op_div => &tailcalls.op_push_then_div,
+                &tailcalls.op_sload => &tailcalls.op_push_then_sload,
+                &tailcalls.op_dup1 => &tailcalls.op_push_then_dup1,
+                &tailcalls.op_swap1 => &tailcalls.op_push_then_swap1,
+                else => null,
+            };
             
             // Skip if no fusion found
             if (fused_op == null) continue;
