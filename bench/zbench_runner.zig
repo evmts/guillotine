@@ -13,6 +13,7 @@ const hardfork_benchmark = @import("hardfork_benchmark.zig");
 const uint_benchmark = @import("uint_benchmark.zig");
 const jump_table_benchmarks = @import("jump_table_benchmarks.zig");
 const inline_hot_ops_benchmarks = @import("inline_hot_ops_zbench.zig");
+const interpreter_comparison = @import("interpreter_comparison_benchmark.zig");
 
 pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     var benchmark = zbench.Benchmark.init(allocator, .{});
@@ -216,6 +217,19 @@ pub fn run_benchmarks(allocator: Allocator, zbench: anytype) !void {
     try benchmark.add("Hot Ops Inline Dispatch", inline_hot_ops_benchmarks.zbench_inline_hot_ops, .{});
     try benchmark.add("Hot Opcode Workload", inline_hot_ops_benchmarks.zbench_hot_opcode_workload, .{});
     try benchmark.add("Cold Opcode Workload", inline_hot_ops_benchmarks.zbench_cold_opcode_workload, .{});
+
+    // Interpreter Comparison Benchmarks - Compare different interpreter implementations
+    try benchmark.add("10k Hashes: interpret.zig", interpreter_comparison.zbench_interpret, .{});
+    try benchmark.add("10k Hashes: call_mini.zig", interpreter_comparison.zbench_call_mini, .{});
+    try benchmark.add("10k Hashes: interpret2.zig", interpreter_comparison.zbench_interpret2, .{});
+    try benchmark.add("10k Hashes: REVM", interpreter_comparison.zbench_revm, .{});
+    
+    try benchmark.add("ERC20: interpret.zig", interpreter_comparison.zbench_erc20_interpret, .{});
+    try benchmark.add("ERC20: call_mini.zig", interpreter_comparison.zbench_erc20_call_mini, .{});
+    try benchmark.add("ERC20: REVM", interpreter_comparison.zbench_erc20_revm, .{});
+    
+    try benchmark.add("Snailtracer: interpret.zig", interpreter_comparison.zbench_snailtracer_interpret, .{});
+    try benchmark.add("Snailtracer: REVM", interpreter_comparison.zbench_snailtracer_revm, .{});
 
     // Run all benchmarks
     const stdout = std.io.getStdOut().writer();
