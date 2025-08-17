@@ -28,6 +28,37 @@ const SimpleAnalysis = struct {
     };
 };
 
+// Helper function to check if a byte is a valid opcode
+fn isValidOpcode(byte: u8) bool {
+    // Valid opcodes are:
+    // 0x00-0x0b: STOP to SIGNEXTEND
+    // 0x10-0x1d: LT to SAR
+    // 0x20: KECCAK256
+    // 0x30-0x3f: ADDRESS to EXTCODECOPY
+    // 0x40-0x48: BLOCKHASH to BASEFEE
+    // 0x50-0x5b: POP to JUMPDEST
+    // 0x5f-0x7f: PUSH0 to PUSH32
+    // 0x80-0x8f: DUP1 to DUP16
+    // 0x90-0x9f: SWAP1 to SWAP16
+    // 0xa0-0xa4: LOG0 to LOG4
+    // 0xf0-0xff: CREATE to SELFDESTRUCT
+    
+    return switch (byte) {
+        0x00...0x0b => true,
+        0x10...0x1d => true,
+        0x20 => true,
+        0x30...0x3f => true,
+        0x40...0x48 => true,
+        0x50...0x5b => true,
+        0x5f...0x7f => true,
+        0x80...0x8f => true,
+        0x90...0x9f => true,
+        0xa0...0xa4 => true,
+        0xf0...0xff => true,
+        else => false,
+    };
+}
+
 // Main interpret function
 pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     // Pre-allocate a fixed buffer for all memory needs
@@ -63,7 +94,24 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     var instruction_index: usize = 0;
     while (pc < code.len) : (instruction_index += 1) {
         const byte = code[pc];
-        const opcode = @as(Opcode, @enumFromInt(byte));
+        
+        // For the initial analysis, we need to check if this is a valid opcode
+        // But we need to handle PUSH instructions specially since they have data bytes
+        const is_push = (byte >= 0x60 and byte <= 0x7F) or byte == 0x5F;
+        
+        if (!is_push and !isValidOpcode(byte)) {
+            // This might be data from a previous PUSH instruction that we missed
+            // For now, treat it as invalid data (0xFF is commonly used for invalid)
+            opcodes[pc] = @as(Opcode, @enumFromInt(0xFF));
+            pc += 1;
+            continue;
+        }
+        
+        const opcode = if (isValidOpcode(byte)) 
+            @as(Opcode, @enumFromInt(byte))
+        else 
+            @as(Opcode, @enumFromInt(0xFF)); // Invalid/data byte
+            
         opcodes[pc] = opcode;
 
         if (opcode == .JUMPDEST) {
@@ -82,6 +130,10 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
             var i: usize = 0;
             while (i < push_size and pc + i < code.len) : (i += 1) {
                 value = (value << 8) | code[pc + i];
+                // Mark these bytes as data, not opcodes
+                if (pc + i < code.len) {
+                    opcodes[pc + i] = @as(Opcode, @enumFromInt(0xFF));
+                }
             }
             try push_values.append(value);
 
@@ -109,6 +161,14 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     pc = 0;
     while (pc < code.len) {
         const byte = code[pc];
+        
+        // Skip invalid opcodes (data bytes)
+        if (!isValidOpcode(byte)) {
+            // This is a data byte from a PUSH instruction, skip it
+            pc += 1;
+            continue;
+        }
+        
         const opcode = @as(Opcode, @enumFromInt(byte));
 
         const fn_ptr = switch (opcode) {
