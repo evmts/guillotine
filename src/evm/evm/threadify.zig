@@ -9,14 +9,14 @@ const wrappers = @import("tailcall_wrappers.zig");
 pub const TailcallFunc = *const fn (context: *anyopaque) ExecutionError.Error!void;
 
 /// Build array of function pointers from analyzed bytecode
-pub fn build(allocator: std.mem.Allocator, analysis: *const CodeAnalysis) ![]const TailcallFunc {
+pub fn build(allocator: std.mem.Allocator, analysis: *const CodeAnalysis) ![]*const anyopaque {
     // Allocate ops array matching instruction count
-    const ops = try allocator.alloc(TailcallFunc, analysis.instructions.len);
+    const ops = try allocator.alloc(*const anyopaque, analysis.instructions.len);
     errdefer allocator.free(ops);
 
     // Map each instruction to its wrapper function
     for (analysis.instructions, 0..) |inst, i| {
-        ops[i] = mapTagToWrapper(inst.tag);
+        ops[i] = @ptrCast(mapTagToWrapper(inst.tag));
     }
 
     return ops;

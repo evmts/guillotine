@@ -6,8 +6,8 @@ const execution = @import("../execution/package.zig");
 
 pub const Error = ExecutionError.Error;
 
-// Function pointer type for tailcall dispatch - use the same type as Frame
-const TailcallFunc = frame_mod.TailcallFunc;
+// Function pointer type for tailcall dispatch - interpret2/tailcalls uses a different signature  
+const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn;
 
 // Helper to advance to next instruction
 pub inline fn next(frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn {

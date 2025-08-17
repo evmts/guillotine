@@ -17,7 +17,8 @@ const Error = ExecutionError.Error;
 inline fn next(frame_ptr: *anyopaque) Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(frame_ptr)));
     frame.tailcall_index += 1;
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -103,7 +104,8 @@ pub fn jump_pc_wrap(frame_ptr: *anyopaque) Error!void {
 
     // Update instruction index to jump target
     frame.tailcall_index = params.jump_idx;
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -122,7 +124,8 @@ pub fn jump_unresolved_wrap(frame_ptr: *anyopaque) Error!void {
     }
 
     frame.tailcall_index = idx;
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -138,7 +141,8 @@ pub fn conditional_jump_pc_wrap(frame_ptr: *anyopaque) Error!void {
     } else {
         frame.tailcall_index += 1;
     }
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -163,7 +167,8 @@ pub fn conditional_jump_unresolved_wrap(frame_ptr: *anyopaque) Error!void {
         frame.tailcall_index += 1;
     }
 
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -367,7 +372,7 @@ pub fn op_pop_wrap(frame_ptr: *anyopaque) Error!void {
 pub fn op_push0_wrap(frame_ptr: *anyopaque) Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(frame_ptr)));
     // PUSH0 pushes 0 onto the stack
-    try frame.stack.push(0);
+    try frame.stack.append(0);
     return next(frame_ptr);
 }
 
@@ -614,7 +619,8 @@ pub fn op_jump_wrap(frame_ptr: *anyopaque) Error!void {
     }
 
     frame.tailcall_index = idx;
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -640,7 +646,8 @@ pub fn op_jumpi_wrap(frame_ptr: *anyopaque) Error!void {
         frame.tailcall_index += 1;
     }
 
-    const next_fn = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn_ptr = frame.tailcall_ops[frame.tailcall_index];
+    const next_fn = @as(TailcallExecutionFunc, @ptrCast(@alignCast(next_fn_ptr)));
     return @call(.always_tail, next_fn, .{frame_ptr});
 }
 
@@ -657,7 +664,7 @@ pub fn op_jumpdest_wrap(frame_ptr: *anyopaque) Error!void {
 pub fn op_gas_wrap(frame_ptr: *anyopaque) Error!void {
     const frame = @as(*Frame, @ptrCast(@alignCast(frame_ptr)));
     // GAS pushes remaining gas onto stack
-    try frame.stack.push(frame.gas_remaining);
+    try frame.stack.append(frame.gas_remaining);
     return next(frame_ptr);
 }
 

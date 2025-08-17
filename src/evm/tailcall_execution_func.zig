@@ -15,4 +15,4 @@ const ExecutionError = @import("execution/execution_error.zig");
 /// 4. Tailcall the next instruction via @call(.always_tail, frame.tailcall_ops[frame.tailcall_index], .{context})
 ///
 /// Halting instructions (STOP, RETURN, REVERT) return instead of tailcalling.
-pub const TailcallExecutionFunc = fn (context: *anyopaque) ExecutionError.Error!void;
+pub const TailcallExecutionFunc = *const fn (context: *anyopaque) ExecutionError.Error!void;

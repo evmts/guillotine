@@ -3,7 +3,8 @@ const builtin = @import("builtin");
 const ExecutionError = @import("../execution/execution_error.zig");
 const frame_mod = @import("../frame.zig");
 const Frame = frame_mod.Frame;
-const Opcode = @import("../opcodes/opcode.zig").Enum;
+const opcode_mod = @import("../opcodes/opcode.zig");
+const Opcode = opcode_mod.Enum;
 const Stack = @import("../stack/stack.zig");
 const Memory = @import("../memory/memory.zig");
 const execution = @import("../execution/package.zig");
@@ -14,58 +15,25 @@ const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
 
 pub const Error = ExecutionError.Error;
 
-// Function pointer type for tailcall dispatch - use the same type as Frame
-const TailcallFunc = frame_mod.TailcallFunc;
+// Function pointer type for tailcall dispatch - interpret2 uses a different signature
+const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn;
 
 // Removed - now using SimpleAnalysis from analysis2.zig
 
-// Helper function to check if a byte is a valid opcode
-fn isValidOpcode(byte: u8) bool {
-    // Valid opcodes are:
-    // 0x00-0x0b: STOP to SIGNEXTEND
-    // 0x10-0x1d: LT to SAR
-    // 0x20: KECCAK256
-    // 0x30-0x3f: ADDRESS to EXTCODECOPY
-    // 0x40-0x4a: BLOCKHASH to BLOBBASEFEE (includes 0x49 BLOBHASH and 0x4A BLOBBASEFEE)
-    // 0x50-0x5e: POP to MCOPY (includes 0x5c TLOAD, 0x5d TSTORE, 0x5e MCOPY)
-    // 0x5f-0x7f: PUSH0 to PUSH32
-    // 0x80-0x8f: DUP1 to DUP16
-    // 0x90-0x9f: SWAP1 to SWAP16
-    // 0xa0-0xa4: LOG0 to LOG4
-    // 0xf0-0xff: CREATE to SELFDESTRUCT (includes 0xfe INVALID)
-    
-    return switch (byte) {
-        0x00...0x0b => true,
-        0x10...0x1d => true,
-        0x20 => true,
-        0x30...0x3f => true,
-        0x40...0x4a => true,
-        0x50...0x5e => true,
-        0x5f...0x7f => true,
-        0x80...0x8f => true,
-        0x90...0x9f => true,
-        0xa0...0xa4 => true,
-        0xf0...0xff => true,
-        else => false,
-    };
-}
+// Removed - now using opcode_mod.is_valid_opcode() instead
+
+const EXTRA_BUFFER = 8192;
 
 // Main interpret function
-pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
-    // Pre-allocate a fixed buffer for all memory needs
-    const estimated_size = code.len * 100 + 8192; // Extra buffer for overhead
-
+pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
+    const estimated_size = code.len * 100 + EXTRA_BUFFER;
     const buffer = try std.heap.page_allocator.alloc(u8, estimated_size);
     defer std.heap.page_allocator.free(buffer);
-
     var fba = std.heap.FixedBufferAllocator.init(buffer);
     const allocator = fba.allocator();
-    
-    // Build the analysis with precomputed mappings
+
     var analysis = try SimpleAnalysis.analyze(allocator, code);
     defer analysis.deinit(allocator);
-    
-    // Store analysis in frame for tailcall functions to use
     frame.tailcall_analysis = &analysis;
 
     var ops = std.ArrayList(TailcallFunc).init(allocator);
@@ -75,51 +43,43 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     var op_count: usize = 0;
     while (pc < code.len) {
         const byte = code[pc];
-        
-        // Check if this is a PUSH instruction and skip its data bytes
-        if (byte >= 0x60 and byte <= 0x7F) {
-            // PUSH1 through PUSH32 - all use the same generic push function
-            const push_size = byte - 0x5F;
+
+        if (opcode_mod.is_push(byte)) {
+            const push_size = opcode_mod.get_push_size(byte);
             try ops.append(&tailcalls.op_push);
-            // Skip past the PUSH opcode and its data bytes
             pc += 1 + push_size;
             op_count += 1;
             continue;
-        } else if (byte == 0x5F) {
-            // PUSH0
-            try ops.append(&tailcalls.op_push0);
-            pc += 1;
-            op_count += 1;
-            continue;
         }
-        
-        // Check for INVALID opcode (0xfe)
+
+        // Check for INVALID opcode
         // Note: INVALID can appear in legitimate code as a trap/revert mechanism
         // Don't stop processing as there may be JUMPDESTs after it
-        if (byte == 0xfe) {
+        if (byte == @intFromEnum(Opcode.INVALID)) {
+            @branchHint(.cold);
             try ops.append(&tailcalls.op_invalid);
             pc += 1;
             op_count += 1;
             continue;
         }
-        
+
         // For non-PUSH instructions, check if it's a valid opcode
-        if (!isValidOpcode(byte)) {
+        if (!opcode_mod.is_valid_opcode(byte)) {
             // Check for Solidity metadata markers (0xa1 or 0xa2 followed by 0x65)
+            // Note: 0xa1 and 0xa2 are not valid EVM opcodes but are used by Solidity for metadata
             if ((byte == 0xa1 or byte == 0xa2) and pc + 1 < code.len and code[pc + 1] == 0x65) {
+                @branchHint(.likely);
                 Log.debug("[interpret2] Found Solidity metadata marker at PC={}, stopping", .{pc});
                 break; // Stop processing - we've hit metadata
             }
-            
-            // Some contracts may contain invalid opcodes as part of their logic
-            // Treat them as INVALID opcodes rather than failing
-            Log.debug("[interpret2] WARNING: Unknown opcode 0x{x:0>2} at PC={}, treating as INVALID", .{ byte, pc });
+            // TODO we will want to remove this and fail hard before beta
+            Log.warn("[interpret2] WARNING: Unknown opcode 0x{x:0>2} at PC={}, treating as INVALID", .{ byte, pc });
             try ops.append(&tailcalls.op_invalid);
             pc += 1;
             op_count += 1;
             continue;
         }
-        
+
         const opcode = @as(Opcode, @enumFromInt(byte));
 
         const fn_ptr = switch (opcode) {
@@ -193,7 +153,8 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
             .TSTORE => &tailcalls.op_tstore,
             .MCOPY => &tailcalls.op_mcopy,
             .PUSH0 => &tailcalls.op_push0,
-            .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => &tailcalls.op_push,
+            // unreachable because we should have handled push already!
+            .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8, .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => unreachable,
             .DUP1 => &tailcalls.op_dup1,
             .DUP2 => &tailcalls.op_dup2,
             .DUP3 => &tailcalls.op_dup3,
@@ -254,27 +215,27 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     try ops.append(&tailcalls.op_stop);
 
     const ops_slice = try ops.toOwnedSlice();
-    
 
     frame.tailcall_ops = @ptrCast(ops_slice.ptr);
     frame.tailcall_index = 0;
 
     var ip: usize = 0;
     const ops_ptr = @as([*]const *const anyopaque, @ptrCast(ops_slice.ptr));
-    
+
     // Safety check
     if (ops_slice.len == 0) {
+        @branchHint(.cold);
         Log.debug("[interpret2] No ops to execute", .{});
         return;
     }
-    
+
     // Add frame fields for tailcall system
     frame.tailcall_max_iterations = 100_000_000; // Increase for complex contracts like snailtracer
     frame.tailcall_iterations = 0;
-    
+
     Log.debug("[interpret2] Starting execution with {} ops", .{ops_slice.len});
-    
+
+    // This Evm will recursively tail-call functions until an Error is thrown. Error will be thrown even in success cases
     const first_op = ops_slice[0];
-    _ = first_op(frame, ops_ptr, &ip) catch |err| return err;
-    unreachable;
+    return try first_op(frame, ops_ptr, &ip);
 }

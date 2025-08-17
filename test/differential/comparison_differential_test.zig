@@ -2,7 +2,8 @@ const std = @import("std");
 const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
-const Address = primitives.Address;
+const Address = primitives.Address.Address;
+const address = primitives.Address;
 const CallParams = evm.CallParams;
 const CallResult = evm.CallResult;
 
@@ -92,8 +93,8 @@ test "LT opcode 5 < 10 = 1 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -112,7 +113,7 @@ test "LT opcode 5 < 10 = 1 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
@@ -166,8 +167,8 @@ test "GT opcode 10 > 5 = 1 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -190,7 +191,7 @@ test "GT opcode 10 > 5 = 1 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
@@ -244,8 +245,8 @@ test "EQ opcode 42 == 42 = 1 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -268,7 +269,7 @@ test "EQ opcode 42 == 42 = 1 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
@@ -339,8 +340,8 @@ test "SLT opcode signed -1 < 1 = 1 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -363,7 +364,7 @@ test "SLT opcode signed -1 < 1 = 1 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
@@ -434,8 +435,8 @@ test "SGT opcode signed 1 > -1 = 1 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -458,7 +459,7 @@ test "SGT opcode signed 1 > -1 = 1 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
@@ -523,8 +524,8 @@ test "Simple PUSH and RETURN test (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
     try revm_vm.setBalance(revm_deployer, 10000000);
 
     try revm_vm.setCode(revm_contract_address, &bytecode);
@@ -540,7 +541,7 @@ test "Simple PUSH and RETURN test (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
     try vm_instance.state.set_code(contract_address, &bytecode);
 
     const call_params = CallParams{ .call = .{
@@ -587,8 +588,8 @@ test "ISZERO opcode 0 == 0 ? 1 : 0 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -611,7 +612,7 @@ test "ISZERO opcode 0 == 0 ? 1 : 0 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
@@ -677,8 +678,8 @@ test "ISZERO opcode 42 == 0 ? 1 : 0 (3x memory corruption test)" {
     var revm_vm = try revm_wrapper.Revm.init(allocator, revm_settings);
     defer revm_vm.deinit();
 
-    const revm_deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
-    const revm_contract_address = try Address.from_hex("0x2222222222222222222222222222222222222222");
+    const revm_deployer = try address.from_hex("0x1111111111111111111111111111111111111111");
+    const revm_contract_address = try address.from_hex("0x2222222222222222222222222222222222222222");
 
     // Set balance for deployer
     try revm_vm.setBalance(revm_deployer, 10000000);
@@ -701,7 +702,7 @@ test "ISZERO opcode 42 == 0 ? 1 : 0 (3x memory corruption test)" {
     var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer vm_instance.deinit();
 
-    const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
+    const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
 
     // Set the code for the contract address in EVM state
     try vm_instance.state.set_code(contract_address, &bytecode);
