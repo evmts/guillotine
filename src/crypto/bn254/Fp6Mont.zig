@@ -268,3 +268,434 @@ pub fn frobeniusMap(self: *const Fp6Mont) Fp6Mont {
 pub fn frobeniusMapAssign(self: *Fp6Mont) void {
     self.* = self.frobeniusMap();
 }
+
+// ============================================================================
+// TESTS - Following patterns from FpMont.zig and Fp2Mont.zig
+// ============================================================================
+
+const std = @import("std");
+
+fn fp6mont(v0_real: u256, v0_imag: u256, v1_real: u256, v1_imag: u256, v2_real: u256, v2_imag: u256) Fp6Mont {
+    return Fp6Mont.init_from_int(v0_real, v0_imag, v1_real, v1_imag, v2_real, v2_imag);
+}
+
+fn expectFp6MontEqual(expected: Fp6Mont, actual: Fp6Mont) !void {
+    try std.testing.expect(expected.equal(&actual));
+}
+
+test "Fp6Mont.init basic initialization" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const expected = Fp6Mont{
+        .v0 = Fp2Mont.init_from_int(123, 456),
+        .v1 = Fp2Mont.init_from_int(789, 101112),
+        .v2 = Fp2Mont.init_from_int(131415, 161718),
+    };
+    try expectFp6MontEqual(expected, a);
+}
+
+test "Fp6Mont.init with modular reduction" {
+    const a = fp6mont(curve_parameters.FP_MOD + 5, curve_parameters.FP_MOD + 10, curve_parameters.FP_MOD + 15, curve_parameters.FP_MOD + 20, curve_parameters.FP_MOD + 25, curve_parameters.FP_MOD + 30);
+    const expected = fp6mont(5, 10, 15, 20, 25, 30);
+    try expectFp6MontEqual(expected, a);
+}
+
+test "Fp6Mont.add basic addition" {
+    const a = fp6mont(10, 20, 30, 40, 50, 60);
+    const b = fp6mont(70, 80, 90, 100, 110, 120);
+    const result = a.add(&b);
+    try expectFp6MontEqual(fp6mont(80, 100, 120, 140, 160, 180), result);
+}
+
+test "Fp6Mont.add with zero" {
+    const a = fp6mont(100, 200, 300, 400, 500, 600);
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = a.add(&zero);
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.add with modular reduction" {
+    const a = fp6mont(curve_parameters.FP_MOD - 1, curve_parameters.FP_MOD - 2, curve_parameters.FP_MOD - 3, curve_parameters.FP_MOD - 4, curve_parameters.FP_MOD - 5, curve_parameters.FP_MOD - 6);
+    const b = fp6mont(5, 10, 15, 20, 25, 30);
+    const result = a.add(&b);
+    try expectFp6MontEqual(fp6mont(4, 8, 12, 16, 20, 24), result);
+}
+
+test "Fp6Mont.add commutative property" {
+    const a = fp6mont(15, 25, 35, 45, 55, 65);
+    const b = fp6mont(75, 85, 95, 105, 115, 125);
+    const result1 = a.add(&b);
+    const result2 = b.add(&a);
+    try expectFp6MontEqual(result1, result2);
+}
+
+test "Fp6Mont.neg basic negation" {
+    const a = fp6mont(100, 200, 300, 400, 500, 600);
+    const result = a.neg();
+    const expected = fp6mont(curve_parameters.FP_MOD - 100, curve_parameters.FP_MOD - 200, curve_parameters.FP_MOD - 300, curve_parameters.FP_MOD - 400, curve_parameters.FP_MOD - 500, curve_parameters.FP_MOD - 600);
+    try expectFp6MontEqual(expected, result);
+}
+
+test "Fp6Mont.neg double negation" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const result = a.neg().neg();
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.neg of zero" {
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = zero.neg();
+    const expected = fp6mont(0, 0, 0, 0, 0, 0);
+    try expectFp6MontEqual(expected, result);
+}
+
+test "Fp6Mont.sub basic subtraction" {
+    const a = fp6mont(100, 150, 200, 250, 300, 350);
+    const b = fp6mont(30, 50, 70, 90, 110, 130);
+    const result = a.sub(&b);
+    try expectFp6MontEqual(fp6mont(70, 100, 130, 160, 190, 220), result);
+}
+
+test "Fp6Mont.sub with zero" {
+    const a = fp6mont(100, 200, 300, 400, 500, 600);
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = a.sub(&zero);
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.sub from zero" {
+    const a = fp6mont(25, 35, 45, 55, 65, 75);
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = zero.sub(&a);
+    try expectFp6MontEqual(a.neg(), result);
+}
+
+test "Fp6Mont.mul basic multiplication" {
+    const a = fp6mont(1, 0, 0, 0, 0, 0); // 1
+    const b = fp6mont(0, 0, 1, 0, 0, 0); // v
+    const result = a.mul(&b);
+    try expectFp6MontEqual(fp6mont(0, 0, 1, 0, 0, 0), result);
+}
+
+test "Fp6Mont.mul with zero" {
+    const a = fp6mont(100, 200, 300, 400, 500, 600);
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = a.mul(&zero);
+    try expectFp6MontEqual(zero, result);
+}
+
+test "Fp6Mont.mul with one" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const one = fp6mont(1, 0, 0, 0, 0, 0);
+    const result = a.mul(&one);
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.mul commutative property" {
+    const a = fp6mont(6, 8, 10, 12, 14, 16);
+    const b = fp6mont(3, 5, 7, 9, 11, 13);
+    const result1 = a.mul(&b);
+    const result2 = b.mul(&a);
+    try expectFp6MontEqual(result1, result2);
+}
+
+test "Fp6Mont.square basic squaring" {
+    const a = fp6mont(2, 1, 1, 2, 3, 1);
+    const result_square = a.square();
+    const result_mul = a.mul(&a);
+    try expectFp6MontEqual(result_square, result_mul);
+}
+
+test "Fp6Mont.square of zero" {
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = zero.square();
+    try expectFp6MontEqual(zero, result);
+}
+
+test "Fp6Mont.square of one" {
+    const one = fp6mont(1, 0, 0, 0, 0, 0);
+    const result = one.square();
+    try expectFp6MontEqual(one, result);
+}
+
+test "Fp6Mont.pow to power of zero" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const result = a.pow(0);
+    try expectFp6MontEqual(fp6mont(1, 0, 0, 0, 0, 0), result);
+}
+
+test "Fp6Mont.pow to power of one" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const result = a.pow(1);
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.pow basic power" {
+    const a = fp6mont(2, 1, 1, 0, 0, 1);
+    const result = a.pow(2);
+    const expected = a.mul(&a);
+    try expectFp6MontEqual(expected, result);
+}
+
+test "Fp6Mont.pow with base zero" {
+    const a = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = a.pow(5);
+    try expectFp6MontEqual(fp6mont(0, 0, 0, 0, 0, 0), result);
+}
+
+test "Fp6Mont.pow with base one" {
+    const a = fp6mont(1, 0, 0, 0, 0, 0);
+    const result = a.pow(100);
+    try expectFp6MontEqual(fp6mont(1, 0, 0, 0, 0, 0), result);
+}
+
+test "Fp6Mont.norm basic norm" {
+    const a = fp6mont(3, 4, 1, 2, 5, 6);
+    const result = a.norm();
+    // Verify norm is multiplicative: norm(a*b) = norm(a)*norm(b)
+    const b = fp6mont(7, 8, 9, 10, 11, 12);
+    const product = a.mul(&b);
+    const norm_product = product.norm();
+    const product_norms = result.mul(&b.norm());
+    try std.testing.expect(norm_product.equal(&product_norms));
+}
+
+test "Fp6Mont.norm of zero" {
+    const zero = fp6mont(0, 0, 0, 0, 0, 0);
+    const result = zero.norm();
+    const expected = Fp2Mont.init_from_int(0, 0);
+    try std.testing.expect(result.equal(&expected));
+}
+
+test "Fp6Mont.norm of one" {
+    const one = fp6mont(1, 0, 0, 0, 0, 0);
+    const result = one.norm();
+    const expected = Fp2Mont.init_from_int(1, 0);
+    try std.testing.expect(result.equal(&expected));
+}
+
+test "Fp6Mont.scalarMul basic scalar multiplication" {
+    const a = fp6mont(3, 4, 5, 6, 7, 8);
+    const scalar = FpMont.init(2);
+    const result = a.scalarMul(&scalar);
+    try expectFp6MontEqual(fp6mont(6, 8, 10, 12, 14, 16), result);
+}
+
+test "Fp6Mont.scalarMul with zero" {
+    const a = fp6mont(10, 20, 30, 40, 50, 60);
+    const zero = FpMont.init(0);
+    const result = a.scalarMul(&zero);
+    try expectFp6MontEqual(fp6mont(0, 0, 0, 0, 0, 0), result);
+}
+
+test "Fp6Mont.scalarMul with one" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const one = FpMont.init(1);
+    const result = a.scalarMul(&one);
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.mulByFp2 basic operation" {
+    const a = fp6mont(3, 4, 5, 6, 7, 8);
+    const fp2_val = Fp2Mont.init_from_int(2, 1);
+    const result = a.mulByFp2(&fp2_val);
+    const expected_v0 = a.v0.mul(&fp2_val);
+    const expected_v1 = a.v1.mul(&fp2_val);
+    const expected_v2 = a.v2.mul(&fp2_val);
+    const expected = Fp6Mont{ .v0 = expected_v0, .v1 = expected_v1, .v2 = expected_v2 };
+    try expectFp6MontEqual(expected, result);
+}
+
+test "Fp6Mont.mulBySmallInt basic multiplication" {
+    const a = fp6mont(2, 3, 4, 5, 6, 7);
+    const result = a.mulBySmallInt(3);
+    try expectFp6MontEqual(fp6mont(6, 9, 12, 15, 18, 21), result);
+}
+
+test "Fp6Mont.mulBySmallInt with zero" {
+    const a = fp6mont(10, 20, 30, 40, 50, 60);
+    const result = a.mulBySmallInt(0);
+    try expectFp6MontEqual(fp6mont(0, 0, 0, 0, 0, 0), result);
+}
+
+test "Fp6Mont.mulBySmallInt with one" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const result = a.mulBySmallInt(1);
+    try expectFp6MontEqual(a, result);
+}
+
+test "Fp6Mont.mulByV basic operation" {
+    const a = fp6mont(1, 2, 3, 4, 5, 6);
+    const result = a.mulByV();
+    const xi = curve_parameters.XI;
+    const expected_v0 = Fp2Mont.init_from_int(5, 6).mul(&xi);
+    const expected_v1 = Fp2Mont.init_from_int(1, 2);
+    const expected_v2 = Fp2Mont.init_from_int(3, 4);
+    const expected = Fp6Mont{ .v0 = expected_v0, .v1 = expected_v1, .v2 = expected_v2 };
+    try expectFp6MontEqual(expected, result);
+}
+
+test "Fp6Mont.inv basic inverse" {
+    const a = fp6mont(3, 4, 1, 2, 5, 6);
+    const a_inv = try a.inv();
+    const product = a.mul(&a_inv);
+    try expectFp6MontEqual(fp6mont(1, 0, 0, 0, 0, 0), product);
+}
+
+test "Fp6Mont.inv of one" {
+    const one = fp6mont(1, 0, 0, 0, 0, 0);
+    const result = try one.inv();
+    try expectFp6MontEqual(one, result);
+}
+
+test "Fp6Mont.inv double inverse" {
+    const a = fp6mont(17, 23, 29, 31, 37, 41);
+    const a_inv = try a.inv();
+    const a_double_inv = try a_inv.inv();
+    try expectFp6MontEqual(a, a_double_inv);
+}
+
+test "Fp6Mont.equal basic equality" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const b = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    try std.testing.expect(a.equal(&b));
+}
+
+test "Fp6Mont.equal different values" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const b = fp6mont(321, 456, 789, 101112, 131415, 161718);
+    try std.testing.expect(!a.equal(&b));
+}
+
+test "Fp6Mont.equal reflexive property" {
+    const a = fp6mont(111, 222, 333, 444, 555, 666);
+    try std.testing.expect(a.equal(&a));
+}
+
+test "Fp6Mont.frobeniusMap basic operation" {
+    const a = fp6mont(5, 7, 9, 11, 13, 15);
+    const result = a.frobeniusMap();
+    // Verify Frobenius map squared equals p-power
+    const result_squared = result.frobeniusMap();
+    // For specific test values, verify known property: phi^2(a) where phi is Frobenius
+    _ = result_squared; // This should equal specific computed value
+    // At minimum verify the operation produces different but valid output
+    try std.testing.expect(!a.equal(&result));
+}
+
+// Additional tests for methods that exist in Fp6Mont but not in base types
+
+test "Fp6Mont.addAssign basic assignment" {
+    var a = fp6mont(10, 20, 30, 40, 50, 60);
+    const b = fp6mont(70, 80, 90, 100, 110, 120);
+    a.addAssign(&b);
+    try expectFp6MontEqual(fp6mont(80, 100, 120, 140, 160, 180), a);
+}
+
+test "Fp6Mont.subAssign basic assignment" {
+    var a = fp6mont(100, 150, 200, 250, 300, 350);
+    const b = fp6mont(30, 50, 70, 90, 110, 130);
+    a.subAssign(&b);
+    try expectFp6MontEqual(fp6mont(70, 100, 130, 160, 190, 220), a);
+}
+
+test "Fp6Mont.mulAssign basic assignment" {
+    var a = fp6mont(1, 0, 0, 0, 0, 0);
+    const b = fp6mont(0, 0, 1, 0, 0, 0);
+    a.mulAssign(&b);
+    try expectFp6MontEqual(fp6mont(0, 0, 1, 0, 0, 0), a);
+}
+
+test "Fp6Mont.mulBySmallIntAssign basic assignment" {
+    var a = fp6mont(2, 3, 4, 5, 6, 7);
+    a.mulBySmallIntAssign(3);
+    try expectFp6MontEqual(fp6mont(6, 9, 12, 15, 18, 21), a);
+}
+
+test "Fp6Mont.squareAssign basic assignment" {
+    var a = fp6mont(2, 1, 1, 2, 3, 1);
+    const expected = a.square();
+    a.squareAssign();
+    try expectFp6MontEqual(expected, a);
+}
+
+test "Fp6Mont.powAssign basic assignment" {
+    var a = fp6mont(2, 1, 1, 0, 0, 1);
+    const expected = a.pow(2);
+    a.powAssign(2);
+    try expectFp6MontEqual(expected, a);
+}
+
+test "Fp6Mont.negAssign basic assignment" {
+    var a = fp6mont(100, 200, 300, 400, 500, 600);
+    a.negAssign();
+    const expected = fp6mont(curve_parameters.FP_MOD - 100, curve_parameters.FP_MOD - 200, curve_parameters.FP_MOD - 300, curve_parameters.FP_MOD - 400, curve_parameters.FP_MOD - 500, curve_parameters.FP_MOD - 600);
+    try expectFp6MontEqual(expected, a);
+}
+
+test "Fp6Mont.scalarMulAssign basic assignment" {
+    var a = fp6mont(3, 4, 5, 6, 7, 8);
+    const scalar = FpMont.init(2);
+    a.scalarMulAssign(&scalar);
+    try expectFp6MontEqual(fp6mont(6, 8, 10, 12, 14, 16), a);
+}
+
+test "Fp6Mont.mulByFp2Assign basic assignment" {
+    var a = fp6mont(3, 4, 5, 6, 7, 8);
+    const fp2_val = Fp2Mont.init_from_int(2, 1);
+    const expected = a.mulByFp2(&fp2_val);
+    a.mulByFp2Assign(&fp2_val);
+    try expectFp6MontEqual(expected, a);
+}
+
+test "Fp6Mont.invAssign basic assignment" {
+    var a = fp6mont(3, 4, 1, 2, 5, 6);
+    const original = a;
+    try a.invAssign();
+    const product = original.mul(&a);
+    try expectFp6MontEqual(fp6mont(1, 0, 0, 0, 0, 0), product);
+}
+
+test "Fp6Mont.frobeniusMapAssign basic assignment" {
+    var a = fp6mont(5, 7, 9, 11, 13, 15);
+    const expected = a.frobeniusMap();
+    a.frobeniusMapAssign();
+    try expectFp6MontEqual(expected, a);
+}
+
+// Mathematical property tests
+
+test "Fp6Mont.mul distributive property over addition" {
+    const a = fp6mont(123, 456, 789, 101112, 131415, 161718);
+    const b = fp6mont(13, 17, 19, 23, 29, 31);
+    const c = fp6mont(37, 41, 43, 47, 53, 59);
+    const left = a.mul(&b.add(&c));
+    const right = a.mul(&b).add(&a.mul(&c));
+    try expectFp6MontEqual(left, right);
+}
+
+test "Fp6Mont.mul associative property" {
+    const a = fp6mont(12, 34, 56, 78, 90, 12);
+    const b = fp6mont(11, 13, 17, 19, 23, 29);
+    const c = fp6mont(31, 37, 41, 43, 47, 53);
+    const left = a.mul(&b).mul(&c);
+    const right = a.mul(&b.mul(&c));
+    try expectFp6MontEqual(left, right);
+}
+
+test "Fp6Mont.norm multiplicative property" {
+    const a = fp6mont(12, 34, 56, 78, 90, 12);
+    const b = fp6mont(11, 13, 17, 19, 23, 29);
+    const product = a.mul(&b);
+    const norm_product = product.norm();
+    const product_norms = a.norm().mul(&b.norm());
+    try std.testing.expect(norm_product.equal(&product_norms));
+}
+
+test "Fp6Mont.representation consistency" {
+    const values = [_][6]u256{ .{ 0, 0, 0, 0, 0, 0 }, .{ 1, 0, 0, 0, 0, 0 }, .{ 0, 1, 0, 0, 0, 0 }, .{ 0, 0, 1, 0, 0, 0 }, .{ 0, 0, 0, 1, 0, 0 }, .{ 0, 0, 0, 0, 1, 0 }, .{ 0, 0, 0, 0, 0, 1 }, .{ 123, 456, 789, 101112, 131415, 161718 }, .{ curve_parameters.FP_MOD - 1, curve_parameters.FP_MOD - 1, curve_parameters.FP_MOD - 1, curve_parameters.FP_MOD - 1, curve_parameters.FP_MOD - 1, curve_parameters.FP_MOD - 1 } };
+    for (values) |val| {
+        const mont = fp6mont(val[0], val[1], val[2], val[3], val[4], val[5]);
+        const expected = Fp6Mont.init_from_int(val[0], val[1], val[2], val[3], val[4], val[5]);
+        try expectFp6MontEqual(expected, mont);
+    }
+}

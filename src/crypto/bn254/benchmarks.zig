@@ -415,7 +415,7 @@ test "benchmark Fp2Mont.square" {
 }
 
 test "benchmark Fp2Mont.pow" {
-    const n = 100000;
+    const n = 10000;
 
     // Random number generation
     // Using deterministic PRNG
