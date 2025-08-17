@@ -29,6 +29,9 @@ const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterf
 /// Function type for tailcall dispatch - using opaque to break circular dependency
 pub const TailcallFunc = *const fn (frame: *anyopaque, ops: [*]const *const anyopaque, ip: *usize) ExecutionError.Error!noreturn;
 
+// Forward declaration for SimpleAnalysis
+const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+
 // Safety check constants - only enabled in Debug and ReleaseSafe modes
 // These checks are redundant after analysis.zig validates blocks
 const SAFE_GAS_CHECK = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
@@ -70,6 +73,9 @@ pub const Frame = struct {
     tailcall_index: usize = undefined,
     tailcall_iterations: usize = 0, // Track number of iterations for safety
     tailcall_max_iterations: usize = 10_000_000, // Maximum allowed iterations
+    
+    // Cached analysis for O(1) lookups in tailcall dispatch
+    tailcall_analysis: ?*const SimpleAnalysis = null,
 
     /// Initialize a Frame with required parameters
     pub fn init(
