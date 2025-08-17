@@ -10,24 +10,14 @@ const execution = @import("../execution/package.zig");
 const primitives = @import("primitives");
 const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
+const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
 
 pub const Error = ExecutionError.Error;
 
 // Function pointer type for tailcall dispatch - use the same type as Frame
 const TailcallFunc = frame_mod.TailcallFunc;
 
-// Simple analysis result for tailcall dispatch
-const SimpleAnalysis = struct {
-    jumpdest_bitvec: []bool, // True if position is valid JUMPDEST
-    opcodes: []Opcode, // Opcode at each position (0xFF for data bytes)
-    jump_table: []JumpEntry, // Sorted list of jump destinations to function pointers
-    push_values: []u256, // Values for PUSH operations (indexed by instruction)
-
-    const JumpEntry = struct {
-        dest: usize,
-        fn_index: usize, // Index into ops array
-    };
-};
+// Removed - now using SimpleAnalysis from analysis2.zig
 
 // Helper function to check if a byte is a valid opcode
 fn isValidOpcode(byte: u8) bool {
@@ -63,103 +53,25 @@ fn isValidOpcode(byte: u8) bool {
 // Main interpret function
 pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
     // Pre-allocate a fixed buffer for all memory needs
-    // Estimate:
-    // - jumpdest_bitvec: code.len * 1 byte (bool)
-    // - opcodes: code.len * 1 byte (u8 enum)
-    // - jump_dests: up to code.len/2 * 16 bytes (JumpEntry is ~16 bytes)
-    // - push_values: up to code.len/2 * 32 bytes (u256 is 32 bytes)
-    // - ops: code.len * 8 bytes (function pointer)
-    // Total rough estimate: code.len * (1 + 1 + 8 + 16 + 32) = code.len * 58
-    // Add 50% safety margin: code.len * 87
-    const estimated_size = code.len * 87 + 4096; // Extra 4KB for overhead
+    const estimated_size = code.len * 100 + 8192; // Extra buffer for overhead
 
     const buffer = try std.heap.page_allocator.alloc(u8, estimated_size);
     defer std.heap.page_allocator.free(buffer);
 
     var fba = std.heap.FixedBufferAllocator.init(buffer);
     const allocator = fba.allocator();
-
-    var jumpdest_bitvec = try allocator.alloc(bool, code.len);
-    @memset(jumpdest_bitvec, false);
-
-    var opcodes = try allocator.alloc(Opcode, code.len);
-    @memset(opcodes, @enumFromInt(0xFF));
-
-    var jump_dests = std.ArrayList(SimpleAnalysis.JumpEntry).init(allocator);
-    defer jump_dests.deinit();
-
-    var push_values = std.ArrayList(u256).init(allocator);
-    defer push_values.deinit();
-
-    var pc: usize = 0;
-    var instruction_index: usize = 0;
-    while (pc < code.len) : (instruction_index += 1) {
-        const byte = code[pc];
-        
-        // For the initial analysis, we need to check if this is a valid opcode
-        // But we need to handle PUSH instructions specially since they have data bytes
-        const is_push = (byte >= 0x60 and byte <= 0x7F) or byte == 0x5F;
-        
-        if (!is_push and !isValidOpcode(byte)) {
-            // This might be data from a previous PUSH instruction that we missed
-            // For now, treat it as invalid data (0xFF is commonly used for invalid)
-            opcodes[pc] = @as(Opcode, @enumFromInt(0xFF));
-            pc += 1;
-            continue;
-        }
-        
-        const opcode = if (isValidOpcode(byte)) 
-            @as(Opcode, @enumFromInt(byte))
-        else 
-            @as(Opcode, @enumFromInt(0xFF)); // Invalid/data byte
-            
-        opcodes[pc] = opcode;
-
-        if (opcode == .JUMPDEST) {
-            jumpdest_bitvec[pc] = true;
-            try jump_dests.append(.{
-                .dest = pc,
-                .fn_index = instruction_index,
-            });
-        }
-
-        if (byte >= 0x60 and byte <= 0x7F) {
-            const push_size = byte - 0x5F;
-            pc += 1;
-
-            var value: u256 = 0;
-            var i: usize = 0;
-            while (i < push_size and pc + i < code.len) : (i += 1) {
-                value = (value << 8) | code[pc + i];
-                // Mark these bytes as data, not opcodes
-                if (pc + i < code.len) {
-                    opcodes[pc + i] = @as(Opcode, @enumFromInt(0xFF));
-                }
-            }
-            try push_values.append(value);
-
-            const end = @min(pc + push_size, code.len);
-            pc = end;
-        } else if (byte == 0x5F) {
-            try push_values.append(0);
-            pc += 1;
-        } else {
-            pc += 1;
-        }
-    }
-
-    // Store analysis data for potential future use
-    _ = SimpleAnalysis{
-        .jumpdest_bitvec = jumpdest_bitvec,
-        .opcodes = opcodes,
-        .jump_table = try jump_dests.toOwnedSlice(),
-        .push_values = try push_values.toOwnedSlice(),
-    };
+    
+    // Build the analysis with precomputed mappings
+    var analysis = try SimpleAnalysis.analyze(allocator, code);
+    defer analysis.deinit(allocator);
+    
+    // Store analysis in frame for tailcall functions to use
+    frame.tailcall_analysis = &analysis;
 
     var ops = std.ArrayList(TailcallFunc).init(allocator);
     defer ops.deinit();
 
-    pc = 0;
+    var pc: usize = 0;
     var op_count: usize = 0;
     while (pc < code.len) {
         const byte = code[pc];
