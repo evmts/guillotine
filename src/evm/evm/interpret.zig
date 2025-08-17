@@ -1033,10 +1033,8 @@ pub fn interpret(self: *Evm, frame: *Frame) ExecutionError.Error!void {
         },
         .op_selfdestruct => {
             @branchHint(.cold);
-            i += 1;
-            const next_tag = instructions[i].tag;
-            try execution.control.op_selfdestruct(frame);
-            continue :dispatch next_tag;
+            try execution.system.op_selfdestruct(frame);
+            return error.STOP;
         },
     }
 }
