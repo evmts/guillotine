@@ -99,9 +99,10 @@ pub const StackFrame = struct {
     pub fn deinit(self: *StackFrame, allocator: std.mem.Allocator) void {
         self.stack.deinit(allocator);
         self.memory.deinit();
-        self.analysis.deinit(allocator);
-        allocator.free(self.metadata);
-        allocator.free(self.ops);
+        
+        // NOTE: analysis, metadata, and ops are managed by interpret2
+        // which allocates them with its own FixedBufferAllocator and
+        // frees them when it exits. We should NOT free them here.
     }
 
     /// Gas consumption with bounds checking
