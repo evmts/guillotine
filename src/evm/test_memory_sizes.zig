@@ -1,6 +1,6 @@
 const std = @import("std");
 const Instruction = @import("instruction.zig").Instruction;
-const Frame = @import("frame.zig").Frame;
+const Frame = @import("stack_frame.zig").StackFrame;
 const Stack = @import("stack/stack.zig");
 const instruction_limits = @import("constants/instruction_limits.zig");
 

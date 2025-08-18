@@ -1,6 +1,6 @@
 const std = @import("std");
 const Instruction = @import("src/evm/instruction.zig").Instruction;
-const Frame = @import("src/evm/frame.zig").Frame;
+const Frame = @import("src/evm/stack_frame.zig").StackFrame;
 const Stack = @import("src/evm/stack/stack.zig");
 const Memory = @import("src/evm/memory/memory.zig");
 const instruction_limits = @import("src/evm/constants/instruction_limits.zig");

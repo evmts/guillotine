@@ -313,10 +313,10 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each DUP operation to avoid opcode detection issues
         const dup_functions = [_]ExecutionFunc{
-            stack_ops.op_dup1,  stack_ops.op_dup2,  stack_ops.op_dup3,  stack_ops.op_dup4,
-            stack_ops.op_dup5,  stack_ops.op_dup6,  stack_ops.op_dup7,  stack_ops.op_dup8,
-            stack_ops.op_dup9,  stack_ops.op_dup10, stack_ops.op_dup11, stack_ops.op_dup12,
-            stack_ops.op_dup13, stack_ops.op_dup14, stack_ops.op_dup15, stack_ops.op_dup16,
+            wrap_ctx(stack_ops.op_dup1),  wrap_ctx(stack_ops.op_dup2),  wrap_ctx(stack_ops.op_dup3),  wrap_ctx(stack_ops.op_dup4),
+            wrap_ctx(stack_ops.op_dup5),  wrap_ctx(stack_ops.op_dup6),  wrap_ctx(stack_ops.op_dup7),  wrap_ctx(stack_ops.op_dup8),
+            wrap_ctx(stack_ops.op_dup9),  wrap_ctx(stack_ops.op_dup10), wrap_ctx(stack_ops.op_dup11), wrap_ctx(stack_ops.op_dup12),
+            wrap_ctx(stack_ops.op_dup13), wrap_ctx(stack_ops.op_dup14), wrap_ctx(stack_ops.op_dup15), wrap_ctx(stack_ops.op_dup16),
         };
 
         inline for (1..17) |n| {
@@ -330,10 +330,10 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     } else {
         // Use the same new-style functions for optimized mode
         const dup_functions = [_]ExecutionFunc{
-            stack_ops.op_dup1,  stack_ops.op_dup2,  stack_ops.op_dup3,  stack_ops.op_dup4,
-            stack_ops.op_dup5,  stack_ops.op_dup6,  stack_ops.op_dup7,  stack_ops.op_dup8,
-            stack_ops.op_dup9,  stack_ops.op_dup10, stack_ops.op_dup11, stack_ops.op_dup12,
-            stack_ops.op_dup13, stack_ops.op_dup14, stack_ops.op_dup15, stack_ops.op_dup16,
+            wrap_ctx(stack_ops.op_dup1),  wrap_ctx(stack_ops.op_dup2),  wrap_ctx(stack_ops.op_dup3),  wrap_ctx(stack_ops.op_dup4),
+            wrap_ctx(stack_ops.op_dup5),  wrap_ctx(stack_ops.op_dup6),  wrap_ctx(stack_ops.op_dup7),  wrap_ctx(stack_ops.op_dup8),
+            wrap_ctx(stack_ops.op_dup9),  wrap_ctx(stack_ops.op_dup10), wrap_ctx(stack_ops.op_dup11), wrap_ctx(stack_ops.op_dup12),
+            wrap_ctx(stack_ops.op_dup13), wrap_ctx(stack_ops.op_dup14), wrap_ctx(stack_ops.op_dup15), wrap_ctx(stack_ops.op_dup16),
         };
 
         inline for (1..17) |n| {
@@ -350,10 +350,10 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each SWAP operation to avoid opcode detection issues
         const swap_functions = [_]ExecutionFunc{
-            stack_ops.op_swap1,  stack_ops.op_swap2,  stack_ops.op_swap3,  stack_ops.op_swap4,
-            stack_ops.op_swap5,  stack_ops.op_swap6,  stack_ops.op_swap7,  stack_ops.op_swap8,
-            stack_ops.op_swap9,  stack_ops.op_swap10, stack_ops.op_swap11, stack_ops.op_swap12,
-            stack_ops.op_swap13, stack_ops.op_swap14, stack_ops.op_swap15, stack_ops.op_swap16,
+            wrap_ctx(stack_ops.op_swap1),  wrap_ctx(stack_ops.op_swap2),  wrap_ctx(stack_ops.op_swap3),  wrap_ctx(stack_ops.op_swap4),
+            wrap_ctx(stack_ops.op_swap5),  wrap_ctx(stack_ops.op_swap6),  wrap_ctx(stack_ops.op_swap7),  wrap_ctx(stack_ops.op_swap8),
+            wrap_ctx(stack_ops.op_swap9),  wrap_ctx(stack_ops.op_swap10), wrap_ctx(stack_ops.op_swap11), wrap_ctx(stack_ops.op_swap12),
+            wrap_ctx(stack_ops.op_swap13), wrap_ctx(stack_ops.op_swap14), wrap_ctx(stack_ops.op_swap15), wrap_ctx(stack_ops.op_swap16),
         };
 
         inline for (1..17) |n| {
@@ -367,10 +367,10 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     } else {
         // Use the same new-style functions for optimized mode
         const swap_functions = [_]ExecutionFunc{
-            stack_ops.op_swap1,  stack_ops.op_swap2,  stack_ops.op_swap3,  stack_ops.op_swap4,
-            stack_ops.op_swap5,  stack_ops.op_swap6,  stack_ops.op_swap7,  stack_ops.op_swap8,
-            stack_ops.op_swap9,  stack_ops.op_swap10, stack_ops.op_swap11, stack_ops.op_swap12,
-            stack_ops.op_swap13, stack_ops.op_swap14, stack_ops.op_swap15, stack_ops.op_swap16,
+            wrap_ctx(stack_ops.op_swap1),  wrap_ctx(stack_ops.op_swap2),  wrap_ctx(stack_ops.op_swap3),  wrap_ctx(stack_ops.op_swap4),
+            wrap_ctx(stack_ops.op_swap5),  wrap_ctx(stack_ops.op_swap6),  wrap_ctx(stack_ops.op_swap7),  wrap_ctx(stack_ops.op_swap8),
+            wrap_ctx(stack_ops.op_swap9),  wrap_ctx(stack_ops.op_swap10), wrap_ctx(stack_ops.op_swap11), wrap_ctx(stack_ops.op_swap12),
+            wrap_ctx(stack_ops.op_swap13), wrap_ctx(stack_ops.op_swap14), wrap_ctx(stack_ops.op_swap15), wrap_ctx(stack_ops.op_swap16),
         };
 
         inline for (1..17) |n| {
@@ -506,10 +506,10 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
 
     // SWAP1..SWAP16
     const swap_functions = [_]ExecutionFunc{
-        execution.stack.op_swap1,  execution.stack.op_swap2,  execution.stack.op_swap3,  execution.stack.op_swap4,
-        execution.stack.op_swap5,  execution.stack.op_swap6,  execution.stack.op_swap7,  execution.stack.op_swap8,
-        execution.stack.op_swap9,  execution.stack.op_swap10, execution.stack.op_swap11, execution.stack.op_swap12,
-        execution.stack.op_swap13, execution.stack.op_swap14, execution.stack.op_swap15, execution.stack.op_swap16,
+        wrap_ctx(execution.stack.op_swap1),  wrap_ctx(execution.stack.op_swap2),  wrap_ctx(execution.stack.op_swap3),  wrap_ctx(execution.stack.op_swap4),
+        wrap_ctx(execution.stack.op_swap5),  wrap_ctx(execution.stack.op_swap6),  wrap_ctx(execution.stack.op_swap7),  wrap_ctx(execution.stack.op_swap8),
+        wrap_ctx(execution.stack.op_swap9),  wrap_ctx(execution.stack.op_swap10), wrap_ctx(execution.stack.op_swap11), wrap_ctx(execution.stack.op_swap12),
+        wrap_ctx(execution.stack.op_swap13), wrap_ctx(execution.stack.op_swap14), wrap_ctx(execution.stack.op_swap15), wrap_ctx(execution.stack.op_swap16),
     };
     i = 0;
     while (i < 16) : (i += 1) {
