@@ -268,7 +268,7 @@ pub const Host = struct {
 
             fn vtable_get_depth(ptr: *anyopaque) u11 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_depth();
+                return @as(u11, @intCast(self.get_depth()));
             }
 
             fn vtable_set_output_buffer(ptr: *anyopaque, output: []const u8) anyerror!void {
