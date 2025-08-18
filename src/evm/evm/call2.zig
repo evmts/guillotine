@@ -38,17 +38,18 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
 
     const snapshot_id = if (!is_top_level_call) host.create_snapshot() else 0;
 
-    // Extract call parameters
-    var call_address: primitives.Address.Address = undefined;
-    var call_code: []const u8 = undefined;
-    var call_input: []const u8 = undefined;
-    var call_gas: u64 = undefined;
-    var call_is_static: bool = undefined;
-    var call_caller: primitives.Address.Address = undefined;
-    var call_value: u256 = undefined;
+    // Define call context struct for better data locality
+    const CallContext = struct {
+        address: primitives.Address.Address,
+        input: []const u8,
+        gas: u64,
+        is_static: bool,
+        caller: primitives.Address.Address,
+        value: u256,
+    };
 
-    // Handle CREATE/CREATE2 differently as they need special processing
-    switch (params) {
+    // Extract parameters with most common cases first
+    const call_context = switch (params) {
         .create, .create2 => {
             // For CREATE operations, delegate to the standard create_contract method
             // as interpret2 isn't designed to handle deployment bytecode
@@ -71,42 +72,41 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
                 .output = result.output orelse &.{},
             };
         },
-        .call => |call_data| {
-            call_address = call_data.to;
-            call_code = self.state.get_code(call_data.to);
-            Log.debug("[call] Retrieved code for address: len={}", .{call_code.len});
-            if (call_code.len > 0) {
-                Log.debug("[call] First 10 bytes of code: {any}", .{std.fmt.fmtSliceHexLower(call_code[0..@min(10, call_code.len)])});
-            }
-            call_input = call_data.input;
-            call_gas = call_data.gas;
-            call_is_static = false;
-            call_caller = call_data.caller;
-            call_value = call_data.value;
+        .call => |call_data| CallContext{
+            .address = call_data.to,
+            .input = call_data.input,
+            .gas = call_data.gas,
+            .is_static = false,
+            .caller = call_data.caller,
+            .value = call_data.value,
         },
-        .staticcall => |call_data| {
-            call_address = call_data.to;
-            call_code = self.state.get_code(call_data.to);
-            call_input = call_data.input;
-            call_gas = call_data.gas;
-            call_is_static = true;
-            call_caller = call_data.caller;
-            call_value = 0;
+        .staticcall => |call_data| CallContext{
+            .address = call_data.to,
+            .input = call_data.input,
+            .gas = call_data.gas,
+            .is_static = true,
+            .caller = call_data.caller,
+            .value = 0,
         },
         else => {
             Log.debug("[call] Unsupported call type", .{});
             return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
         },
+    };
+
+    // Get code once after extracting address
+    const call_code = self.state.get_code(call_context.address);
+    Log.debug("[call] Retrieved code for address: len={}", .{call_code.len});
+    if (call_code.len > 0) {
+        Log.debug("[call] First 10 bytes of code: {any}", .{std.fmt.fmtSliceHexLower(call_code[0..@min(10, call_code.len)])});
     }
 
-    // Validate inputs
-    if (call_input.len > MAX_INPUT_SIZE or call_code.len > MAX_CODE_SIZE) {
+    if (call_context.input.len > MAX_INPUT_SIZE or call_code.len > MAX_CODE_SIZE) {
         if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
 
-    // Charge base transaction cost for top-level calls
-    var gas_after_base = call_gas;
+    var gas_after_base = call_context.gas;
     if (is_top_level_call) {
         const GasConstants = @import("primitives").GasConstants;
         const base_cost = GasConstants.TxGas;
@@ -117,9 +117,8 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         gas_after_base -= base_cost;
     }
 
-    // Check for precompiles
-    if (precompile_addresses.get_precompile_id_checked(call_address)) |precompile_id| {
-        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_input, gas_after_base, call_is_static) catch |err| {
+    if (precompile_addresses.get_precompile_id_checked(call_context.address)) |precompile_id| {
+        const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_context.input, gas_after_base, call_context.is_static) catch |err| {
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return switch (err) {
                 else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
@@ -133,7 +132,6 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         return precompile_result;
     }
 
-    // Initialize frame state for top-level calls
     if (is_top_level_call) {
         self.current_frame_depth = 0;
         self.access_list.clear();
@@ -144,36 +142,29 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         self.created_contracts.deinit();
         self.created_contracts = CreatedContracts.init(self.allocator);
 
-        // Clear output and input state
         self.current_output = &.{};
         self.current_input = &.{};
 
-        if (self.frame_stack == null) {
-            // Frame stack not needed for StackFrame-based execution
-        }
+        if (self.frame_stack == null) {}
     } else {
-        // Nested call - check depth and increment
         const new_depth = self.current_frame_depth + 1;
         if (new_depth >= MAX_CALL_DEPTH) {
             if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
             return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
         }
-        // CRITICAL: Actually update the frame depth for nested calls
         self.current_frame_depth = new_depth;
+        defer self.current_frame_depth -= 1;
     }
 
-    // Prewarm addresses for Berlin
     if (self.chain_rules.is_berlin) {
-        const addresses_to_warm = [_]primitives.Address.Address{ call_address, call_caller };
+        const addresses_to_warm = [_]primitives.Address.Address{ call_context.address, call_context.caller };
         self.access_list.pre_warm_addresses(&addresses_to_warm) catch |err| {
             Log.debug("[call] Failed to warm addresses: {any}", .{err});
         };
     }
 
-    // Create a StackFrame for interpret2
     const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
 
-    // Create analysis with bytecode - interpret2 will analyze and fill the rest
     const empty_analysis = SimpleAnalysis{
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
@@ -184,7 +175,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
 
     var frame = try StackFrame.init(
         gas_after_base,
-        call_address,
+        call_context.address,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -194,59 +185,52 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     );
     defer frame.deinit();
 
-    // Set up frame metadata
     if (self.current_frame_depth < MAX_CALL_DEPTH) {
         self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
-            .caller = call_caller,
-            .value = call_value,
-            .input_buffer = call_input,
+            .caller = call_context.caller,
+            .value = call_context.value,
+            .input_buffer = call_context.input,
             .output_buffer = &.{},
-            .is_static = call_is_static,
+            .is_static = call_context.is_static,
             .depth = self.current_frame_depth,
         };
     }
 
     // Store the current input for the host interface to access
-    self.current_input = call_input;
+    self.current_input = call_context.input;
 
     // Main execution with interpret2
-    var exec_err: ?ExecutionError.Error = null;
-    // Call interpret2 which will handle its own analysis and tailcall dispatch
-    Log.debug("[call] About to call interpret2 with code.len={}", .{call_code.len});
+    // Interpret always throws an error to end execution even on success.
+    // TODO make it return a success enum instead on succcess
+    var exec_err: ExecutionError.Error = undefined;
     interpret2(&frame) catch |err| {
         Log.debug("[call] interpret2 ended with error: {any}", .{err});
         exec_err = err;
     };
 
-    // Handle snapshot revert for failed nested calls
-    if (!is_top_level_call and exec_err != null) {
-        const should_revert = switch (exec_err.?) {
-            ExecutionError.Error.STOP => false,
-            ExecutionError.Error.RETURN => false,
-            else => true,
+    // Handle snapshot revert for failed nested calls - flatten conditions
+    if (is_top_level_call) {
+        // Top level calls don't need snapshot revert
+    } else {
+        // Only revert on actual errors, not STOP/RETURN
+        const is_success = switch (exec_err) {
+            ExecutionError.Error.STOP, ExecutionError.Error.RETURN => true,
+            else => false,
         };
-        if (should_revert) {
+        if (!is_success) {
             host.revert_to_snapshot(snapshot_id);
         }
     }
 
-    // Map error to success status
-    const success = if (exec_err) |e| switch (e) {
+    const success = switch (exec_err) {
         ExecutionError.Error.STOP => true,
         ExecutionError.Error.RETURN => true,
         else => false,
-    } else false;
+    };
 
-    // Return VM-owned view; callers must not free (same as standard call)
     const output = if (self.current_output.len > 0) self.current_output else &.{};
 
-    // Clear current_input to avoid interference
     self.current_input = &.{};
-
-    // Restore frame depth for nested calls
-    if (!is_top_level_call) {
-        self.current_frame_depth -= 1;
-    }
 
     return CallResult{
         .success = success,
