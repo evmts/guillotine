@@ -181,6 +181,10 @@ const Address = primitives.Address.Address;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const Host = @import("../host.zig").Host;
 const BlockInfo = @import("../host.zig").BlockInfo;
+const StackFrame = @import("../stack_frame.zig").StackFrame;
+const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
+const DatabaseInterface = @import("../state/database_interface.zig").DatabaseInterface;
+const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 
 // Mock host implementation for testing block opcodes
 const TestBlockHost = struct {
@@ -307,9 +311,9 @@ const TestBlockHost = struct {
 };
 
 test "COINBASE returns block coinbase address" {
-    // Create a minimal test context with only required fields
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
+    const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
+    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 
     const test_coinbase = primitives.Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
 
@@ -325,19 +329,40 @@ test "COINBASE returns block coinbase address" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try Frame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO_ADDRESS, // contract_address
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Execute COINBASE opcode
-    try op_coinbase(&context);
+    try op_coinbase(&frame);
 
     // Verify coinbase address was pushed to stack
-    const result = stack.pop_unsafe();
+    const result = frame.stack.pop_unsafe();
     try testing.expectEqual(primitives.Address.to_u256(test_coinbase), result);
 }
 
