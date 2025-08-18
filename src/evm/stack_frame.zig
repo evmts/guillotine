@@ -26,22 +26,38 @@ pub const StateError = error{OutOfMemory};
 
 /// StackFrame owns all execution state for the tailcall interpreter
 pub const StackFrame = struct {
-    // === HOT DATA - accessed every instruction ===
-    ip: usize, // Instruction pointer
-    ops: []*const anyopaque, // Owned ops array
-    gas_remaining: u64,
-    stack: Stack,
-    memory: Memory,
-    host: Host,
+    // ===================================================================
+    // CACHE LINE 1 (64 bytes) - ULTRA HOT (accessed every instruction)
+    // ===================================================================
+    // These fields are accessed by EVERY operation in the hot path
+    ip: usize, // 8 bytes - instruction pointer
+    gas_remaining: u64, // 8 bytes - checked every instruction
+    stack: Stack, // 48 bytes - struct with ptr (16) + len (8) + cap (8) + allocator (16)
+    // Total: 64 bytes exactly - perfect cache line alignment
 
-    // === OWNED EXECUTION STATE ===
-    analysis: SimpleAnalysis, // Owned, not a pointer
-    metadata: []u32, // Owned metadata array
+    // ===================================================================
+    // CACHE LINE 2 (64 bytes) - HOT (accessed by most operations)
+    // ===================================================================
+    // Memory operations (MLOAD/MSTORE/etc) and analysis lookups
+    memory: Memory, // 32 bytes - struct with ArrayList
+    analysis: SimpleAnalysis, // 32 bytes - inst_to_pc, pc_to_inst, bytecode, inst_count
+    // Total: 64 bytes
 
-    // === DEPRECATED - TO BE MOVED TO HOST ===
-    // TODO: Move to host interface - should be host.get_contract_address()
-    contract_address: primitives.Address.Address,
-    state: DatabaseInterface,
+    // ===================================================================
+    // CACHE LINE 3 (64 bytes) - WARM (accessed by some operations)
+    // ===================================================================
+    // Control flow and metadata access
+    ops: []*const anyopaque, // 16 bytes - owned ops array
+    metadata: []u32, // 16 bytes - owned metadata array
+    host: Host, // 32 bytes - vtable pointer + context pointer
+    // Total: 64 bytes
+
+    // ===================================================================
+    // CACHE LINE 4+ - COLD (rarely accessed)
+    // ===================================================================
+    // These fields are accessed infrequently
+    contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
+    state: DatabaseInterface, // 32 bytes - database interface
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
