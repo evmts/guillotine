@@ -19,7 +19,7 @@ This document provides implementation-specific guidance for AI assistants workin
    ```zig
    // ALWAYS pair Frame.init with Frame.deinit
    var frame = try Frame.init(...);
-   defer frame.deinit(allocator);
+   defer frame.deinit();
    ```
 
 2. **Analysis Ownership**:

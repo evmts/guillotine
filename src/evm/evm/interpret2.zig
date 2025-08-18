@@ -12,7 +12,8 @@ pub const Error = ExecutionError.Error;
 
 // Main interpret function - gets code from frame.analysis.bytecode  
 pub fn interpret2(frame: *StackFrame) Error!noreturn {
-    std.debug.assert(frame.analysis.code.len > std.math.maxInt(u16)) 
+    const code = frame.analysis.bytecode;
+    std.debug.assert(code.len <= std.math.maxInt(u16));
 
     var static_buffer: [1024 * 1024]u8 = undefined; // 1MB should be enough for most code
     var fba = std.heap.FixedBufferAllocator.init(&static_buffer);

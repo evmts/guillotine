@@ -12,7 +12,6 @@ const Host = @import("../host.zig").Host;
 const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
-const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
 
 // Define local CallType to decouple from preallocated call frame stack
 const CallType = enum { Call, CallCode, DelegateCall, StaticCall };
@@ -1857,7 +1856,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
             db_interface,
             allocator,
         );
-        defer frame.deinit(allocator);
+        defer frame.deinit();
 
         // Test 1: With value transfer, stipend is ADDED to forwarded gas
         {
@@ -1950,7 +1949,7 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
             db_interface,
             allocator,
         );
-        defer frame.deinit(allocator);
+        defer frame.deinit();
 
         // Test: Without value transfer, no stipend should be applied
         {
@@ -2008,7 +2007,7 @@ test "EIP-150 gas calculations for nested calls" {
         db_interface,
         allocator,
     );
-    defer frame.deinit(allocator);
+    defer frame.deinit();
 
     // Test 1: First level call gets 63/64 of available gas
     {
@@ -2079,7 +2078,7 @@ test "EIP-150 minimum gas retention" {
         db_interface,
         allocator,
     );
-    defer frame.deinit(allocator);
+    defer frame.deinit();
 
     // Caller should retain exactly 1 gas (64/64 = 1)
     {
@@ -2146,7 +2145,7 @@ test "EIP-150 stipend edge cases" {
         db_interface,
         allocator,
     );
-    defer frame.deinit(allocator);
+    defer frame.deinit();
 
     // Test 1: Stipend is added even when caller has very low gas
     {
