@@ -101,6 +101,10 @@ depth: u11 = 0, // 2 bytes - call depth tracking
 
 /// Whether the current context is read-only (STATICCALL)
 read_only: bool = false, // 1 byte - STATICCALL check
+/// Whether the VM is currently executing a call (used to detect nested calls)
+is_executing: bool = false, // 1 byte - execution state
+/// Packed execution flags (bit 0 = read_only, bit 1 = is_executing)
+flags: u8 = 0, // 1 byte - packed flags
 // Padding: 25 bytes used, 39 bytes available = 64 bytes total
 
 // ===================================================================
@@ -260,6 +264,8 @@ pub fn init(
         .current_snapshot_id = 0,
         .depth = @intCast(depth),
         .read_only = read_only,
+        .is_executing = false,
+        .flags = @as(u8, if (read_only) 1 else 0),
 
         // Cache line 3 - transaction lifecycle (warm)
         .created_contracts = CreatedContracts.init(allocator),
