@@ -66,58 +66,84 @@ pub const StackFrameMetadata = struct {
 /// Initial arena capacity for temporary allocations (256KB)
 /// This covers most common contract executions without reallocation
 const ARENA_INITIAL_CAPACITY = 256 * 1024;
-// === FIRST CACHE LINE (64 bytes) - ULTRA HOT ===
-// These are accessed by nearly every operation
-/// Normal allocator for data that outlives EVM execution (passed by user)
-allocator: std.mem.Allocator, // 16 bytes - accessed by CALL/CREATE for frame allocation
+
+// ===================================================================
+// CACHE LINE 1 (64 bytes) - STATE OPERATIONS (HOTTEST)
+// ===================================================================
+// These fields are accessed together during SLOAD/SSTORE/BALANCE operations
+/// World state including accounts, storage, and code
+state: EvmState, // 16 bytes - accessed by storage/balance ops
 /// Warm/cold access tracking for EIP-2929 gas costs
 access_list: AccessList, // 24 bytes - accessed by all address/storage operations
 /// Call journal for transaction revertibility
 journal: CallJournal, // 24 bytes - accessed by state-changing operations
-// Total first cache line: exactly 64 bytes (16 + 24 + 24)
+// Total: 64 bytes exactly - perfect cache line
 
-// === SECOND CACHE LINE - STATE MANAGEMENT ===
-// Accessed together during state operations
-/// World state including accounts, storage, and code
-state: EvmState, // 16 bytes - SLOAD/SSTORE/BALANCE
-/// Tracks contracts created in current transaction for EIP-6780
-created_contracts: CreatedContracts, // 24 bytes - CREATE/CREATE2
-/// Self-destruct tracking for the current execution
-self_destruct: SelfDestruct, // 24 bytes - SELFDESTRUCT
+// ===================================================================
+// CACHE LINE 2 (64 bytes) - EXECUTION CONTROL (HOT)
+// ===================================================================
+// These fields are accessed together during call operations and gas accounting
+/// Normal allocator for data that outlives EVM execution (passed by user)
+allocator: std.mem.Allocator, // 16 bytes - accessed by CALL/CREATE for frame allocation
+/// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
+/// Signed accumulator: EIP-2200 allows negative deltas during execution.
+/// Applied at transaction end with EIP-3529 cap.
+gas_refunds: i64, // 8 bytes - accessed by SSTORE/SELFDESTRUCT
 
-// === THIRD CACHE LINE - EXECUTION CONTROL ===
-/// Internal arena allocator for temporary data that's reset between executions
-internal_arena: std.heap.ArenaAllocator, // 16 bytes - execution management
-/// Opcode dispatch table for the configured hardfork
-table: OpcodeMetadata, // Large struct - opcode execution
-/// Current call depth for overflow protection
-depth: u11 = 0, // 2 bytes - call depth tracking
-/// Whether the current context is read-only (STATICCALL)
-read_only: bool = false, // 1 byte - STATICCALL check
-/// Whether the VM is currently executing a call (used to detect nested calls)
-is_executing: bool = false, // 1 byte - execution state
-/// Packed execution flags (bit 0 = read_only, bit 1 = is_executing)
-flags: u8 = 0,
 /// Current active frame depth in the frame stack
 current_frame_depth: u11 = 0, // 2 bytes - frame management
 /// Maximum frame depth allocated so far (for efficient cleanup)
 max_allocated_depth: u11 = 0, // 2 bytes - frame management
 /// Current snapshot ID for the frame being executed
 current_snapshot_id: u32 = 0, // 4 bytes - snapshot tracking
-/// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
-/// Signed accumulator: EIP-2200 allows negative deltas during execution.
-/// Applied at transaction end with EIP-3529 cap.
-gas_refunds: i64, // 8 bytes - accessed by SSTORE/SELFDESTRUCT
+/// Current call depth for overflow protection
+depth: u11 = 0, // 2 bytes - call depth tracking
 
-// === FOURTH CACHE LINE - CONFIGURATION (COLD) ===
-// Only accessed during initialization or specific opcodes
+/// Whether the current context is read-only (STATICCALL)
+read_only: bool = false, // 1 byte - STATICCALL check
+/// Whether the VM is currently executing a call (used to detect nested calls)
+is_executing: bool = false, // 1 byte - execution state
+/// Packed execution flags (bit 0 = read_only, bit 1 = is_executing)
+flags: u8 = 0, // 1 byte - packed flags
+// Padding: 25 bytes used, 39 bytes available = 64 bytes total
+
+// ===================================================================
+// CACHE LINE 3 (64 bytes) - TRANSACTION LIFECYCLE (WARM)
+// ===================================================================
+// These fields are accessed together during CREATE/SELFDESTRUCT operations
+/// Tracks contracts created in current transaction for EIP-6780
+created_contracts: CreatedContracts, // 24 bytes - CREATE/CREATE2 tracking
+/// Self-destruct tracking for the current execution
+self_destruct: SelfDestruct, // 24 bytes - SELFDESTRUCT tracking
+/// Internal arena allocator for temporary data that's reset between executions
+internal_arena: std.heap.ArenaAllocator, // 16 bytes - execution management
+// Total: 64 bytes
+
+// ===================================================================
+// CACHE LINE 4 (64 bytes) - CALL FRAME MANAGEMENT (WARM)
+// ===================================================================
+// These fields are accessed together during nested calls
+/// Pool for lazily reusing temporary Frames (e.g., constructor frames)
+frame_pool: FramePool, // ~32 bytes - frame allocation pool
+/// Fixed-size array storing metadata for each call frame in the stack
+/// Index corresponds to frame depth (0 = top-level call, 1 = first nested call, etc.)
+frame_metadata: [MAX_CALL_DEPTH]StackFrameMetadata, // ~32 bytes - call context
+// Total: ~64 bytes
+
+// ===================================================================
+// CACHE LINE 5+ - CONFIGURATION AND I/O (COLD)
+// ===================================================================
+// These fields are accessed infrequently or during initialization only
+
+// Configuration data (accessed during init and specific opcodes)
+/// Opcode dispatch table for the configured hardfork
+table: OpcodeMetadata, // Large struct - opcode execution
 /// Protocol rules for the current hardfork
 chain_rules: ChainRules, // Configuration, accessed during init
 /// Execution context providing transaction and block information
 context: Context, // Transaction context - rarely accessed
 
-// === FIFTH CACHE LINE - OUTPUT BUFFERS (COLD) ===
-// Only accessed by RETURN/REVERT
+// I/O buffers (accessed only during RETURN/REVERT/CALLDATALOAD)
 /// Output buffer for the current frame (set via Host.set_output)
 current_output: []const u8 = &.{}, // 16 bytes - only for RETURN/REVERT
 /// Input buffer for the current frame (exposed via Host.get_input)
@@ -127,26 +153,23 @@ owned_output: ?[]u8 = null,
 /// Separate output buffer for mini execution to avoid conflicts with regular execution
 mini_output: ?[]u8 = null,
 
-// === REMAINING COLD DATA ===
+// Rarely accessed fields
 /// Lazily allocated frame stack for nested calls - only allocates what's needed
 /// Frame at index 0 is allocated when top-level call begins,
 /// additional frames are allocated on-demand during CALL/CREATE operations
 frame_stack: ?[]Frame = null, // 8 bytes - frame storage pointer
 /// LRU cache for code analysis to avoid redundant analysis during nested calls
 analysis_cache: ?AnalysisCache = null, // 8 bytes - analysis cache pointer
+
+// Debug/tracing data (cold - only used in development)
 /// Optional tracer for capturing execution traces (not available on WASM)
-tracer: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.io.AnyWriter = null, // 16 bytes - debugging only
+tracer: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.io.AnyWriter = null,
 /// Open file handle used by tracer when tracing to file (not available on WASM)
-trace_file: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.fs.File = null, // 8 bytes - debugging only
+trace_file: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.fs.File = null,
 /// As of now the EVM assumes we are only running on a single thread
 /// All places in code that make this assumption are commented and must be handled
 /// Before we can remove this restriction
-initial_thread_id: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) u32 else std.Thread.Id, // Thread tracking
-/// Pool for lazily reusing temporary Frames (e.g., constructor frames)
-frame_pool: FramePool,
-/// Fixed-size array storing metadata for each call frame in the stack
-/// Index corresponds to frame depth (0 = top-level call, 1 = first nested call, etc.)
-frame_metadata: [MAX_CALL_DEPTH]StackFrameMetadata,
+initial_thread_id: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) u32 else std.Thread.Id,
 
 // Compile-time validation and optimizations
 comptime {
@@ -228,41 +251,28 @@ pub fn init(
     // std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
     Log.debug("Evm.init: EVM initialization complete", .{});
     const result = Evm{
-        // First cache line - hot data
-        .allocator = allocator,
-        .gas_refunds = 0,
+        // Cache line 1 - state operations (hottest)
+        .state = state,
         .access_list = access_list,
         .journal = CallJournal.init(allocator),
-        // Second cache line - state management
-        .state = state,
-        .created_contracts = CreatedContracts.init(allocator),
-        .self_destruct = SelfDestruct.init(allocator),
-        // Third cache line - execution control
-        .internal_arena = internal_arena,
-        .table = table orelse OpcodeMetadata.DEFAULT,
+
+        // Cache line 2 - execution control (hot)
+        .allocator = allocator,
+        .gas_refunds = 0,
+        .current_frame_depth = 0,
+        .max_allocated_depth = 0,
+        .current_snapshot_id = 0,
         .depth = @intCast(depth),
         .read_only = read_only,
         .is_executing = false,
         .flags = @as(u8, if (read_only) 1 else 0),
-        .current_frame_depth = 0,
-        .max_allocated_depth = 0,
-        .current_snapshot_id = 0,
-        // Fourth cache line - configuration
-        .chain_rules = chain_rules orelse ChainRules.DEFAULT,
-        .context = ctx,
-        // Fifth cache line - I/O buffers
-        .current_output = &.{},
-        .current_input = &.{},
-        // Cold data
-        .frame_stack = null,
-        // MEMORY ALLOCATION: Analysis cache for bytecode analysis results
-        // Expected size: 50-100KB (128 cache entries * analysis data)
-        // Lifetime: Per EVM instance
-        // Frequency: Once per EVM creation
-        .analysis_cache = AnalysisCache.init(allocator, AnalysisCache.DEFAULT_CACHE_SIZE),
-        .tracer = tracer,
-        .trace_file = null,
-        .initial_thread_id = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) 0 else std.Thread.getCurrentId(),
+
+        // Cache line 3 - transaction lifecycle (warm)
+        .created_contracts = CreatedContracts.init(allocator),
+        .self_destruct = SelfDestruct.init(allocator),
+        .internal_arena = internal_arena,
+
+        // Cache line 4 - call frame management (warm)
         .frame_pool = try FramePool.init(allocator, MAX_CALL_DEPTH),
         .frame_metadata = [_]StackFrameMetadata{StackFrameMetadata{
             .caller = primitives.ZERO_ADDRESS,
@@ -272,6 +282,24 @@ pub fn init(
             .is_static = false,
             .depth = 0,
         }} ** MAX_CALL_DEPTH,
+
+        // Cache line 5+ - configuration and I/O (cold)
+        .table = table orelse OpcodeMetadata.DEFAULT,
+        .chain_rules = chain_rules orelse ChainRules.DEFAULT,
+        .context = ctx,
+        .current_output = &.{},
+        .current_input = &.{},
+        .owned_output = null,
+        .mini_output = null,
+        .frame_stack = null,
+        // MEMORY ALLOCATION: Analysis cache for bytecode analysis results
+        // Expected size: 50-100KB (128 cache entries * analysis data)
+        // Lifetime: Per EVM instance
+        // Frequency: Once per EVM creation
+        .analysis_cache = AnalysisCache.init(allocator, AnalysisCache.DEFAULT_CACHE_SIZE),
+        .tracer = tracer,
+        .trace_file = null,
+        .initial_thread_id = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) 0 else std.Thread.getCurrentId(),
     };
 
     // Debug: verify tracer was stored correctly
