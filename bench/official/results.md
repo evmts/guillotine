@@ -4,17 +4,17 @@
 
 **Test Runs per Case**: 2 (EthereumJS: 1)
 **EVMs Compared**: Guillotine Call2 (Zig with tailcall dispatch), REVM (Rust), EthereumJS (JavaScript), Geth (Go), evmone (C++)
-**Timestamp**: 1755489170 (Unix epoch)
+**Timestamp**: 1755493490 (Unix epoch)
 
 ## Overall Performance Summary (Per Run)
 
 | Test Case | Zig-Call2 | REVM | EthereumJS | Geth | evmone |
 |-----------|-----------|------|------------|------|--------|
-| erc20-approval-transfer   | 4.87 ms | 5.98 ms | 438.13 ms | 10.06 ms | 3.88 ms |
-| erc20-mint                | 4.02 ms | 6.38 ms | 453.79 ms | 8.81 ms | 2.41 ms |
-| erc20-transfer            | 6.27 ms | 6.99 ms | 570.57 ms | 13.10 ms | 4.51 ms |
-| ten-thousand-hashes       | 1.59 ms | 1.75 ms | 327.18 ms | 5.08 ms | 1.39 ms |
-| snailtracer               | 54.73 ms | 37.95 ms | 3.11 s | 113.09 ms | 25.89 ms |
+| erc20-approval-transfer   | 4.31 ms | 4.72 ms | 379.81 ms | 8.57 ms | 3.59 ms |
+| erc20-mint                | 3.47 ms | 3.67 ms | 396.44 ms | 7.47 ms | 2.27 ms |
+| erc20-transfer            | 5.48 ms | 6.05 ms | 503.37 ms | 11.15 ms | 4.31 ms |
+| ten-thousand-hashes       | 1.57 ms | 1.43 ms | 278.27 ms | 4.27 ms | 884.66 μs |
+| snailtracer               | 49.83 ms | 30.96 ms | 2.67 s | 93.87 ms | 21.52 ms |
 
 ## Detailed Performance Comparison
 
@@ -22,51 +22,51 @@
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| Guillotine (Call2) | 4.87 ms | 4.87 ms | 4.86 ms | 4.88 ms | 17.37 μs |            20 |
-| REVM        | 5.98 ms | 5.98 ms | 5.93 ms | 6.04 ms | 77.02 μs |            20 |
-| EthereumJS  | 438.13 ms | 438.13 ms | 437.51 ms | 438.76 ms | 884.80 μs |             1 |
-| Geth        | 10.06 ms | 10.06 ms | 10.04 ms | 10.09 ms | 34.47 μs |            20 |
-| evmone      | 3.88 ms | 3.88 ms | 3.88 ms | 3.89 ms | 9.79 μs |            20 |
+| Guillotine (Call2) | 4.31 ms | 4.31 ms | 4.30 ms | 4.32 ms | 12.24 μs |            20 |
+| REVM        | 4.72 ms | 4.72 ms | 4.72 ms | 4.73 ms | 2.07 μs |            20 |
+| EthereumJS  | 379.81 ms | 379.81 ms | 372.08 ms | 387.53 ms | 10.92 ms |             1 |
+| Geth        | 8.57 ms | 8.57 ms | 8.52 ms | 8.62 ms | 71.98 μs |            20 |
+| evmone      | 3.59 ms | 3.59 ms | 3.59 ms | 3.59 ms | 3.17 μs |            20 |
 
 ### erc20-mint
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| Guillotine (Call2) | 4.02 ms | 4.02 ms | 4.02 ms | 4.02 ms | 0.94 μs |            20 |
-| REVM        | 6.38 ms | 6.38 ms | 5.64 ms | 7.13 ms | 1.05 ms |            20 |
-| EthereumJS  | 453.79 ms | 453.79 ms | 452.86 ms | 454.72 ms | 1.32 ms |             1 |
-| Geth        | 8.81 ms | 8.81 ms | 8.76 ms | 8.87 ms | 78.39 μs |            20 |
-| evmone      | 2.41 ms | 2.41 ms | 2.41 ms | 2.42 ms | 3.67 μs |            20 |
+| Guillotine (Call2) | 3.47 ms | 3.47 ms | 3.47 ms | 3.47 ms | 2.31 μs |            20 |
+| REVM        | 3.67 ms | 3.67 ms | 3.62 ms | 3.71 ms | 63.97 μs |            20 |
+| EthereumJS  | 396.44 ms | 396.44 ms | 395.81 ms | 397.06 ms | 883.59 μs |             1 |
+| Geth        | 7.47 ms | 7.47 ms | 7.43 ms | 7.51 ms | 52.71 μs |            20 |
+| evmone      | 2.27 ms | 2.27 ms | 2.25 ms | 2.29 ms | 29.03 μs |            20 |
 
 ### erc20-transfer
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| Guillotine (Call2) | 6.27 ms | 6.27 ms | 6.19 ms | 6.35 ms | 118.39 μs |            20 |
-| REVM        | 6.99 ms | 6.99 ms | 6.89 ms | 7.09 ms | 145.20 μs |            20 |
-| EthereumJS  | 570.57 ms | 570.57 ms | 566.02 ms | 575.11 ms | 6.42 ms |             1 |
-| Geth        | 13.10 ms | 13.10 ms | 13.05 ms | 13.15 ms | 66.10 μs |            20 |
-| evmone      | 4.51 ms | 4.51 ms | 4.51 ms | 4.52 ms | 4.83 μs |            20 |
+| Guillotine (Call2) | 5.48 ms | 5.48 ms | 5.48 ms | 5.48 ms | 1.83 μs |            20 |
+| REVM        | 6.05 ms | 6.05 ms | 6.02 ms | 6.08 ms | 38.72 μs |            20 |
+| EthereumJS  | 503.37 ms | 503.37 ms | 497.55 ms | 509.18 ms | 8.22 ms |             1 |
+| Geth        | 11.15 ms | 11.15 ms | 11.15 ms | 11.15 ms | 2.24 μs |            20 |
+| evmone      | 4.31 ms | 4.31 ms | 4.29 ms | 4.33 ms | 27.15 μs |            20 |
 
 ### ten-thousand-hashes
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| Guillotine (Call2) | 1.59 ms | 1.59 ms | 1.59 ms | 1.60 ms | 4.24 μs |            20 |
-| REVM        | 1.75 ms | 1.75 ms | 1.73 ms | 1.76 ms | 20.17 μs |            20 |
-| EthereumJS  | 327.18 ms | 327.18 ms | 326.63 ms | 327.73 ms | 776.90 μs |             1 |
-| Geth        | 5.08 ms | 5.08 ms | 5.07 ms | 5.08 ms | 11.34 μs |            20 |
-| evmone      | 1.39 ms | 1.39 ms | 1.38 ms | 1.40 ms | 14.93 μs |            20 |
+| Guillotine (Call2) | 1.57 ms | 1.57 ms | 1.55 ms | 1.59 ms | 30.27 μs |            20 |
+| REVM        | 1.43 ms | 1.43 ms | 1.42 ms | 1.45 ms | 26.87 μs |            20 |
+| EthereumJS  | 278.27 ms | 278.27 ms | 277.80 ms | 278.73 ms | 657.73 μs |             1 |
+| Geth        | 4.27 ms | 4.27 ms | 4.26 ms | 4.29 ms | 21.65 μs |            20 |
+| evmone      | 884.66 μs | 884.66 μs | 880.29 μs | 889.04 μs | 6.18 μs |            20 |
 
 ### snailtracer
 
 | EVM | Mean (per run) | Median (per run) | Min (per run) | Max (per run) | Std Dev (per run) | Internal Runs |
 |-----|----------------|------------------|---------------|---------------|-------------------|---------------|
-| Guillotine (Call2) | 54.73 ms | 54.73 ms | 54.14 ms | 55.32 ms | 830.98 μs |             2 |
-| REVM        | 37.95 ms | 37.95 ms | 37.36 ms | 38.55 ms | 840.50 μs |             2 |
-| EthereumJS  | 3.11 s | 3.11 s | 3.11 s | 3.11 s | 0.00 μs |             1 |
-| Geth        | 113.09 ms | 113.09 ms | 112.33 ms | 113.85 ms | 1.07 ms |             2 |
-| evmone      | 25.89 ms | 25.89 ms | 25.88 ms | 25.89 ms | 3.95 μs |             2 |
+| Guillotine (Call2) | 49.83 ms | 49.83 ms | 49.18 ms | 50.49 ms | 923.76 μs |             2 |
+| REVM        | 30.96 ms | 30.96 ms | 30.90 ms | 31.01 ms | 76.04 μs |             2 |
+| EthereumJS  | 2.67 s | 2.67 s | 2.67 s | 2.67 s | 0.00 μs |             1 |
+| Geth        | 93.87 ms | 93.87 ms | 93.83 ms | 93.90 ms | 49.39 μs |             2 |
+| evmone      | 21.52 ms | 21.52 ms | 21.41 ms | 21.64 ms | 162.49 μs |             2 |
 
 
 ## Notes
