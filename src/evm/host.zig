@@ -1,7 +1,7 @@
 const std = @import("std");
 const Address = @import("primitives").Address.Address;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
-const Frame = @import("frame.zig").Frame;
+const Frame = @import("stack_frame.zig").StackFrame;
 
 /// Call operation parameters for different call types
 pub const CallParams = union(enum) {
