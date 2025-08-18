@@ -62,7 +62,7 @@ pub fn op_push_div_fusion(frame: *Frame) ExecutionError.Error!void {
 pub fn op_iszero_inline(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 1);
 
-    const value = try frame.stack.peek_unsafe();
+    const value = frame.stack.peek_unsafe();
     const result: u256 = @intFromBool(value == 0);
     frame.stack.set_top_unsafe(result);
 }
@@ -74,7 +74,7 @@ pub fn op_eq_inline(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     const b = frame.stack.pop_unsafe();
-    const a = try frame.stack.peek_unsafe();
+    const a = frame.stack.peek_unsafe();
     const result: u256 = @intFromBool(a == b);
     frame.stack.set_top_unsafe(result);
 }

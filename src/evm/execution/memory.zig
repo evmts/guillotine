@@ -41,7 +41,7 @@ pub fn op_mload(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Get offset from top of stack unsafely - bounds checking is done in jump_table.zig
-    const offset = try frame.stack.peek_unsafe();
+    const offset = frame.stack.peek_unsafe();
 
     // Check offset bounds
     if (offset > std.math.maxInt(usize)) {

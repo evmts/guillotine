@@ -47,7 +47,7 @@ pub fn op_sha3(frame: *Frame) ExecutionError.Error!void {
 
     // Debug: show what's on stack before popping
     if (frame.stack.size() >= 2) {
-        const top = try frame.stack.peek_unsafe();
+        const top = frame.stack.peek_unsafe();
         const second = try frame.stack.peek_n(1);
         Log.debug("KECCAK256 stack before pop: top={}, second={}", .{ top, second });
     }

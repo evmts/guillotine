@@ -230,7 +230,7 @@ pub fn peek_n_unsafe(self: *const Stack, n: usize) u256 {
 pub fn peek(self: *const Stack) Error!u256 {
     return self.peek_n(0);
 }
-pub fn peek_unsafe(self: *const Stack) Error!u256 {
+pub fn peek_unsafe(self: *const Stack) u256 {
     return self.peek_n_unsafe(0);
 }
 

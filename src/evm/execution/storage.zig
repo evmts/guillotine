@@ -17,7 +17,7 @@ pub fn op_sload(frame: *Frame) ExecutionError.Error!void {
         }
     }
 
-    const slot = try frame.stack.peek_unsafe();
+    const slot = frame.stack.peek_unsafe();
 
     if (frame.host.is_hardfork_at_least(.BERLIN)) {
         const is_cold = frame.mark_storage_slot_warm(slot) catch {
@@ -96,7 +96,7 @@ pub fn op_tload(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Get slot from top of stack unsafely - bounds checking is done in jump_table.zig
-    const slot = try frame.stack.peek_unsafe();
+    const slot = frame.stack.peek_unsafe();
 
     const value = frame.get_transient_storage(slot);
 

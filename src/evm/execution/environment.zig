@@ -42,7 +42,7 @@ pub fn op_address(frame: *Frame) ExecutionError.Error!void {
 /// Subject to EIP-2929 gas costs for cold account access.
 /// Stack: [address] → [balance]
 pub fn op_balance(frame: *Frame) ExecutionError.Error!void {
-    const address_u256 = try frame.stack.peek_unsafe();
+    const address_u256 = frame.stack.peek_unsafe();
     const address = from_u256(address_u256);
 
     // EIP-2929: Check if address is cold and consume appropriate gas

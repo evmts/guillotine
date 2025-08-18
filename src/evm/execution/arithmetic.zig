@@ -89,7 +89,7 @@ pub fn op_add(frame: *Frame) ExecutionError.Error!void {
     }
 
     const top = frame.stack.pop_unsafe(); // top
-    const top_minus_1 = try frame.stack.peek_unsafe(); // second from top
+    const top_minus_1 = frame.stack.peek_unsafe(); // second from top
     const result = top_minus_1 +% top;
     frame.stack.set_top_unsafe(result);
 }
@@ -124,7 +124,7 @@ pub fn op_mul(frame: *Frame) ExecutionError.Error!void {
     }
 
     const top = frame.stack.pop_unsafe();
-    const top_minus_1 = try frame.stack.peek_unsafe();
+    const top_minus_1 = frame.stack.peek_unsafe();
 
     // Use optimized U256 multiplication
     const a_u256 = U256.from_u256_unsafe(top_minus_1);
@@ -165,7 +165,7 @@ pub fn op_sub(frame: *Frame) ExecutionError.Error!void {
     }
 
     const a = frame.stack.pop_unsafe();
-    const b = try frame.stack.peek_unsafe();
+    const b = frame.stack.peek_unsafe();
     const result = a -% b;
 
     frame.stack.set_top_unsafe(result);
@@ -208,7 +208,7 @@ pub fn op_div(frame: *Frame) ExecutionError.Error!void {
     }
 
     const b = frame.stack.pop_unsafe(); // divisor (top)
-    const a = try frame.stack.peek_unsafe(); // dividend (second from top)
+    const a = frame.stack.peek_unsafe(); // dividend (second from top)
 
     // EVM semantics: b / a (top / second_from_top)
     // REVM computes: top / second_from_top
@@ -263,7 +263,7 @@ pub fn op_sdiv(frame: *Frame) ExecutionError.Error!void {
     }
 
     const b = frame.stack.pop_unsafe(); // top (dividend)
-    const a = try frame.stack.peek_unsafe(); // second from top (divisor)
+    const a = frame.stack.peek_unsafe(); // second from top (divisor)
 
     // EVM semantics: b / a (top / second_from_top) - signed division
     // REVM computes: top / second_from_top
@@ -325,7 +325,7 @@ pub fn op_mod(frame: *Frame) ExecutionError.Error!void {
     }
 
     const b = frame.stack.pop_unsafe(); // top
-    const a = try frame.stack.peek_unsafe(); // second from top
+    const a = frame.stack.peek_unsafe(); // second from top
 
     // EVM semantics: b % a (top % second_from_top)
     // REVM computes: top % second_from_top
@@ -383,7 +383,7 @@ pub fn op_smod(frame: *Frame) ExecutionError.Error!void {
     }
 
     const b = frame.stack.pop_unsafe(); // top (dividend)
-    const a = try frame.stack.peek_unsafe(); // second from top (divisor)
+    const a = frame.stack.peek_unsafe(); // second from top (divisor)
 
     // EVM semantics: b % a (top % second_from_top) - signed modulo
     // REVM computes: top % second_from_top
@@ -442,7 +442,7 @@ pub fn op_addmod(frame: *Frame) ExecutionError.Error!void {
 
     const top = frame.stack.pop_unsafe();
     const second = frame.stack.pop_unsafe();
-    const third = try frame.stack.peek_unsafe();
+    const third = frame.stack.peek_unsafe();
 
     // REVM pattern: for ADDMOD with stack [7, 10, 5], computes (5 + 10) % 7 = 1
     // So: top (5) + second (10) % third (7)
@@ -511,7 +511,7 @@ pub fn op_mulmod(frame: *Frame) ExecutionError.Error!void {
 
     const top = frame.stack.pop_unsafe();
     const second = frame.stack.pop_unsafe();
-    const third = try frame.stack.peek_unsafe();
+    const third = frame.stack.peek_unsafe();
 
     // REVM pattern: same as ADDMOD
     const a = top;
@@ -581,7 +581,7 @@ pub fn op_exp(frame: *Frame) ExecutionError.Error!void {
     }
 
     const b = frame.stack.pop_unsafe(); // top (will be base)
-    const a = try frame.stack.peek_unsafe(); // second from top (will be exponent)
+    const a = frame.stack.peek_unsafe(); // second from top (will be exponent)
 
     // EVM semantics: b^a (top ^ second_from_top)
     // REVM computes: top ^ second_from_top
@@ -689,7 +689,7 @@ pub fn op_signextend(frame: *Frame) ExecutionError.Error!void {
     }
 
     const byte_num = frame.stack.pop_unsafe();
-    const x = try frame.stack.peek_unsafe();
+    const x = frame.stack.peek_unsafe();
 
     var result: u256 = undefined;
 

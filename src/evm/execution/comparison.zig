@@ -36,7 +36,7 @@ pub fn op_lt(frame: *Frame) ExecutionError.Error!void {
     // Pop the top operand
     const top = frame.stack.pop_unsafe();
     // Peek the second from top operand
-    const second_from_top = try frame.stack.peek_unsafe();
+    const second_from_top = frame.stack.peek_unsafe();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b < a
     // REVM computes: top < second_from_top
@@ -60,7 +60,7 @@ pub fn op_gt(frame: *Frame) ExecutionError.Error!void {
     // Pop the top operand
     const top = frame.stack.pop_unsafe();
     // Peek the second from top operand
-    const second_from_top = try frame.stack.peek_unsafe();
+    const second_from_top = frame.stack.peek_unsafe();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b > a
     // REVM computes: top > second_from_top
@@ -85,7 +85,7 @@ pub fn op_slt(frame: *Frame) ExecutionError.Error!void {
     // Pop the top operand
     const top = frame.stack.pop_unsafe();
     // Peek the second from top operand
-    const second_from_top = try frame.stack.peek_unsafe();
+    const second_from_top = frame.stack.peek_unsafe();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b < a (signed)
     // REVM computes: top < second_from_top
@@ -113,7 +113,7 @@ pub fn op_sgt(frame: *Frame) ExecutionError.Error!void {
     // Pop the top operand
     const top = frame.stack.pop_unsafe();
     // Peek the second from top operand
-    const second_from_top = try frame.stack.peek_unsafe();
+    const second_from_top = frame.stack.peek_unsafe();
 
     // EVM semantics: compare top (b) with second-from-top (a), push b > a (signed)
     // REVM computes: top > second_from_top
@@ -137,7 +137,7 @@ pub fn op_eq(frame: *Frame) ExecutionError.Error!void {
     // Pop the top operand (b)
     const b = frame.stack.pop_unsafe();
     // Peek the new top operand (a)
-    const a = try frame.stack.peek_unsafe();
+    const a = frame.stack.peek_unsafe();
 
     const result: u256 = if (a == b) 1 else 0;
 
@@ -153,7 +153,7 @@ pub fn op_iszero(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 1);
 
     // Peek the operand
-    const value = try frame.stack.peek_unsafe();
+    const value = frame.stack.peek_unsafe();
 
     // Optimized: Use @intFromBool for direct bool to int conversion
     // This should compile to more efficient assembly than if/else
