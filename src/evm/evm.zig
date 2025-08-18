@@ -620,6 +620,9 @@ pub usingnamespace @import("evm/call2.zig"); // This provides the call() impleme
 // Export call2 as an alias for the new call implementation  
 pub const call2 = @import("evm/call2.zig").call;
 
+// Alias for benchmark runner compatibility
+pub const call_mini = @import("evm/call2.zig").call;
+
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
@@ -637,7 +640,9 @@ pub usingnamespace @import("evm/interpret2.zig");
 
 // Compatibility wrapper for old interpret API used by tests
 pub const InterprResult = struct {
-    status: enum { Success, Failure, Invalid, Revert, OutOfGas },
+    pub const Status = enum { Success, Failure, Invalid, Revert, OutOfGas };
+    
+    status: Status,
     output: ?[]const u8,
     gas_left: u64,
     gas_used: u64,
@@ -684,13 +689,13 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     frame_ptr.* = frame_val;
     
     // Set the input data in the frame
-    frame_ptr.input = input;
+    frame_ptr.input_buffer = input;
     
     var exec_err: ?ExecutionError.Error = null;
     var gas_left = contract.gas;
     
     // Execute using interpret2
-    @import("evm/interpret2.zig").interpret2(frame_ptr, contract.bytecode) catch |err| {
+    @import("evm/interpret2.zig").interpret2(frame_ptr) catch |err| {
         if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
             // Normal termination
         } else {
@@ -705,89 +710,8 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     const output = host.get_output();
     
     // Convert error to status
-    const status: enum { Success, Failure, Invalid, Revert, OutOfGas } = if (exec_err) |err| switch (err) {
+    const status: InterprResult.Status = if (exec_err) |err| switch (err) {
         ExecutionError.Error.REVERT => .Revert,
-        ExecutionError.Error.OUT_OF_GAS => .OutOfGas,
-        else => .Failure,
-    } else .Success;
-    
-    return InterprResult{
-        .status = status,
-        .output = if (output.len > 0) output else null,
-        .gas_left = gas_left,
-        .gas_used = gas_used,
-        .address = contract.address,
-        .success = exec_err == null,
-    };
-}
-
-/// EVM interpretation using the new interpret2 interpreter with StackFrame
-/// This provides the same interface as interpret() but uses the new StackFrame-based execution
-pub fn interpret2(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
-    // Create host interface
-    const host = Host.init(self);
-    const snapshot_id = host.create_snapshot();
-    defer {
-        // Always revert snapshot to clean up any state changes
-        host.revert_to_snapshot(snapshot_id);
-    }
-    
-    // Create a StackFrame directly - interpret2 will handle analysis
-    const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
-    
-    // Create empty analysis and arrays - interpret2 will fill them
-    const empty_analysis = SimpleAnalysis{
-        .inst_to_pc = &.{},
-        .pc_to_inst = &.{},
-        .bytecode = contract.bytecode,
-        .inst_count = 0,
-    };
-    const empty_metadata: []u32 = &.{};
-    const empty_ops: []*const anyopaque = &.{};
-    
-    var frame = try Frame.init(
-        contract.gas,
-        is_static,
-        contract.address,
-        contract.caller,
-        contract.value,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        self.state.database,
-        self.allocator,
-    );
-    defer frame.deinit(self.allocator);
-    
-    // Set the input buffer for the frame
-    frame.input_buffer = input;
-    
-    var exec_err: ?ExecutionError.Error = null;
-    var gas_left = contract.gas;
-    
-    // Execute using interpret2
-    const interpret2_fn = @import("evm/interpret2.zig").interpret2;
-    interpret2_fn(&frame, contract.bytecode) catch |err| {
-        if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
-            // Normal termination
-        } else {
-            exec_err = err;
-        }
-    };
-    
-    gas_left = frame.gas_remaining;
-    const gas_used = contract.gas - gas_left;
-    
-    // Get output from host
-    const output = host.get_output();
-    
-    // Map execution error to status
-    const status: enum { Success, Failure, Invalid, Revert, OutOfGas } = if (exec_err) |e| switch (e) {
-        ExecutionError.Error.STOP => .Success,
-        ExecutionError.Error.RETURN => .Success,
-        ExecutionError.Error.REVERT => .Revert,
-        ExecutionError.Error.INVALID => .Invalid,
         ExecutionError.Error.OutOfGas => .OutOfGas,
         else => .Failure,
     } else .Success;
@@ -801,6 +725,7 @@ pub fn interpret2(self: *Evm, contract: *const Contract, input: []const u8, is_s
         .success = exec_err == null,
     };
 }
+
 
 // Legacy interpret wrapper for test compatibility
 pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {
@@ -1001,7 +926,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[create_contract_at] Before interpret: depth={}, has_tracer={}, self_ptr=0x{x}, tracer_ptr=0x{x}", .{ self.depth, self.tracer != null, @intFromPtr(self), if (self.tracer) |t| @intFromPtr(&t) else 0 });
     Log.debug("[create_contract_at] Tracer field check: offset={}, value_exists={}", .{ @offsetOf(Evm, "tracer"), self.tracer != null });
     Log.debug("[create_contract_at] Calling interpret for CREATE2 at depth={}", .{self.depth});
-    @import("evm/interpret2.zig").interpret2(frame_ptr, frame_ptr.analysis.bytecode) catch |err| {
+    @import("evm/interpret2.zig").interpret2(frame_ptr) catch |err| {
         Log.debug("[CREATE_DEBUG] Interpret finished with error: {}", .{err});
         Log.debug("[create_contract_at] Interpret finished with error: {}", .{err});
         if (err != ExecutionError.Error.STOP and err != ExecutionError.Error.RETURN) {
