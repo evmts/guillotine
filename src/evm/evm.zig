@@ -627,7 +627,7 @@ pub usingnamespace @import("evm/emit_log_protected.zig");
 pub usingnamespace @import("evm/validate_value_transfer.zig");
 pub usingnamespace @import("evm/selfdestruct_protected.zig");
 pub usingnamespace @import("evm/require_one_thread.zig");
-pub usingnamespace @import("evm/interpret.zig");
+pub usingnamespace @import("evm/interpret2.zig");
 
 // Compatibility wrapper for old interpret API used by tests
 pub const InterprResult = struct {
@@ -837,7 +837,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[create_contract_at] Before interpret: depth={}, has_tracer={}, self_ptr=0x{x}, tracer_ptr=0x{x}", .{ self.depth, self.tracer != null, @intFromPtr(self), if (self.tracer) |t| @intFromPtr(&t) else 0 });
     Log.debug("[create_contract_at] Tracer field check: offset={}, value_exists={}", .{ @offsetOf(Evm, "tracer"), self.tracer != null });
     Log.debug("[create_contract_at] Calling interpret for CREATE2 at depth={}", .{self.depth});
-    @import("evm/interpret.zig").interpret(self, frame_ptr) catch |err| {
+    @import("evm/interpret2.zig").interpret2(frame_ptr, frame_ptr.analysis.code) catch |err| {
         Log.debug("[CREATE_DEBUG] Interpret finished with error: {}", .{err});
         Log.debug("[create_contract_at] Interpret finished with error: {}", .{err});
         if (err != ExecutionError.Error.STOP and err != ExecutionError.Error.RETURN) {
