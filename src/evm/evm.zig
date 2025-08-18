@@ -28,6 +28,7 @@ const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 const FramePool = @import("frame_pool.zig").FramePool;
 pub const StorageKey = @import("primitives").StorageKey;
 pub const CreateResult = @import("evm/create_result.zig").CreateResult;
+const Contract = @import("root.zig").Contract;
 pub const CallResult = @import("evm/call_result.zig").CallResult;
 pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
@@ -638,6 +639,81 @@ pub const InterprResult = struct {
     address: primitives_internal.Address.Address,
     success: bool,
 };
+
+// Main interpret function - wrapper around interpret2
+pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
+    
+    // Check for bytecode analysis using cache
+    const analysis_ptr = if (self.analysis_cache) |*cache|
+        try cache.getOrAnalyze(contract.bytecode, &self.table)
+    else blk: {
+        // Fallback when no cache available
+        var analysis = try @import("analysis.zig").CodeAnalysis.from_code(self.allocator, contract.bytecode, &self.table);
+        break :blk &analysis;
+    };
+    
+    // Create host interface
+    const host = Host.init(self);
+    const snapshot_id = host.create_snapshot();
+    defer {
+        // Always revert snapshot to clean up any state changes
+        host.revert_to_snapshot(snapshot_id);
+    }
+    
+    // Create frame for execution
+    const frame_val = try Frame.init(
+        contract.gas,
+        is_static,
+        @intCast(self.depth),
+        contract.address,
+        contract.caller,
+        contract.value,
+        analysis_ptr,
+        host,
+        self.state.database,
+        self.allocator,
+    );
+    const frame_ptr = try self.frame_pool.acquire();
+    defer self.frame_pool.release(frame_ptr);
+    frame_ptr.* = frame_val;
+    
+    // Set the input data in the frame
+    frame_ptr.input = input;
+    
+    var exec_err: ?ExecutionError.Error = null;
+    var gas_left = contract.gas;
+    
+    // Execute using interpret2
+    @import("evm/interpret2.zig").interpret2(frame_ptr, contract.bytecode) catch |err| {
+        if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
+            // Normal termination
+        } else {
+            exec_err = err;
+        }
+    };
+    
+    gas_left = frame_ptr.gas_remaining;
+    const gas_used = contract.gas - gas_left;
+    
+    // Get output from host
+    const output = host.get_output();
+    
+    // Convert error to status
+    const status: enum { Success, Failure, Invalid, Revert, OutOfGas } = if (exec_err) |err| switch (err) {
+        ExecutionError.Error.REVERT => .Revert,
+        ExecutionError.Error.OUT_OF_GAS => .OutOfGas,
+        else => .Failure,
+    } else .Success;
+    
+    return InterprResult{
+        .status = status,
+        .output = if (output.len > 0) output else null,
+        .gas_left = gas_left,
+        .gas_used = gas_used,
+        .address = contract.address,
+        .success = exec_err == null,
+    };
+}
 
 // Legacy interpret wrapper for test compatibility
 pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {

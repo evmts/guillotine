@@ -5,7 +5,7 @@ const Evm = @import("../evm.zig");
 const Host = @import("../host.zig").Host;
 const Analysis = @import("../analysis.zig");
 const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const Revm = @import("../revm_wrapper/revm.zig").Revm;
 
 pub const TraceStep = struct {
