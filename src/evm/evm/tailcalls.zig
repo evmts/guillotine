@@ -700,14 +700,13 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
 }
 
 // Helper function to read push value from bytecode
-// TODO make a safe version
-inline fn readPushValue(frame: *StackFrame) u256 {
+inline fn readPushValue(frame: *StackFrame) Error!u256 {
     const pc = frame.analysis.getPc(@intCast(frame.ip));
     const bytecode = frame.analysis.bytecode;
 
-    // Add bounds checking for pc - check for invalid PC first
+    // Propagate error instead of silently returning 0
     if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or pc >= bytecode.len) {
-        return 0; // Return 0 for invalid or out of bounds access
+        return Error.InvalidOpcode;
     }
 
     const opcode = bytecode[pc];
@@ -724,7 +723,7 @@ inline fn readPushValue(frame: *StackFrame) u256 {
 
 // Memory operation fusions
 pub fn op_push_then_mload(frame: *StackFrame) Error!noreturn {
-    const offset = readPushValue(frame);
+    const offset = try readPushValue(frame);
 
     // Push offset to stack then call mload
     frame.stack.append_unsafe(offset);
@@ -733,7 +732,7 @@ pub fn op_push_then_mload(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_mstore(frame: *StackFrame) Error!noreturn {
-    const offset = readPushValue(frame);
+    const offset = try readPushValue(frame);
     const value = frame.stack.peek_unsafe();
 
     // Push value and offset to stack then call mstore
@@ -747,7 +746,7 @@ pub fn op_push_then_mstore(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_eq(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     const result: u256 = if (other == push_val) 1 else 0;
@@ -758,7 +757,7 @@ pub fn op_push_then_eq(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_lt(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, LT pops a then b, and checks if a < b
@@ -771,7 +770,7 @@ pub fn op_push_then_lt(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_gt(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, GT pops a then b, and checks if a > b
@@ -785,7 +784,7 @@ pub fn op_push_then_gt(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_and(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     const result = other & push_val;
@@ -797,7 +796,7 @@ pub fn op_push_then_and(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_add(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     const result = other +% push_val; // Wrapping add
@@ -808,7 +807,7 @@ pub fn op_push_then_add(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_sub(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, SUB pops a then b, and computes a - b
@@ -821,7 +820,7 @@ pub fn op_push_then_sub(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_mul(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     const result = other *% push_val; // Wrapping mul
@@ -832,7 +831,7 @@ pub fn op_push_then_mul(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_div(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, DIV pops a then b, and computes a / b
@@ -846,7 +845,7 @@ pub fn op_push_then_div(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_sload(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const key = readPushValue(frame);
+    const key = try readPushValue(frame);
 
     // Push key to stack then call sload
     frame.stack.append_unsafe(key);
@@ -858,7 +857,7 @@ pub fn op_push_then_sload(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_dup1(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const value = readPushValue(frame);
+    const value = try readPushValue(frame);
 
     // Push the value twice (PUSH then DUP1 effect)
     frame.stack.append_unsafe(value);
@@ -869,7 +868,7 @@ pub fn op_push_then_dup1(frame: *StackFrame) Error!noreturn {
 pub fn op_push_then_swap1(frame: *StackFrame) Error!noreturn {
 
     // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
+    const push_val = try readPushValue(frame);
     const top = frame.stack.peek_unsafe();
 
     // Push in swapped order
@@ -1018,7 +1017,7 @@ pub fn op_push_then_swap1_small(frame: *StackFrame) Error!noreturn {
 // Crypto operation fusions
 pub fn op_push_then_keccak(frame: *StackFrame) Error!noreturn {
     // Use frame.analysis directly instead of casting
-    const offset = readPushValue(frame);
+    const offset = try readPushValue(frame);
     const size = frame.stack.pop_unsafe();
 
     // Push offset to stack then call keccak256
