@@ -616,32 +616,6 @@ pub fn build(b: *std.Build) void {
     const build_evm_runner_small_step = b.step("build-evm-runner-small", "Build the EVM benchmark runner (ReleaseSmall)");
     build_evm_runner_small_step.dependOn(&b.addInstallArtifact(evm_runner_small_exe, .{}).step);
 
-    // EVM Benchmark Runner for call2 (ReleaseFast)
-    const evm_runner_call2_exe = b.addExecutable(.{
-        .name = "evm-runner-call2",
-        .root_source_file = b.path("bench/official/src/evm-runner-call2.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    
-    // Debug version of call2 runner
-    // const evm_runner_call2_debug_exe = b.addExecutable(.{
-    //     .name = "evm-runner-call2-debug",
-    //     .root_source_file = b.path("bench/official/src/evm-runner-call2.zig"),
-    //     .target = target,
-    //     .optimize = .Debug,
-    // });
-    evm_runner_call2_exe.root_module.addImport("evm", evm_mod);
-    evm_runner_call2_exe.root_module.addImport("primitives", primitives_mod);
-    b.installArtifact(evm_runner_call2_exe);
-    const build_evm_runner_call2_step = b.step("build-evm-runner-call2", "Build the EVM benchmark runner for call2 (ReleaseFast)");
-    build_evm_runner_call2_step.dependOn(&b.addInstallArtifact(evm_runner_call2_exe, .{}).step);
-    
-    // evm_runner_call2_debug_exe.root_module.addImport("evm", evm_mod);
-    // evm_runner_call2_debug_exe.root_module.addImport("primitives", primitives_mod);
-    // b.installArtifact(evm_runner_call2_debug_exe);
-    // const build_evm_runner_call2_debug_step = b.step("build-evm-runner-call2-debug", "Build the EVM benchmark runner for call2 (Debug)");
-    // build_evm_runner_call2_debug_step.dependOn(&b.addInstallArtifact(evm_runner_call2_debug_exe, .{}).step);
 
     // Debug EVM Runner
     const debug_runner_exe = b.addExecutable(.{
@@ -738,7 +712,6 @@ pub fn build(b: *std.Build) void {
     // Zig runners
     compare_step.dependOn(build_evm_runner_step);
     compare_step.dependOn(build_evm_runner_small_step);
-    compare_step.dependOn(build_evm_runner_call2_step);
     // External runners
     compare_step.dependOn(&geth_runner_build.step);
     compare_step.dependOn(&evmone_cmake_build.step);
