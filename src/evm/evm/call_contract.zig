@@ -121,11 +121,12 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
     // Create execution context for the contract
     var context = Frame.init(execution_gas, // gas remaining
         is_static, // static call flag
-        @intCast(self.depth), // call depth
         to, // contract address
         caller, // caller address
         value, // value being transferred
-        &analysis, // code analysis
+        analysis.analysis, // simple analysis
+        analysis.metadata, // metadata array
+        &[_]*const anyopaque{}, // empty ops array - interpret2 will set this up
         host, // host interface from self
         self.state.database, // database interface
         self.allocator // allocator

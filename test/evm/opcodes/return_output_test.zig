@@ -39,7 +39,7 @@ test "RETURN sets output correctly" {
     );
     defer contract.deinit(allocator, null);
 
-    const result = try evm.interpret(&contract, &[_]u8{}, false);
+    const result = try evm.interpret2(&contract, &[_]u8{}, false);
     try testing.expect(result.status == .Success);
     try testing.expect(result.output != null);
 

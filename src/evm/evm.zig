@@ -23,6 +23,7 @@ const Memory = @import("memory/memory.zig");
 const ReturnData = @import("evm/return_data.zig").ReturnData;
 const evm_limits = @import("constants/evm_limits.zig");
 const Frame = @import("stack_frame.zig").StackFrame;
+const StackFrame = @import("stack_frame.zig").StackFrame;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
 const FramePool = @import("frame_pool.zig").FramePool;
@@ -615,6 +616,10 @@ pub fn is_currently_executing(self: *const Evm) bool {
 pub usingnamespace @import("evm/set_context.zig");
 
 pub usingnamespace @import("evm/call2.zig"); // This provides the call() implementation using interpret2
+
+// Export call2 as an alias for the new call implementation  
+pub const call2 = @import("evm/call2.zig").call;
+
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
@@ -664,11 +669,12 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     const frame_val = try Frame.init(
         contract.gas,
         is_static,
-        @intCast(self.depth),
         contract.address,
         contract.caller,
         contract.value,
-        analysis_ptr,
+        analysis_ptr.analysis,
+        analysis_ptr.metadata,
+        &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
         host,
         self.state.database,
         self.allocator,
@@ -702,6 +708,87 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     const status: enum { Success, Failure, Invalid, Revert, OutOfGas } = if (exec_err) |err| switch (err) {
         ExecutionError.Error.REVERT => .Revert,
         ExecutionError.Error.OUT_OF_GAS => .OutOfGas,
+        else => .Failure,
+    } else .Success;
+    
+    return InterprResult{
+        .status = status,
+        .output = if (output.len > 0) output else null,
+        .gas_left = gas_left,
+        .gas_used = gas_used,
+        .address = contract.address,
+        .success = exec_err == null,
+    };
+}
+
+/// EVM interpretation using the new interpret2 interpreter with StackFrame
+/// This provides the same interface as interpret() but uses the new StackFrame-based execution
+pub fn interpret2(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
+    // Create host interface
+    const host = Host.init(self);
+    const snapshot_id = host.create_snapshot();
+    defer {
+        // Always revert snapshot to clean up any state changes
+        host.revert_to_snapshot(snapshot_id);
+    }
+    
+    // Create a StackFrame directly - interpret2 will handle analysis
+    const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+    
+    // Create empty analysis and arrays - interpret2 will fill them
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = contract.bytecode,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+    
+    var frame = try Frame.init(
+        contract.gas,
+        is_static,
+        contract.address,
+        contract.caller,
+        contract.value,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        host,
+        self.state.database,
+        self.allocator,
+    );
+    defer frame.deinit(self.allocator);
+    
+    // Set the input buffer for the frame
+    frame.input_buffer = input;
+    
+    var exec_err: ?ExecutionError.Error = null;
+    var gas_left = contract.gas;
+    
+    // Execute using interpret2
+    const interpret2_fn = @import("evm/interpret2.zig").interpret2;
+    interpret2_fn(&frame, contract.bytecode) catch |err| {
+        if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
+            // Normal termination
+        } else {
+            exec_err = err;
+        }
+    };
+    
+    gas_left = frame.gas_remaining;
+    const gas_used = contract.gas - gas_left;
+    
+    // Get output from host
+    const output = host.get_output();
+    
+    // Map execution error to status
+    const status: enum { Success, Failure, Invalid, Revert, OutOfGas } = if (exec_err) |e| switch (e) {
+        ExecutionError.Error.STOP => .Success,
+        ExecutionError.Error.RETURN => .Success,
+        ExecutionError.Error.REVERT => .Revert,
+        ExecutionError.Error.INVALID => .Invalid,
+        ExecutionError.Error.OutOfGas => .OutOfGas,
         else => .Failure,
     } else .Success;
     
@@ -888,11 +975,12 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     const frame_val = try Frame.init(
         frame_gas,
         false, // not static
-        @intCast(self.depth + 1), // Increment depth for nested create
         new_address, // contract address being created
         caller,
         value,
-        analysis_ptr,
+        analysis_ptr.analysis,
+        analysis_ptr.metadata,
+        &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
         host,
         self.state.database,
         self.allocator,
@@ -913,7 +1001,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[create_contract_at] Before interpret: depth={}, has_tracer={}, self_ptr=0x{x}, tracer_ptr=0x{x}", .{ self.depth, self.tracer != null, @intFromPtr(self), if (self.tracer) |t| @intFromPtr(&t) else 0 });
     Log.debug("[create_contract_at] Tracer field check: offset={}, value_exists={}", .{ @offsetOf(Evm, "tracer"), self.tracer != null });
     Log.debug("[create_contract_at] Calling interpret for CREATE2 at depth={}", .{self.depth});
-    @import("evm/interpret2.zig").interpret2(frame_ptr, frame_ptr.analysis.code) catch |err| {
+    @import("evm/interpret2.zig").interpret2(frame_ptr, frame_ptr.analysis.bytecode) catch |err| {
         Log.debug("[CREATE_DEBUG] Interpret finished with error: {}", .{err});
         Log.debug("[create_contract_at] Interpret finished with error: {}", .{err});
         if (err != ExecutionError.Error.STOP and err != ExecutionError.Error.RETURN) {
