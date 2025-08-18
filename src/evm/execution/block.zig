@@ -332,7 +332,6 @@ test "COINBASE returns block coinbase address" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -383,7 +382,6 @@ test "TIMESTAMP returns block timestamp" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -434,7 +432,6 @@ test "NUMBER returns block number" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -485,7 +482,6 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -536,7 +532,6 @@ test "GASLIMIT returns block gas limit" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -587,7 +582,6 @@ test "BASEFEE returns block base fee" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -636,7 +630,6 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -685,7 +678,6 @@ test "BLOCKHASH returns 0 for future blocks" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -737,7 +729,6 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = &.{},
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};

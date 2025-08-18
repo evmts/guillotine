@@ -663,7 +663,7 @@ pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
     }
 
     // Jump directly to the destination
-    frame.ip = dest_inst_idx;
+    frame.ip = @intCast(dest_inst_idx);
     return next(frame);
 }
 
@@ -678,7 +678,7 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
         const dest_inst_idx = frame.metadata[frame.ip];
 
         // Validate the destination index
-        if (dest_inst_idx >= frame.analysis.inst_count) {
+        if (dest_inst_idx >= frame.analysis.inst_to_pc.len) {
             return Error.InvalidJump;
         }
 
@@ -691,7 +691,7 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
         }
 
         // Jump to the destination
-        frame.ip = dest_inst_idx;
+        frame.ip = @intCast(dest_inst_idx);
         return next(frame);
     } else {
         // Condition is zero, continue to next instruction

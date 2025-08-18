@@ -12,8 +12,6 @@ pub const SimpleAnalysis = struct {
     pc_to_inst: []u16,
     /// Reference to the original bytecode for reading push values
     bytecode: []const u8,
-    /// Total number of instructions
-    inst_count: u16,
 
     pub const MAX_USIZE: u16 = std.math.maxInt(u16);
 
@@ -98,7 +96,6 @@ pub const SimpleAnalysis = struct {
                 .inst_to_pc = try inst_to_pc_list.toOwnedSlice(),
                 .pc_to_inst = pc_to_inst,
                 .bytecode = code,
-                .inst_count = inst_idx,
             },
             .metadata = try metadata_list.toOwnedSlice(),
         };
@@ -417,8 +414,6 @@ test "analysis2: PUSH0 metadata and length" {
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
-    // Two instructions
-    try std.testing.expectEqual(@as(u16, 2), result.analysis.inst_count);
     // First is PUSH0 -> metadata 0
     try std.testing.expectEqual(@as(u32, 0), result.metadata[0]);
 }
