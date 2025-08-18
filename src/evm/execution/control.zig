@@ -130,8 +130,9 @@ pub fn op_return(frame: *Frame) ExecutionError.Error!void {
 /// and returns data from memory. The returned data is available to the caller.
 /// Stack: [offset, size] → [] (execution ends)
 pub fn op_revert(frame: *Frame) ExecutionError.Error!void {
-
-    std.debug.assert(frame.stack.size() >= 2);
+    if (frame.stack.size() < 2) {
+        return ExecutionError.Error.StackUnderflow;
+    }
 
     // Use batch pop for performance - pop 2 values at once
     // EVM stack is [offset, size] with OFFSET on top
