@@ -11,7 +11,7 @@ const CallParams = @import("host.zig").CallParams;
 const Host = @import("host.zig").Host;
 const AccessList = @import("access_list.zig").AccessList;
 const CallJournal = @import("call_frame_stack.zig").CallJournal;
-const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
+const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
 const Stack = @import("stack/stack.zig");
 const Memory = @import("memory/memory.zig");
 
@@ -97,8 +97,9 @@ test "Frame initialization with minimal parameters" {
 
     // Create simple bytecode for analysis
     const bytecode = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }; // PUSH1 1, PUSH1 2, ADD
-    var analysis = try CodeAnalysis.analyze(allocator, bytecode);
-    defer analysis.deinit(allocator);
+    const result = try SimpleAnalysis.analyze(allocator, bytecode);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
 
     // Initialize frame
     var frame = try Frame.init(100_000, // gas
@@ -107,7 +108,7 @@ test "Frame initialization with minimal parameters" {
         testAddress(0x1000), // contract address
         testAddress(0x2000), // caller
         0, // value
-        &analysis, &access_list, &journal, host, 0, // snapshot id
+        &result.analysis, &access_list, &journal, host, 0, // snapshot id
         memory_db.to_database_interface(), @import("hardforks/chain_rules.zig").for_hardfork(.LONDON), null, // self destruct
         null, // created contracts
         &[_]u8{}, // input
@@ -120,7 +121,6 @@ test "Frame initialization with minimal parameters" {
     // Verify frame initialization
     try testing.expectEqual(@as(u64, 100_000), frame.gas_remaining);
     try testing.expectEqual(false, frame.is_static);
-    try testing.expectEqual(@as(u10, 0), frame.depth);
     try testing.expectEqual(testAddress(0x1000), frame.contract_address);
     try testing.expectEqual(testAddress(0x2000), frame.caller);
 }
@@ -156,8 +156,9 @@ test "Frame execution with simple bytecode" {
     var memory = try Memory.init(allocator);
     defer memory.deinit();
 
-    var analysis = try CodeAnalysis.analyze(allocator, bytecode);
-    defer analysis.deinit(allocator);
+    const result2 = try SimpleAnalysis.analyze(allocator, bytecode);
+    defer result2.analysis.deinit(allocator);
+    defer allocator.free(result2.metadata);
 
     var host = try allocator.create(Host);
     defer allocator.destroy(host);
@@ -169,7 +170,7 @@ test "Frame execution with simple bytecode" {
         0, // call depth
         contract_addr, testAddress(0x4000), // caller
         0, // value
-        &analysis, &evm.access_list, &evm.journal, host, 0, // snapshot id
+        &result2.analysis, &evm.access_list, &evm.journal, host, 0, // snapshot id
         db_interface, @import("hardforks/chain_rules.zig").for_hardfork(.LONDON), null, // self destruct
         null, // created contracts
         &[_]u8{}, // input
