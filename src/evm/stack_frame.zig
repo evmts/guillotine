@@ -13,6 +13,7 @@ const ExecutionError = @import("execution/execution_error.zig");
 const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+const AllocationTier = @import("allocation_tier.zig").AllocationTier;
 
 // Maximum allowed tailcall iterations
 const TAILCALL_MAX_ITERATIONS: usize = 10_000_000;
@@ -40,6 +41,10 @@ pub const StackFrame = struct {
     state: DatabaseInterface,
     allocator: std.mem.Allocator,
     
+    // Buffer management for pre-allocation strategy
+    static_buffer: []u8,
+    buffer_allocator: *std.heap.FixedBufferAllocator,
+    
     /// Total up-front allocation size for StackFrame
     /// This includes all the allocations needed by the frame:
     /// - Stack data: 1024 * 32 bytes = 32KB
@@ -54,7 +59,7 @@ pub const StackFrame = struct {
                                      @import("evm/analysis2.zig").METADATA_UP_FRONT_ALLOCATION +
                                      @import("evm/analysis2.zig").OPS_UP_FRONT_ALLOCATION;
 
-    /// Initialize a StackFrame with required parameters
+    /// Initialize a StackFrame with required parameters (legacy method - will be deprecated)
     pub fn init(
         gas_remaining: u64,
         contract_address: primitives.Address.Address,
@@ -65,6 +70,12 @@ pub const StackFrame = struct {
         state: DatabaseInterface,
         allocator: std.mem.Allocator,
     ) !StackFrame {
+        // For compatibility, allocate a minimal buffer
+        const buffer_size = 1024 * 1024; // 1MB
+        const static_buffer = try allocator.alloc(u8, buffer_size);
+        const fba_ptr = try allocator.create(std.heap.FixedBufferAllocator);
+        fba_ptr.* = std.heap.FixedBufferAllocator.init(static_buffer);
+        
         return StackFrame{
             .gas_remaining = @intCast(gas_remaining),
             .stack = try Stack.init(allocator),
@@ -77,11 +88,77 @@ pub const StackFrame = struct {
             .contract_address = contract_address,
             .state = state,
             .allocator = allocator,
+            .static_buffer = static_buffer,
+            .buffer_allocator = fba_ptr,
+        };
+    }
+    
+    /// Initialize a StackFrame with tiered pre-allocation based on bytecode size
+    pub fn init_with_bytecode_size(
+        bytecode_size: usize,
+        gas_remaining: u64,
+        contract_address: primitives.Address.Address,
+        host: Host,
+        state: DatabaseInterface,
+        allocator: std.mem.Allocator,
+    ) !StackFrame {
+        // Select tier and allocate buffer
+        const tier = AllocationTier.select_tier(bytecode_size);
+        const buffer_size = tier.buffer_size();
+        
+        const static_buffer = try allocator.alloc(u8, buffer_size);
+        errdefer allocator.free(static_buffer);
+        
+        const fba_ptr = try allocator.create(std.heap.FixedBufferAllocator);
+        errdefer allocator.destroy(fba_ptr);
+        fba_ptr.* = std.heap.FixedBufferAllocator.init(static_buffer);
+        const fba_allocator = fba_ptr.allocator();
+        
+        // Pre-allocate stack
+        const stack = try Stack.init(fba_allocator);
+        
+        // Memory uses heap allocator (can grow)
+        const memory = try Memory.init_default(allocator);
+        
+        // Analysis, metadata, and ops will be filled by caller
+        const empty_analysis = SimpleAnalysis{
+            .inst_to_pc = &.{},
+            .pc_to_inst = &.{},
+            .bytecode = &.{},
+        };
+        
+        return StackFrame{
+            .gas_remaining = @intCast(gas_remaining),
+            .stack = stack,
+            .memory = memory,
+            .analysis = empty_analysis,
+            .metadata = &.{},
+            .ops = &.{},
+            .ip = 0,
+            .host = host,
+            .contract_address = contract_address,
+            .state = state,
+            .allocator = allocator,
+            .static_buffer = static_buffer,
+            .buffer_allocator = fba_ptr,
         };
     }
 
     pub fn deinit(self: *StackFrame) void {
-        self.stack.deinit(self.allocator);
+        // For the legacy init method, stack uses the heap allocator
+        // For init_with_bytecode_size, stack uses the buffer allocator
+        // We need to handle both cases correctly
+        if (self.static_buffer.len > 0) {
+            // Stack was allocated from buffer, no need to free individually
+            // Just free the entire buffer and the FBA
+            self.allocator.destroy(self.buffer_allocator);
+            self.allocator.free(self.static_buffer);
+        } else {
+            // Legacy path - free stack normally
+            self.stack.deinit(self.allocator);
+        }
+        
+        // Memory always uses heap allocator (can grow)
         self.memory.deinit();
 
         // NOTE: analysis, metadata, and ops are managed by interpret2
@@ -153,6 +230,12 @@ pub const StackFrame = struct {
 
     pub fn add_gas_refund(self: *StackFrame, amount: u64) void {
         self.adjust_gas_refund(@as(i64, @intCast(amount)));
+    }
+    
+    /// Get the buffer allocator for allocating analysis data
+    /// This allows external code to allocate from the pre-allocated buffer
+    pub fn get_buffer_allocator(self: *StackFrame) std.mem.Allocator {
+        return self.buffer_allocator.allocator();
     }
 };
 
