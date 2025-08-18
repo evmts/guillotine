@@ -250,7 +250,7 @@ test "snailtracer deployment gas requirements" {
     try std.testing.expect(gas_used < initial_gas); // But not all of it
 }
 
-test "snailtracer using call_mini" {
+test "snailtracer using call" {
     const allocator = std.testing.allocator;
 
     // Load bytecode and calldata from official case
@@ -288,11 +288,11 @@ test "snailtracer using call_mini" {
         .gas = initial_gas,
     } };
     
-    std.log.debug("Calling snailtracer with call_mini, gas: {}, calldata len: {}", .{ initial_gas, calldata.len });
-    // Use call_mini directly
-    const call_result = try vm.call_mini(params);
+    std.log.debug("Calling snailtracer with call, gas: {}, calldata len: {}", .{ initial_gas, calldata.len });
+    // Use call directly
+    const call_result = try vm.call(params);
 
-    std.log.debug("call_mini result: success={}, gas_left={}, output_len={}", .{ 
+    std.log.debug("call result: success={}, gas_left={}, output_len={}", .{ 
         call_result.success, 
         call_result.gas_left, 
         if (call_result.output) |o| o.len else 0 
@@ -304,14 +304,14 @@ test "snailtracer using call_mini" {
 
     // Snailtracer should produce output
     if (call_result.output) |output| {
-        std.log.debug("Snailtracer via call_mini returned {} bytes", .{output.len});
+        std.log.debug("Snailtracer via call returned {} bytes", .{output.len});
         try std.testing.expect(output.len > 0);
     } else {
         return error.NoOutput;
     }
 }
 
-test "snailtracer high gas consumption with call_mini" {
+test "snailtracer high gas consumption with call" {
     const allocator = std.testing.allocator;
 
     // Load bytecode and calldata
@@ -347,8 +347,8 @@ test "snailtracer high gas consumption with call_mini" {
         .input = calldata,
         .gas = initial_gas,
     } };
-    // Use call_mini directly
-    const call_result = try vm.call_mini(params);
+    // Use call directly
+    const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
 

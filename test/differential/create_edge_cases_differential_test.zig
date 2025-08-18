@@ -64,7 +64,7 @@ test "CREATE opcode with insufficient balance fails" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -144,7 +144,7 @@ test "CREATE2 with same salt and init code produces same address" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -217,7 +217,7 @@ test "CREATE in static call fails with WriteProtection" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -280,7 +280,7 @@ test "CREATE with no balance succeeds but creates empty contract" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -367,7 +367,7 @@ test "CREATE2 with large init code" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -453,7 +453,7 @@ test "CREATE with init code that reverts" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine

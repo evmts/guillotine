@@ -69,7 +69,7 @@ test "PUSH2 opcode pushes 2 bytes" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -160,7 +160,7 @@ test "PUSH4 opcode pushes 4 bytes" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -252,7 +252,7 @@ test "PUSH8 opcode pushes 8 bytes" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -345,7 +345,7 @@ test "PUSH16 opcode pushes 16 bytes" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -441,7 +441,7 @@ test "PUSH32 edge case all zeros" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -535,7 +535,7 @@ test "PUSH20 opcode pushes 20 bytes (address size)" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM

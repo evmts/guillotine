@@ -55,7 +55,7 @@ test "SELFDESTRUCT in static call fails with WriteProtection" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -113,7 +113,7 @@ test "SELFDESTRUCT to self keeps balance" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -171,7 +171,7 @@ test "SELFDESTRUCT with refund gas calculation" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -245,7 +245,7 @@ test "SELFDESTRUCT in CREATE context" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine
@@ -340,7 +340,7 @@ test "SELFDESTRUCT multiple times in same transaction" {
     } };
 
     // Execute using mini EVM
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using regular Guillotine

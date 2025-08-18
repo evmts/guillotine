@@ -76,7 +76,7 @@ test "MSTORE at large offset triggers memory expansion" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -168,7 +168,7 @@ test "MLOAD from uninitialized memory returns zero" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -263,7 +263,7 @@ test "MSTORE8 stores single byte correctly" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -368,7 +368,7 @@ test "MCOPY opcode copies memory correctly" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -474,7 +474,7 @@ test "MCOPY overlapping regions copies correctly" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -566,7 +566,7 @@ test "Memory expansion gas cost edge case" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM

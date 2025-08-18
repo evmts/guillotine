@@ -76,7 +76,7 @@ test "CALL with insufficient gas for base cost" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -193,7 +193,7 @@ test "DELEGATECALL preserves msg.sender and msg.value" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -322,7 +322,7 @@ test "STATICCALL prevents state modifications" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -425,7 +425,7 @@ test "CALL with value transfer to non-existent account" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -546,7 +546,7 @@ test "CALL with exact gas allocation" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -668,7 +668,7 @@ test "CALLCODE modifies caller's storage" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM

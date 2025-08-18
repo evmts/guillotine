@@ -252,7 +252,7 @@ test "readCaseFile reads and trims files correctly" {
     try std.testing.expect(content[content.len - 1] != ' ' and content[content.len - 1] != '\t' and content[content.len - 1] != '\n');
 }
 
-test "ten-thousand-hashes using call_mini" {
+test "ten-thousand-hashes using call" {
     const allocator = std.testing.allocator;
 
     // Load bytecode and calldata from official case
@@ -295,11 +295,11 @@ test "ten-thousand-hashes using call_mini" {
         .gas = initial_gas,
     } };
     
-    std.log.debug("Calling ten-thousand-hashes with call_mini, gas: {}, calldata len: {}", .{ initial_gas, calldata.len });
-    // Use call_mini directly
-    const call_result = try vm.call_mini(params);
+    std.log.debug("Calling ten-thousand-hashes with call, gas: {}, calldata len: {}", .{ initial_gas, calldata.len });
+    // Use call directly
+    const call_result = try vm.call(params);
 
-    std.log.debug("call_mini result: success={}, gas_left={}, output_len={}", .{ 
+    std.log.debug("call result: success={}, gas_left={}, output_len={}", .{ 
         call_result.success, 
         call_result.gas_left, 
         if (call_result.output) |o| o.len else 0 
@@ -310,7 +310,7 @@ test "ten-thousand-hashes using call_mini" {
     try std.testing.expect(gas_used > 0);
 }
 
-test "ten-thousand-hashes gas consumption with call_mini" {
+test "ten-thousand-hashes gas consumption with call" {
     const allocator = std.testing.allocator;
 
     // Load bytecode and calldata
@@ -380,8 +380,8 @@ test "ten-thousand-hashes gas consumption with call_mini" {
         .input = calldata,
         .gas = initial_gas,
     } };
-    // Use call_mini directly
-    const call_result = try vm.call_mini(params);
+    // Use call directly
+    const call_result = try vm.call(params);
 
     try std.testing.expect(call_result.success);
 

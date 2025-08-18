@@ -78,7 +78,7 @@ test "DIV opcode max_u256 / max_u256 = 1" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -178,7 +178,7 @@ test "MOD opcode any_number % 1 = 0" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -278,7 +278,7 @@ test "EXP opcode 0 ** 0 = 1" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -382,7 +382,7 @@ test "SDIV opcode MIN_I256 / -1 = MIN_I256 (overflow)" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -489,7 +489,7 @@ test "ADDMOD opcode (max_u256 + max_u256) % max_u256 = 0" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -595,7 +595,7 @@ test "MULMOD opcode (max_u256 * max_u256) % max_u256 = 0" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -699,7 +699,7 @@ test "SMOD opcode MIN_I256 % -1 = 0" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM
@@ -800,7 +800,7 @@ test "EXP opcode 1 ** max_u256 = 1" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // VM owns mini_result.output; do not free here
 
     // Execute using Guillotine regular EVM

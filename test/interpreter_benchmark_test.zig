@@ -81,7 +81,7 @@ test "benchmark interpreters: ten-thousand-hashes" {
         });
     }
     
-    // Benchmark call_mini.zig
+    // Benchmark call.zig
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
@@ -103,10 +103,10 @@ test "benchmark interpreters: ten-thousand-hashes" {
         };
         
         const start = std.time.nanoTimestamp();
-        const result = try vm.call_mini(params);
+        const result = try vm.call(params);
         const elapsed = std.time.nanoTimestamp() - start;
         
-        std.debug.print("call_mini.zig:    {d:.3} ms (success: {}, gas left: {})\n", .{
+        std.debug.print("call.zig:    {d:.3} ms (success: {}, gas left: {})\n", .{
             @as(f64, @floatFromInt(elapsed)) / 1_000_000.0,
             result.success,
             result.gas_left,
@@ -186,7 +186,7 @@ test "benchmark interpreters: erc20-transfer" {
         });
     }
     
-    // Benchmark call_mini.zig
+    // Benchmark call.zig
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
@@ -208,10 +208,10 @@ test "benchmark interpreters: erc20-transfer" {
         };
         
         const start = std.time.nanoTimestamp();
-        const result = try vm.call_mini(params);
+        const result = try vm.call(params);
         const elapsed = std.time.nanoTimestamp() - start;
         
-        std.debug.print("call_mini.zig:    {d:.3} ms (success: {}, gas left: {})\n", .{
+        std.debug.print("call.zig:    {d:.3} ms (success: {}, gas left: {})\n", .{
             @as(f64, @floatFromInt(elapsed)) / 1_000_000.0,
             result.success,
             result.gas_left,

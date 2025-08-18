@@ -73,7 +73,7 @@ test "SSTORE and SLOAD basic operation" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -172,7 +172,7 @@ test "SSTORE max u256 value" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -265,7 +265,7 @@ test "SLOAD from uninitialized storage returns zero" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -358,7 +358,7 @@ test "SSTORE in static call fails with WriteProtection" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -438,7 +438,7 @@ test "Multiple SSTORE to same slot updates value" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
@@ -541,7 +541,7 @@ test "SSTORE and SLOAD with max u256 key" {
     } };
 
     // Execute using mini EVM (after REVM, before Guillotine)
-    const mini_result = try vm_instance.call_mini(call_params);
+    const mini_result = try vm_instance.call(call_params);
     // Output is VM-owned, do not free
 
     // Execute using Guillotine regular EVM
