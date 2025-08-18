@@ -710,9 +710,9 @@ pub const call2 = @import("evm/call2.zig").call;
 // Alias for benchmark runner compatibility
 pub const call_mini = @import("evm/call2.zig").call;
 
-pub usingnamespace @import("evm/call_contract.zig");
+// pub usingnamespace @import("evm/call_contract.zig"); // Old implementation - use call2
 pub usingnamespace @import("evm/execute_precompile_call.zig");
-pub usingnamespace @import("evm/staticcall_contract.zig");
+// pub usingnamespace @import("evm/staticcall_contract.zig"); // Old implementation - use call2
 // pub usingnamespace @import("evm/emit_log.zig"); // Commented out to avoid ambiguity with Host interface
 pub usingnamespace @import("evm/validate_static_context.zig");
 pub usingnamespace @import("evm/set_storage_protected.zig");
