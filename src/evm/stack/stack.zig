@@ -15,21 +15,15 @@ pub const Error = error{
     StackUnderflow,
 };
 
-current: [*]u256,
-base: [*]u256,
-limit: [*]u256,
-
+current: usize,
 data: *[CAPACITY]u256,
 
 pub fn init(allocator: std.mem.Allocator) !Stack {
     const data: *[CAPACITY]u256 = try allocator.create([CAPACITY]u256);
     errdefer allocator.free(data);
-    const base: [*]u256 = @ptrCast(&data[0]);
     return Stack{
         .data = data,
-        .current = base,
-        .base = base,
-        .limit = base + CAPACITY,
+        .current = 0,
     };
 }
 
@@ -39,7 +33,7 @@ pub fn deinit(self: *Stack, allocator: std.mem.Allocator) void {
 
 pub fn clear(self: *Stack) void {
     self.debug_is_in_bounds();
-    self.current = self.base;
+    self.current = 0;
     if (comptime CLEAR_ON_POP) {
         @memset(std.mem.sliceAsBytes(self.data), 0);
     }
@@ -48,26 +42,25 @@ pub fn clear(self: *Stack) void {
 
 pub fn size(self: *const Stack) usize {
     self.debug_is_in_bounds();
-    return (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
+    return self.current;
 }
 
 pub fn is_empty(self: *const Stack) bool {
     self.debug_is_in_bounds();
-    return self.current == self.base;
+    return self.current == 0;
 }
 
 pub fn is_full(self: *const Stack) bool {
     self.debug_is_in_bounds();
-    return @intFromPtr(self.current) >= @intFromPtr(self.limit);
+    return self.current >= CAPACITY;
 }
 
 pub fn debug_is_in_bounds(self: *const Stack) void {
-    std.debug.assert(@intFromPtr(self.current) >= @intFromPtr(self.base));
-    std.debug.assert(@intFromPtr(self.current) <= @intFromPtr(self.limit));
+    std.debug.assert(self.current <= CAPACITY);
 }
 
 pub fn append(self: *Stack, value: u256) Error!void {
-    if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
+    if (self.current >= CAPACITY) {
         @branchHint(.cold);
         return Error.StackOverflow;
     }
@@ -75,13 +68,13 @@ pub fn append(self: *Stack, value: u256) Error!void {
 }
 pub fn append_unsafe(self: *Stack, value: u256) void {
     self.debug_is_in_bounds();
-    self.current[0] = value;
+    self.data[self.current] = value;
     self.current += 1;
     self.debug_is_in_bounds();
 }
 
 pub fn pop(self: *Stack) Error!u256 {
-    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
+    if (self.current == 0) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
@@ -90,8 +83,8 @@ pub fn pop(self: *Stack) Error!u256 {
 pub fn pop_unsafe(self: *Stack) u256 {
     self.debug_is_in_bounds();
     self.current -= 1;
-    const value = self.current[0];
-    if (comptime CLEAR_ON_POP) self.current[0] = 0;
+    const value = self.data[self.current];
+    if (comptime CLEAR_ON_POP) self.data[self.current] = 0;
     self.debug_is_in_bounds();
     return value;
 }
@@ -101,7 +94,7 @@ pub fn dup(self: *Stack, n: usize) Error!void {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
-    if (@intFromPtr(self.current) >= @intFromPtr(self.limit)) {
+    if (self.current >= CAPACITY) {
         @branchHint(.cold);
         return Error.StackOverflow;
     }
@@ -109,14 +102,13 @@ pub fn dup(self: *Stack, n: usize) Error!void {
 }
 pub fn dup_unsafe(self: *Stack, n: usize) void {
     self.debug_is_in_bounds();
-    const value = (self.current - n)[0];
+    const value = self.data[self.current - n];
     self.append_unsafe(value);
     self.debug_is_in_bounds();
 }
 
 pub fn pop2(self: *Stack) Error!Pop2 {
-    const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-    if (cur_size < 2) {
+    if (self.current < 2) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
@@ -125,19 +117,18 @@ pub fn pop2(self: *Stack) Error!Pop2 {
 pub fn pop2_unsafe(self: *Stack) Pop2 {
     self.debug_is_in_bounds();
     self.current -= 2;
-    const top_minus_1 = self.current[0];
-    const top = self.current[1];
+    const top_minus_1 = self.data[self.current];
+    const top = self.data[self.current + 1];
     if (comptime CLEAR_ON_POP) {
-        self.current[0] = 0;
-        self.current[1] = 0;
+        self.data[self.current] = 0;
+        self.data[self.current + 1] = 0;
     }
     return .{ .a = top_minus_1, .b = top };
 }
 
 pub fn pop3(self: *Stack) Error!Pop3 {
     self.debug_is_in_bounds();
-    const cur_size = (@intFromPtr(self.current) - @intFromPtr(self.base)) / @sizeOf(u256);
-    if (cur_size < 3) {
+    if (self.current < 3) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
@@ -146,27 +137,27 @@ pub fn pop3(self: *Stack) Error!Pop3 {
 pub fn pop3_unsafe(self: *Stack) Pop3 {
     self.debug_is_in_bounds();
     self.current -= 3;
-    const top_minus_2 = self.current[0];
-    const top_minus_1 = self.current[1];
-    const top = self.current[2];
+    const top_minus_2 = self.data[self.current];
+    const top_minus_1 = self.data[self.current + 1];
+    const top = self.data[self.current + 2];
     if (comptime CLEAR_ON_POP) {
-        self.current[0] = 0;
-        self.current[1] = 0;
-        self.current[2] = 0;
+        self.data[self.current] = 0;
+        self.data[self.current + 1] = 0;
+        self.data[self.current + 2] = 0;
     }
     return .{ .a = top_minus_2, .b = top_minus_1, .c = top };
 }
 
 pub fn set_top(self: *Stack, value: u256) Error!void {
-    if (@intFromPtr(self.current) <= @intFromPtr(self.base)) {
+    if (self.current == 0) {
         @branchHint(.cold);
         return Error.StackUnderflow;
     }
-    (self.current - 1)[0] = value;
+    self.data[self.current - 1] = value;
 }
 pub fn set_top_unsafe(self: *Stack, value: u256) void {
     self.debug_is_in_bounds();
-    (self.current - 1)[0] = value;
+    self.data[self.current - 1] = value;
 }
 
 /// Safely set the logical size of the stack to `new_size` elements.
@@ -188,18 +179,16 @@ pub fn set_size_unsafe(self: *Stack, new_size: usize) void {
     }
 
     const previous_size = self.size();
-    const new_current: [*]u256 = self.base + new_size;
 
     // If we're shrinking and clearing is enabled, zero the removed slots
     if (comptime CLEAR_ON_POP) {
         if (new_size < previous_size) {
-            const start = self.base + new_size;
             const count = previous_size - new_size;
-            @memset(std.mem.sliceAsBytes(start[0..count]), 0);
+            @memset(std.mem.sliceAsBytes(self.data[new_size .. new_size + count]), 0);
         }
     }
 
-    self.current = new_current;
+    self.current = new_size;
 }
 
 pub fn swap(self: *Stack, n: usize) Error!void {
@@ -211,7 +200,7 @@ pub fn swap(self: *Stack, n: usize) Error!void {
 }
 pub fn swap_unsafe(self: *Stack, n: usize) void {
     self.debug_is_in_bounds();
-    std.mem.swap(u256, &(self.current - 1)[0], &(self.current - 1 - n)[0]);
+    std.mem.swap(u256, &self.data[self.current - 1], &self.data[self.current - 1 - n]);
 }
 
 pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
@@ -224,7 +213,7 @@ pub fn peek_n(self: *const Stack, n: usize) Error!u256 {
 }
 pub fn peek_n_unsafe(self: *const Stack, n: usize) u256 {
     self.debug_is_in_bounds();
-    return (self.current - 1 - n)[0];
+    return self.data[self.current - 1 - n];
 }
 
 pub fn peek(self: *const Stack) Error!u256 {
@@ -248,7 +237,7 @@ pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const F
                 if (old_size < CAPACITY) {
                     try result;
                     try testing.expectEqual(old_size + 1, stack.size());
-                    try testing.expectEqual(value, (stack.current - 1)[0]);
+                    try testing.expectEqual(value, stack.data[stack.current - 1]);
                 } else {
                     try testing.expectError(Error.StackOverflow, result);
                     try testing.expectEqual(old_size, stack.size());
@@ -270,7 +259,7 @@ pub fn fuzz_stack_operations(allocator: std.mem.Allocator, operations: []const F
                 const result = stack.peek();
                 if (stack.size() > 0) {
                     const value = try result;
-                    try testing.expectEqual((stack.current - 1)[0], value);
+                    try testing.expectEqual(stack.data[stack.current - 1], value);
                 } else {
                     try testing.expectError(Error.StackUnderflow, result);
                 }
@@ -295,9 +284,8 @@ const FuzzOperation = union(enum) {
 fn validate_stack_invariants(stack: *const Stack) !void {
     const testing = std.testing;
 
-    // Check pointer relationships
-    try testing.expect(@intFromPtr(stack.current) >= @intFromPtr(stack.base));
-    try testing.expect(@intFromPtr(stack.current) <= @intFromPtr(stack.limit));
+    // Check index relationships
+    try testing.expect(stack.current <= CAPACITY);
     try testing.expect(stack.size() <= CAPACITY);
 }
 
@@ -398,9 +386,9 @@ test "stack_swap_operations" {
     stack.swap_unsafe(1);
     // After SWAP1: [100, 300, 200] (200 on top)
 
-    try std.testing.expectEqual(@as(u256, 200), (stack.current - 1)[0]); // top
-    try std.testing.expectEqual(@as(u256, 300), (stack.current - 2)[0]); // second
-    try std.testing.expectEqual(@as(u256, 100), (stack.current - 3)[0]); // bottom
+    try std.testing.expectEqual(@as(u256, 200), stack.data[stack.current - 1]); // top
+    try std.testing.expectEqual(@as(u256, 300), stack.data[stack.current - 2]); // second
+    try std.testing.expectEqual(@as(u256, 100), stack.data[stack.current - 3]); // bottom
 }
 
 test "stack_multi_pop_operations" {
@@ -460,16 +448,14 @@ test "memory_layout_verification" {
     var stack = try Stack.init(std.testing.allocator);
     defer stack.deinit(std.testing.allocator);
 
-    // Verify pointer setup
-    try std.testing.expectEqual(@intFromPtr(stack.base), @intFromPtr(&stack.data[0]));
-    try std.testing.expectEqual(@intFromPtr(stack.current), @intFromPtr(stack.base));
-    try std.testing.expectEqual(@intFromPtr(stack.limit), @intFromPtr(stack.base + CAPACITY));
+    // Verify index setup
+    try std.testing.expectEqual(@as(usize, 0), stack.current);
 
     // Verify data layout
     const data_ptr = @intFromPtr(&stack.data[0]);
     try std.testing.expectEqual(@as(usize, 0), data_ptr % @alignOf(u256));
 
-    // Test that pointers are at start of struct for cache efficiency
+    // Test that current index is at start of struct for cache efficiency
     const stack_ptr = @intFromPtr(&stack);
     const current_ptr = @intFromPtr(&stack.current);
     try std.testing.expectEqual(stack_ptr, current_ptr);
@@ -849,24 +835,24 @@ test "stack_memory_cleanup_verification" {
     _ = stack.pop_unsafe();
 
     // Check that the memory was cleared (in debug/safe modes)
-    const cleared_value = stack.base[0];
+    const cleared_value = stack.data[0];
     try std.testing.expectEqual(@as(u256, 0), cleared_value);
 
     // Test pop2_unsafe cleanup
     stack.append_unsafe(0x1111);
     stack.append_unsafe(0x2222);
     _ = stack.pop2_unsafe();
-    try std.testing.expectEqual(@as(u256, 0), stack.base[0]);
-    try std.testing.expectEqual(@as(u256, 0), stack.base[1]);
+    try std.testing.expectEqual(@as(u256, 0), stack.data[0]);
+    try std.testing.expectEqual(@as(u256, 0), stack.data[1]);
 
     // Test pop3_unsafe cleanup
     stack.append_unsafe(0x3333);
     stack.append_unsafe(0x4444);
     stack.append_unsafe(0x5555);
     _ = stack.pop3_unsafe();
-    try std.testing.expectEqual(@as(u256, 0), stack.base[0]);
-    try std.testing.expectEqual(@as(u256, 0), stack.base[1]);
-    try std.testing.expectEqual(@as(u256, 0), stack.base[2]);
+    try std.testing.expectEqual(@as(u256, 0), stack.data[0]);
+    try std.testing.expectEqual(@as(u256, 0), stack.data[1]);
+    try std.testing.expectEqual(@as(u256, 0), stack.data[2]);
 }
 
 test "stack_set_size_unsafe" {
