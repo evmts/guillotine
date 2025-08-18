@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 const Log = @import("../log.zig");
 const memory = @import("./memory.zig");
 const errors = @import("errors.zig");
-const context = @import("context.zig");
 
 // Safety check constants - only enabled in Debug and ReleaseSafe modes
 // These checks are redundant after analysis.zig validates memory operations
