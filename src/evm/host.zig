@@ -120,6 +120,15 @@ pub const Host = struct {
         /// Hardfork helpers
         is_hardfork_at_least: *const fn (ptr: *anyopaque, target: @import("hardforks/hardfork.zig").Hardfork) bool,
         get_hardfork: *const fn (ptr: *anyopaque) @import("hardforks/hardfork.zig").Hardfork,
+        /// Get metadata for the current frame
+        get_is_static: *const fn (ptr: *anyopaque) bool,
+        get_caller: *const fn (ptr: *anyopaque) @import("primitives").Address.Address,
+        get_value: *const fn (ptr: *anyopaque) u256,
+        get_input_buffer: *const fn (ptr: *anyopaque) []const u8,
+        get_output_buffer: *const fn (ptr: *anyopaque) []const u8,
+        get_depth: *const fn (ptr: *anyopaque) u11,
+        /// Set output buffer for the current frame
+        set_output_buffer: *const fn (ptr: *anyopaque, output: []const u8) anyerror!void,
     };
 
     /// Initialize a Host interface from any implementation
@@ -232,6 +241,41 @@ pub const Host = struct {
                 return self.get_hardfork();
             }
 
+            fn vtable_get_is_static(ptr: *anyopaque) bool {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_is_static();
+            }
+
+            fn vtable_get_caller(ptr: *anyopaque) @import("primitives").Address.Address {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_caller();
+            }
+
+            fn vtable_get_value(ptr: *anyopaque) u256 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_value();
+            }
+
+            fn vtable_get_input_buffer(ptr: *anyopaque) []const u8 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_input_buffer();
+            }
+
+            fn vtable_get_output_buffer(ptr: *anyopaque) []const u8 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_output_buffer();
+            }
+
+            fn vtable_get_depth(ptr: *anyopaque) u11 {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.get_depth();
+            }
+
+            fn vtable_set_output_buffer(ptr: *anyopaque, output: []const u8) anyerror!void {
+                const self: Impl = @ptrCast(@alignCast(ptr));
+                return self.set_output_buffer(output);
+            }
+
             const vtable = VTable{
                 .get_balance = vtable_get_balance,
                 .account_exists = vtable_account_exists,
@@ -253,6 +297,13 @@ pub const Host = struct {
                 .get_input = vtable_get_input,
                 .is_hardfork_at_least = vtable_is_hardfork_at_least,
                 .get_hardfork = vtable_get_hardfork,
+                .get_is_static = vtable_get_is_static,
+                .get_caller = vtable_get_caller,
+                .get_value = vtable_get_value,
+                .get_input_buffer = vtable_get_input_buffer,
+                .get_output_buffer = vtable_get_output_buffer,
+                .get_depth = vtable_get_depth,
+                .set_output_buffer = vtable_set_output_buffer,
             };
         };
 
@@ -359,6 +410,41 @@ pub const Host = struct {
 
     pub fn get_hardfork(self: Host) @import("hardforks/hardfork.zig").Hardfork {
         return self.vtable.get_hardfork(self.ptr);
+    }
+
+    /// Get whether the current frame is static (read-only)
+    pub fn get_is_static(self: Host) bool {
+        return self.vtable.get_is_static(self.ptr);
+    }
+
+    /// Get the caller address for the current frame
+    pub fn get_caller(self: Host) @import("primitives").Address.Address {
+        return self.vtable.get_caller(self.ptr);
+    }
+
+    /// Get the value transferred with the current call
+    pub fn get_value(self: Host) u256 {
+        return self.vtable.get_value(self.ptr);
+    }
+
+    /// Get the input buffer for the current frame
+    pub fn get_input_buffer(self: Host) []const u8 {
+        return self.vtable.get_input_buffer(self.ptr);
+    }
+
+    /// Get the output buffer for the current frame
+    pub fn get_output_buffer(self: Host) []const u8 {
+        return self.vtable.get_output_buffer(self.ptr);
+    }
+
+    /// Get the call depth for the current frame
+    pub fn get_depth(self: Host) u11 {
+        return self.vtable.get_depth(self.ptr);
+    }
+
+    /// Set the output buffer for the current frame
+    pub fn set_output_buffer(self: Host, output: []const u8) !void {
+        return self.vtable.set_output_buffer(self.ptr, output);
     }
 };
 
@@ -541,6 +627,48 @@ pub const MockHost = struct {
         _ = self;
         // Mock implementation - return latest hardfork
         return .CANCUN;
+    }
+
+    pub fn get_is_static(self: *MockHost) bool {
+        _ = self;
+        // Mock implementation - return false
+        return false;
+    }
+
+    pub fn get_caller(self: *MockHost) @import("primitives").Address.Address {
+        _ = self;
+        // Mock implementation - return zero address
+        return @import("primitives").ZERO_ADDRESS;
+    }
+
+    pub fn get_value(self: *MockHost) u256 {
+        _ = self;
+        // Mock implementation - return zero value
+        return 0;
+    }
+
+    pub fn get_input_buffer(self: *MockHost) []const u8 {
+        _ = self;
+        // Mock implementation - return empty buffer
+        return &.{};
+    }
+
+    pub fn get_output_buffer(self: *MockHost) []const u8 {
+        _ = self;
+        // Mock implementation - return empty buffer
+        return &.{};
+    }
+
+    pub fn get_depth(self: *MockHost) u11 {
+        _ = self;
+        // Mock implementation - return zero depth
+        return 0;
+    }
+
+    pub fn set_output_buffer(self: *MockHost, output: []const u8) !void {
+        _ = self;
+        _ = output;
+        // Mock implementation - do nothing
     }
 
     pub fn to_host(self: *MockHost) Host {

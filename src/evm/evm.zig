@@ -46,6 +46,23 @@ const Evm = @This();
 /// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
 
+/// Metadata for a single stack frame, moved from StackFrame to EVM
+/// This centralizes frame context data to improve cache locality and simplify frame management
+pub const StackFrameMetadata = struct {
+    /// Address that initiated this call
+    caller: primitives.Address.Address,
+    /// Value transferred with this call (0 for STATICCALL and DELEGATECALL)
+    value: u256,
+    /// Input data for this call
+    input_buffer: []const u8,
+    /// Output data from this call
+    output_buffer: []const u8,
+    /// Whether this call is read-only (STATICCALL)
+    is_static: bool,
+    /// Current depth in the call stack
+    depth: u11,
+};
+
 /// Initial arena capacity for temporary allocations (256KB)
 /// This covers most common contract executions without reallocation
 const ARENA_INITIAL_CAPACITY = 256 * 1024;
@@ -127,6 +144,9 @@ trace_file: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == 
 initial_thread_id: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) u32 else std.Thread.Id, // Thread tracking
 /// Pool for lazily reusing temporary Frames (e.g., constructor frames)
 frame_pool: FramePool,
+/// Fixed-size array storing metadata for each call frame in the stack
+/// Index corresponds to frame depth (0 = top-level call, 1 = first nested call, etc.)
+frame_metadata: [MAX_CALL_DEPTH]StackFrameMetadata,
 
 // Compile-time validation and optimizations
 comptime {
@@ -244,6 +264,14 @@ pub fn init(
         .trace_file = null,
         .initial_thread_id = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) 0 else std.Thread.getCurrentId(),
         .frame_pool = try FramePool.init(allocator, MAX_CALL_DEPTH),
+        .frame_metadata = [_]StackFrameMetadata{StackFrameMetadata{
+            .caller = primitives.ZERO_ADDRESS,
+            .value = 0,
+            .input_buffer = &.{},
+            .output_buffer = &.{},
+            .is_static = false,
+            .depth = 0,
+        }} ** MAX_CALL_DEPTH,
     };
 
     // Debug: verify tracer was stored correctly
@@ -518,10 +546,9 @@ pub fn set_output(self: *Evm, output: []const u8) !void {
     }
 
     // Update current frame's visible output buffer if stack exists
-    if (self.frame_stack) |frames| {
-        if (self.current_frame_depth < frames.len) {
-            frames[self.current_frame_depth].output_buffer = self.current_output;
-        }
+    // Update the frame metadata instead of the frame's output_buffer field
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        self.frame_metadata[self.current_frame_depth].output_buffer = self.current_output;
     }
     Log.debug("[Evm.set_output] Output set: current_output.len={}, owned_output.len={}", .{ self.current_output.len, if (self.owned_output) |buf| buf.len else 0 });
 }
@@ -530,12 +557,11 @@ pub fn set_output(self: *Evm, output: []const u8) !void {
 pub fn get_output(self: *Evm) []const u8 {
     Log.debug("[Evm.get_output] Getting output: frame_stack={}, current_frame_depth={}, current_output.len={}", .{ self.frame_stack != null, self.current_frame_depth, self.current_output.len });
 
-    if (self.frame_stack) |frames| {
-        if (self.current_frame_depth < frames.len) {
-            const result = frames[self.current_frame_depth].output_buffer;
-            Log.debug("[Evm.get_output] Using frame output: frame_depth={}, output_len={}", .{ self.current_frame_depth, result.len });
-            return result;
-        }
+    // Use frame metadata instead of frame's output_buffer field
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        const result = self.frame_metadata[self.current_frame_depth].output_buffer;
+        Log.debug("[Evm.get_output] Using frame output: frame_depth={}, output_len={}", .{ self.current_frame_depth, result.len });
+        return result;
     }
     Log.debug("[Evm.get_output] Fallback to current_output, len={}", .{self.current_output.len});
     return self.current_output;
@@ -547,11 +573,9 @@ pub fn get_input(self: *Evm) []const u8 {
     if (self.current_input.len > 0) {
         return self.current_input;
     }
-    // For regular execution, get from frame stack
-    if (self.frame_stack) |frames| {
-        if (self.current_frame_depth < frames.len) {
-            return frames[self.current_frame_depth].input_buffer;
-        }
+    // For regular execution, get from frame metadata
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].input_buffer;
     }
     return &.{};
 }
@@ -578,6 +602,63 @@ pub fn is_hardfork_at_least(self: *Evm, target: Hardfork) bool {
 
 pub fn get_hardfork(self: *Evm) Hardfork {
     return self.chain_rules.getHardfork();
+}
+
+/// Get whether the current frame is static (read-only) (Host interface)
+pub fn get_is_static(self: *Evm) bool {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].is_static;
+    }
+    return self.read_only;
+}
+
+/// Get the caller address for the current frame (Host interface)
+pub fn get_caller(self: *Evm) primitives.Address.Address {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].caller;
+    }
+    return primitives.ZERO_ADDRESS;
+}
+
+/// Get the value transferred with the current call (Host interface)
+pub fn get_value(self: *Evm) u256 {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].value;
+    }
+    return 0;
+}
+
+/// Get the input buffer for the current frame (Host interface)
+pub fn get_input_buffer(self: *Evm) []const u8 {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].input_buffer;
+    }
+    return &.{};
+}
+
+/// Get the output buffer for the current frame (Host interface)
+pub fn get_output_buffer(self: *Evm) []const u8 {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].output_buffer;
+    }
+    return &.{};
+}
+
+/// Get the call depth for the current frame (Host interface)
+pub fn get_depth(self: *Evm) u11 {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        return self.frame_metadata[self.current_frame_depth].depth;
+    }
+    return self.current_frame_depth;
+}
+
+/// Set the output buffer for the current frame (Host interface)
+pub fn set_output_buffer(self: *Evm, output: []const u8) !void {
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        self.frame_metadata[self.current_frame_depth].output_buffer = output;
+    }
+    // Also update the current_output for backward compatibility
+    try self.set_output(output);
 }
 
 // Inline helpers to keep boolean fields and packed flags in sync
@@ -673,10 +754,7 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     // Create frame for execution
     const frame_val = try Frame.init(
         contract.gas,
-        is_static,
         contract.address,
-        contract.caller,
-        contract.value,
         analysis_ptr.analysis,
         analysis_ptr.metadata,
         &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
@@ -688,8 +766,17 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     defer self.frame_pool.release(frame_ptr);
     frame_ptr.* = frame_val;
     
-    // Set the input data in the frame
-    frame_ptr.input_buffer = input;
+    // Set up frame metadata 
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
+            .caller = contract.caller,
+            .value = contract.value,
+            .input_buffer = input,
+            .output_buffer = &.{},
+            .is_static = is_static,
+            .depth = self.current_frame_depth,
+        };
+    }
     
     var exec_err: ?ExecutionError.Error = null;
     var gas_left = contract.gas;
@@ -899,10 +986,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     const snapshot_id: u32 = host.create_snapshot();
     const frame_val = try Frame.init(
         frame_gas,
-        false, // not static
         new_address, // contract address being created
-        caller,
-        value,
         analysis_ptr.analysis,
         analysis_ptr.metadata,
         &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
@@ -913,6 +997,19 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     const frame_ptr = try self.frame_pool.acquire();
     frame_ptr.* = frame_val;
 
+    // Set up frame metadata for CREATE
+    const create_frame_depth = self.current_frame_depth + 1;
+    if (create_frame_depth < MAX_CALL_DEPTH) {
+        self.frame_metadata[create_frame_depth] = StackFrameMetadata{
+            .caller = caller,
+            .value = value,
+            .input_buffer = &.{}, // CREATE has no input
+            .output_buffer = &.{},
+            .is_static = false, // CREATE is never static
+            .depth = create_frame_depth,
+        };
+    }
+
     var exec_err: ?ExecutionError.Error = null;
     // Save current depth and increment for nested create
     const saved_depth = self.depth;
@@ -920,8 +1017,8 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     Log.debug("[CREATE_DEBUG] Starting interpret with frame_gas: {}", .{frame_ptr.gas_remaining});
     Log.debug("[CREATE_DEBUG] Frame details: address={any}, caller={any}, value={}", .{
         std.fmt.fmtSliceHexLower(&frame_ptr.contract_address),
-        std.fmt.fmtSliceHexLower(&frame_ptr.caller),
-        frame_ptr.value,
+        std.fmt.fmtSliceHexLower(&caller), // Use the caller parameter instead
+        value, // Use the value parameter instead
     });
     Log.debug("[create_contract_at] Before interpret: depth={}, has_tracer={}, self_ptr=0x{x}, tracer_ptr=0x{x}", .{ self.depth, self.tracer != null, @intFromPtr(self), if (self.tracer) |t| @intFromPtr(&t) else 0 });
     Log.debug("[create_contract_at] Tracer field check: offset={}, value_exists={}", .{ @offsetOf(Evm, "tracer"), self.tracer != null });
