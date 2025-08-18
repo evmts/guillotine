@@ -419,8 +419,7 @@ test "TIMESTAMP returns block timestamp" {
 }
 
 test "NUMBER returns block number" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
 
     const test_block_number: u64 = 15537393;
 
@@ -436,19 +435,40 @@ test "NUMBER returns block number" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try StackFrame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Execute NUMBER opcode
-    try op_number(&context);
+    try op_number(&frame);
 
     // Verify block number was pushed to stack
-    const result = stack.pop_unsafe();
+    const result = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, test_block_number), result);
 }
 
