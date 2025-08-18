@@ -20,6 +20,24 @@ pub const Error = error{
 /// Stack allocates a fixed array of CAPACITY u256 values
 pub const UP_FRONT_ALLOCATION = CAPACITY * @sizeOf(u256);
 
+/// Allocation information for pre-allocation strategy
+pub const AllocationInfo = struct {
+    size: usize,
+    alignment: usize = 8,
+    can_grow: bool = false,
+};
+
+/// Calculate allocation requirements for Stack
+/// Stack size is fixed regardless of bytecode size
+pub fn calculate_allocation(bytecode_size: usize) AllocationInfo {
+    _ = bytecode_size; // Stack size is fixed
+    return .{
+        .size = CAPACITY * @sizeOf(u256),
+        .alignment = @alignOf(u256),
+        .can_grow = false,
+    };
+}
+
 // TODO make this depend on CAPCITY
 current: u16,
 data: *[CAPACITY]u256,
@@ -938,6 +956,20 @@ test "stack_unsafe_operations_preconditions" {
     stack.swap_unsafe(5);
     const top = stack.pop_unsafe();
     try std.testing.expectEqual(@as(u256, 13), top);
+}
+
+test "stack calculate_allocation returns fixed size" {
+    const small_bytecode = 100;
+    const large_bytecode = 50000;
+    
+    const small_alloc = calculate_allocation(small_bytecode);
+    const large_alloc = calculate_allocation(large_bytecode);
+    
+    // Stack allocation should be the same regardless of bytecode size
+    try std.testing.expectEqual(small_alloc.size, large_alloc.size);
+    try std.testing.expectEqual(CAPACITY * @sizeOf(u256), small_alloc.size);
+    try std.testing.expectEqual(@alignOf(u256), small_alloc.alignment);
+    try std.testing.expectEqual(false, small_alloc.can_grow);
 }
 
 test "stack_concurrent_safety_simulation" {
