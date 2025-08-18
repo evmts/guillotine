@@ -343,10 +343,7 @@ test "COINBASE returns block coinbase address" {
 
     var frame = try Frame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -397,10 +394,7 @@ test "TIMESTAMP returns block timestamp" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -451,10 +445,7 @@ test "NUMBER returns block number" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -505,10 +496,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -559,10 +547,7 @@ test "GASLIMIT returns block gas limit" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -613,10 +598,7 @@ test "BASEFEE returns block base fee" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -665,10 +647,7 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -717,10 +696,7 @@ test "BLOCKHASH returns 0 for future blocks" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -772,10 +748,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
 
     var frame = try StackFrame.init(
         1000000, // gas_remaining
-        false, // static_call
         primitives.Address.ZERO, // contract_address
-        primitives.Address.ZERO, // caller
-        0, // value
         empty_analysis,
         empty_metadata,
         empty_ops,

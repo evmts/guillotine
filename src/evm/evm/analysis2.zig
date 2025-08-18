@@ -323,6 +323,14 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
                     val = (val << 8) | code[value_start + j];
                 }
                 if (val < code.len and code[val] == 0x5B) {
+                    // Store the jump destination instruction index in metadata for JUMPI
+                    if (next_op == OP_JUMPI) {
+                        const dest_inst_idx = analysis.getInstIdx(@intCast(val));
+                        if (dest_inst_idx != SimpleAnalysis.MAX_USIZE) {
+                            metadata[i] = dest_inst_idx;
+                        }
+                    }
+                    
                     fused = if (next_op == OP_JUMP)
                         @ptrCast(&tailcalls.op_push_then_jump)
                     else
@@ -363,8 +371,8 @@ test "analysis2: PUSH small value bounds check and metadata" {
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
     try std.testing.expectEqual(@as(u16, 0), result.analysis.getInstIdx(0));
-    try std.testing.expectEqual(@as(u16, 1), result.analysis.getInstIdx(1));
-    try std.testing.expectEqual(@as(u16, 2), result.analysis.getInstIdx(2));
+    try std.testing.expectEqual(@as(u16, SimpleAnalysis.MAX_USIZE), result.analysis.getInstIdx(1)); // PC 1 is push data, not instruction
+    try std.testing.expectEqual(@as(u16, 1), result.analysis.getInstIdx(2));
     // First instruction is PUSH1: metadata should store value 0xAA
     try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]);
 }

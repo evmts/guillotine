@@ -933,11 +933,11 @@ test "stack_unsafe_operations_preconditions" {
     }
 
     // Test all unsafe operations work correctly with valid preconditions
-    const peek_val = try stack.peek_unsafe();
+    const peek_val = stack.peek_unsafe();
     try std.testing.expectEqual(@as(u256, 19), peek_val);
 
     stack.set_top_unsafe(999);
-    try std.testing.expectEqual(@as(u256, 999), try stack.peek_unsafe());
+    try std.testing.expectEqual(@as(u256, 999), stack.peek_unsafe());
 
     stack.dup_unsafe(10);
     try std.testing.expectEqual(@as(u256, 999), stack.pop_unsafe());

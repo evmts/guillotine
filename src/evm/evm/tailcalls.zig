@@ -13,12 +13,7 @@ const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
 
 // Helper to advance to next instruction
 pub inline fn next(frame: *StackFrame) Error!noreturn {
-    if (comptime SAFE) {
-        try frame.check_iteration_limit();
-    }
-
     frame.ip += 1;
-
     const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(frame.ops[frame.ip])));
     return @call(.always_tail, func_ptr, .{frame});
 }
@@ -668,46 +663,23 @@ pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
 
 // Fused PUSH+JUMPI operation
 pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
-    // Get the PC for this instruction to read the push value
-    const pc = frame.analysis.getPc(@intCast(frame.ip));
-    if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
-        return Error.InvalidJump;
-    }
-
-    const bytecode = frame.analysis.bytecode;
-    if (pc >= bytecode.len) {
-        return Error.InvalidJump;
-    }
-
-    const opcode = bytecode[pc];
-    if (opcode < 0x60 or opcode > 0x7F) {
-        return Error.InvalidJump;
-    }
-
-    const push_size = opcode - 0x5F;
-    const value_start = pc + 1;
-
-    // Read the push value (the jump destination)
-    var dest: usize = 0;
-    var i: usize = 0;
-    while (i < push_size and value_start + i < bytecode.len) : (i += 1) {
-        dest = (dest << 8) | bytecode[value_start + i];
-    }
-
     // Pop the condition value
     const condition = frame.stack.pop_unsafe();
 
     // If condition is non-zero, take the jump
     if (condition != 0) {
-        // Convert PC destination to instruction index
-        const dest_inst_idx = frame.analysis.getInstIdx(@intCast(dest));
-        if (dest_inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
+        // Read jump destination instruction index directly from metadata
+        const dest_inst_idx = frame.metadata[frame.ip];
+
+        // Validate the destination index
+        if (dest_inst_idx >= frame.analysis.inst_count) {
             return Error.InvalidJump;
         }
 
         // In Debug/ReleaseSafe, validate it's a JUMPDEST
         if (comptime SAFE) {
-            if (dest >= frame.analysis.bytecode.len or frame.analysis.bytecode[dest] != 0x5B) {
+            const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
+            if (dest_pc >= frame.analysis.bytecode.len or frame.analysis.bytecode[dest_pc] != 0x5B) {
                 return Error.InvalidJump;
             }
         }
@@ -726,6 +698,12 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
 inline fn readPushValue(frame: *StackFrame) u256 {
     const pc = frame.analysis.getPc(@intCast(frame.ip));
     const bytecode = frame.analysis.bytecode;
+
+    // Add bounds checking for pc - check for invalid PC first
+    if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or pc >= bytecode.len) {
+        return 0; // Return 0 for invalid or out of bounds access
+    }
+
     const opcode = bytecode[pc];
     const push_size = opcode - 0x5F;
     const value_start = pc + 1;
