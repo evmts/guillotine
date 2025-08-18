@@ -172,3 +172,6 @@ diff-trace.log
 
 # Coordination docs
 coordinate.md
+
+# Test output files
+test_output.txt
