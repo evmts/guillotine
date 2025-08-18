@@ -296,6 +296,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
         const OP_SLOAD: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_sload));
         const OP_DUP1: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_dup1));
         const OP_SWAP1: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_swap1));
+        const OP_KECCAK256: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_keccak256));
         var i: usize = 0;
         while (i < ops_slice.len - 1) : (i += 1) {
             const is_push = ops_slice[i] == OP_PUSH;
@@ -330,7 +331,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
                             metadata[i] = dest_inst_idx;
                         }
                     }
-                    
+
                     fused = if (next_op == OP_JUMP)
                         @ptrCast(&tailcalls.op_push_then_jump)
                     else
@@ -380,6 +381,9 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
             if (fused == null and next_op == OP_SWAP1) {
                 fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_swap1_small) else @ptrCast(&tailcalls.op_push_then_swap1);
             }
+            if (fused == null and next_op == OP_KECCAK256) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_keccak_small) else @ptrCast(&tailcalls.op_push_then_keccak);
+            }
 
             if (fused == null) continue;
 
@@ -422,22 +426,22 @@ test "analysis2: PUSH0 metadata and length" {
 test "analysis2: PUSH1-4 metadata fast path optimization" {
     const allocator = std.testing.allocator;
     // PUSH1 0xAA, PUSH2 0x1234, PUSH3 0xABCDEF, PUSH4 0x11223344, STOP
-    const code = &[_]u8{ 
-        0x60, 0xAA,                     // PUSH1 0xAA
-        0x61, 0x12, 0x34,              // PUSH2 0x1234  
-        0x62, 0xAB, 0xCD, 0xEF,        // PUSH3 0xABCDEF
-        0x63, 0x11, 0x22, 0x33, 0x44,  // PUSH4 0x11223344
-        0x00                            // STOP
+    const code = &[_]u8{
+        0x60, 0xAA, // PUSH1 0xAA
+        0x61, 0x12, 0x34, // PUSH2 0x1234
+        0x62, 0xAB, 0xCD, 0xEF, // PUSH3 0xABCDEF
+        0x63, 0x11, 0x22, 0x33, 0x44, // PUSH4 0x11223344
+        0x00, // STOP
     };
-    
+
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
-    
+
     // Verify metadata contains precomputed values for PUSH1-4
-    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]);        // PUSH1
-    try std.testing.expectEqual(@as(u32, 0x1234), result.metadata[1]);      // PUSH2  
-    try std.testing.expectEqual(@as(u32, 0xABCDEF), result.metadata[2]);    // PUSH3
-    try std.testing.expectEqual(@as(u32, 0x11223344), result.metadata[3]);  // PUSH4
-    try std.testing.expectEqual(@as(u32, 0), result.metadata[4]);           // STOP (no metadata)
+    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]); // PUSH1
+    try std.testing.expectEqual(@as(u32, 0x1234), result.metadata[1]); // PUSH2
+    try std.testing.expectEqual(@as(u32, 0xABCDEF), result.metadata[2]); // PUSH3
+    try std.testing.expectEqual(@as(u32, 0x11223344), result.metadata[3]); // PUSH4
+    try std.testing.expectEqual(@as(u32, 0), result.metadata[4]); // STOP (no metadata)
 }

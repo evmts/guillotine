@@ -1015,6 +1015,30 @@ pub fn op_push_then_swap1_small(frame: *StackFrame) Error!noreturn {
     return next(frame);
 }
 
+// Crypto operation fusions
+pub fn op_push_then_keccak(frame: *StackFrame) Error!noreturn {
+    // Use frame.analysis directly instead of casting
+    const offset = readPushValue(frame);
+    const size = frame.stack.pop_unsafe();
+
+    // Push offset to stack then call keccak256
+    frame.stack.append_unsafe(offset);
+    frame.stack.append_unsafe(size);
+    try execution.crypto.op_keccak256(frame);
+    return next(frame);
+}
+
+pub fn op_push_then_keccak_small(frame: *StackFrame) Error!noreturn {
+    const offset = frame.metadata[frame.ip];
+    const size = frame.stack.pop_unsafe();
+
+    // Push offset to stack then call keccak256
+    frame.stack.append_unsafe(offset);
+    frame.stack.append_unsafe(size);
+    try execution.crypto.op_keccak256(frame);
+    return next(frame);
+}
+
 // Log operations
 pub fn op_log0(frame: *StackFrame) Error!noreturn {
     try execution.log.log_0(frame);
