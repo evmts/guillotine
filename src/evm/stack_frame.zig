@@ -31,45 +31,22 @@ pub const StackFrame = struct {
     stack: Stack,
     memory: Memory,
     host: Host,
-    
+
     // === OWNED EXECUTION STATE ===
-    analysis: SimpleAnalysis,  // Owned, not a pointer
-    metadata: []u32,           // Owned metadata array
-    ops: []*const anyopaque,   // Owned ops array
-    ip: usize,                 // Instruction pointer
-    
+    analysis: SimpleAnalysis, // Owned, not a pointer
+    metadata: []u32, // Owned metadata array
+    ip: usize, // Instruction pointer
+    ops: []*const anyopaque, // Owned ops array
+
     // === DEPRECATED - TO BE MOVED TO HOST ===
     // TODO: Move to host interface - should be host.get_contract_address()
     contract_address: primitives.Address.Address,
-    
-    // TODO: Move to host interface - should be host.get_state()
     state: DatabaseInterface,
-    
-    // TODO: Don't know how to remove yet, but should find a way
-    is_static: bool,
-    
-    // TODO: Move to host interface - should be host.get_caller()
-    caller: primitives.Address.Address,
-    
-    // TODO: Move to host interface - should be host.get_value()
-    value: u256,
-    
-    // TODO: Move to host interface - should be host.get_input()
-    input_buffer: []const u8 = &.{},
-    
-    // TODO: Move to host interface - should be host.get_output()
-    output_buffer: []const u8 = &.{},
-    
-    // Tailcall safety tracking
-    tailcall_iterations: usize = 0,
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
         gas_remaining: u64,
-        static_call: bool,
         contract_address: primitives.Address.Address,
-        caller: primitives.Address.Address,
-        value: u256,
         analysis: SimpleAnalysis,
         metadata: []u32,
         ops: []*const anyopaque,
@@ -85,12 +62,7 @@ pub const StackFrame = struct {
             .metadata = metadata,
             .ops = ops,
             .ip = 0,
-            .is_static = static_call,
             .host = host,
-            .caller = caller,
-            .value = value,
-            .input_buffer = &.{},
-            .output_buffer = &.{},
             .contract_address = contract_address,
             .state = state,
         };
@@ -99,7 +71,7 @@ pub const StackFrame = struct {
     pub fn deinit(self: *StackFrame, allocator: std.mem.Allocator) void {
         self.stack.deinit(allocator);
         self.memory.deinit();
-        
+
         // NOTE: analysis, metadata, and ops are managed by interpret2
         // which allocates them with its own FixedBufferAllocator and
         // frees them when it exits. We should NOT free them here.
@@ -114,14 +86,6 @@ pub const StackFrame = struct {
             }
         }
         self.gas_remaining -= amount;
-    }
-
-    /// Check if we've exceeded maximum iterations
-    pub fn check_iteration_limit(self: *StackFrame) ExecutionError.Error!void {
-        self.tailcall_iterations += 1;
-        if (self.tailcall_iterations > TAILCALL_MAX_ITERATIONS) {
-            return ExecutionError.Error.OutOfGas; // Use OutOfGas as proxy for too many iterations
-        }
     }
 
     /// Address access for EIP-2929
