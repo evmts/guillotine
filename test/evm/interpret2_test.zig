@@ -34,10 +34,7 @@ test "interpret2: simple ADD operation" {
     // Create frame
     var frame = try evm.Frame.init(
         1_000_000,                    // gas
-        false,                        // static
         primitives.Address.ZERO_ADDRESS,  // contract_address
-        primitives.Address.ZERO_ADDRESS,  // caller
-        0,                            // value
         empty_analysis,               // analysis
         empty_metadata,               // metadata
         empty_ops,                    // ops
@@ -85,10 +82,7 @@ test "interpret2: PUSH operations" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -139,10 +133,7 @@ test "interpret2: JUMP to valid destination" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -193,10 +184,7 @@ test "interpret2: JUMPI conditional jump taken" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -247,10 +235,7 @@ test "interpret2: JUMPI conditional jump not taken" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -298,10 +283,7 @@ test "interpret2: DUP and SWAP operations" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -350,10 +332,7 @@ test "interpret2: invalid JUMP destination" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -404,10 +383,7 @@ test "interpret2: arithmetic operations" {
     
     var frame = try evm.Frame.init(
         1_000_000,
-        false,
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
         empty_analysis,
         empty_metadata,
         empty_ops,
