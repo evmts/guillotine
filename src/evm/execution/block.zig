@@ -312,8 +312,6 @@ const TestBlockHost = struct {
 
 test "COINBASE returns block coinbase address" {
     const allocator = testing.allocator;
-    const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
-    const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 
     const test_coinbase = primitives.Address.from_hex("0x1234567890123456789012345678901234567890") catch unreachable;
 
@@ -346,8 +344,8 @@ test "COINBASE returns block coinbase address" {
     var frame = try Frame.init(
         1000000, // gas_remaining
         false, // static_call
-        primitives.Address.ZERO_ADDRESS, // contract_address
-        primitives.Address.ZERO_ADDRESS, // caller
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
         0, // value
         empty_analysis,
         empty_metadata,
@@ -400,8 +398,8 @@ test "TIMESTAMP returns block timestamp" {
     var frame = try StackFrame.init(
         1000000, // gas_remaining
         false, // static_call
-        primitives.Address.ZERO_ADDRESS, // contract_address
-        primitives.Address.ZERO_ADDRESS, // caller
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
         0, // value
         empty_analysis,
         empty_metadata,
