@@ -26,38 +26,19 @@ pub const StateError = error{OutOfMemory};
 
 /// StackFrame owns all execution state for the tailcall interpreter
 pub const StackFrame = struct {
-    // ===================================================================
-    // CACHE LINE 1 (64 bytes) - ULTRA HOT (accessed every instruction)
-    // ===================================================================
-    // These fields are accessed by EVERY operation in the hot path
-    ip: usize, // 8 bytes - instruction pointer
-    gas_remaining: u64, // 8 bytes - checked every instruction
-    stack: Stack, // 48 bytes - struct with ptr (16) + len (8) + cap (8) + allocator (16)
-    // Total: 64 bytes exactly - perfect cache line alignment
-
-    // ===================================================================
-    // CACHE LINE 2 (64 bytes) - HOT (accessed by most operations)
-    // ===================================================================
-    // Memory operations (MLOAD/MSTORE/etc) and analysis lookups
-    memory: Memory, // 32 bytes - struct with ArrayList
-    analysis: SimpleAnalysis, // 32 bytes - inst_to_pc, pc_to_inst, bytecode, inst_count
-    // Total: 64 bytes
-
-    // ===================================================================
-    // CACHE LINE 3 (64 bytes) - WARM (accessed by some operations)
-    // ===================================================================
-    // Control flow and metadata access
-    ops: []*const anyopaque, // 16 bytes - owned ops array
-    metadata: []u32, // 16 bytes - owned metadata array
-    host: Host, // 32 bytes - vtable pointer + context pointer
-    // Total: 64 bytes
-
-    // ===================================================================
-    // CACHE LINE 4+ - COLD (rarely accessed)
-    // ===================================================================
-    // These fields are accessed infrequently
-    contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
-    state: DatabaseInterface, // 32 bytes - database interface
+    // CACHE LINE 1
+    ip: u16,
+    // TODO we need to make gas type configurable
+    gas_remaining: u32,
+    stack: Stack,
+    ops: []*const anyopaque,
+    metadata: []u32,
+    analysis: SimpleAnalysis,
+    memory: Memory,
+    host: Host,
+    contract_address: primitives.Address.Address,
+    state: DatabaseInterface,
+    allocator: std.mem.Allocator,
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
@@ -71,7 +52,7 @@ pub const StackFrame = struct {
         allocator: std.mem.Allocator,
     ) !StackFrame {
         return StackFrame{
-            .gas_remaining = gas_remaining,
+            .gas_remaining = @intCast(gas_remaining),
             .stack = try Stack.init(allocator),
             .memory = try Memory.init_default(allocator),
             .analysis = analysis,
@@ -81,11 +62,12 @@ pub const StackFrame = struct {
             .host = host,
             .contract_address = contract_address,
             .state = state,
+            .allocator = allocator,
         };
     }
 
-    pub fn deinit(self: *StackFrame, allocator: std.mem.Allocator) void {
-        self.stack.deinit(allocator);
+    pub fn deinit(self: *StackFrame) void {
+        self.stack.deinit(self.allocator);
         self.memory.deinit();
 
         // NOTE: analysis, metadata, and ops are managed by interpret2
@@ -101,7 +83,7 @@ pub const StackFrame = struct {
                 return ExecutionError.Error.OutOfGas;
             }
         }
-        self.gas_remaining -= amount;
+        self.gas_remaining -= @intCast(amount);
     }
 
     /// Address access for EIP-2929
