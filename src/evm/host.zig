@@ -92,7 +92,7 @@ pub const Host = struct {
         /// Emit log event (for LOG0-LOG4 opcodes)
         emit_log: *const fn (ptr: *anyopaque, contract_address: Address, topics: []const u256, data: []const u8) void,
         /// Execute EVM call (CALL, DELEGATECALL, STATICCALL, CREATE, CREATE2)
-        call: *const fn (ptr: *anyopaque, params: CallParams) anyerror!CallResult,
+        inner_call: *const fn (ptr: *anyopaque, params: CallParams) anyerror!CallResult,
         /// Register a contract as created in the current transaction (EIP-6780)
         register_created_contract: *const fn (ptr: *anyopaque, address: Address) anyerror!void,
         /// Check if a contract was created in the current transaction (EIP-6780)
@@ -166,9 +166,9 @@ pub const Host = struct {
                 return self.emit_log(contract_address, topics, data);
             }
 
-            fn vtable_call(ptr: *anyopaque, params: CallParams) anyerror!CallResult {
+            fn vtable_inner_call(ptr: *anyopaque, params: CallParams) anyerror!CallResult {
                 const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.call(params);
+                return self.inner_call(params);
             }
 
             fn vtable_register_created_contract(ptr: *anyopaque, address: Address) anyerror!void {
@@ -282,7 +282,7 @@ pub const Host = struct {
                 .get_code = vtable_get_code,
                 .get_block_info = vtable_get_block_info,
                 .emit_log = vtable_emit_log,
-                .call = vtable_call,
+                .inner_call = vtable_inner_call,
                 .register_created_contract = vtable_register_created_contract,
                 .was_created_in_tx = vtable_was_created_in_tx,
                 .create_snapshot = vtable_create_snapshot,
@@ -339,8 +339,8 @@ pub const Host = struct {
     }
 
     /// Execute EVM call
-    pub fn call(self: Host, params: CallParams) !CallResult {
-        return self.vtable.call(self.ptr, params);
+    pub fn inner_call(self: Host, params: CallParams) !CallResult {
+        return self.vtable.inner_call(self.ptr, params);
     }
 
     /// Register a contract as created in the current transaction (EIP-6780)
