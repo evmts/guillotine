@@ -22,7 +22,7 @@ const primitives = @import("primitives");
 const Stack = @import("stack/stack.zig");
 const Memory = @import("memory/memory.zig");
 const ExecutionError = @import("execution/execution_error.zig");
-const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
+// Using SimpleAnalysis from analysis2.zig for tailcall dispatch
 const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 
@@ -48,6 +48,7 @@ pub const Frame = struct {
     // Every single instruction accesses these fields
     gas_remaining: u64, // 8 bytes - checked/consumed by every opcode
     stack: Stack, // 32 bytes - accessed by every opcode (4 pointers)
+    tailcall_analysis: *const SimpleAnalysis = undefined,
     host: Host, // 16 bytes - needed for hardfork checks, gas costs
     // === SECOND CACHE LINE - MEMORY OPERATIONS ===
     memory: Memory, // 72 bytes - MLOAD/MSTORE/MCOPY/LOG*/KECCAK256
@@ -73,8 +74,9 @@ pub const Frame = struct {
     tailcall_iterations: usize = 0, // Track number of iterations for safety
     tailcall_max_iterations: usize = 10_000_000, // Maximum allowed iterations
 
-    // Cached analysis for O(1) lookups in tailcall dispatch
-    analysis: *const CodeAnalysis, // 8 bytes - control flow (JUMP/JUMPI validation)
+    // Legacy field kept for compatibility - will be removed when all systems use tailcall_analysis
+    // TODO: Remove this field once all systems migrate to tailcall dispatch
+    analysis: ?*const anyopaque = null, // Legacy field for backwards compatibility
 
     /// Initialize a Frame with required parameters
     pub fn init(
@@ -84,7 +86,7 @@ pub const Frame = struct {
         contract_address: primitives.Address.Address,
         caller: primitives.Address.Address,
         value: u256,
-        analysis: *const CodeAnalysis,
+        analysis: ?*const anyopaque, // Legacy parameter - set to null for new tailcall dispatch
         host: Host,
         state: DatabaseInterface,
         allocator: std.mem.Allocator,
@@ -157,50 +159,34 @@ pub const Frame = struct {
         self.gas_remaining -= amount;
     }
 
-    /// Jump destination validation - uses cache-efficient packed array
-    /// This is significantly faster than bitmap access due to better cache locality
-    /// In ReleaseFast/ReleaseSmall modes, debug logging is skipped for performance
+    /// Jump destination validation - temporary fallback for backwards compatibility
+    /// TODO: Remove this method once all systems migrate to tailcall dispatch
+    /// The tailcall dispatch system handles jumpdest validation internally
     pub fn valid_jumpdest(self: *Frame, dest: u256) bool {
-        if (SAFE_JUMP_VALIDATION) {
-            std.debug.assert(dest <= std.math.maxInt(u32));
+        // For now, use the SimpleAnalysis bytecode to do basic validation
+        // This is a simplified fallback during the migration period
+        if (self.tailcall_analysis.bytecode.len == 0) {
+            return false; // No bytecode, no valid jumpdests
         }
+        
+        if (dest > self.tailcall_analysis.bytecode.len) {
+            return false; // Out of bounds
+        }
+        
         const dest_usize = @as(usize, @intCast(dest));
-        const is_valid = self.analysis.jumpdest_array.is_valid_jumpdest(dest_usize);
-        // Add debug logging to trace jump dest validation during failures
-        if (SAFE_JUMP_VALIDATION and !is_valid) {
-            const in_bounds = dest_usize < self.analysis.code_len;
-            const opcode: u8 = if (in_bounds) self.analysis.code[dest_usize] else 0xff;
-            var nearest: isize = -1;
-            if (in_bounds) {
-                var offset: isize = -3;
-                while (offset <= 3) : (offset += 1) {
-                    if (offset == 0) continue;
-                    const idx_isize: isize = @as(isize, @intCast(dest_usize)) + offset;
-                    if (idx_isize >= 0 and @as(usize, @intCast(idx_isize)) < self.analysis.code_len) {
-                        if (self.analysis.jumpdest_array.is_valid_jumpdest(@as(usize, @intCast(idx_isize)))) {
-                            nearest = offset;
-                            break;
-                        }
-                    }
-                }
-            }
-            // Dump a small code window for visibility
-            const window_start: usize = if (dest_usize >= 5) dest_usize - 5 else 0;
-            const window_end: usize = @min(self.analysis.code_len, dest_usize + 6);
-            std.debug.print("[frame.valid_jumpdest] window [{}..{}): ", .{ window_start, window_end });
-            var i: usize = window_start;
-            while (i < window_end) : (i += 1) {
-                const b: u8 = self.analysis.code[i];
-                if (i == dest_usize) {
-                    std.debug.print("[>>0x{x}<<]", .{b});
-                } else {
-                    std.debug.print(" 0x{x}", .{b});
-                }
-            }
-            std.debug.print("\n", .{});
-            std.debug.print("[frame.valid_jumpdest] Invalid jumpdest: dest={} in_bounds={} code_len={} opcode_at_dest=0x{x} nearest_jumpdest_offset={}\n", .{ dest_usize, in_bounds, self.analysis.code_len, opcode, nearest });
+        if (dest_usize >= self.tailcall_analysis.bytecode.len) {
+            return false; // Out of bounds
         }
-        return is_valid;
+        
+        // Check if the position contains a JUMPDEST opcode (0x5B)
+        const opcode = self.tailcall_analysis.bytecode[dest_usize];
+        const is_jumpdest = opcode == 0x5B;
+        
+        if (SAFE_JUMP_VALIDATION and !is_jumpdest) {
+            std.debug.print("[frame.valid_jumpdest] Invalid jumpdest: dest={} opcode=0x{x}\n", .{ dest_usize, opcode });
+        }
+        
+        return is_jumpdest;
     }
 
     /// Address access for EIP-2929 - uses host interface
@@ -299,10 +285,12 @@ const TestHelpers = struct {
     const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
     const MemoryDatabase = @import("state/memory_database.zig").MemoryDatabase;
 
-    fn createEmptyAnalysis(allocator: std.mem.Allocator) !CodeAnalysis {
+    fn createEmptyAnalysis(allocator: std.mem.Allocator) !SimpleAnalysis {
         const code = &[_]u8{0x00}; // STOP
-        const table = OpcodeMetadata.DEFAULT;
-        return CodeAnalysis.from_code(allocator, code, &table);
+        const result = try SimpleAnalysis.analyze(allocator, code);
+        result.metadata.len; // Consume metadata if needed
+        allocator.free(result.metadata); // Free metadata immediately as it's not used in tests
+        return result.analysis;
     }
 
     fn createMockDatabase(allocator: std.mem.Allocator) !MemoryDatabase {
@@ -312,13 +300,12 @@ const TestHelpers = struct {
 
 test "Frame - basic initialization" {
     const allocator = std.testing.allocator;
-    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
     // Create a simple code analysis for testing
     const code = &[_]u8{ 0x5B, 0x60, 0x01, 0x00 }; // JUMPDEST, PUSH1 0x01, STOP
-    const table = OpcodeMetadata.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
+    const result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
 
     // Create mock components
     var mock_host = @import("host.zig").MockHost.init(allocator);
@@ -335,32 +322,29 @@ test "Frame - basic initialization" {
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS, // caller
         0, // value
-        &analysis,
+        null, // legacy analysis parameter
         host,
         db.to_database_interface(),
         allocator,
     );
     defer ctx.deinit(allocator);
+    
+    // Set the tailcall analysis after creation
+    ctx.tailcall_analysis = &result.analysis;
 
     // Test initial state
     try std.testing.expectEqual(@as(u64, 1000000), ctx.gas_remaining);
     try std.testing.expectEqual(false, ctx.is_static);
-    try std.testing.expectEqual(@as(u32, 1), ctx.depth);
+    try std.testing.expectEqual(@as(u16, 1), ctx.depth);
     try std.testing.expectEqual(@as(usize, 0), ctx.stack.size());
-
-    // Test that analysis is correctly referenced
-    try std.testing.expect(ctx.analysis == &analysis);
 }
 
 test "Frame - gas consumption" {
     const allocator = std.testing.allocator;
-    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
     // Create empty code analysis for testing
-    const code = &[_]u8{0x00}; // STOP
-    const table = OpcodeMetadata.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
+    var analysis = try TestHelpers.createEmptyAnalysis(allocator);
+    defer analysis.deinit(allocator);
 
     // Create mock components
     var db = try TestHelpers.createMockDatabase(allocator);
@@ -376,12 +360,13 @@ test "Frame - gas consumption" {
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        null, // legacy analysis parameter
         host,
         db.to_database_interface(),
         allocator,
     );
     defer ctx.deinit(allocator);
+    ctx.tailcall_analysis = &analysis;
 
     // Test successful gas consumption
     try ctx.consume_gas(300);
@@ -397,13 +382,12 @@ test "Frame - gas consumption" {
 
 test "Frame - jumpdest validation" {
     const allocator = std.testing.allocator;
-    const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
 
     // Create code with specific JUMPDESTs at positions 2 and 4
     const code = &[_]u8{ 0x00, 0x00, 0x5B, 0x00, 0x5B, 0x00 }; // STOP, STOP, JUMPDEST, STOP, JUMPDEST, STOP
-    const table = OpcodeMetadata.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
+    const result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
 
     // Create mock components
     var db = try TestHelpers.createMockDatabase(allocator);
@@ -419,12 +403,13 @@ test "Frame - jumpdest validation" {
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        null, // legacy analysis parameter
         host2,
         db.to_database_interface(),
         allocator,
     );
     defer ctx.deinit(allocator);
+    ctx.tailcall_analysis = &result.analysis;
 
     // Test valid jump destinations (positions 2 and 4 have JUMPDEST)
     try std.testing.expect(ctx.valid_jumpdest(2));
@@ -464,12 +449,13 @@ test "Frame - address access tracking" {
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS, // caller
         0, // value
-        &analysis,
+        null, // legacy analysis parameter
         host,
         db.to_database_interface(),
         allocator,
     );
     defer ctx.deinit(allocator);
+    ctx.tailcall_analysis = &analysis;
 
     // Test address access (MockHost always returns cold cost)
     const cost1 = try ctx.access_address(primitives.Address.ZERO_ADDRESS);
@@ -502,12 +488,13 @@ test "Frame - static call restrictions" {
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        null, // legacy analysis parameter
         host3,
         db1.to_database_interface(),
         allocator,
     );
     defer static_ctx.deinit(allocator);
+    static_ctx.tailcall_analysis = &analysis;
 
     // Create non-static context
     var normal_ctx = try Frame.init(
@@ -517,12 +504,13 @@ test "Frame - static call restrictions" {
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        null, // legacy analysis parameter
         host3,
         db2.to_database_interface(),
         allocator,
     );
     defer normal_ctx.deinit(allocator);
+    normal_ctx.tailcall_analysis = &analysis;
 
     // Test static flag
     try std.testing.expect(static_ctx.is_static);

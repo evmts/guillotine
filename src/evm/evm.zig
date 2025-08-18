@@ -608,13 +608,12 @@ pub fn is_currently_executing(self: *const Evm) bool {
     return self.is_executing;
 }
 
-// The actual call implementation is in evm/call.zig
+// The actual call implementation is in evm/call2.zig
 // Import it with usingnamespace below
 
 pub usingnamespace @import("evm/set_context.zig");
 
-pub usingnamespace @import("evm/call.zig"); // This provides the actual call() implementation
-pub usingnamespace @import("evm/call2.zig"); // This provides the call2() implementation using interpret2
+pub usingnamespace @import("evm/call2.zig"); // This provides the call() implementation using interpret2
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
