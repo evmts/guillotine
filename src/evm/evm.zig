@@ -101,10 +101,6 @@ depth: u11 = 0, // 2 bytes - call depth tracking
 
 /// Whether the current context is read-only (STATICCALL)
 read_only: bool = false, // 1 byte - STATICCALL check
-/// Whether the VM is currently executing a call (used to detect nested calls)
-is_executing: bool = false, // 1 byte - execution state
-/// Packed execution flags (bit 0 = read_only, bit 1 = is_executing)
-flags: u8 = 0, // 1 byte - packed flags
 // Padding: 25 bytes used, 39 bytes available = 64 bytes total
 
 // ===================================================================
@@ -264,8 +260,6 @@ pub fn init(
         .current_snapshot_id = 0,
         .depth = @intCast(depth),
         .read_only = read_only,
-        .is_executing = false,
-        .flags = @as(u8, if (read_only) 1 else 0),
 
         // Cache line 3 - transaction lifecycle (warm)
         .created_contracts = CreatedContracts.init(allocator),
@@ -704,19 +698,9 @@ pub fn set_read_only(self: *Evm, on: bool) void {
     set_flag(self, 0, on);
 }
 
-pub fn set_is_executing(self: *Evm, on: bool) void {
-    self.is_executing = on;
-    set_flag(self, 1, on);
-}
-
 pub fn is_read_only(self: *const Evm) bool {
     // Read from canonical boolean to avoid desync with tests that set read_only directly
     return self.read_only;
-}
-
-pub fn is_currently_executing(self: *const Evm) bool {
-    // Read from canonical boolean to avoid desync with direct writes
-    return self.is_executing;
 }
 
 // The actual call implementation is in evm/call2.zig
@@ -726,7 +710,7 @@ pub usingnamespace @import("evm/set_context.zig");
 
 pub usingnamespace @import("evm/call2.zig"); // This provides the call() implementation using interpret2
 
-// Export call2 as an alias for the new call implementation  
+// Export call2 as an alias for the new call implementation
 pub const call2 = @import("evm/call2.zig").call;
 
 // Alias for benchmark runner compatibility
@@ -750,7 +734,7 @@ pub usingnamespace @import("evm/interpret2.zig");
 // Compatibility wrapper for old interpret API used by tests
 pub const InterprResult = struct {
     pub const Status = enum { Success, Failure, Invalid, Revert, OutOfGas };
-    
+
     status: Status,
     output: ?[]const u8,
     gas_left: u64,
@@ -761,7 +745,7 @@ pub const InterprResult = struct {
 
 // Main interpret function - wrapper around interpret2
 pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
-    
+
     // Check for bytecode analysis using cache
     const analysis_ptr = if (self.analysis_cache) |*cache|
         try cache.getOrAnalyze(contract.bytecode, &self.table)
@@ -770,7 +754,7 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
         var analysis = try @import("analysis.zig").CodeAnalysis.from_code(self.allocator, contract.bytecode, &self.table);
         break :blk &analysis;
     };
-    
+
     // Create host interface
     const host = Host.init(self);
     const snapshot_id = host.create_snapshot();
@@ -778,7 +762,7 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
         // Always revert snapshot to clean up any state changes
         host.revert_to_snapshot(snapshot_id);
     }
-    
+
     // Create frame for execution
     const frame_val = try Frame.init(
         contract.gas,
@@ -793,8 +777,8 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
     const frame_ptr = try self.frame_pool.acquire();
     defer self.frame_pool.release(frame_ptr);
     frame_ptr.* = frame_val;
-    
-    // Set up frame metadata 
+
+    // Set up frame metadata
     if (self.current_frame_depth < MAX_CALL_DEPTH) {
         self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
             .caller = contract.caller,
@@ -805,10 +789,10 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
             .depth = self.current_frame_depth,
         };
     }
-    
+
     var exec_err: ?ExecutionError.Error = null;
     var gas_left = contract.gas;
-    
+
     // Execute using interpret2
     @import("evm/interpret2.zig").interpret2(frame_ptr) catch |err| {
         if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
@@ -817,20 +801,20 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
             exec_err = err;
         }
     };
-    
+
     gas_left = frame_ptr.gas_remaining;
     const gas_used = contract.gas - gas_left;
-    
+
     // Get output from host
     const output = host.get_output();
-    
+
     // Convert error to status
     const status: InterprResult.Status = if (exec_err) |err| switch (err) {
         ExecutionError.Error.REVERT => .Revert,
         ExecutionError.Error.OutOfGas => .OutOfGas,
         else => .Failure,
     } else .Success;
-    
+
     return InterprResult{
         .status = status,
         .output = if (output.len > 0) output else null,
@@ -840,7 +824,6 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
         .success = exec_err == null,
     };
 }
-
 
 // Legacy interpret wrapper for test compatibility
 pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {
