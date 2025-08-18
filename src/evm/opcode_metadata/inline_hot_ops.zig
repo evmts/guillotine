@@ -51,10 +51,10 @@ pub fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasQuickStep
 
             // Execute inline
-            if (pc + 1 >= frame.analysis.code.len) {
+            if (pc + 1 >= frame.analysis.bytecode.len) {
                 try frame.stack.append(0);
             } else {
-                const value = frame.analysis.code[pc + 1];
+                const value = frame.analysis.bytecode[pc + 1];
                 try frame.stack.append(value);
             }
 
@@ -193,16 +193,16 @@ pub fn execute_with_inline_hot_ops(
             try frame.consume_gas(3); // GasQuickStep
 
             // Execute inline
-            if (pc + 2 >= frame.analysis.code.len) {
+            if (pc + 2 >= frame.analysis.bytecode.len) {
                 // Partial push - pad with zeros
                 var value: u256 = 0;
-                if (pc + 1 < frame.analysis.code.len) {
-                    value = @as(u256, frame.analysis.code[pc + 1]) << 8;
+                if (pc + 1 < frame.analysis.bytecode.len) {
+                    value = @as(u256, frame.analysis.bytecode[pc + 1]) << 8;
                 }
                 try frame.stack.append(value);
             } else {
-                const value = (@as(u256, frame.analysis.code[pc + 1]) << 8) |
-                    @as(u256, frame.analysis.code[pc + 2]);
+                const value = (@as(u256, frame.analysis.bytecode[pc + 1]) << 8) |
+                    @as(u256, frame.analysis.bytecode[pc + 2]);
                 try frame.stack.append(value);
             }
 
@@ -285,7 +285,6 @@ test "inline hot ops maintains correctness" {
     {
         const code = &[_]u8{ 0x60, 0x42 }; // PUSH1 0x42
         const result = try SimpleAnalysis.analyze(testing.allocator, code);
-        defer result.analysis.deinit(testing.allocator);
         defer testing.allocator.free(result.metadata);
 
         var memory_db = MemoryDatabase.init(testing.allocator);
@@ -320,7 +319,6 @@ test "inline hot ops maintains correctness" {
     {
         const code = &[_]u8{0x01}; // ADD
         const add_result = try SimpleAnalysis.analyze(testing.allocator, code);
-        defer add_result.analysis.deinit(testing.allocator);
         defer testing.allocator.free(add_result.metadata);
 
         var memory_db = MemoryDatabase.init(testing.allocator);
