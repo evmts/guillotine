@@ -1,6 +1,6 @@
 const std = @import("std");
 const ecpairing = @import("ecpairing.zig");
-const ExecutionContext = @import("../frame.zig");
+const ExecutionContext = @import("../stack_frame.zig");
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 
 test "fuzz ecpairing input length validation" {
