@@ -257,9 +257,9 @@ pub fn main() !void {
                 std.process.exit(1);
             }
         else if (use_block_execution)
-            vm.call_mini(call_params) catch |err| {
+            vm.call2(call_params) catch |err| {
                 // On error, print to stderr and exit
-                std.debug.print("Error executing call_mini: {}\n", .{err});
+                std.debug.print("Error executing call2: {}\n", .{err});
                 std.process.exit(1);
             }
         else
