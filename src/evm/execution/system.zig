@@ -313,7 +313,7 @@ fn handle_call_result(frame: Frame, result: anytype, ret_offset: u256, ret_size:
 
 /// Check static call restrictions for CREATE operations
 fn validate_create_static_context(frame: Frame) ExecutionError.Error!void {
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
@@ -542,7 +542,7 @@ pub fn op_create(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Check if in static context (CREATE not allowed)
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.StaticStateChange;
     }
@@ -693,7 +693,7 @@ pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
     const salt = params2.a; // second (after first pop2) = salt
 
     // Check if in static context (CREATE2 not allowed)
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.StaticStateChange;
     }
@@ -838,7 +838,7 @@ pub fn op_call(frame: *Frame) ExecutionError.Error!void {
     const ret_size = frame.stack.pop_unsafe();
 
     // Validate static context for value transfers
-    if (frame.is_static and value != 0) {
+    if (frame.host.get_is_static() and value != 0) {
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -975,7 +975,7 @@ pub fn op_callcode(frame: *Frame) ExecutionError.Error!void {
     const ret_size = params3.b;
 
     // CALLCODE obeys static context for value transfers
-    if (frame.is_static and value != 0) {
+    if (frame.host.get_is_static() and value != 0) {
         return ExecutionError.Error.WriteProtection;
     }
 
@@ -1131,7 +1131,7 @@ pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
     // This is critical for proxy patterns and library calls
     const call_params = CallParams{
         .delegatecall = .{
-            .caller = frame.caller, // Preserve original caller, not current contract
+            .caller = frame.host.get_caller(), // Preserve original caller, not current contract
             .to = to_address,
             .input = args,
             .gas = gas_limit,
@@ -1378,7 +1378,7 @@ pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
 pub fn op_selfdestruct(frame: *Frame) ExecutionError.Error!void {
 
     // Check static call restriction
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         return ExecutionError.Error.WriteProtection;
     }
 

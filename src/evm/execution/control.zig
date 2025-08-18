@@ -186,7 +186,7 @@ pub fn op_invalid(frame: *Frame) ExecutionError.Error!void {
 pub fn op_selfdestruct_legacy(frame: *Frame) ExecutionError.Error!void {
 
     // Check if we're in a static call
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
@@ -220,7 +220,7 @@ pub fn op_selfdestruct_legacy(frame: *Frame) ExecutionError.Error!void {
 pub fn op_selfdestruct(frame: *Frame) ExecutionError.Error!void {
 
     // Check if we're in a static call
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }

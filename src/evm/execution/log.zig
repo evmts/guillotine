@@ -99,7 +99,7 @@ pub fn log_4(frame: *Frame) ExecutionError.Error!void {
 // Common implementation for all LOG operations
 fn log_impl(num_topics: u8, frame: *Frame) ExecutionError.Error!void {
     // Check if we're in a static call
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }

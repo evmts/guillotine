@@ -72,7 +72,7 @@ pub fn op_origin(frame: *Frame) ExecutionError.Error!void {
 /// Pushes the address of the account that directly called this contract.
 /// Stack: [] → [caller]
 pub fn op_caller(frame: *Frame) ExecutionError.Error!void {
-    const caller = to_u256(frame.caller);
+    const caller = to_u256(frame.host.get_caller());
     frame.stack.append_unsafe(caller);
 }
 
@@ -81,7 +81,7 @@ pub fn op_caller(frame: *Frame) ExecutionError.Error!void {
 /// Pushes the value in wei sent with the current call.
 /// Stack: [] → [value]
 pub fn op_callvalue(frame: *Frame) ExecutionError.Error!void {
-    frame.stack.append_unsafe(frame.value);
+    frame.stack.append_unsafe(frame.host.get_value());
 }
 
 /// GASPRICE opcode (0x3A) - Get price of gas in current transaction

@@ -37,7 +37,7 @@ pub fn op_sload(frame: *Frame) ExecutionError.Error!void {
 
 /// SSTORE opcode - Store value in persistent storage
 pub fn op_sstore(frame: *Frame) ExecutionError.Error!void {
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
@@ -110,7 +110,7 @@ pub fn op_tstore(frame: *Frame) ExecutionError.Error!void {
     //     return ExecutionError.Error.InvalidOpcode;
     // }
 
-    if (frame.is_static) {
+    if (frame.host.get_is_static()) {
         @branchHint(.unlikely);
         return ExecutionError.Error.WriteProtection;
     }
