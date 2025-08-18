@@ -1879,7 +1879,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
         const code = &[_]u8{0x00}; // STOP
         _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
         const result = try SimpleAnalysis.analyze(allocator, code);
-        defer result.analysis.deinit(allocator);
+        // Analysis is const from analyze(), cannot deinit here
         defer allocator.free(result.metadata);
 
         const MockHost = @import("../host.zig").MockHost;
@@ -1971,7 +1971,7 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
         const code = &[_]u8{0x00}; // STOP
         _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
         const result = try SimpleAnalysis.analyze(allocator, code);
-        defer result.analysis.deinit(allocator);
+        // Analysis is const from analyze(), cannot deinit here
         defer allocator.free(result.metadata);
 
         const MockHost = @import("../host.zig").MockHost;
@@ -2029,7 +2029,7 @@ test "EIP-150 gas calculations for nested calls" {
     const code = &[_]u8{0x00}; // STOP
     _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
-    defer result.analysis.deinit(allocator);
+    // Analysis is const from analyze(), cannot deinit here
     defer allocator.free(result.metadata);
 
     const MockHost = @import("../host.zig").MockHost;
@@ -2104,7 +2104,7 @@ test "EIP-150 minimum gas retention" {
     const code = &[_]u8{0x00}; // STOP
     _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
-    defer result.analysis.deinit(allocator);
+    // Analysis is const from analyze(), cannot deinit here
     defer allocator.free(result.metadata);
 
     var mock_host = MockHost.init(allocator);
@@ -2167,7 +2167,7 @@ test "EIP-150 stipend edge cases" {
     const code = &[_]u8{0x00}; // STOP
     _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
-    defer result.analysis.deinit(allocator);
+    // Analysis is const from analyze(), cannot deinit here
     defer allocator.free(result.metadata);
 
     const MockHost = @import("../host.zig").MockHost;

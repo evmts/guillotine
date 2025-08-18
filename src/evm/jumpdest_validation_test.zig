@@ -14,7 +14,7 @@ test "SimpleAnalysis correctly maps instructions and skips PUSH data" {
     };
     
     const result = try SimpleAnalysis.analyze(allocator, code);
-    defer result.analysis.deinit(allocator);
+    // Analysis is const from analyze(), cannot deinit here
     defer allocator.free(result.metadata);
     
     // Verify instruction mapping: position 1 and 2 should NOT be instruction starts
@@ -46,7 +46,7 @@ test "SimpleAnalysis with basic EVM sequence" {
     };
     
     const result = try SimpleAnalysis.analyze(allocator, code);
-    defer result.analysis.deinit(allocator);
+    // Analysis is const from analyze(), cannot deinit here
     defer allocator.free(result.metadata);
     
     // Verify instruction mapping for each actual instruction start
@@ -90,7 +90,7 @@ test "SimpleAnalysis with ERC20 constructor pattern" {
     };
     
     const result = try SimpleAnalysis.analyze(allocator, code);
-    defer result.analysis.deinit(allocator);
+    // Analysis is const from analyze(), cannot deinit here
     defer allocator.free(result.metadata);
     
     // Verify key instruction positions
