@@ -28,10 +28,11 @@ pub fn main() !void {
     defer std.process.argsFree(gpa_allocator, args);
 
     if (args.len < 5) {
-        std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>] [--next]\n", .{args[0]});
+        std.debug.print("Usage: {s} --contract-code-path <path> --calldata <hex> [--num-runs <n>] [--next] [--call2]\n", .{args[0]});
         std.debug.print("Example: {s} --contract-code-path bytecode.txt --calldata 0x12345678\n", .{args[0]});
         std.debug.print("Options:\n", .{});
         std.debug.print("  --next    Use call_mini (simplified lazy jumpdest validation)\n", .{});
+        std.debug.print("  --call2   Use call2 with interpret2 (tailcall dispatch interpreter)\n", .{});
         std.process.exit(1);
     }
 
@@ -39,6 +40,7 @@ pub fn main() !void {
     var calldata_hex: ?[]const u8 = null;
     var num_runs: u8 = 1;
     var use_block_execution = false;
+    var use_call2 = false;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -68,6 +70,8 @@ pub fn main() !void {
             i += 1;
         } else if (std.mem.eql(u8, args[i], "--next")) {
             use_block_execution = true;
+        } else if (std.mem.eql(u8, args[i], "--call2")) {
+            use_call2 = true;
         } else {
             std.debug.print("Error: Unknown argument {s}\n", .{args[i]});
             std.process.exit(1);
@@ -246,7 +250,13 @@ pub fn main() !void {
             .gas = 100_000_000, // 100M gas for intensive operations like minting loops
         } };
         
-        const result = if (use_block_execution)
+        const result = if (use_call2)
+            vm.call2(call_params) catch |err| {
+                // On error, print to stderr and exit
+                std.debug.print("Error executing call2: {}\n", .{err});
+                std.process.exit(1);
+            }
+        else if (use_block_execution)
             vm.call_mini(call_params) catch |err| {
                 // On error, print to stderr and exit
                 std.debug.print("Error executing call_mini: {}\n", .{err});

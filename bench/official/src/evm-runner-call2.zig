@@ -105,7 +105,7 @@ pub fn main() !void {
         // Set deployer balance
         try vm.state.set_balance(deployer, std.math.maxInt(u256));
 
-        // Step 1: Deploy contract using call CREATE
+        // Step 1: Deploy contract using call2 CREATE
         const create_params = evm.CallParams{ .create = .{
             .caller = deployer,
             .value = 0,
@@ -113,8 +113,8 @@ pub fn main() !void {
             .gas = 10_000_000,
         } };
 
-        const create_result = vm.call(create_params) catch |err| {
-            std.debug.print("Error calling vm.call for CREATE: {}\n", .{err});
+        const create_result = vm.call2(create_params) catch |err| {
+            std.debug.print("Error calling vm.call2 for CREATE: {}\n", .{err});
             std.process.exit(1);
         };
 
@@ -156,7 +156,7 @@ pub fn main() !void {
             }
         }
 
-        // Step 2: Call contract using call
+        // Step 2: Call contract using call2 CALL
         // std.debug.print("Starting CALL to contract...\n", .{});
         const call_params = evm.CallParams{ .call = .{
             .caller = deployer,
@@ -167,8 +167,8 @@ pub fn main() !void {
         } };
 
         const start_time = std.time.nanoTimestamp();
-        const call_result = vm.call(call_params) catch |err| {
-            std.debug.print("Error calling vm.call for CALL: {}\n", .{err});
+        const call_result = vm.call2(call_params) catch |err| {
+            std.debug.print("Error calling vm.call2 for CALL: {}\n", .{err});
             std.process.exit(1);
         };
         const end_time = std.time.nanoTimestamp();
