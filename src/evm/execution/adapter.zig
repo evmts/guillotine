@@ -1,5 +1,5 @@
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const Operation = @import("../opcodes/operation.zig");
 const Stack = @import("../stack/stack.zig");
 const GasConstants = @import("primitives").GasConstants;
@@ -17,8 +17,7 @@ pub fn call_any(comptime OpFn: *const fn (*anyopaque) ExecutionError.Error!void,
 }
 
 /// Adapter for op_returndatasize - push the size of return data to stack
-pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_returndatasize_adapter(frame: *Frame) ExecutionError.Error!void {
 
     if (frame.stack.size() >= Stack.CAPACITY) {
         @branchHint(.cold);
@@ -30,8 +29,7 @@ pub fn op_returndatasize_adapter(context: *anyopaque) ExecutionError.Error!void 
 }
 
 /// Adapter for op_returndatacopy - copy return data to memory
-pub fn op_returndatacopy_adapter(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_returndatacopy_adapter(frame: *Frame) ExecutionError.Error!void {
 
     if (frame.stack.size() < 3) {
         @branchHint(.cold);

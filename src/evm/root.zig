@@ -64,6 +64,8 @@ pub const primitives = @import("primitives");
 
 /// Simplified bytecode analysis for tailcall dispatch
 pub const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+/// Compatibility wrapper for the old CodeAnalysis interface
+pub const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 
 /// Unified error types for EVM execution
 pub const ExecutionError = @import("execution/execution_error.zig");

@@ -13,7 +13,17 @@ pub const CodeAnalysis = struct {
     code: []const u8, // Compatibility field for old interface
     code_len: usize, // Compatibility field for old interface
     instructions: []const u8, // Compatibility field - maps to bytecode for now
-    size2_instructions: usize, // Compatibility field for instruction count
+    size2_instructions: []const u8, // Compatibility field for instruction slices
+    size8_instructions: []const u8, // Compatibility field for instruction slices
+    size16_instructions: []const u8, // Compatibility field for instruction slices
+    size0_counts: @import("size_buckets.zig").Size0Counts, // Compatibility field 
+    size2_counts: @import("size_buckets.zig").Size2Counts, // Compatibility field
+    size8_counts: @import("size_buckets.zig").Size8Counts, // Compatibility field
+    size16_counts: @import("size_buckets.zig").Size16Counts, // Compatibility field
+    pc_to_block_start: []const u8, // Compatibility field for PC to block start mapping
+    jumpdest_array: @import("size_buckets.zig").JumpdestArray, // Compatibility field for jump destination array
+    inst_jump_type: []const u8, // Compatibility field for instruction jump types
+    inst_to_pc: []const u8, // Compatibility field for instruction to PC mapping
 
     /// Create analysis from bytecode (old interface compatibility)
     pub fn from_code(allocator: std.mem.Allocator, code: []const u8, _jump_table: anytype) !CodeAnalysis {
@@ -26,7 +36,20 @@ pub const CodeAnalysis = struct {
             .code = code,
             .code_len = code.len,
             .instructions = code, // Map to bytecode for compatibility
-            .size2_instructions = result.analysis.inst_count,
+            .size2_instructions = &.{}, // Empty slice for compatibility
+            .size8_instructions = &.{}, // Empty slice for compatibility
+            .size16_instructions = &.{}, // Empty slice for compatibility
+            .size0_counts = std.mem.zeroes(@import("size_buckets.zig").Size0Counts),
+            .size2_counts = std.mem.zeroes(@import("size_buckets.zig").Size2Counts),
+            .size8_counts = std.mem.zeroes(@import("size_buckets.zig").Size8Counts),
+            .size16_counts = std.mem.zeroes(@import("size_buckets.zig").Size16Counts),
+            .pc_to_block_start = &.{}, // Empty slice for compatibility
+            .jumpdest_array = @import("size_buckets.zig").JumpdestArray{
+                .positions = &.{},
+                .code_len = code.len,
+            }, // Empty array for compatibility
+            .inst_jump_type = &.{}, // Empty slice for compatibility
+            .inst_to_pc = &.{}, // Empty slice for compatibility
         };
     }
 

@@ -364,7 +364,7 @@ pub fn op_push0(frame: *StackFrame) Error!noreturn {
 // Handle PUSH operations with data bytes
 pub fn op_push(frame: *StackFrame) Error!noreturn {
     // Use cached analysis for O(1) lookup
-    const pc = frame.analysis.getPc(frame.ip);
+    const pc = frame.analysis.getPc(@intCast(frame.ip));
     if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
         const bytecode = frame.analysis.bytecode;
         if (pc < bytecode.len) {
@@ -689,7 +689,7 @@ pub fn op_jumpi(frame: *StackFrame) Error!noreturn {
 
 pub fn op_pc(frame: *StackFrame) Error!noreturn {
     // Use cached analysis for O(1) lookup
-    const pc = frame.analysis.getPc(frame.ip);
+    const pc = frame.analysis.getPc(@intCast(frame.ip));
     if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
         try frame.stack.append(pc);
         return next(frame);
@@ -718,7 +718,7 @@ pub fn op_nop(frame: *StackFrame) Error!noreturn {
 // Fused PUSH+JUMP operation
 pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
     // Get the PC for this instruction to read the push value
-    const pc = frame.analysis.getPc(frame.ip);
+    const pc = frame.analysis.getPc(@intCast(frame.ip));
     if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
         return Error.InvalidJump;
     }
@@ -764,7 +764,7 @@ pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
 // Fused PUSH+JUMPI operation
 pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
     // Get the PC for this instruction to read the push value
-    const pc = frame.analysis.getPc(frame.ip);
+    const pc = frame.analysis.getPc(@intCast(frame.ip));
     if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
         return Error.InvalidJump;
     }
@@ -818,7 +818,7 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
 
 // Helper function to read push value from bytecode
 inline fn readPushValue(frame: *StackFrame) !u256 {
-    const pc = frame.analysis.getPc(frame.ip);
+    const pc = frame.analysis.getPc(@intCast(frame.ip));
     if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
         return Error.InvalidJump;
     }
