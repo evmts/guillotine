@@ -4,6 +4,13 @@
 //! block hashes, timestamps, miner address, block number, difficulty/prevrandao,
 //! gas limit, chain ID, and base fee.
 //!
+//! ## Safety Note
+//!
+//! All handlers in this module use `unsafe` stack operations (pop_unsafe, peek_unsafe,
+//! append_unsafe) because stack bounds checking and validation is performed by the
+//! interpreter's jump table before dispatching to these handlers. This eliminates
+//! redundant checks and maximizes performance.
+//!
 //! ## Gas Costs
 //! - BLOCKHASH: 20 gas
 //! - COINBASE, TIMESTAMP, NUMBER, GASLIMIT, CHAINID: 2 gas
@@ -16,17 +23,26 @@
 //! - EIP-4844: BLOBBASEFEE opcode (Cancun)
 
 const std = @import("std");
+const builtin = @import("builtin");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 
+// Safety check constants - only enabled in Debug and ReleaseSafe modes
+const SAFE_STACK_CHECKS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
+
 /// BLOCKHASH opcode (0x40) - Get hash of specific block
+/// Static gas cost (20 gas) is consumed externally by the interpreter
 ///
 /// Returns the hash of one of the 256 most recent blocks. If the requested block
 /// is not within this range or is the current block or a future block, returns 0.
 ///
 /// Stack: [block_number] → [hash]
 pub fn op_blockhash(frame: *Frame) ExecutionError.Error!void {
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 1);
+    }
+    
     const block_number = frame.stack.pop_unsafe();
 
     const block_info = frame.host.get_block_info();
@@ -49,6 +65,7 @@ pub fn op_blockhash(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// COINBASE opcode (0x41) - Get current block miner's address
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Pushes the address of the miner who produced the current block.
 /// Note: After EIP-3651 (Shanghai), the coinbase address is pre-warmed.
@@ -65,6 +82,7 @@ pub fn op_coinbase(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// TIMESTAMP opcode (0x42) - Get current block timestamp
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Pushes the Unix timestamp of the current block.
 ///
@@ -75,6 +93,7 @@ pub fn op_timestamp(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// NUMBER opcode (0x43) - Get current block number
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Pushes the number of the current block.
 ///
@@ -85,6 +104,7 @@ pub fn op_number(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// DIFFICULTY/PREVRANDAO opcode (0x44) - Get block difficulty or prevrandao
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Pre-merge: Returns the difficulty of the current block.
 /// Post-merge (EIP-4399): Returns the prevrandao value from the beacon chain.
@@ -98,6 +118,7 @@ pub fn op_difficulty(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Returns the prevrandao value from the beacon chain.
 /// This is an alias for DIFFICULTY that makes the semantic change explicit.
@@ -109,6 +130,7 @@ pub fn op_prevrandao(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// GASLIMIT opcode (0x45) - Get current block gas limit
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Pushes the gas limit of the current block.
 ///
@@ -119,6 +141,7 @@ pub fn op_gaslimit(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// BASEFEE opcode (0x48) - Get current block base fee
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Returns the base fee per gas of the current block (EIP-3198, London).
 /// This value is determined by the network's fee market mechanism.
@@ -139,12 +162,17 @@ pub fn op_basefee(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// BLOBHASH opcode (0x49) - Get versioned hash of blob
+/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
 /// Returns the versioned hash of the blob at the given index (EIP-4844, Cancun).
 /// If index is out of bounds, returns 0.
 ///
 /// Stack: [index] → [blob_hash]
 pub fn op_blobhash(frame: *Frame) ExecutionError.Error!void {
+    if (SAFE_STACK_CHECKS) {
+        std.debug.assert(frame.stack.size() >= 1);
+    }
+    
     const index = frame.stack.pop_unsafe();
 
     // TODO: Need blob_hashes field in ExecutionContext
@@ -163,6 +191,7 @@ pub fn op_blobhash(frame: *Frame) ExecutionError.Error!void {
 }
 
 /// BLOBBASEFEE opcode (0x4A) - Get current blob base fee
+/// Static gas cost (2 gas) is consumed externally by the interpreter
 ///
 /// Returns the base fee per blob gas of the current block (EIP-4844, Cancun).
 /// Used for blob transaction pricing.
