@@ -739,6 +739,7 @@ pub const InterprResult = struct {
 
 // Main interpret function - wrapper around call2
 pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
+    _ = is_static; // TODO: use this in call params
     // Use call2 for execution
     const params = CallParams{
         .kind = .Call,
