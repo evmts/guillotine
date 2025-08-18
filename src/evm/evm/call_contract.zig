@@ -120,10 +120,7 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
 
     // Create execution context for the contract
     var context = Frame.init(execution_gas, // gas remaining
-        is_static, // static call flag
         to, // contract address
-        caller, // caller address
-        value, // value being transferred
         analysis.analysis, // simple analysis
         analysis.metadata, // metadata array
         &[_]*const anyopaque{}, // empty ops array - interpret2 will set this up
@@ -135,6 +132,18 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
     defer context.deinit(self.allocator);
+
+    // Set up frame metadata
+    if (self.current_frame_depth < @import("../evm.zig").MAX_CALL_DEPTH) {
+        self.frame_metadata[self.current_frame_depth] = @import("../evm.zig").StackFrameMetadata{
+            .caller = caller,
+            .value = value,
+            .input_buffer = input,
+            .output_buffer = &.{},
+            .is_static = is_static,
+            .depth = self.current_frame_depth,
+        };
+    }
 
     // TODO: Execute the contract using the Frame
     // This would require implementing a new execution method that works with Frame

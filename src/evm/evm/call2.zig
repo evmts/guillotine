@@ -7,6 +7,7 @@ const Host = @import("../host.zig").Host;
 const StackFrame = @import("../stack_frame.zig").StackFrame;
 const Frame = StackFrame;
 const Evm = @import("../evm.zig");
+const StackFrameMetadata = Evm.StackFrameMetadata;
 const interpret2 = @import("interpret2.zig").interpret2;
 const primitives = @import("primitives");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
@@ -177,10 +178,7 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     
     var frame = try StackFrame.init(
         gas_after_base,
-        call_is_static,
         call_address,
-        call_caller,
-        call_value,
         empty_analysis,
         empty_metadata,
         empty_ops,
@@ -190,8 +188,17 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     );
     defer frame.deinit(self.allocator);
 
-    // Set the input buffer for the frame
-    frame.input_buffer = call_input;
+    // Set up frame metadata
+    if (self.current_frame_depth < MAX_CALL_DEPTH) {
+        self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
+            .caller = call_caller,
+            .value = call_value,
+            .input_buffer = call_input,
+            .output_buffer = &.{},
+            .is_static = call_is_static,
+            .depth = self.current_frame_depth,
+        };
+    }
 
     // Store the current input for the host interface to access
     self.current_input = call_input;
