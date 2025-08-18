@@ -121,6 +121,190 @@ pub const METADATA_UP_FRONT_ALLOCATION = (std.math.maxInt(u16) + 1) * @sizeOf(u3
 /// Maximum 64K opcodes * pointer size
 pub const OPS_UP_FRONT_ALLOCATION = ((std.math.maxInt(u16) + 1) + 1) * @sizeOf(*const anyopaque);
 
+/// Allocation information for pre-allocation strategy
+pub const AllocationInfo = struct {
+    size: usize,
+    alignment: usize = 8,
+    can_grow: bool = false,
+};
+
+/// Calculate allocation requirements for SimpleAnalysis arrays
+/// Based on bytecode size, calculates space needed for inst_to_pc and pc_to_inst
+pub fn calculate_analysis_allocation(bytecode_size: usize) AllocationInfo {
+    // Worst case: every byte is an instruction
+    const max_instructions = bytecode_size;
+    return .{
+        .size = max_instructions * @sizeOf(u16) * 2, // inst_to_pc + pc_to_inst
+        .alignment = @alignOf(u16),
+        .can_grow = false,
+    };
+}
+
+/// Calculate allocation requirements for metadata array
+/// Based on bytecode size, calculates space needed for metadata
+pub fn calculate_metadata_allocation(bytecode_size: usize) AllocationInfo {
+    // Worst case: every byte is an instruction needing metadata
+    const max_instructions = bytecode_size;
+    return .{
+        .size = max_instructions * @sizeOf(u32),
+        .alignment = @alignOf(u32),
+        .can_grow = false,
+    };
+}
+
+/// Calculate allocation requirements for ops array
+/// Based on bytecode size, calculates space needed for function pointers
+pub fn calculate_ops_allocation(bytecode_size: usize) AllocationInfo {
+    // Worst case: every byte is an opcode + 1 for terminating STOP
+    const max_ops = bytecode_size + 1;
+    return .{
+        .size = max_ops * @sizeOf(*const anyopaque),
+        .alignment = @alignOf(*const anyopaque),
+        .can_grow = false,
+    };
+}
+
+/// Build analysis and ops array with pre-allocated buffers
+/// This version accepts pre-allocated slices to avoid internal allocations
+pub fn prepare_with_buffers(
+    inst_to_pc: []u16,
+    pc_to_inst: []u16,
+    metadata: []u32,
+    ops: []*const anyopaque,
+    code: []const u8,
+) !struct {
+    analysis: SimpleAnalysis,
+    metadata: []u32,
+    ops: []*const anyopaque,
+} {
+    // Verify buffer sizes are sufficient
+    if (code.len > std.math.maxInt(u16)) return error.CodeTooLarge;
+    
+    // Count actual instructions first
+    var inst_count: usize = 0;
+    var pc: usize = 0;
+    while (pc < code.len) {
+        const byte = code[pc];
+        if (byte >= 0x60 and byte <= 0x7F) {
+            // PUSH instruction
+            const push_size = byte - 0x5F;
+            pc += 1 + push_size;
+        } else {
+            pc += 1;
+        }
+        inst_count += 1;
+    }
+    
+    // Verify buffers are large enough
+    std.debug.assert(inst_to_pc.len >= inst_count);
+    std.debug.assert(pc_to_inst.len >= code.len);
+    std.debug.assert(metadata.len >= inst_count);
+    std.debug.assert(ops.len >= inst_count + 1); // +1 for terminating op_stop
+    
+    // Initialize pc_to_inst with MAX_USIZE
+    @memset(pc_to_inst[0..code.len], SimpleAnalysis.MAX_USIZE);
+    
+    // Build analysis mappings
+    pc = 0;
+    var inst_idx: u16 = 0;
+    
+    while (pc < code.len) {
+        const byte = code[pc];
+        
+        // Record instruction start
+        inst_to_pc[inst_idx] = @intCast(pc);
+        pc_to_inst[pc] = inst_idx;
+        
+        // Build metadata for this instruction
+        if (byte >= 0x60 and byte <= 0x7F) {
+            // PUSH1-PUSH32
+            const push_size = byte - 0x5F;
+            
+            if (push_size <= 4 and pc + 1 + push_size <= code.len) {
+                var value: u32 = 0;
+                var i: usize = 0;
+                while (i < push_size) : (i += 1) {
+                    value = (value << 8) | code[pc + 1 + i];
+                }
+                metadata[inst_idx] = value;
+            } else {
+                metadata[inst_idx] = @intCast(pc);
+            }
+            
+            pc += 1 + push_size;
+        } else if (byte == 0x5F) {
+            // PUSH0
+            metadata[inst_idx] = 0;
+            pc += 1;
+        } else if (byte == 0x58) {
+            // PC opcode
+            metadata[inst_idx] = @intCast(pc);
+            pc += 1;
+        } else {
+            // Other opcodes
+            metadata[inst_idx] = 0;
+            pc += 1;
+        }
+        
+        inst_idx += 1;
+    }
+    
+    // Build ops array with fusion patterns
+    var i: usize = 0;
+    while (i < inst_count) : (i += 1) {
+        const opcode_pc = inst_to_pc[i];
+        const opcode = code[opcode_pc];
+        
+        // Check for PUSH fusion opportunities
+        if (opcode >= 0x60 and opcode <= 0x64) { // PUSH1-PUSH5
+            if (i + 1 < inst_count) {
+                const next_pc = inst_to_pc[i + 1];
+                const next_opcode = code[next_pc];
+                
+                // Map fusion patterns
+                const fused_op = switch (next_opcode) {
+                    0x01 => &tailcalls.op_push_then_add,
+                    0x02 => &tailcalls.op_push_then_mul,
+                    0x03 => &tailcalls.op_push_then_sub,
+                    0x10 => &tailcalls.op_push_then_lt,
+                    0x11 => &tailcalls.op_push_then_gt,
+                    0x14 => &tailcalls.op_push_then_eq,
+                    0x16 => &tailcalls.op_push_then_and,
+                    0x17 => &tailcalls.op_push_then_or,
+                    0x18 => &tailcalls.op_push_then_xor,
+                    0x1B => &tailcalls.op_push_then_shl,
+                    0x1C => &tailcalls.op_push_then_shr,
+                    else => null,
+                };
+                
+                if (fused_op) |op| {
+                    ops[i] = @ptrCast(op);
+                    i += 1; // Skip the next instruction
+                    ops[i] = @ptrCast(&tailcalls.op_nop);
+                    continue;
+                }
+            }
+        }
+        
+        // Regular opcode mapping
+        ops[i] = @ptrCast(tailcalls.opcode_to_tailcall(opcode));
+    }
+    
+    // Add terminating op_stop
+    ops[inst_count] = @ptrCast(&tailcalls.op_stop);
+    
+    // Return slices trimmed to actual size
+    return .{
+        .analysis = SimpleAnalysis{
+            .inst_to_pc = inst_to_pc[0..inst_count],
+            .pc_to_inst = pc_to_inst[0..code.len],
+            .bytecode = code,
+        },
+        .metadata = metadata[0..inst_count],
+        .ops = ops[0..inst_count + 1],
+    };
+}
+
 /// Build the tailcall ops array and return together with analysis and metadata
 /// This encapsulates opcode decoding and fusion logic for PUSH+X patterns
 pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
@@ -410,6 +594,78 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
     }
 
     return .{ .analysis = analysis, .metadata = metadata, .ops = ops_slice };
+}
+
+test "prepare_with_buffers" {
+    const testing = std.testing;
+    
+    // Test simple bytecode: PUSH1 0x05 ADD PUSH1 0x10 MUL STOP
+    const code = &[_]u8{ 0x60, 0x05, 0x01, 0x60, 0x10, 0x02, 0x00 };
+    
+    // Allocate buffers based on bytecode size
+    var inst_to_pc: [10]u16 = undefined;
+    var pc_to_inst: [10]u16 = undefined;
+    var metadata: [10]u32 = undefined;
+    var ops: [11]*const anyopaque = undefined;
+    
+    const result = try prepare_with_buffers(
+        &inst_to_pc,
+        &pc_to_inst,
+        &metadata,
+        &ops,
+        code,
+    );
+    
+    // Verify analysis
+    try testing.expectEqual(@as(usize, 5), result.analysis.inst_to_pc.len);
+    try testing.expectEqual(@as(usize, 7), result.analysis.pc_to_inst.len);
+    
+    // Verify metadata for PUSH instructions
+    try testing.expectEqual(@as(u32, 0x05), result.metadata[0]); // PUSH1 0x05
+    try testing.expectEqual(@as(u32, 0x10), result.metadata[2]); // PUSH1 0x10
+    
+    // Verify ops include fusion
+    // First PUSH should be fused with ADD
+    const first_op = @intFromPtr(result.ops[0]);
+    const push_add_op = @intFromPtr(&tailcalls.op_push_then_add);
+    try testing.expectEqual(push_add_op, first_op);
+    
+    // Second operation should be NOP (consumed by fusion)
+    const second_op = @intFromPtr(result.ops[1]);
+    const nop_op = @intFromPtr(&tailcalls.op_nop);
+    try testing.expectEqual(nop_op, second_op);
+}
+
+test "analysis allocation calculations" {
+    const testing = std.testing;
+    
+    // Test small bytecode
+    const small_size = 100;
+    const small_analysis = calculate_analysis_allocation(small_size);
+    const small_metadata = calculate_metadata_allocation(small_size);
+    const small_ops = calculate_ops_allocation(small_size);
+    
+    try testing.expectEqual(small_size * @sizeOf(u16) * 2, small_analysis.size);
+    try testing.expectEqual(small_size * @sizeOf(u32), small_metadata.size);
+    try testing.expectEqual((small_size + 1) * @sizeOf(*const anyopaque), small_ops.size);
+    
+    // Test larger bytecode (16KB like Snailtracer)
+    const large_size = 16384;
+    const large_analysis = calculate_analysis_allocation(large_size);
+    const large_metadata = calculate_metadata_allocation(large_size);
+    const large_ops = calculate_ops_allocation(large_size);
+    
+    try testing.expectEqual(large_size * @sizeOf(u16) * 2, large_analysis.size);
+    try testing.expectEqual(large_size * @sizeOf(u32), large_metadata.size);
+    try testing.expectEqual((large_size + 1) * @sizeOf(*const anyopaque), large_ops.size);
+    
+    // Verify alignment and growth properties
+    try testing.expectEqual(@alignOf(u16), small_analysis.alignment);
+    try testing.expectEqual(@alignOf(u32), small_metadata.alignment);
+    try testing.expectEqual(@alignOf(*const anyopaque), small_ops.alignment);
+    try testing.expectEqual(false, small_analysis.can_grow);
+    try testing.expectEqual(false, small_metadata.can_grow);
+    try testing.expectEqual(false, small_ops.can_grow);
 }
 
 test "analysis2: PUSH small value bounds check and metadata" {
