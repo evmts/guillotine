@@ -33,6 +33,12 @@ pub const INITIAL_CAPACITY = constants.INITIAL_CAPACITY;
 pub const DEFAULT_MEMORY_LIMIT = constants.DEFAULT_MEMORY_LIMIT;
 pub const calculate_num_words = constants.calculate_num_words;
 
+/// Up-front allocation size for Memory
+/// Memory allocates:
+/// - Initial ArrayList(u8) structure
+/// - Initial buffer capacity (INITIAL_CAPACITY bytes)
+pub const UP_FRONT_ALLOCATION = @sizeOf(std.ArrayList(u8)) + INITIAL_CAPACITY;
+
 // Core memory struct fields optimized for cache locality and minimal padding
 /// Memory checkpoint for child memory isolation
 /// Frequently accessed during memory operations

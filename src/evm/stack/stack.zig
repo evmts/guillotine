@@ -16,6 +16,10 @@ pub const Error = error{
     StackUnderflow,
 };
 
+/// Up-front allocation size for Stack
+/// Stack allocates a fixed array of CAPACITY u256 values
+pub const UP_FRONT_ALLOCATION = CAPACITY * @sizeOf(u256);
+
 // TODO make this depend on CAPCITY
 current: u16,
 data: *[CAPACITY]u256,

@@ -39,6 +39,20 @@ pub const StackFrame = struct {
     contract_address: primitives.Address.Address,
     state: DatabaseInterface,
     allocator: std.mem.Allocator,
+    
+    /// Total up-front allocation size for StackFrame
+    /// This includes all the allocations needed by the frame:
+    /// - Stack data: 1024 * 32 bytes = 32KB
+    /// - Memory initial buffer: 4KB
+    /// - SimpleAnalysis arrays: 256KB
+    /// - Metadata array: 256KB
+    /// - Ops array: ~512KB (assuming 8-byte pointers)
+    /// Total: ~1060KB for worst case
+    pub const UP_FRONT_ALLOCATION = Stack.UP_FRONT_ALLOCATION + 
+                                     Memory.UP_FRONT_ALLOCATION + 
+                                     @import("evm/analysis2.zig").SimpleAnalysis.UP_FRONT_ALLOCATION +
+                                     @import("evm/analysis2.zig").METADATA_UP_FRONT_ALLOCATION +
+                                     @import("evm/analysis2.zig").OPS_UP_FRONT_ALLOCATION;
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
