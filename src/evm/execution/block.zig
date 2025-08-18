@@ -527,8 +527,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
 }
 
 test "GASLIMIT returns block gas limit" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
 
     const test_gas_limit: u64 = 30_000_000;
 
@@ -544,25 +543,45 @@ test "GASLIMIT returns block gas limit" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try StackFrame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Execute GASLIMIT opcode
-    try op_gaslimit(&context);
+    try op_gaslimit(&frame);
 
     // Verify gas limit was pushed to stack
-    const result = stack.pop_unsafe();
+    const result = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, test_gas_limit), result);
 }
 
 test "BASEFEE returns block base fee" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
 
     const test_base_fee: u256 = 1_000_000_000; // 1 gwei
 
@@ -578,25 +597,45 @@ test "BASEFEE returns block base fee" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try StackFrame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Execute BASEFEE opcode
-    try op_basefee(&context);
+    try op_basefee(&frame);
 
     // Verify base fee was pushed to stack
-    const result = stack.pop_unsafe();
+    const result = frame.stack.pop_unsafe();
     try testing.expectEqual(test_base_fee, result);
 }
 
 test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
 
     var test_host = TestBlockHost{
         .block_info = BlockInfo{
@@ -610,25 +649,45 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try StackFrame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Execute BLOBBASEFEE opcode
-    try op_blobbasefee(&context);
+    try op_blobbasefee(&frame);
 
     // Verify 0 was pushed to stack (not yet implemented in BlockInfo)
-    const result = stack.pop_unsafe();
+    const result = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, 0), result);
 }
 
 test "BLOCKHASH returns 0 for future blocks" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
 
     var test_host = TestBlockHost{
         .block_info = BlockInfo{
@@ -642,28 +701,48 @@ test "BLOCKHASH returns 0 for future blocks" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try StackFrame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Push future block number
-    stack.append_unsafe(1001);
+    frame.stack.append_unsafe(1001);
 
     // Execute BLOCKHASH opcode
-    try op_blockhash(&context);
+    try op_blockhash(&frame);
 
     // Verify 0 was pushed for future block
-    const result = stack.pop_unsafe();
+    const result = frame.stack.pop_unsafe();
     try testing.expectEqual(@as(u256, 0), result);
 }
 
 test "BLOCKHASH returns 0 for blocks too far in past" {
-    var stack = try @import("../stack/stack.zig").init(testing.allocator);
-    defer stack.deinit(std.testing.allocator);
+    const allocator = testing.allocator;
 
     var test_host = TestBlockHost{
         .block_info = BlockInfo{
@@ -677,22 +756,43 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         },
     };
 
-    var context = struct {
-        stack: *@TypeOf(stack),
-        host: Host,
-    }{
-        .stack = &stack,
-        .host = (&test_host).to_host(),
+    // Create empty analysis for StackFrame
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &.{},
+        .inst_count = 0,
     };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.to_database_interface();
+
+    var frame = try StackFrame.init(
+        1000000, // gas_remaining
+        false, // static_call
+        primitives.Address.ZERO, // contract_address
+        primitives.Address.ZERO, // caller
+        0, // value
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
+        (&test_host).to_host(),
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
 
     // Push block number more than 256 blocks in past
-    stack.append_unsafe(700);
+    frame.stack.append_unsafe(700);
 
     // Execute BLOCKHASH opcode
-    try op_blockhash(&context);
+    try op_blockhash(&frame);
 
     // Verify 0 was pushed for old block
-    const result = try stack.pop();
+    const result = try frame.stack.pop();
     try testing.expectEqual(@as(u256, 0), result);
 }
 
