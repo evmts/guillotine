@@ -1,234 +1,126 @@
-# Block-Based EVM Optimization with BLOCK_START Instructions
+# EVM Memory Pre-allocation Refactoring
 
 ## Overview
 
-This prompt outlines the implementation of a comprehensive block-based optimization system for the Guillotine EVM that introduces BLOCK_START pseudo-instructions to enable advanced optimizations including stack validation, gas pre-calculation, and intelligent prefetching.
+Refactor the EVM to use a tiered, upfront allocation strategy where StackFrame owns a single static buffer for all non-growable allocations. This eliminates scattered allocations and improves performance through better cache locality.
 
-## Core Philosophy
+## Key Design Principles
 
-Instead of validating stack depth and calculating gas costs instruction-by-instruction during execution, we pre-analyze bytecode into basic blocks and aggregate requirements at the block level. This enables:
-
-1. **Batch validation** - Check stack requirements once per block entry
-2. **Gas pre-calculation** - Calculate total gas cost for entire blocks upfront  
-3. **Intelligent prefetching** - Prefetch next blocks during current block execution
-4. **Better branch prediction** - Provide hints based on block analysis
-
-## Architecture Overview
-
-### Phase 1: Block Analysis and Metadata
-
-```zig
-pub const BlockMetadata = struct {
-    // Block identification
-    start_inst_idx: u16,
-    end_inst_idx: u16,
-    start_pc: u16,
-    
-    // Execution requirements (to be calculated)
-    min_stack_depth: u8,    // Minimum stack items needed on entry
-    max_stack_growth: u8,   // Maximum additional stack items created
-    total_gas_cost: u64,    // Total gas cost for entire block
-    
-    // Control flow
-    is_terminator: bool,    // Block ends with RETURN/REVERT/STOP
-    jump_targets: []u16,    // Possible jump destinations (for JUMPI)
-    
-    // Optimization hints
-    is_loop_header: bool,   // Block is start of a loop
-    is_hot_path: bool,      // Frequently executed block
-};
-
-pub const BlockAnalysis = struct {
-    blocks: []BlockMetadata,
-    inst_to_block: []u16,   // Maps instruction index to block index
-    allocator: std.mem.Allocator,
-    
-    pub fn analyzeBlocks(allocator: std.mem.Allocator, code: []const u8) !BlockAnalysis;
-    pub fn getBlockForInst(self: *const BlockAnalysis, inst_idx: u16) u16;
-    pub fn deinit(self: *BlockAnalysis) void;
-};
-```
-
-### Phase 2: BLOCK_START Instruction Injection
-
-During analysis, inject BLOCK_START pseudo-instructions at the beginning of each basic block:
-
-```zig
-// Enhanced analysis that creates ops array with BLOCK_START injections
-pub fn prepareWithBlocks(allocator: std.mem.Allocator, code: []const u8) !struct {
-    analysis: SimpleAnalysis,
-    metadata: []u32,
-    ops: []*const anyopaque,
-    block_analysis: BlockAnalysis,
-} {
-    // 1. Analyze basic blocks
-    const block_analysis = try BlockAnalysis.analyzeBlocks(allocator, code);
-    
-    // 2. Create ops array with BLOCK_START injections
-    var ops_list = std.ArrayList(*const anyopaque).init(allocator);
-    
-    for (instructions) |inst, i| {
-        // Check if this instruction starts a new block
-        if (block_analysis.isBlockStart(i)) {
-            // Inject BLOCK_START before the actual instruction
-            try ops_list.append(@ptrCast(&tailcalls.op_block_start));
-        }
-        
-        // Add the actual instruction
-        const opcode_fn = mapOpcodeToFunction(inst.opcode);
-        try ops_list.append(opcode_fn);
-    }
-    
-    return .{
-        .analysis = analysis,
-        .metadata = metadata,
-        .ops = try ops_list.toOwnedSlice(),
-        .block_analysis = block_analysis,
-    };
-}
-```
-
-### Phase 3: BLOCK_START Implementation
-
-```zig
-pub fn op_block_start(frame: *StackFrame) Error!noreturn {
-    const block_idx = frame.block_analysis.getBlockForInst(frame.ip);
-    const block = &frame.block_analysis.blocks[block_idx];
-    
-    // 1. STACK VALIDATION
-    // Check if we have sufficient stack depth for this block
-    if (frame.stack.depth() < block.min_stack_depth) {
-        @branchHint(.cold);
-        return Error.StackUnderflow;
-    }
-    
-    // Check if block would cause stack overflow
-    if (frame.stack.depth() + block.max_stack_growth > MAX_STACK_SIZE) {
-        @branchHint(.cold);
-        return Error.StackOverflow;
-    }
-    
-    // 2. GAS PRE-CALCULATION AND CHARGING
-    // Charge gas for the entire block upfront
-    try frame.useGas(block.total_gas_cost);
-    
-    // 3. INTELLIGENT PREFETCHING
-    // Prefetch likely next blocks based on control flow analysis
-    if (block.jump_targets.len > 0) {
-        // This block ends with a conditional jump - prefetch both targets
-        const fallthrough_block = block_idx + 1;
-        const jump_target_block = findBlockForPC(block.jump_targets[0]);
-        
-        // Prefetch fallthrough (more likely)
-        if (fallthrough_block < frame.block_analysis.blocks.len) {
-            prefetchBlock(frame, fallthrough_block, .medium_locality);
-        }
-        
-        // Prefetch jump target (less likely unless it's a loop)
-        if (block.is_loop_header) {
-            prefetchBlock(frame, jump_target_block, .high_locality);
-        } else {
-            prefetchBlock(frame, jump_target_block, .low_locality);
-        }
-    } else if (!block.is_terminator) {
-        // Linear execution - prefetch next block
-        const next_block = block_idx + 1;
-        if (next_block < frame.block_analysis.blocks.len) {
-            prefetchBlock(frame, next_block, .high_locality);
-        }
-    }
-    
-    // 4. EXECUTION OPTIMIZATION HINTS
-    // Provide branch prediction hints based on block analysis
-    if (block.is_hot_path) {
-        @branchHint(.likely);
-    }
-    
-    // 5. Continue to actual block execution
-    return next(frame);
-}
-```
-
-### Phase 4: Block-Aware Prefetching
-
-```zig
-fn prefetchBlock(frame: *StackFrame, block_idx: u16, locality: enum { low_locality, medium_locality, high_locality }) void {
-    if (block_idx >= frame.block_analysis.blocks.len) return;
-    
-    const block = &frame.block_analysis.blocks[block_idx];
-    const start_idx = block.start_inst_idx;
-    const end_idx = @min(block.end_inst_idx, start_idx + 8); // Limit prefetch window
-    
-    const locality_val: u2 = switch (locality) {
-        .low_locality => 1,
-        .medium_locality => 2, 
-        .high_locality => 3,
-    };
-    
-    // Prefetch the block's instructions
-    for (start_idx..end_idx) |i| {
-        if (i < frame.ops.len) {
-            @prefetch(frame.ops.ptr + i, .{ .rw = .read, .locality = locality_val, .cache = .data });
-            @prefetch(frame.metadata.ptr + i, .{ .rw = .read, .locality = locality_val, .cache = .data });
-            @prefetch(frame.ops[i], .{ .rw = .read, .locality = locality_val, .cache = .instruction });
-        }
-    }
-}
-```
-
-## Implementation Phases
-
-### Phase 1: Basic Block Detection
-1. Implement `BlockAnalysis.analyzeBlocks()` to identify basic block boundaries
-2. Create `BlockMetadata` structures for each block
-3. Build instruction-to-block mapping
-
-### Phase 2: BLOCK_START Injection  
-1. Modify `prepareWithBlocks()` to inject BLOCK_START instructions
-2. Update metadata arrays to account for injected instructions
-3. Ensure instruction indexing remains consistent
-
-### Phase 3: Stack and Gas Analysis
-1. Implement stack depth analysis for each block
-2. Calculate total gas costs per block 
-3. Identify stack growth/shrinkage patterns
-
-### Phase 4: Control Flow Analysis
-1. Identify jump targets and fallthrough paths
-2. Detect loop headers and hot paths
-3. Build jump target mappings
-
-### Phase 5: Prefetching Integration
-1. Implement block-aware prefetching in `op_block_start`
-2. Remove old instruction-level prefetching
-3. Add locality-based prefetching strategies
-
-### Phase 6: Optimization and Validation
-1. Add comprehensive tests for block analysis
-2. Benchmark performance improvements
-3. Validate correctness of stack/gas calculations
-
-## Key Benefits
-
-1. **Reduced Overhead**: Validate stack once per block instead of per instruction
-2. **Better Gas Accounting**: Batch gas charging reduces per-instruction overhead
-3. **Smarter Prefetching**: Block-level analysis enables better cache utilization
-4. **Branch Prediction**: Provide CPU with better hints about execution patterns
-5. **Future Optimizations**: Foundation for JIT compilation, superblock formation
-
-## Performance Expectations
-
-- **Stack Validation**: 5-10x reduction in validation overhead for large blocks
-- **Gas Calculation**: 3-5x reduction in gas accounting overhead  
-- **Cache Performance**: 15-25% improvement in instruction cache hit rates
-- **Branch Prediction**: 10-20% improvement in branch prediction accuracy
+1. **Size-based allocation tiers**: Components export functions that calculate allocation needs based on bytecode size
+2. **StackFrame ownership**: StackFrame.init pre-allocates a single static buffer for all components
+3. **Special case for growable memory**: Memory.zig remains separate as the only growable component
+4. **Move allocation logic upstream**: Call sites (call2.zig) handle allocation, not implementations
+5. **Zero internal allocations**: Components receive pre-allocated buffers as arguments
 
 ## Implementation Requirements
 
-1. **Correctness**: Block analysis must be 100% accurate - any errors break execution
-2. **Memory Safety**: All block metadata must be properly allocated/deallocated
-3. **Compatibility**: Must work with existing fusion optimizations
-4. **Performance**: Block analysis overhead must be amortized by execution gains
-5. **Testing**: Comprehensive test suite covering edge cases and error conditions
+### 1. Component Allocation Functions
 
-This architecture provides a solid foundation for advanced EVM optimizations while maintaining correctness and enabling significant performance improvements through intelligent batching and prefetching.
+Each component that needs memory must export a function with this signature:
+
+```zig
+pub fn calculate_allocation(bytecode_size: usize) struct {
+    size: usize,
+    can_grow: bool,
+} {
+    // Calculate based on bytecode size
+}
+```
+
+Components to update:
+- `stack.zig` - Fixed size (always 32KB for 1024 elements)
+- `analysis2.zig` - Variable based on bytecode (inst_to_pc, pc_to_inst arrays)
+- Metadata array - Variable based on bytecode
+- Ops array - Variable based on bytecode
+
+### 2. StackFrame Pre-allocation
+
+Update `StackFrame.init` to:
+1. Accept bytecode size as parameter
+2. Call each component's `calculate_allocation` function
+3. Allocate a single static buffer for all non-growable components
+4. Use a FixedBufferAllocator to sub-allocate from this buffer
+5. Pass pre-allocated slices to component constructors
+
+### 3. Memory.zig Special Handling
+
+Since Memory can grow dynamically:
+1. Remove it from the static buffer allocation
+2. Let it manage its own memory using the heap allocator
+3. Use its `calculate_allocation` to set initial capacity
+4. Add clear documentation explaining why Memory is handled separately
+
+### 4. Refactor interpret2.zig
+
+Remove all allocation logic from interpret2:
+1. Remove the static buffer and FixedBufferAllocator
+2. Remove the call to `analysis2.prepare`
+3. Add `std.debug.assert` verifying that analysis has been prepared
+4. Assume all data structures are pre-allocated and passed in via StackFrame
+
+### 5. Update call2.zig
+
+Move allocation and preparation to call2:
+1. Calculate bytecode size before creating StackFrame
+2. Call `analysis2.prepare` with pre-allocated buffers
+3. Pass prepared analysis, metadata, and ops to StackFrame.init
+4. Handle all allocation before calling interpret2
+
+### 6. Update analysis2.zig
+
+Refactor to accept pre-allocated buffers:
+1. Change `prepare` to accept pre-allocated slices as arguments
+2. Remove all internal allocations
+3. Add `std.debug.assert` verifying buffer sizes match expectations
+4. Return error if buffers are too small
+
+## Debug Assertions
+
+Add debug assertions throughout to verify correctness:
+
+```zig
+// In interpret2.zig
+std.debug.assert(frame.analysis.inst_to_pc.len > 0); // Analysis was prepared
+std.debug.assert(frame.ops.len > 0); // Ops array was populated
+
+// In analysis2.zig prepare function
+std.debug.assert(inst_to_pc_buffer.len >= expected_size);
+std.debug.assert(pc_to_inst_buffer.len >= bytecode.len);
+```
+
+These assertions:
+- Perform hard checks in debug mode
+- Become undefined behavior in release mode (no overhead)
+- Document invariants and catch bugs early
+
+## Tiered Allocation Strategy
+
+Support these bytecode size tiers:
+- 4KB - Small contracts
+- 8KB - Medium contracts
+- 16KB - Large contracts (like Snailtracer)
+- 32KB - Very large contracts
+- 64KB - Maximum supported
+
+StackFrame.init should:
+1. Check bytecode size
+2. Select the next highest tier
+3. Allocate buffer for that tier size
+4. Use the buffer efficiently for all components
+
+## Benefits
+
+1. **Single allocation per frame** - Better performance
+2. **Predictable memory usage** - Known upfront costs
+3. **Better cache locality** - All data in contiguous memory
+4. **No allocation during execution** - All memory pre-allocated
+5. **Clear ownership model** - StackFrame owns the buffer
+
+## Migration Path
+
+1. Add allocation functions to each component (keep existing init functions)
+2. Update StackFrame to pre-allocate
+3. Update call2.zig to prepare analysis
+4. Update interpret2.zig to remove allocations
+5. Update component init functions to accept pre-allocated buffers
+6. Add comprehensive tests for each tier

@@ -934,37 +934,14 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         Log.debug("[CREATE_DEBUG] After base cost, remaining_gas: {}", .{remaining_gas});
     }
 
-    // Analyze initcode (use cache if available)
-    // Use analysis cache (always initialized in Evm.init)
-    Log.debug("[CREATE_DEBUG] Analyzing bytecode, cache available: {}", .{self.analysis_cache != null});
-    const analysis_ptr = blk: {
-        if (self.analysis_cache) |*cache| {
-            Log.debug("[CREATE_DEBUG] Using cache for analysis", .{});
-            break :blk cache.getOrAnalyze(bytecode, &self.table) catch |err| {
-                Log.debug("[CREATE_DEBUG] Analysis failed: {}", .{err});
-                return InterprResult{
-                    .status = .Failure,
-                    .output = null,
-                    .gas_left = remaining_gas,
-                    .gas_used = 0,
-                    .address = new_address,
-                    .success = false,
-                };
-            };
-        } else {
-            // Fallback: treat as failure if cache unavailable (should not happen)
-            Log.debug("[CREATE_DEBUG] No cache available - failing", .{});
-            return InterprResult{
-                .status = .Failure,
-                .output = null,
-                .gas_left = remaining_gas,
-                .gas_used = 0,
-                .address = new_address,
-                .success = false,
-            };
-        }
+    // Create empty analysis - interpret2 will handle the actual analysis
+    const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = bytecode,
     };
-    Log.debug("[CREATE_DEBUG] Analysis complete, ptr: 0x{x}", .{@intFromPtr(analysis_ptr)});
+    Log.debug("[CREATE_DEBUG] Created empty analysis for interpret2", .{});
 
     // Pre-charge CREATE base and initcode costs to align with opcode path
     const GasC = @import("primitives").GasConstants;
@@ -998,8 +975,8 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
     const frame_val = try Frame.init(
         frame_gas,
         new_address, // contract address being created
-        analysis_ptr.analysis,
-        analysis_ptr.metadata,
+        empty_analysis,
+        &.{}, // Empty metadata array - interpret2 will set this up
         &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
         host,
         self.state.database,

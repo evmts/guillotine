@@ -113,18 +113,60 @@ pub fn deinit(self: *Memory) void {
 }
 
 // Import and re-export all method implementations
-const context_ops = @import("context.zig");
 const read_ops = @import("read.zig");
 const write_ops = @import("write.zig");
 const slice_ops = @import("slice.zig");
 
 // Context operations
-pub const context_size = context_ops.context_size;
-pub const ensure_context_capacity = context_ops.ensure_context_capacity;
-pub const ensure_context_capacity_slow = context_ops.ensure_context_capacity_slow;
-pub const resize_context = context_ops.resize_context;
-pub const size = context_ops.size;
-pub const total_size = context_ops.total_size;
+
+/// Get the size of the current context's memory
+pub fn context_size(self: *const Memory) usize {
+    if (self.shared_buffer_ref.items.len <= self.my_checkpoint) {
+        return 0;
+    }
+    return self.shared_buffer_ref.items.len - self.my_checkpoint;
+}
+
+/// Ensure the context has at least `min_size` bytes of capacity
+pub fn ensure_context_capacity(self: *Memory, min_size: usize) MemoryError!void {
+    const abs_size = self.my_checkpoint + min_size;
+    if (abs_size > self.shared_buffer_ref.items.len) {
+        try self.ensure_context_capacity_slow(min_size);
+    }
+}
+
+/// Slow path for ensure_context_capacity that actually expands the buffer
+pub fn ensure_context_capacity_slow(self: *Memory, min_size: usize) MemoryError!void {
+    const abs_size = self.my_checkpoint + min_size;
+    
+    // Check against memory limit
+    if (abs_size > self.memory_limit) {
+        return MemoryError.OutOfMemory;
+    }
+    
+    // Expand the shared buffer
+    try self.shared_buffer_ref.ensureTotalCapacity(abs_size);
+    
+    // Zero-initialize the new memory
+    const old_len = self.shared_buffer_ref.items.len;
+    self.shared_buffer_ref.items.len = abs_size;
+    @memset(self.shared_buffer_ref.items[old_len..abs_size], 0);
+}
+
+/// Resize the context's memory to a specific size
+pub fn resize_context(self: *Memory, new_size: usize) MemoryError!void {
+    try self.ensure_context_capacity(new_size);
+}
+
+/// Get the current size (alias for context_size)
+pub fn size(self: *const Memory) usize {
+    return self.context_size();
+}
+
+/// Get the total size of the shared buffer
+pub fn total_size(self: *const Memory) usize {
+    return self.shared_buffer_ref.items.len;
+}
 
 /// Clear the memory by resetting size to 0 (for call frame reuse)
 pub fn clear(self: *Memory) void {
