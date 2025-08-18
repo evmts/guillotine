@@ -62,7 +62,8 @@ pub const State = *Frame;
 /// @param interpreter VM interpreter context
 /// @param state Execution state and environment
 /// @return Execution result indicating success/failure and gas consumption
-pub const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
+// Function signature for EVM opcode execution using an opaque pointer to the execution context.
+pub const ExecutionFunc = *const fn (context: *anyopaque) @import("../execution/execution_error.zig").Error!void;
 
 /// Function signature for dynamic gas calculation.
 ///
