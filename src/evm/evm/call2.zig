@@ -4,7 +4,7 @@ const ExecutionError = @import("../execution/execution_error.zig");
 const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
 const Host = @import("../host.zig").Host;
-const Frame = @import("../frame.zig").Frame;
+const StackFrame = @import("../stack_frame.zig").StackFrame;
 const Evm = @import("../evm.zig");
 const interpret2 = @import("interpret2.zig").interpret2;
 const primitives = @import("primitives");
@@ -140,7 +140,7 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         self.current_input = &.{};
 
         if (self.frame_stack == null) {
-            self.frame_stack = try std.heap.page_allocator.alloc(Frame, MAX_CALL_DEPTH);
+            // Frame stack not needed for StackFrame-based execution
         }
     } else {
         // Nested call - check depth and increment
@@ -161,62 +161,28 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         };
     }
 
-    // Create a minimal dummy CodeAnalysis for Frame compatibility
-    // interpret2 does its own analysis internally, so this is just to satisfy Frame's requirements
-    const analysis_mod = @import("../analysis.zig");
-    const CodeAnalysis = analysis_mod.CodeAnalysis;
-    const size_buckets = @import("../size_buckets.zig");
-
-    // Create empty size buckets for dummy analysis
-    const empty_size0_counts = size_buckets.Size0Counts{
-        .noop = 0,
-        .conditional_jump_unresolved = 0,
-        .conditional_jump_invalid = 0,
-    };
-    const empty_size2_counts = size_buckets.Size2Counts{
-        .jump_pc = 0,
-        .conditional_jump_pc = 0,
-        .pc = 0,
-    };
-    const empty_size8_counts = size_buckets.Size8Counts{
-        .real_opcodes = 0,
-        .block_info = 0,
-    };
-    const empty_size16_counts = size_buckets.Size16Counts{
-        .word = 0,
-    };
-
-    var dummy_analysis = CodeAnalysis{
-        .code = call_code,
-        .code_len = call_code.len,
-        .instructions = &.{},
-        .size2_instructions = &.{},
-        .size8_instructions = &.{},
-        .size16_instructions = &.{},
-        .size0_counts = empty_size0_counts,
-        .size2_counts = empty_size2_counts,
-        .size8_counts = empty_size8_counts,
-        .size16_counts = empty_size16_counts,
-        .pc_to_block_start = &.{},
-        .jumpdest_array = size_buckets.JumpdestArray{
-            .positions = &.{},
-            .code_len = call_code.len,
-        },
-        .inst_jump_type = &.{},
-        .inst_to_pc = &.{},
-        .allocator = self.allocator,
-    };
-
-    // Create frame - interpret2 doesn't use CodeAnalysis, but Frame requires it
+    // Create a StackFrame directly - interpret2 will handle analysis
+    const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
     const contract_addr_for_frame = call_address;
-    var frame = try Frame.init(
+    
+    // Create empty analysis and arrays - interpret2 will fill them
+    const empty_analysis = SimpleAnalysis{
+        .instructions = &.{},
+        .pc_to_instruction = &.{},
+        .jump_destinations = &.{},
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
+    
+    var frame = try StackFrame.init(
         gas_after_base,
         call_is_static,
-        @intCast(self.current_frame_depth),
         contract_addr_for_frame,
         call_caller,
         call_value,
-        &dummy_analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         self.state.database,
         self.allocator,
@@ -228,13 +194,6 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
 
     // Store the current input for the host interface to access
     self.current_input = call_input;
-
-    // Store the frame in the frame stack if it exists
-    if (self.frame_stack) |frames| {
-        if (self.current_frame_depth < frames.len) {
-            frames[self.current_frame_depth] = frame;
-        }
-    }
 
     // Main execution with interpret2
     var exec_err: ?ExecutionError.Error = null;
@@ -281,7 +240,3 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .output = output,
     };
 }
-
-/// Alias for backward compatibility with tests and benchmarks
-/// that still reference call_mini
-pub const call_mini = call;
