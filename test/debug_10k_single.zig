@@ -49,7 +49,7 @@ pub fn main() !void {
         null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
+        0, // depth
         false, // read_only
         stderr.any(), // tracer - this enables debug output
     );
@@ -62,11 +62,11 @@ pub fn main() !void {
     // Deploy contract
     std.debug.print("\n--- DEPLOYING CONTRACT ---\n", .{});
     const deploy_result = try vm.create_contract(caller, 0, bytecode, 10_000_000);
-    
+
     std.debug.print("Deploy success: {}\n", .{deploy_result.success});
     std.debug.print("Deploy gas_left: {}\n", .{deploy_result.gas_left});
     std.debug.print("Deploy address: {x}\n", .{primitives.Address.to_u256(deploy_result.address)});
-    
+
     if (deploy_result.output) |output| {
         std.debug.print("Deployed code length: {}\n", .{output.len});
     }
@@ -88,11 +88,11 @@ pub fn main() !void {
     } };
 
     const call_result = try vm.call(call_params);
-    
+
     std.debug.print("\nCall success: {}\n", .{call_result.success});
     std.debug.print("Call gas_left: {}\n", .{call_result.gas_left});
     std.debug.print("Gas used: {}\n", .{10_000_000 - call_result.gas_left});
-    
+
     if (call_result.output) |output| {
         std.debug.print("Output length: {} bytes\n", .{output.len});
     }
