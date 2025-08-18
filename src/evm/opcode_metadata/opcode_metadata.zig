@@ -387,7 +387,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     if (comptime builtin.mode == .ReleaseSmall) {
         // Use specific functions for each LOG operation to avoid opcode detection issues
         const log_functions = [_]ExecutionFunc{
-            log.log_0, log.log_1, log.log_2, log.log_3, log.log_4,
+            wrap_ctx(log.log_0), wrap_ctx(log.log_1), wrap_ctx(log.log_2), wrap_ctx(log.log_3), wrap_ctx(log.log_4),
         };
 
         inline for (0..5) |n| {
@@ -401,7 +401,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     } else {
         // Use the same static functions for optimized mode
         const log_functions = [_]ExecutionFunc{
-            log.log_0, log.log_1, log.log_2, log.log_3, log.log_4,
+            wrap_ctx(log.log_0), wrap_ctx(log.log_1), wrap_ctx(log.log_2), wrap_ctx(log.log_3), wrap_ctx(log.log_4),
         };
 
         inline for (0..5) |n| {
@@ -489,10 +489,10 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
 
     // DUP1..DUP16
     const dup_functions = [_]ExecutionFunc{
-        execution.stack.op_dup1,  execution.stack.op_dup2,  execution.stack.op_dup3,  execution.stack.op_dup4,
-        execution.stack.op_dup5,  execution.stack.op_dup6,  execution.stack.op_dup7,  execution.stack.op_dup8,
-        execution.stack.op_dup9,  execution.stack.op_dup10, execution.stack.op_dup11, execution.stack.op_dup12,
-        execution.stack.op_dup13, execution.stack.op_dup14, execution.stack.op_dup15, execution.stack.op_dup16,
+        wrap_ctx(execution.stack.op_dup1),  wrap_ctx(execution.stack.op_dup2),  wrap_ctx(execution.stack.op_dup3),  wrap_ctx(execution.stack.op_dup4),
+        wrap_ctx(execution.stack.op_dup5),  wrap_ctx(execution.stack.op_dup6),  wrap_ctx(execution.stack.op_dup7),  wrap_ctx(execution.stack.op_dup8),
+        wrap_ctx(execution.stack.op_dup9),  wrap_ctx(execution.stack.op_dup10), wrap_ctx(execution.stack.op_dup11), wrap_ctx(execution.stack.op_dup12),
+        wrap_ctx(execution.stack.op_dup13), wrap_ctx(execution.stack.op_dup14), wrap_ctx(execution.stack.op_dup15), wrap_ctx(execution.stack.op_dup16),
     };
     i = 0;
     while (i < 16) : (i += 1) {
@@ -523,7 +523,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
 
     // LOG0..LOG4
     const log_functions = [_]ExecutionFunc{
-        execution.log.log_0, execution.log.log_1, execution.log.log_2, execution.log.log_3, execution.log.log_4,
+        wrap_ctx(execution.log.log_0), wrap_ctx(execution.log.log_1), wrap_ctx(execution.log.log_2), wrap_ctx(execution.log.log_3), wrap_ctx(execution.log.log_4),
     };
     i = 0;
     while (i <= 4) : (i += 1) {
