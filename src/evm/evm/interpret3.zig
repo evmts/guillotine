@@ -1,8 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const ExecutionError = @import("../execution/execution_error.zig");
-const frame_mod = @import("../frame.zig");
-const Frame = frame_mod.Frame;
+const StackFrame = @import("../stack_frame.zig").StackFrame;
 const opcode_mod = @import("../opcodes/opcode.zig");
 const Opcode = opcode_mod.Enum;
 const Stack = @import("../stack/stack.zig");
@@ -17,18 +16,14 @@ const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
 pub const Error = ExecutionError.Error;
 
-// Function pointer type for tailcall dispatch - interpret2 uses a different signature
-const TailcallFunc = *const fn (frame: *anyopaque, metadata: [*]const u32, ops: [*]const *const anyopaque, ip: *usize) Error!noreturn;
+// Function pointer type for tailcall dispatch - using StackFrame signature
+const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
 
-// Removed - now using SimpleAnalysis from analysis2.zig
-
-// Removed - now using opcode_mod.is_valid_opcode() instead
-
-// TODO we need to be prices about storage at the end
+// TODO we need to be precise about storage at the end
 const EXTRA_BUFFER = 8192;
 
-// Main interpret function
-pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
+// Main interpret function using StackFrame
+pub fn interpret3(frame: *StackFrame, code: []const u8) Error!noreturn {
     if (code.len > std.math.maxInt(u16)) {
         std.log.err("Bytecode length {} exceeds maximum supported size {}", .{ code.len, std.math.maxInt(u16) });
         unreachable; // Hard limit due to u16 PC indexing
@@ -81,11 +76,11 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
             // Note: 0xa1 and 0xa2 are not valid EVM opcodes but are used by Solidity for metadata
             if ((byte == 0xa1 or byte == 0xa2) and pc + 1 < code.len and code[pc + 1] == 0x65) {
                 @branchHint(.likely);
-                Log.debug("[interpret2] Found Solidity metadata marker at PC={}, stopping", .{pc});
+                Log.debug("[interpret3] Found Solidity metadata marker at PC={}, stopping", .{pc});
                 break; // Stop processing - we've hit metadata
             }
             // TODO we will want to remove this and fail hard before beta
-            Log.warn("[interpret2] WARNING: Unknown opcode 0x{x:0>2} at PC={}, treating as INVALID", .{ byte, pc });
+            Log.warn("[interpret3] WARNING: Unknown opcode 0x{x:0>2} at PC={}, treating as INVALID", .{ byte, pc });
             try ops.append(&tailcalls.op_invalid);
             pc += 1;
             op_count += 1;
@@ -233,11 +228,10 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
     if (ops_slice.len > 1) {
         var i: usize = 0;
         while (i < ops_slice.len - 1) : (i += 1) {
-            // Check if it's a PUSH instruction (small or normal)
-            const is_push_small = ops_slice[i] == &tailcalls.op_push_small;
+            // Check if it's a PUSH instruction
             const is_push = ops_slice[i] == &tailcalls.op_push;
 
-            if (!is_push_small and !is_push) continue;
+            if (!is_push) continue;
 
             // Get the PC for this instruction
             const inst_pc = analysis.getPc(@intCast(i));
@@ -251,7 +245,7 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
             const next_op = ops_slice[i + 1];
             const push_size = opcode - 0x5F;
 
-            // Determine which fusion to apply (small vs normal variants)
+            // Determine which fusion to apply
             var fused_op: ?*const anyopaque = null;
 
             // Special handling for jumps - need to validate destination
@@ -266,57 +260,50 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
 
                 // Only fuse if destination is a valid JUMPDEST
                 if (push_value < code.len and code[push_value] == 0x5B) {
-                    if (is_push_small) {
-                        fused_op = if (next_op == &tailcalls.op_jump)
-                            &tailcalls.op_push_small_then_jump
-                        else
-                            &tailcalls.op_push_small_then_jumpi;
-                    } else {
-                        fused_op = if (next_op == &tailcalls.op_jump)
-                            &tailcalls.op_push_then_jump
-                        else
-                            &tailcalls.op_push_then_jumpi;
-                    }
+                    fused_op = if (next_op == &tailcalls.op_jump)
+                        &tailcalls.op_push_then_jump
+                    else
+                        &tailcalls.op_push_then_jumpi;
                 }
             }
             if (next_op == &tailcalls.op_mload) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_mload else &tailcalls.op_push_then_mload;
+                fused_op = &tailcalls.op_push_then_mload;
             }
             if (next_op == &tailcalls.op_mstore) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_mstore else &tailcalls.op_push_then_mstore;
+                fused_op = &tailcalls.op_push_then_mstore;
             }
             if (next_op == &tailcalls.op_eq) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_eq else &tailcalls.op_push_then_eq;
+                fused_op = &tailcalls.op_push_then_eq;
             }
             if (next_op == &tailcalls.op_lt) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_lt else &tailcalls.op_push_then_lt;
+                fused_op = &tailcalls.op_push_then_lt;
             }
             if (next_op == &tailcalls.op_gt) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_gt else &tailcalls.op_push_then_gt;
+                fused_op = &tailcalls.op_push_then_gt;
             }
             if (next_op == &tailcalls.op_and) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_and else &tailcalls.op_push_then_and;
+                fused_op = &tailcalls.op_push_then_and;
             }
             if (next_op == &tailcalls.op_add) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_add else &tailcalls.op_push_then_add;
+                fused_op = &tailcalls.op_push_then_add;
             }
             if (next_op == &tailcalls.op_sub) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_sub else &tailcalls.op_push_then_sub;
+                fused_op = &tailcalls.op_push_then_sub;
             }
             if (next_op == &tailcalls.op_mul) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_mul else &tailcalls.op_push_then_mul;
+                fused_op = &tailcalls.op_push_then_mul;
             }
             if (next_op == &tailcalls.op_div) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_div else &tailcalls.op_push_then_div;
+                fused_op = &tailcalls.op_push_then_div;
             }
             if (next_op == &tailcalls.op_sload) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_sload else &tailcalls.op_push_then_sload;
+                fused_op = &tailcalls.op_push_then_sload;
             }
             if (next_op == &tailcalls.op_dup1) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_dup1 else &tailcalls.op_push_then_dup1;
+                fused_op = &tailcalls.op_push_then_dup1;
             }
             if (next_op == &tailcalls.op_swap1) {
-                fused_op = if (is_push_small) &tailcalls.op_push_small_then_swap1 else &tailcalls.op_push_then_swap1;
+                fused_op = &tailcalls.op_push_then_swap1;
             }
 
             // Skip if no fusion found
@@ -329,28 +316,26 @@ pub fn interpret2(frame: *Frame, code: []const u8) Error!noreturn {
         }
     }
 
-    frame.tailcall_ops = @ptrCast(ops_slice.ptr);
-    frame.tailcall_index = 0;
-    // No longer store analysis in frame; pass as local
-
-    var ip: usize = 0;
-    const ops_ptr = @as([*]const *const anyopaque, @ptrCast(ops_slice.ptr));
+    // Store analysis, metadata, ops, and ip in the StackFrame
+    frame.analysis = analysis;
+    frame.metadata = metadata;
+    frame.ops = @ptrCast(ops_slice.ptr);
+    frame.ip = 0;
 
     if (ops_slice.len == 0) {
         unreachable;
     }
 
-    // Add frame fields for tailcall system
+    // Add iteration tracking for safety
     if (comptime SAFE) {
         frame.tailcall_max_iterations = 100_000_000; // Increase for complex contracts like snailtracer
         frame.tailcall_iterations = 0;
     }
 
-    Log.debug("[interpret2] Starting execution with {} ops", .{ops_slice.len});
+    Log.debug("[interpret3] Starting execution with {} ops", .{ops_slice.len});
 
-    // This Evm will recursively tail-call functions until an Error is thrown. Error will be thrown even in success cases
+    // This will recursively tail-call functions until an Error is thrown. Error will be thrown even in success cases
     const first_op = ops_slice[0];
-    const metadata_ptr = @as([*]const u32, @ptrCast(metadata.ptr));
-    // Pass analysis pointer directly in the call
-    return try (@call(.always_tail, first_op, .{ frame, &analysis, metadata_ptr, ops_ptr, &ip }));
+    // Pass the StackFrame with all the data it needs
+    return try (@call(.always_tail, first_op, .{frame}));
 }
