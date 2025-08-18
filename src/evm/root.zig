@@ -112,8 +112,8 @@ pub const stack_validation = @import("stack/stack_validation.zig");
 pub const Evm = @import("evm.zig");
 
 /// Execution context and frame management
-pub const Frame = @import("frame.zig").Frame;
-pub const ExecutionContext = @import("frame.zig").Frame;
+pub const Frame = @import("stack_frame.zig").StackFrame;
+pub const ExecutionContext = @import("stack_frame.zig").StackFrame;
 /// Backwards-compatibility builder used by older tests
 pub const EvmBuilder = struct {
     allocator: std.mem.Allocator,

@@ -242,7 +242,7 @@ pub fn op_calldatasize(frame: *Frame) ExecutionError.Error!void {
 /// Stack: [] → [size]
 pub fn op_codesize(frame: *Frame) ExecutionError.Error!void {
     // Push size of current contract's code
-    const code_len = frame.analysis.code_len;
+    const code_len = frame.analysis.bytecode.len;
     frame.stack.append_unsafe(@as(u256, @intCast(code_len)));
 }
 
@@ -347,7 +347,7 @@ pub fn op_codecopy(frame: *Frame) ExecutionError.Error!void {
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
     // Copy from current contract bytecode (from analysis or frame)
-    const code = frame.analysis.code;
+    const code = frame.analysis.bytecode;
     const Log = @import("../log.zig");
     Log.debug("CODECOPY: mem_offset={}, code_offset={}, size={}, code.len={}", .{ mem_offset_usize, code_offset_usize, size_usize, code.len });
     if (code.len > 0 and size_usize > 0) {

@@ -37,7 +37,7 @@ const std = @import("std");
 const Opcode = @import("opcode.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const Memory = @import("../memory/memory.zig");
 
 pub const ExecutionResult = @import("../execution/execution_result.zig");

@@ -1,8 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const ExecutionError = @import("../execution/execution_error.zig");
-const frame_mod = @import("../frame.zig");
-const Frame = frame_mod.Frame;
+const StackFrame = @import("../stack_frame.zig").StackFrame;
 const Opcode = @import("../opcodes/opcode.zig").Enum;
 const execution = @import("../execution/package.zig");
 const primitives = @import("primitives");
@@ -10,7 +9,7 @@ const primitives = @import("primitives");
 pub const Error = ExecutionError.Error;
 
 // Simple interpreter that executes bytecode directly without tailcall optimization
-pub fn interpret2(frame: *Frame, code: []const u8) Error!void {
+pub fn interpret2(frame: *StackFrame, code: []const u8) Error!void {
     var pc: usize = 0;
     
     while (pc < code.len) {
