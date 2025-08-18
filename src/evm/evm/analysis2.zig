@@ -106,7 +106,7 @@ test "analysis2: PUSH small value bounds check and metadata" {
     const allocator = std.testing.allocator;
     // PUSH1 0xAA; STOP
     const code = &[_]u8{ 0x60, 0xAA, 0x00 };
-    const result = try SimpleAnalysis.analyze(allocator, code);
+    var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
     try std.testing.expectEqual(@as(u16, 0), result.analysis.getInstIdx(0));
@@ -120,7 +120,7 @@ test "analysis2: PUSH0 metadata and length" {
     const allocator = std.testing.allocator;
     // PUSH0; STOP
     const code = &[_]u8{ 0x5F, 0x00 };
-    const result = try SimpleAnalysis.analyze(allocator, code);
+    var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
     // Two instructions

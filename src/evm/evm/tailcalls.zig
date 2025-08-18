@@ -744,7 +744,7 @@ pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
     }
     
     // Convert PC destination to instruction index
-    const dest_inst_idx = frame.analysis.getInstIdx(dest);
+    const dest_inst_idx = frame.analysis.getInstIdx(@intCast(dest));
     if (dest_inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
         return Error.InvalidJump;
     }
@@ -795,7 +795,7 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
     // If condition is non-zero, take the jump
     if (condition != 0) {
         // Convert PC destination to instruction index
-        const dest_inst_idx = frame.analysis.getInstIdx(dest);
+        const dest_inst_idx = frame.analysis.getInstIdx(@intCast(dest));
         if (dest_inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
             return Error.InvalidJump;
         }

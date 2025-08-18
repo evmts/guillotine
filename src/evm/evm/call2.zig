@@ -5,6 +5,7 @@ const CallResult = @import("call_result.zig").CallResult;
 const CallParams = @import("../host.zig").CallParams;
 const Host = @import("../host.zig").Host;
 const StackFrame = @import("../stack_frame.zig").StackFrame;
+const Frame = StackFrame;
 const Evm = @import("../evm.zig");
 const interpret2 = @import("interpret2.zig").interpret2;
 const primitives = @import("primitives");
@@ -161,15 +162,15 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         };
     }
 
-    // Create a StackFrame directly - interpret2 will handle analysis
+    // Create a StackFrame for interpret2
     const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
-    const contract_addr_for_frame = call_address;
     
-    // Create empty analysis and arrays - interpret2 will fill them
+    // Create analysis with bytecode - interpret2 will analyze and fill the rest
     const empty_analysis = SimpleAnalysis{
-        .instructions = &.{},
-        .pc_to_instruction = &.{},
-        .jump_destinations = &.{},
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = call_code,
+        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -177,7 +178,7 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     var frame = try StackFrame.init(
         gas_after_base,
         call_is_static,
-        contract_addr_for_frame,
+        call_address,
         call_caller,
         call_value,
         empty_analysis,
@@ -199,7 +200,7 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     var exec_err: ?ExecutionError.Error = null;
     // Call interpret2 which will handle its own analysis and tailcall dispatch
     Log.debug("[call] About to call interpret2 with code.len={}", .{call_code.len});
-    interpret2(&frame, call_code) catch |err| {
+    interpret2(&frame) catch |err| {
         Log.debug("[call] interpret2 ended with error: {any}", .{err});
         exec_err = err;
     };

@@ -26,8 +26,9 @@ const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
 // TODO we need to be prices about storage at the end
 const EXTRA_BUFFER = 8192;
 
-// Main interpret function
-pub fn interpret2(frame: *StackFrame, code: []const u8) Error!noreturn {
+// Main interpret function - gets code from frame.analysis.bytecode
+pub fn interpret2(frame: *StackFrame) Error!noreturn {
+    const code = frame.analysis.bytecode;
     if (code.len > std.math.maxInt(u16)) {
         std.log.err("Bytecode length {} exceeds maximum supported size {}", .{ code.len, std.math.maxInt(u16) });
         unreachable; // Hard limit due to u16 PC indexing
@@ -323,7 +324,7 @@ pub fn interpret2(frame: *StackFrame, code: []const u8) Error!noreturn {
     // Update StackFrame with analysis data
     frame.analysis = analysis;
     frame.metadata = metadata;
-    frame.ops = @ptrCast(ops_slice.ptr);
+    frame.ops = @as([]*const anyopaque, @ptrCast(ops_slice));
     frame.ip = 0;
 
     if (ops_slice.len == 0) {
@@ -338,6 +339,6 @@ pub fn interpret2(frame: *StackFrame, code: []const u8) Error!noreturn {
     Log.debug("[interpret2] Starting execution with {} ops", .{ops_slice.len});
 
     // This Evm will recursively tail-call functions until an Error is thrown. Error will be thrown even in success cases
-    const first_op = ops_slice[0];
+    const first_op: TailcallFunc = @ptrCast(@alignCast(frame.ops[0]));
     return try (@call(.always_tail, first_op, .{frame}));
 }

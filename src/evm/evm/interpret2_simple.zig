@@ -9,7 +9,8 @@ const primitives = @import("primitives");
 pub const Error = ExecutionError.Error;
 
 // Simple interpreter that executes bytecode directly without tailcall optimization
-pub fn interpret2(frame: *StackFrame, code: []const u8) Error!void {
+pub fn interpret2(frame: *StackFrame) Error!void {
+    const code = frame.analysis.bytecode;
     var pc: usize = 0;
     
     while (pc < code.len) {
