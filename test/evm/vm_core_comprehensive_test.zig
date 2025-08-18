@@ -212,7 +212,7 @@ test "VMCore: VM program counter management and control flow" {
     defer contract.deinit(allocator, null);
 
     // Execute and verify control flow with traditional interpreter
-    const result = try vm.interpret(&contract, &[_]u8{});
+    const result = try vm.interpret(&contract, &[_]u8{}, false);
     // Execute and verify control flow with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try vm.interpret_block_write(&contract, &[_]u8{});
@@ -257,7 +257,7 @@ test "VMCore: VM execution loop with gas tracking" {
     contract.gas = 100000;
 
     const initial_gas = contract.gas;
-    const result = try vm.interpret(&contract, &[_]u8{});
+    const result = try vm.interpret(&contract, &[_]u8{}, false);
     // Execute with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try vm.interpret_block_write(&contract, &[_]u8{});
@@ -307,7 +307,7 @@ test "VMCore: VM depth tracking in nested calls" {
     // Simulate nested execution by calling interpret multiple times
     vm.depth = 5; // Simulate being in a nested call
 
-    _ = try vm.interpret(&contract, &[_]u8{});
+    _ = try vm.interpret(&contract, &[_]u8{}, false);
 
     // Depth should be restored after execution
     try testing.expectEqual(@as(u16, 5), vm.depth);
@@ -378,7 +378,7 @@ test "VMCore: VM instruction dispatch error handling" {
     defer contract.deinit(allocator, null);
     contract.gas = 100000;
 
-    const result = try vm.interpret(&contract, &[_]u8{});
+    const result = try vm.interpret(&contract, &[_]u8{}, false);
     // Execute with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try vm.interpret_block_write(&contract, &[_]u8{});
@@ -933,7 +933,7 @@ test "VMCore: Integration - Complete execution flow" {
     defer contract.deinit(allocator, null);
     contract.gas = 100000;
 
-    const result = try vm.interpret(&contract, &[_]u8{});
+    const result = try vm.interpret(&contract, &[_]u8{}, false);
     // Execute with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try vm.interpret_block_write(&contract, &[_]u8{});
@@ -979,7 +979,7 @@ test "VMCore: Integration - Error propagation across components" {
     defer contract.deinit(allocator, null);
     contract.gas = 100000;
 
-    const result = try vm.interpret(&contract, &[_]u8{});
+    const result = try vm.interpret(&contract, &[_]u8{}, false);
     // Execute with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try vm.interpret_block_write(&contract, &[_]u8{});
@@ -1028,7 +1028,7 @@ test "VMCore: Integration - Memory and gas coordination" {
     defer contract.deinit(allocator, null);
     contract.gas = 1000; // Limited gas
 
-    const result = try vm.interpret(&contract, &[_]u8{});
+    const result = try vm.interpret(&contract, &[_]u8{}, false);
     // Execute with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try vm.interpret_block_write(&contract, &[_]u8{});

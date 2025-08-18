@@ -39,16 +39,57 @@ test "RETURN sets output correctly" {
     );
     defer contract.deinit(allocator, null);
 
-    const result = try evm.interpret2(&contract, &[_]u8{}, false);
-    try testing.expect(result.status == .Success);
-    try testing.expect(result.output != null);
-
-    if (result.output) |output| {
-        try testing.expectEqual(@as(usize, 4), output.len);
-        try testing.expectEqual(@as(u8, 0xde), output[0]);
-        try testing.expectEqual(@as(u8, 0xad), output[1]);
-        try testing.expectEqual(@as(u8, 0xbe), output[2]);
-        try testing.expectEqual(@as(u8, 0xef), output[3]);
+    // Create host interface and frame for interpret2
+    const Host = Evm.Host;
+    const StackFrame = Evm.StackFrame;
+    const SimpleAnalysis = Evm.SimpleAnalysis;
+    const interpret2 = Evm.interpret2;
+    
+    const host = Host.init(&evm);
+    const analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = bytecode,
+        .inst_count = 0,
+    };
+    
+    var frame = try StackFrame.init(
+        1000000, // gas
+        false,   // is_static
+        Address.ZERO, // contract_address
+        Address.ZERO, // caller
+        0,       // value
+        analysis,
+        &.{},    // metadata
+        &.{},    // ops
+        host,
+        db_interface,
+        allocator,
+    );
+    defer frame.deinit(allocator);
+    
+    frame.input_buffer = &[_]u8{};
+    
+    // Execute with interpret2
+    var success = false;
+    interpret2(&frame) catch |err| {
+        switch (err) {
+            .RETURN => success = true,
+            else => try testing.expect(false), // Should not fail
+        }
+    };
+    
+    try testing.expect(success);
+    
+    // Check output through host
+    const output = host.get_output();
+    try testing.expect(output != null);
+    if (output) |out| {
+        try testing.expectEqual(@as(usize, 4), out.len);
+        try testing.expectEqual(@as(u8, 0xde), out[0]);
+        try testing.expectEqual(@as(u8, 0xad), out[1]);
+        try testing.expectEqual(@as(u8, 0xbe), out[2]);
+        try testing.expectEqual(@as(u8, 0xef), out[3]);
     }
 }
 

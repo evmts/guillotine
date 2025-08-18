@@ -20,20 +20,27 @@ test "interpret2: simple ADD operation" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    // Analyze the code first
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    // Create empty analysis for interpret2 to fill
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     // Create frame
     var frame = try evm.Frame.init(
         1_000_000,                    // gas
         false,                        // static
-        0,                           // depth
-        primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS,
-        0,
-        &analysis,
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        empty_analysis,               // analysis
+        empty_metadata,               // metadata
+        empty_ops,                    // ops
         host,
         memory_db.to_database_interface(),
         allocator
@@ -41,7 +48,7 @@ test "interpret2: simple ADD operation" {
     defer frame.deinit(allocator);
     
     // Execute using interpret2
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // Check stack result - should have 8 (5 + 3)
@@ -66,25 +73,32 @@ test "interpret2: PUSH operations" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // Stack should have two values
@@ -113,25 +127,32 @@ test "interpret2: JUMP to valid destination" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // Should have pushed 0x42 after jumping
@@ -160,25 +181,32 @@ test "interpret2: JUMPI conditional jump taken" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // Should have 0xBB (jumped over 0xAA)
@@ -207,25 +235,32 @@ test "interpret2: JUMPI conditional jump not taken" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // Should have 0xAA (did not jump)
@@ -251,25 +286,32 @@ test "interpret2: DUP and SWAP operations" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // After DUP1: [1, 2, 2]
@@ -296,25 +338,32 @@ test "interpret2: invalid JUMP destination" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.InvalidJump, result);
 }
 
@@ -343,25 +392,32 @@ test "interpret2: arithmetic operations" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     
-    const metadata = evm.OpcodeMetadata.init();
-    var analysis = try evm.CodeAnalysis.from_code(allocator, &code, &metadata);
-    defer analysis.deinit();
+    const SimpleAnalysis = evm.SimpleAnalysis;
+    const empty_analysis = SimpleAnalysis{
+        .inst_to_pc = &.{},
+        .pc_to_inst = &.{},
+        .bytecode = &code,
+        .inst_count = 0,
+    };
+    const empty_metadata: []u32 = &.{};
+    const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
         1_000_000,
         false,
-        0,
         primitives.Address.ZERO_ADDRESS,
         primitives.Address.ZERO_ADDRESS,
         0,
-        &analysis,
+        empty_analysis,
+        empty_metadata,
+        empty_ops,
         host,
         memory_db.to_database_interface(),
         allocator
     );
     defer frame.deinit(allocator);
     
-    const result = interpret2.interpret2(&frame, &code);
+    const result = interpret2.interpret2(&frame);
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     // Debug: Check stack size

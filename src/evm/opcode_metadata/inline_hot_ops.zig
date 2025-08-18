@@ -277,16 +277,16 @@ test "inline hot ops maintains correctness" {
     const testing = std.testing;
     const OpcodeMetadata = @import("opcode_metadata.zig");
     const Frame = @import("../stack_frame.zig").StackFrame;
-    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
     const MockHost = @import("../host.zig").MockHost;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 
     // Test PUSH1
     {
         const code = &[_]u8{ 0x60, 0x42 }; // PUSH1 0x42
-        const table = OpcodeMetadata.DEFAULT;
-        var analysis = try CodeAnalysis.from_code(testing.allocator, code, &table);
-        defer analysis.deinit();
+        const result = try SimpleAnalysis.analyze(testing.allocator, code);
+        defer result.analysis.deinit(testing.allocator);
+        defer testing.allocator.free(result.metadata);
 
         var memory_db = MemoryDatabase.init(testing.allocator);
         defer memory_db.deinit();
@@ -299,28 +299,29 @@ test "inline hot ops maintains correctness" {
         var frame = try Frame.init(
             1000, // gas_remaining
             false, // static_call
-            0, // call_depth
             primitives.Address.ZERO_ADDRESS, // contract_address
             primitives.Address.ZERO_ADDRESS, // caller
             0, // value
-            &analysis,
+            result.analysis,
+            result.metadata,
+            &.{}, // empty ops
             host,
             db_interface,
             testing.allocator,
         );
         defer frame.deinit(testing.allocator);
 
-        const result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &frame, 0x60);
-        try testing.expectEqual(@as(usize, 2), result.bytes_consumed);
+        const exec_result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &frame, 0x60);
+        try testing.expectEqual(@as(usize, 2), exec_result.bytes_consumed);
         try testing.expectEqual(@as(u256, 0x42), frame.stack.pop_unsafe());
     }
 
     // Test ADD
     {
         const code = &[_]u8{0x01}; // ADD
-        const table = OpcodeMetadata.DEFAULT;
-        var analysis = try CodeAnalysis.from_code(testing.allocator, code, &table);
-        defer analysis.deinit();
+        const add_result = try SimpleAnalysis.analyze(testing.allocator, code);
+        defer add_result.analysis.deinit(testing.allocator);
+        defer testing.allocator.free(add_result.metadata);
 
         var memory_db = MemoryDatabase.init(testing.allocator);
         defer memory_db.deinit();
@@ -333,11 +334,12 @@ test "inline hot ops maintains correctness" {
         var frame = try Frame.init(
             1000, // gas_remaining
             false, // static_call
-            0, // call_depth
             primitives.Address.ZERO_ADDRESS, // contract_address
             primitives.Address.ZERO_ADDRESS, // caller
             0, // value
-            &analysis,
+            add_result.analysis,
+            add_result.metadata,
+            &.{}, // empty ops
             host,
             db_interface,
             testing.allocator,

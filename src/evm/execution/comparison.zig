@@ -165,8 +165,6 @@ pub fn op_iszero(frame: *Frame) ExecutionError.Error!void {
 
 // Fuzz testing functions for comparison operations
 pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []const FuzzComparisonOperation) !void {
-    const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
     const MockHost = @import("../host.zig").MockHost;
 
     for (operations) |op| {
@@ -175,9 +173,17 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
 
         // Create a simple code analysis for testing
         const code = &[_]u8{0x00}; // STOP
-        const table = OpcodeMetadata.DEFAULT;
-        var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-        defer analysis.deinit();
+        
+        // Create empty analysis for StackFrame
+        const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
+        const empty_analysis = SimpleAnalysis{
+            .inst_to_pc = &.{},
+            .pc_to_inst = &.{},
+            .bytecode = code,
+            .inst_count = 0,
+        };
+        const empty_metadata: []u32 = &.{};
+        const empty_ops: []*const anyopaque = &.{};
 
         // Create mock host
         var mock_host = MockHost.init(allocator);
@@ -189,11 +195,12 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         var context = try Frame.init(
             1000000, // gas_remaining
             false, // static_call
-            0, // call_depth
             primitives.Address.ZERO_ADDRESS, // contract_address
             primitives.Address.ZERO_ADDRESS, // caller
             0, // value
-            &analysis,
+            empty_analysis,
+            empty_metadata,
+            empty_ops,
             host,
             db_interface,
             allocator,

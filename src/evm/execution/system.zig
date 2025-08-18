@@ -1894,11 +1894,12 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
         var frame = try Frame.init(
             10000, // gas_remaining
             false, // static_call
-            0, // call_depth
             primitives.Address.ZERO_ADDRESS, // contract_address
             primitives.Address.ZERO_ADDRESS, // caller
             0, // value
-            &result.analysis,
+            result.analysis,
+            result.metadata,
+            &.{}, // empty ops
             host,
             db_interface,
             allocator,
@@ -1986,11 +1987,12 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
         var frame = try Frame.init(
             1000, // gas_remaining
             false, // static_call
-            0, // call_depth
             prim.Address.ZERO_ADDRESS, // contract_address
             prim.Address.ZERO_ADDRESS, // caller
             0, // value
-            &result.analysis,
+            result.analysis,
+            result.metadata,
+            &.{}, // empty ops
             host,
             db_interface,
             allocator,
@@ -2043,11 +2045,12 @@ test "EIP-150 gas calculations for nested calls" {
     var frame = try Frame.init(
         100000, // gas_remaining
         false, // static_call
-        0, // call_depth
         prim.Address.ZERO_ADDRESS, // contract_address
         prim.Address.ZERO_ADDRESS, // caller
         0, // value
-        &result.analysis,
+        result.analysis,
+        result.metadata,
+        &.{}, // empty ops
         host,
         db_interface,
         allocator,
@@ -2113,11 +2116,12 @@ test "EIP-150 minimum gas retention" {
     var frame = try Frame.init(
         64, // gas_remaining - Exactly 64 gas
         false, // static_call
-        0, // call_depth
         primitives.Address.ZERO_ADDRESS, // contract_address
         primitives.Address.ZERO_ADDRESS, // caller
         0, // value
-        &result.analysis,
+        result.analysis,
+        result.metadata,
+        &.{}, // empty ops
         host,
         db_interface,
         allocator,
@@ -2179,11 +2183,12 @@ test "EIP-150 stipend edge cases" {
     var frame = try Frame.init(
         100, // gas_remaining - Very low gas
         false, // static_call
-        0, // call_depth
         prim.Address.ZERO_ADDRESS, // contract_address
         prim.Address.ZERO_ADDRESS, // caller
         0, // value
-        &result.analysis,
+        result.analysis,
+        result.metadata,
+        &.{}, // empty ops
         host,
         db_interface,
         allocator,
