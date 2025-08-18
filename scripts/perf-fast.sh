@@ -2,7 +2,6 @@
 
 zig build build-evm-runner -Doptimize=ReleaseFast \
   && zig build build-evm-runner-small -Doptimize=ReleaseSmall \
-  && zig build build-evm-runner-call2 -Doptimize=ReleaseFast \
   && zig build build-orchestrator -Doptimize=ReleaseFast \
   && zig-out/bin/orchestrator \
     --compare \
