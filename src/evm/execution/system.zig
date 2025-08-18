@@ -130,52 +130,6 @@ pub const CallInput = struct {
     }
 };
 
-/// Result of a contract call operation
-///
-/// Contains the execution result, gas usage, output data, and success status.
-///
-/// ## Field Ordering Optimization
-/// Fields ordered for optimal memory layout:
-/// - Gas fields grouped together for better cache locality
-/// - Pointer field next
-/// - Small bool field last to minimize padding
-pub const CallResult = struct {
-    /// Gas consumed during execution
-    /// Frequently accessed field placed first
-    gas_used: u64,
-
-    /// Gas remaining after execution
-    /// Grouped with gas_used for cache locality
-    gas_left: u64,
-
-    /// Output data returned by the called contract
-    output: ?[]const u8,
-
-    /// Whether the call succeeded (true) or reverted (false)
-    /// Small bool field placed last to minimize padding
-    success: bool,
-
-    /// Create a successful call result
-    pub fn success_result(gas_used: u64, gas_left: u64, output: ?[]const u8) CallResult {
-        return CallResult{
-            .gas_used = gas_used,
-            .gas_left = gas_left,
-            .output = output,
-            .success = true,
-        };
-    }
-
-    /// Create a failed call result
-    pub fn failure_result(gas_used: u64, gas_left: u64, output: ?[]const u8) CallResult {
-        return CallResult{
-            .gas_used = gas_used,
-            .gas_left = gas_left,
-            .output = output,
-            .success = false,
-        };
-    }
-};
-
 // ============================================================================
 // Shared Validation Functions for Call Operations
 // ============================================================================
@@ -619,7 +573,7 @@ pub fn op_create(frame: *Frame) ExecutionError.Error!void {
     const snapshot = frame.host.create_snapshot();
 
     // Execute the CREATE through the host
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -632,7 +586,7 @@ pub fn op_create(frame: *Frame) ExecutionError.Error!void {
         // The journal entries persist for transaction-level revert capability
 
         // Handle gas accounting after CREATE
-        frame.gas_remaining = gas_reserved + call_result.gas_left;
+        frame.gas_remaining = @intCast(gas_reserved + call_result.gas_left);
 
         // The host returns the created address as 20 bytes in the output
         if (call_result.output) |address_bytes| {
@@ -667,7 +621,7 @@ pub fn op_create(frame: *Frame) ExecutionError.Error!void {
         frame.host.revert_to_snapshot(snapshot);
 
         // Handle gas accounting after failed CREATE
-        frame.gas_remaining = gas_reserved + call_result.gas_left;
+        frame.gas_remaining = @intCast(gas_reserved + call_result.gas_left);
 
         // Free revert/output buffer if present
         if (call_result.output) |buf| {
@@ -766,7 +720,7 @@ pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
     const snapshot = frame.host.create_snapshot();
 
     // Execute the CREATE2 through the host
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -779,7 +733,7 @@ pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
         // The journal entries persist for transaction-level revert capability
 
         // Handle gas accounting after CREATE2
-        frame.gas_remaining = gas_reserved + call_result.gas_left;
+        frame.gas_remaining = @intCast(gas_reserved + call_result.gas_left);
 
         // The host returns the created address as 20 bytes in the output
         if (call_result.output) |address_bytes| {
@@ -814,7 +768,7 @@ pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
         frame.host.revert_to_snapshot(snapshot);
 
         // Handle gas accounting after failed CREATE2
-        frame.gas_remaining = gas_reserved + call_result.gas_left;
+        frame.gas_remaining = @intCast(gas_reserved + call_result.gas_left);
 
         // Free revert/output buffer if present
         if (call_result.output) |buf| {
@@ -915,7 +869,7 @@ pub fn op_call(frame: *Frame) ExecutionError.Error!void {
     } };
 
     // Perform the call using the host's call method
-    const call_result = host.call(call_params) catch {
+    const call_result = host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
@@ -933,7 +887,7 @@ pub fn op_call(frame: *Frame) ExecutionError.Error!void {
 
     // Update gas remaining - return unused gas to caller
     // The gas_left from the call should be added back
-    frame.gas_remaining += call_result.gas_left;
+    frame.gas_remaining += @intCast(call_result.gas_left);
 
     // Write return data to memory if requested, regardless of success
     // EVM semantics: on failure (e.g., REVERT), return data must still be available to caller
@@ -950,7 +904,7 @@ pub fn op_call(frame: *Frame) ExecutionError.Error!void {
     // Update RETURNDATA buffer for RETURNDATASIZE/RETURNDATACOPY semantics
     // TODO: frame.return_data was removed
     // try frame.return_data.set(call_result.output orelse &[_]u8{});
-    // Free callee-owned output buffer if present (ownership transferred by Host.call)
+    // Free callee-owned output buffer if present (ownership transferred by host.inner_call)
     if (call_result.output) |out_buf| {
         const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
         evm_ptr.allocator.free(out_buf);
@@ -1035,7 +989,7 @@ pub fn op_callcode(frame: *Frame) ExecutionError.Error!void {
         .gas = gas_limit,
     } };
 
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
         return;
@@ -1047,7 +1001,7 @@ pub fn op_callcode(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Return unused gas to caller
-    frame.gas_remaining += call_result.gas_left;
+    frame.gas_remaining += @intCast(call_result.gas_left);
 
     // Write return data to memory, update RETURNDATA and free buffer
     if (call_result.output) |output| {
@@ -1073,7 +1027,6 @@ pub fn op_callcode(frame: *Frame) ExecutionError.Error!void {
 }
 
 pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
-
     const params1 = frame.stack.pop2_unsafe();
     const gas = params1.a;
     const to = params1.b;
@@ -1139,7 +1092,7 @@ pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
     };
 
     // Execute the delegatecall through the host
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -1156,7 +1109,7 @@ pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Return unused gas to caller
-    frame.gas_remaining += call_result.gas_left;
+    frame.gas_remaining += @intCast(call_result.gas_left);
 
     // Store return data if any (VM owns buffer; do not free here)
     if (call_result.output) |output| {
@@ -1289,7 +1242,7 @@ pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
         },
     );
 
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -1318,7 +1271,7 @@ pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Return unused gas to caller
-    frame.gas_remaining += call_result.gas_left;
+    frame.gas_remaining += @intCast(call_result.gas_left);
 
     // Store return data if any and free buffer
     if (call_result.output) |output| {
