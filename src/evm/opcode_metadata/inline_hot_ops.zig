@@ -305,7 +305,7 @@ test "inline hot ops maintains correctness" {
             db_interface,
             testing.allocator,
         );
-        defer frame.deinit(testing.allocator);
+        defer frame.deinit();
 
         const exec_result = try execute_with_inline_hot_ops(OpcodeMetadata.DEFAULT, 0, undefined, &frame, 0x60);
         try testing.expectEqual(@as(usize, 2), exec_result.bytes_consumed);
@@ -336,7 +336,7 @@ test "inline hot ops maintains correctness" {
             db_interface,
             testing.allocator,
         );
-        defer frame.deinit(testing.allocator);
+        defer frame.deinit();
 
         // Setup stack values for ADD
         frame.stack.append_unsafe(10);

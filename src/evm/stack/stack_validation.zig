@@ -26,7 +26,6 @@ const Log = @import("../log.zig");
 /// - Maximum depth: 1024 elements
 /// - Underflow: Cannot pop from empty stack
 /// - Overflow: Cannot exceed maximum depth
-pub const ValidationPatterns = @import("validation_patterns.zig");
 
 /// Validates stack requirements using Operation metadata.
 ///
@@ -317,32 +316,6 @@ test "calculate_max_stack" {
     try testing.expectEqual(@as(u32, Stack.CAPACITY - 3), calculate_max_stack(1, 4));
 }
 
-test "ValidationPatterns" {
-    var stack = try Stack.init(std.testing.allocator);
-    defer stack.deinit(std.testing.allocator);
-
-    // Test binary op validation
-    try testing.expectError(ExecutionError.Error.StackUnderflow, ValidationPatterns.validate_binary_op(&stack));
-    try stack.append(1);
-    try stack.append(2);
-    try ValidationPatterns.validate_binary_op(&stack);
-
-    // Test DUP validation
-    try testing.expectError(ExecutionError.Error.StackUnderflow, ValidationPatterns.validate_dup(&stack, 3));
-    try ValidationPatterns.validate_dup(&stack, 2);
-
-    // Test SWAP validation
-    try testing.expectError(ExecutionError.Error.StackUnderflow, ValidationPatterns.validate_swap(&stack, 2));
-    try ValidationPatterns.validate_swap(&stack, 1);
-
-    // Test PUSH validation at capacity
-    stack.clear();
-    var j: usize = 0;
-    while (j < Stack.CAPACITY) : (j += 1) {
-        try stack.append(@intCast(j));
-    }
-    try testing.expectError(ExecutionError.Error.StackOverflow, ValidationPatterns.validate_push(&stack));
-}
 
 test "validateStackRequirements comptime validation" {
     var stack = try Stack.init(std.testing.allocator);

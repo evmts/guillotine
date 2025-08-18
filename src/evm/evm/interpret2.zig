@@ -14,10 +14,7 @@ pub const Error = ExecutionError.Error;
 // Main interpret function - gets code from frame.analysis.bytecode
 pub fn interpret2(frame: *StackFrame) Error!noreturn {
     const code = frame.analysis.bytecode;
-    if (code.len > std.math.maxInt(u16)) {
-        std.log.err("Bytecode length {} exceeds maximum supported size {}", .{ code.len, std.math.maxInt(u16) });
-        unreachable; // Hard limit due to u16 PC indexing
-    }
+    std.debug.assert(code.len <= std.math.maxInt(u16));
 
     // Use a static buffer that will persist for the execution
     // This is similar to the original approach but uses analysis2.prepare

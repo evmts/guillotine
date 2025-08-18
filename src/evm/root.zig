@@ -64,8 +64,6 @@ pub const primitives = @import("primitives");
 
 /// Simplified bytecode analysis for tailcall dispatch
 pub const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
-/// Compatibility wrapper for the old CodeAnalysis interface
-pub const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 
 /// Unified error types for EVM execution
 pub const ExecutionError = @import("execution/execution_error.zig");
@@ -234,14 +232,6 @@ pub const Tracer = @import("tracer.zig").Tracer;
 /// EIP-7702 EOA delegation bytecode format
 pub const eip_7702_bytecode = @import("frame/eip_7702_bytecode.zig");
 
-/// Instruction type for block-based execution
-pub const Instruction = @import("instruction.zig").Instruction;
-const instruction_module = @import("instruction.zig");
-
-/// Block execution metrics and performance analysis
-pub const block_metrics = @import("block_metrics.zig");
-pub const BlockExecutionMetrics = block_metrics.BlockExecutionMetrics;
-pub const BlockCache = block_metrics.BlockCache;
 
 /// Fee market calculations (EIP-1559)
 pub const fee_market = @import("primitives").FeeMarket;
@@ -434,17 +424,4 @@ test "OpcodeMetadata module" {
 }
 test "Execution module" {
     std.testing.refAllDecls(execution);
-}
-test "Instruction module" {
-    std.testing.refAllDecls(instruction_module);
-}
-
-// Import instruction tag tests
-test {
-    _ = @import("instruction_tag_test.zig");
-}
-
-// Import jumpdest validation tests
-test {
-    _ = @import("jumpdest_validation_test.zig");
 }
