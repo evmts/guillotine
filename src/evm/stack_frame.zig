@@ -27,6 +27,8 @@ pub const StateError = error{OutOfMemory};
 /// StackFrame owns all execution state for the tailcall interpreter
 pub const StackFrame = struct {
     // === HOT DATA - accessed every instruction ===
+    ip: usize, // Instruction pointer
+    ops: []*const anyopaque, // Owned ops array
     gas_remaining: u64,
     stack: Stack,
     memory: Memory,
@@ -35,8 +37,6 @@ pub const StackFrame = struct {
     // === OWNED EXECUTION STATE ===
     analysis: SimpleAnalysis, // Owned, not a pointer
     metadata: []u32, // Owned metadata array
-    ip: usize, // Instruction pointer
-    ops: []*const anyopaque, // Owned ops array
 
     // === DEPRECATED - TO BE MOVED TO HOST ===
     // TODO: Move to host interface - should be host.get_contract_address()
