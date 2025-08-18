@@ -36,7 +36,7 @@ pub const FramePool = struct {
     }
 
     /// Release a Frame pointer back to the pool. This function assumes the caller has
-    /// already called frame.deinit(allocator) to release owned resources.
+    /// already called frame.deinit() to release owned resources.
     pub fn release(self: *FramePool, frame_ptr: *Frame) void {
         // In a future iteration, push to free_list for reuse rather than destroy
         self.allocator.destroy(frame_ptr);

@@ -34,7 +34,6 @@ pub const CallResult = @import("evm/call_result.zig").CallResult;
 pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
-const AnalysisCache = @import("analysis_cache.zig");
 
 /// Virtual Machine for executing Ethereum bytecode.
 ///
@@ -155,7 +154,6 @@ mini_output: ?[]u8 = null,
 /// additional frames are allocated on-demand during CALL/CREATE operations
 frame_stack: ?[]Frame = null, // 8 bytes - frame storage pointer
 /// LRU cache for code analysis to avoid redundant analysis during nested calls
-analysis_cache: ?AnalysisCache = null, // 8 bytes - analysis cache pointer
 
 // Debug/tracing data (cold - only used in development)
 /// Optional tracer for capturing execution traces (not available on WASM)
@@ -290,7 +288,6 @@ pub fn init(
         // Expected size: 50-100KB (128 cache entries * analysis data)
         // Lifetime: Per EVM instance
         // Frequency: Once per EVM creation
-        .analysis_cache = AnalysisCache.init(allocator, AnalysisCache.DEFAULT_CACHE_SIZE),
         .tracer = tracer,
         .trace_file = null,
         .initial_thread_id = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) 0 else std.Thread.getCurrentId(),
@@ -329,9 +326,6 @@ pub fn deinit(self: *Evm) void {
     self.frame_pool.deinit();
 
     // Clean up analysis cache if it exists
-    if (self.analysis_cache) |*cache| {
-        cache.deinit();
-    }
 
     // Clean up self-destruct tracking
     self.self_destruct.deinit();
@@ -743,85 +737,32 @@ pub const InterprResult = struct {
     success: bool,
 };
 
-// Main interpret function - wrapper around interpret2
+// Main interpret function - wrapper around call2
 pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
-
-    // Check for bytecode analysis using cache
-    const analysis_ptr = if (self.analysis_cache) |*cache|
-        try cache.getOrAnalyze(contract.bytecode, &self.table)
-    else blk: {
-        // Fallback when no cache available
-        var analysis = try @import("analysis.zig").CodeAnalysis.from_code(self.allocator, contract.bytecode, &self.table);
-        break :blk &analysis;
+    // Use call2 for execution
+    const params = CallParams{
+        .kind = .Call,
+        .caller = contract.caller,
+        .address = contract.address,
+        .code_address = contract.address,
+        .input = input,
+        .value = contract.value,
+        .gas_limit = contract.gas,
+        .depth = 0,
     };
-
-    // Create host interface
-    const host = Host.init(self);
-    const snapshot_id = host.create_snapshot();
-    defer {
-        // Always revert snapshot to clean up any state changes
-        host.revert_to_snapshot(snapshot_id);
-    }
-
-    // Create frame for execution
-    const frame_val = try Frame.init(
-        contract.gas,
-        contract.address,
-        analysis_ptr.analysis,
-        analysis_ptr.metadata,
-        &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
-        host,
-        self.state.database,
-        self.allocator,
-    );
-    const frame_ptr = try self.frame_pool.acquire();
-    defer self.frame_pool.release(frame_ptr);
-    frame_ptr.* = frame_val;
-
-    // Set up frame metadata
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
-            .caller = contract.caller,
-            .value = contract.value,
-            .input_buffer = input,
-            .output_buffer = &.{},
-            .is_static = is_static,
-            .depth = self.current_frame_depth,
-        };
-    }
-
-    var exec_err: ?ExecutionError.Error = null;
-    var gas_left = contract.gas;
-
-    // Execute using interpret2
-    @import("evm/interpret2.zig").interpret2(frame_ptr) catch |err| {
-        if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
-            // Normal termination
-        } else {
-            exec_err = err;
-        }
-    };
-
-    gas_left = frame_ptr.gas_remaining;
-    const gas_used = contract.gas - gas_left;
-
-    // Get output from host
-    const output = host.get_output();
-
-    // Convert error to status
-    const status: InterprResult.Status = if (exec_err) |err| switch (err) {
-        ExecutionError.Error.REVERT => .Revert,
-        ExecutionError.Error.OutOfGas => .OutOfGas,
-        else => .Failure,
-    } else .Success;
-
+    
+    const result = try self.call(params);
+    
+    // Convert CallResult to InterprResult
+    const status: InterprResult.Status = if (result.success) .Success else .Failure;
+    
     return InterprResult{
         .status = status,
-        .output = if (output.len > 0) output else null,
-        .gas_left = gas_left,
-        .gas_used = gas_used,
+        .output = if (result.output.len > 0) result.output else null,
+        .gas_left = result.gas_left,
+        .gas_used = result.gas_used,
         .address = contract.address,
-        .success = exec_err == null,
+        .success = result.success,
     };
 }
 
@@ -1056,7 +997,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                 // Return view of owned output buffer (no extra allocation)
                 const out: ?[]const u8 = if (output.len > 0) output else null;
                 const gas_left = frame_ptr.gas_remaining;
-                frame_ptr.deinit(self.allocator);
+                frame_ptr.deinit();
                 self.frame_pool.release(frame_ptr);
                 return InterprResult{
                     .status = .Revert,
@@ -1070,7 +1011,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
             ExecutionError.Error.OutOfGas => {
                 Log.debug("[create_contract] OutOfGas during constructor", .{});
                 host.revert_to_snapshot(snapshot_id);
-                frame_ptr.deinit(self.allocator);
+                frame_ptr.deinit();
                 self.frame_pool.release(frame_ptr);
                 return InterprResult{
                     .status = .OutOfGas,
@@ -1085,7 +1026,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                 Log.debug("[create_contract] Failure during constructor: {}", .{e});
                 // Treat other errors as failure
                 host.revert_to_snapshot(snapshot_id);
-                frame_ptr.deinit(self.allocator);
+                frame_ptr.deinit();
                 self.frame_pool.release(frame_ptr);
                 return InterprResult{
                     .status = .Failure,
@@ -1120,7 +1061,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
 
     // Add back the unspent frame gas to the caller, but exclude the precharged overhead
     const gas_left = frame_ptr.gas_remaining;
-    frame_ptr.deinit(self.allocator);
+    frame_ptr.deinit();
     self.frame_pool.release(frame_ptr);
     return InterprResult{
         .status = .Success,

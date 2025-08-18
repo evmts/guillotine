@@ -131,7 +131,7 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
         Log.debug("VM.call_contract: Frame creation failed with error: {any}", .{err});
         return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
-    defer context.deinit(self.allocator);
+    defer context.deinit();
 
     // Set up frame metadata
     if (self.current_frame_depth < @import("../evm.zig").MAX_CALL_DEPTH) {

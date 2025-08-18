@@ -192,7 +192,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         self.state.database,
         self.allocator,
     );
-    defer frame.deinit(self.allocator);
+    defer frame.deinit();
 
     // Set up frame metadata
     if (self.current_frame_depth < MAX_CALL_DEPTH) {
