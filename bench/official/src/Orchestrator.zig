@@ -166,7 +166,7 @@ pub fn runDifferentialTrace(self: *Orchestrator, test_case: TestCase, output_dir
     const zig_trace_path = try std.fmt.allocPrint(self.allocator, "{s}/{s}_zig_trace.json", .{ output_dir, test_case.name });
     defer self.allocator.free(zig_trace_path);
 
-    const zig_runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
+    const zig_runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
     defer self.allocator.free(zig_runner_path);
 
     var zig_argv = std.ArrayList([]const u8).init(self.allocator);
@@ -832,9 +832,9 @@ fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
     var runner_path: []const u8 = undefined;
     if (std.mem.eql(u8, self.evm_name, "zig")) {
         // Default zig to use call2 runner
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
     } else if (std.mem.eql(u8, self.evm_name, "zig-call2")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
     } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "ethereumjs", "runner.js" });
     } else if (std.mem.eql(u8, self.evm_name, "geth")) {
@@ -1240,9 +1240,9 @@ fn buildRunnerCommand(self: *Orchestrator, test_case: TestCase) ![]const u8 {
     var runner_path: []const u8 = undefined;
     if (std.mem.eql(u8, self.evm_name, "zig")) {
         // Default zig to use call2 runner
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
     } else if (std.mem.eql(u8, self.evm_name, "zig-call2")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner-call2" });
+        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
     } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "ethereumjs", "runner.js" });
     } else if (std.mem.eql(u8, self.evm_name, "geth")) {
