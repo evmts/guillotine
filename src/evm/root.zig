@@ -111,6 +111,9 @@ pub const stack_validation = @import("stack/stack_validation.zig");
 /// Main virtual machine implementation
 pub const Evm = @import("evm.zig");
 
+/// Main call function using interpret2 (tailcall dispatch)
+pub const call2 = @import("evm/call2.zig").call;
+
 /// Execution context and frame management
 pub const Frame = @import("stack_frame.zig").StackFrame;
 pub const ExecutionContext = @import("stack_frame.zig").StackFrame;
