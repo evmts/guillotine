@@ -12,6 +12,7 @@ const Host = @import("../host.zig").Host;
 const CallParams = @import("../host.zig").CallParams;
 const AccessList = @import("../access_list/access_list.zig");
 const Log = @import("../log.zig");
+const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
 
 // Define local CallType to decouple from preallocated call frame stack
 const CallType = enum { Call, CallCode, DelegateCall, StaticCall };
@@ -178,12 +179,6 @@ pub const CallResult = struct {
 // ============================================================================
 // Shared Validation Functions for Call Operations
 // ============================================================================
-
-/// Check call depth limit shared by all call operations
-/// Returns true if depth limit is exceeded, false otherwise
-fn validate_call_depth(frame: *Frame) bool {
-    return frame.depth >= 1024;
-}
 
 /// Handle memory expansion for call arguments
 /// Returns the arguments slice or empty slice if size is 0
@@ -541,7 +536,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     const value = params.a; // bottom = value
     const init_offset = params.b; // middle = offset
     const init_size = params.c; // top = size
-    
+
     // Debug: Check what parameters we got from stack
     if (builtin.mode == .Debug) {
         std.debug.print("[op_create DEBUG] Stack params: value={}, offset={}, size={}\n", .{ value, init_offset, init_size });
@@ -551,13 +546,6 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
     if (frame.is_static) {
         @branchHint(.unlikely);
         return ExecutionError.Error.StaticStateChange;
-    }
-
-    // Check call depth limit
-    if (frame.depth >= 1024) {
-        @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
-        return;
     }
 
     // CRITICAL FIX: Calculate memory expansion costs BEFORE expanding memory
@@ -616,7 +604,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
             std.debug.print("\n", .{});
         }
     }
-    
+
     // CREATE uses sender address + nonce for address calculation
     const call_params = CallParams{
         .create = .{
@@ -712,14 +700,8 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.StaticStateChange;
     }
 
-    // Check call depth limit
-    if (frame.depth >= 1024) {
-        @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
-        return;
-    }
+    // Check call depth limit in the host interface
 
-    // CRITICAL FIX: Calculate memory expansion costs BEFORE expanding memory
     const init_end = if (init_size > 0) blk: {
         try check_offset_bounds(init_offset);
         try check_offset_bounds(init_size);
@@ -863,13 +845,6 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.WriteProtection;
     }
 
-    // Check depth limit
-    if (validate_call_depth(frame)) {
-        // Depth limit exceeded, push failure
-        frame.stack.append_unsafe(0);
-        return;
-    }
-
     // Convert to address
     const to_address = from_u256(to);
 
@@ -1008,12 +983,6 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
         return ExecutionError.Error.WriteProtection;
     }
 
-    // Depth limit
-    if (validate_call_depth(frame)) {
-        frame.stack.append_unsafe(0);
-        return;
-    }
-
     const to_address = from_u256(to);
 
     // Compute memory bounds (charging already done via dynamic_gas path)
@@ -1142,12 +1111,6 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     const max_memory_size = @max(args_end, ret_end);
     if (max_memory_size > 0) _ = try frame.memory.ensure_context_capacity(@intCast(max_memory_size));
     const to_address = from_u256(to);
-
-    if (frame.depth >= 1024) {
-        @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
-        return;
-    }
 
     const args = if (args_size == 0) &[_]u8{} else blk_args: {
         const o: usize = @intCast(args_offset);
@@ -1285,13 +1248,6 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const to_address = from_u256(to);
     Log.debug("[STATICCALL] Converted address: {any}", .{to_address});
 
-    // Check call depth limit
-    if (frame.depth >= 1024) {
-        @branchHint(.unlikely);
-        frame.stack.append_unsafe(0);
-        return;
-    }
-
     // Now expand memory after charging for it
     const args = if (args_size == 0) &[_]u8{} else blk_args: {
         const o: usize = @intCast(args_offset);
@@ -1330,13 +1286,11 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
     const evm_depth_before = evm_ptr.current_frame_depth;
 
-    const pre_depth = frame.depth;
     const pre_stack_size = frame.stack.size();
     Log.debug(
-        "[STATICCALL] pre-call: frame={x}, depth={}, stack size={}",
+        "[STATICCALL] pre-call: frame={x}, stack size={}",
         .{
             @intFromPtr(frame),
-            pre_depth,
             pre_stack_size,
         },
     );
@@ -1351,10 +1305,9 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
     // Debug: capture stack/frame state after call
     const evm_depth_after = evm_ptr.current_frame_depth;
     Log.debug(
-        "[STATICCALL] post-call: frame={x}, depth={}, evm_depth_before={}, evm_depth_after={}, stack size={}",
+        "[STATICCALL] post-call: frame={x}, evm_depth_before={}, evm_depth_after={}, stack size={}",
         .{
             @intFromPtr(frame),
-            frame.depth,
             evm_depth_before,
             evm_depth_after,
             frame.stack.size(),
@@ -1921,20 +1874,21 @@ fn validate_system_result(frame: *const Frame, op: FuzzSystemOperation, result: 
 
 test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x memory corruption test)" {
     const allocator = testing.allocator;
-    
+
     // Run test 3 times to detect memory corruption
     var run: usize = 0;
     while (run < 3) : (run += 1) {
         std.debug.print("CALL gas stipend test run {}/3\n", .{run + 1});
-        
+
         // Create a proper frame for testing
-        const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+        const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
         const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
         const code = &[_]u8{0x00}; // STOP
         const table = OpcodeMetadata.DEFAULT;
-        var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-        defer analysis.deinit();
-        
+        const result = try SimpleAnalysis.analyze(allocator, code);
+        defer result.analysis.deinit(allocator);
+        defer allocator.free(result.metadata);
+
         const MockHost = @import("../host.zig").MockHost;
         const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
         var memory_db = MemDb.init(allocator);
@@ -1943,7 +1897,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
         defer mock_host.deinit();
         const host = mock_host.to_host();
         const db_interface = memory_db.to_database_interface();
-        
+
         var frame = try Frame.init(
             10000, // gas_remaining
             false, // static_call
@@ -1951,80 +1905,81 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
             primitives.Address.ZERO_ADDRESS, // contract_address
             primitives.Address.ZERO_ADDRESS, // caller
             0, // value
-            &analysis,
+            &result.analysis,
             host,
             db_interface,
             allocator,
         );
         defer frame.deinit(allocator);
 
-    // Test 1: With value transfer, stipend is ADDED to forwarded gas
-    {
-        const gas_requested: u256 = 1000; // Request 1000 gas
-        const value: u256 = 1; // Non-zero value triggers stipend
-        const already_consumed: u64 = 100; // Some gas already consumed
+        // Test 1: With value transfer, stipend is ADDED to forwarded gas
+        {
+            const gas_requested: u256 = 1000; // Request 1000 gas
+            const value: u256 = 1; // Non-zero value triggers stipend
+            const already_consumed: u64 = 100; // Some gas already consumed
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+            const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Available after consumed: 10000 - 100 = 9900
-        // Max forwardable: 9900 - (9900/64) = 9900 - 154 = 9746
-        // Requested: 1000 (less than max)
-        // With stipend: 1000 + 2300 = 3300
-        try testing.expectEqual(@as(u64, 1000 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
-    }
+            // Available after consumed: 10000 - 100 = 9900
+            // Max forwardable: 9900 - (9900/64) = 9900 - 154 = 9746
+            // Requested: 1000 (less than max)
+            // With stipend: 1000 + 2300 = 3300
+            try testing.expectEqual(@as(u64, 1000 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
+        }
 
-    // Test 2: EIP-150 63/64 rule limits gas forwarding
-    {
-        frame.gas_remaining = 6400; // Specific amount for easy calculation
-        const gas_requested: u256 = 10000; // Request more than available
-        const value: u256 = 0; // No value, no stipend
-        const already_consumed: u64 = 0;
+        // Test 2: EIP-150 63/64 rule limits gas forwarding
+        {
+            frame.gas_remaining = 6400; // Specific amount for easy calculation
+            const gas_requested: u256 = 10000; // Request more than available
+            const value: u256 = 0; // No value, no stipend
+            const already_consumed: u64 = 0;
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+            const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Available: 6400
-        // One 64th: 6400 / 64 = 100
-        // Max forwardable: 6400 - 100 = 6300
-        // No stipend since value = 0
-        try testing.expectEqual(@as(u64, 6300), gas_for_call);
-    }
+            // Available: 6400
+            // One 64th: 6400 / 64 = 100
+            // Max forwardable: 6400 - 100 = 6300
+            // No stipend since value = 0
+            try testing.expectEqual(@as(u64, 6300), gas_for_call);
+        }
 
-    // Test 3: Stipend is added even when gas is limited by 63/64 rule
-    {
-        frame.gas_remaining = 640; // Low gas
-        const gas_requested: u256 = 1000; // Request more than available
-        const value: u256 = 1; // Non-zero value
-        const already_consumed: u64 = 0;
+        // Test 3: Stipend is added even when gas is limited by 63/64 rule
+        {
+            frame.gas_remaining = 640; // Low gas
+            const gas_requested: u256 = 1000; // Request more than available
+            const value: u256 = 1; // Non-zero value
+            const already_consumed: u64 = 0;
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+            const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Available: 640
-        // One 64th: 640 / 64 = 10
-        // Max forwardable: 640 - 10 = 630
-        // With stipend: 630 + 2300 = 2930
-        try testing.expectEqual(@as(u64, 630 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
-    }
-    
+            // Available: 640
+            // One 64th: 640 / 64 = 10
+            // Max forwardable: 640 - 10 = 630
+            // With stipend: 630 + 2300 = 2930
+            try testing.expectEqual(@as(u64, 630 + GasConstants.GAS_STIPEND_VALUE_TRANSFER), gas_for_call);
+        }
+
         std.debug.print("  Run {} completed successfully\n", .{run + 1});
     } // End of while loop
 }
 
 test "CALL without value respects gas limit without stipend (3x memory corruption test)" {
     const allocator = testing.allocator;
-    
+
     // Run test 3 times to detect memory corruption
     var run: usize = 0;
     while (run < 3) : (run += 1) {
         std.debug.print("CALL without value test run {}/3\n", .{run + 1});
-        
+
         // Create a proper frame for testing
-        const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+        const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
         const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
         const code = &[_]u8{0x00}; // STOP
         const table = OpcodeMetadata.DEFAULT;
-        var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-        defer analysis.deinit();
-        
+        const result = try SimpleAnalysis.analyze(allocator, code);
+        defer result.analysis.deinit(allocator);
+        defer allocator.free(result.metadata);
+
         const MockHost = @import("../host.zig").MockHost;
         const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
         var memory_db = MemDb.init(allocator);
@@ -2033,7 +1988,7 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
         defer mock_host.deinit();
         const host = mock_host.to_host();
         const db_interface = memory_db.to_database_interface();
-        
+
         const prim = @import("primitives");
         var frame = try Frame.init(
             1000, // gas_remaining
@@ -2042,45 +1997,46 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
             prim.Address.ZERO_ADDRESS, // contract_address
             prim.Address.ZERO_ADDRESS, // caller
             0, // value
-            &analysis,
+            &result.analysis,
             host,
             db_interface,
             allocator,
         );
         defer frame.deinit(allocator);
 
-    // Test: Without value transfer, no stipend should be applied
-    {
-        const gas_requested: u256 = 50; // Request only 50 gas
-        const value: u256 = 0; // Zero value - no stipend
-        const already_consumed: u64 = 0;
+        // Test: Without value transfer, no stipend should be applied
+        {
+            const gas_requested: u256 = 50; // Request only 50 gas
+            const value: u256 = 0; // Zero value - no stipend
+            const already_consumed: u64 = 0;
 
-        const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
+            const gas_for_call = calculate_call_gas_amount(&frame, gas_requested, value, already_consumed);
 
-        // Available: 1000
-        // One 64th: 1000 / 64 = 15
-        // Max forwardable: 1000 - 15 = 985
-        // Requested: 50 (less than max)
-        // No stipend since value = 0
-        try testing.expectEqual(@as(u64, 50), gas_for_call);
-        try testing.expect(gas_for_call < GasConstants.GAS_STIPEND_VALUE_TRANSFER);
-    }
-    
+            // Available: 1000
+            // One 64th: 1000 / 64 = 15
+            // Max forwardable: 1000 - 15 = 985
+            // Requested: 50 (less than max)
+            // No stipend since value = 0
+            try testing.expectEqual(@as(u64, 50), gas_for_call);
+            try testing.expect(gas_for_call < GasConstants.GAS_STIPEND_VALUE_TRANSFER);
+        }
+
         std.debug.print("  Run {} completed successfully\n", .{run + 1});
     } // End of while loop
 }
 
 test "EIP-150 gas calculations for nested calls" {
     const allocator = testing.allocator;
-    
+
     // Create a proper frame for testing
-    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const LocalAnalysis = @import("../analysis.zig").CodeAnalysis;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const code = &[_]u8{0x00}; // STOP
     const table = OpcodeMetadata.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
-    
+    const result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
+
     const MockHost = @import("../host.zig").MockHost;
     const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
     var memory_db = MemDb.init(allocator);
@@ -2089,7 +2045,7 @@ test "EIP-150 gas calculations for nested calls" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     const db_interface = memory_db.to_database_interface();
-    
+
     const prim = @import("primitives");
     var frame = try Frame.init(
         100000, // gas_remaining
@@ -2098,7 +2054,7 @@ test "EIP-150 gas calculations for nested calls" {
         prim.Address.ZERO_ADDRESS, // contract_address
         prim.Address.ZERO_ADDRESS, // caller
         0, // value
-        &analysis,
+        &result.analysis,
         host,
         db_interface,
         allocator,
@@ -2139,26 +2095,27 @@ test "EIP-150 gas calculations for nested calls" {
 
 test "EIP-150 minimum gas retention" {
     const allocator = std.testing.allocator;
-    
+
     // Create minimal test infrastructure
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const LocalAnalysis = @import("../analysis.zig").CodeAnalysis;
     const MockHost = @import("../host.zig").MockHost;
     const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
-    
+
     var memory_db = MemDb.init(allocator);
     defer memory_db.deinit();
-    
+
     const code = &[_]u8{0x00}; // STOP
     const table = OpcodeMetadata.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
-    
+    const result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
+
     var mock_host = MockHost.init(allocator);
     defer mock_host.deinit();
     const host = mock_host.to_host();
     const db_interface = memory_db.to_database_interface();
-    
+
     // Test that caller always retains at least 1/64 of gas
     var frame = try Frame.init(
         64, // gas_remaining - Exactly 64 gas
@@ -2167,7 +2124,7 @@ test "EIP-150 minimum gas retention" {
         primitives.Address.ZERO_ADDRESS, // contract_address
         primitives.Address.ZERO_ADDRESS, // caller
         0, // value
-        &analysis,
+        &result.analysis,
         host,
         db_interface,
         allocator,
@@ -2206,15 +2163,16 @@ test "EIP-150 minimum gas retention" {
 
 test "EIP-150 stipend edge cases" {
     const allocator = testing.allocator;
-    
+
     // Create a proper frame for testing
-    const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const LocalAnalysis = @import("../analysis.zig").CodeAnalysis;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const code = &[_]u8{0x00}; // STOP
     const table = OpcodeMetadata.DEFAULT;
-    var analysis = try CodeAnalysis.from_code(allocator, code, &table);
-    defer analysis.deinit();
-    
+    const result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
+
     const MockHost = @import("../host.zig").MockHost;
     const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
     var memory_db = MemDb.init(allocator);
@@ -2223,7 +2181,7 @@ test "EIP-150 stipend edge cases" {
     defer mock_host.deinit();
     const host = mock_host.to_host();
     const db_interface = memory_db.to_database_interface();
-    
+
     const prim = @import("primitives");
     var frame = try Frame.init(
         100, // gas_remaining - Very low gas
@@ -2232,7 +2190,7 @@ test "EIP-150 stipend edge cases" {
         prim.Address.ZERO_ADDRESS, // contract_address
         prim.Address.ZERO_ADDRESS, // caller
         0, // value
-        &analysis,
+        &result.analysis,
         host,
         db_interface,
         allocator,

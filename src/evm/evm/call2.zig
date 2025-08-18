@@ -17,16 +17,16 @@ const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
 
 /// EVM execution using the new interpret2 interpreter with tailcall dispatch
 /// This wraps interpret2 similar to how call wraps interpret
-pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
-    Log.debug("[call2] Starting execution with interpret2", .{});
+    Log.debug("[call] Starting execution with interpret2", .{});
 
     // Create host interface
     const host = Host.init(self);
 
     // Check if top-level call
     const is_top_level_call = !self.is_currently_executing();
-    Log.debug("[call2] is_top_level_call={}, is_executing={}, current_frame_depth={}", .{ is_top_level_call, self.is_currently_executing(), self.current_frame_depth });
+    Log.debug("[call] is_top_level_call={}, is_executing={}, current_frame_depth={}", .{ is_top_level_call, self.is_currently_executing(), self.current_frame_depth });
     const snapshot_id = if (!is_top_level_call) host.create_snapshot() else 0;
 
     // Extract call parameters
@@ -43,7 +43,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .create, .create2 => {
             // For CREATE operations, delegate to the standard create_contract method
             // as interpret2 isn't designed to handle deployment bytecode
-            Log.debug("[call2] CREATE operation - delegating to standard create_contract", .{});
+            Log.debug("[call] CREATE operation - delegating to standard create_contract", .{});
 
             const caller = if (params == .create) params.create.caller else params.create2.caller;
             const value = if (params == .create) params.create.value else params.create2.value;
@@ -52,7 +52,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
 
             // Use the standard create_contract for deployment
             const result = self.create_contract(caller, value, init_code, gas) catch |err| {
-                Log.debug("[call2] create_contract failed: {any}", .{err});
+                Log.debug("[call] create_contract failed: {any}", .{err});
                 return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
             };
 
@@ -65,9 +65,9 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .call => |call_data| {
             call_address = call_data.to;
             call_code = self.state.get_code(call_data.to);
-            Log.debug("[call2] Retrieved code for address: len={}", .{call_code.len});
+            Log.debug("[call] Retrieved code for address: len={}", .{call_code.len});
             if (call_code.len > 0) {
-                Log.debug("[call2] First 10 bytes of code: {any}", .{std.fmt.fmtSliceHexLower(call_code[0..@min(10, call_code.len)])});
+                Log.debug("[call] First 10 bytes of code: {any}", .{std.fmt.fmtSliceHexLower(call_code[0..@min(10, call_code.len)])});
             }
             call_input = call_data.input;
             call_gas = call_data.gas;
@@ -85,7 +85,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
             call_value = 0;
         },
         else => {
-            Log.debug("[call2] Unsupported call type", .{});
+            Log.debug("[call] Unsupported call type", .{});
             return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
         },
     }
@@ -157,7 +157,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     if (self.chain_rules.is_berlin) {
         const addresses_to_warm = [_]primitives.Address.Address{ call_address, call_caller };
         self.access_list.pre_warm_addresses(&addresses_to_warm) catch |err| {
-            Log.debug("[call2] Failed to warm addresses: {any}", .{err});
+            Log.debug("[call] Failed to warm addresses: {any}", .{err});
         };
     }
 
@@ -239,9 +239,9 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     // Main execution with interpret2
     var exec_err: ?ExecutionError.Error = null;
     // Call interpret2 which will handle its own analysis and tailcall dispatch
-    Log.debug("[call2] About to call interpret2 with code.len={}", .{call_code.len});
+    Log.debug("[call] About to call interpret2 with code.len={}", .{call_code.len});
     interpret2(&frame, call_code) catch |err| {
-        Log.debug("[call2] interpret2 ended with error: {any}", .{err});
+        Log.debug("[call] interpret2 ended with error: {any}", .{err});
         exec_err = err;
     };
 
@@ -281,3 +281,7 @@ pub fn call2(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
         .output = output,
     };
 }
+
+/// Alias for backward compatibility with tests and benchmarks
+/// that still reference call_mini
+pub const call_mini = call;
