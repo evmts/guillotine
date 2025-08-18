@@ -389,3 +389,26 @@ test "analysis2: PUSH0 metadata and length" {
     // First is PUSH0 -> metadata 0
     try std.testing.expectEqual(@as(u32, 0), result.metadata[0]);
 }
+
+test "analysis2: PUSH1-4 metadata fast path optimization" {
+    const allocator = std.testing.allocator;
+    // PUSH1 0xAA, PUSH2 0x1234, PUSH3 0xABCDEF, PUSH4 0x11223344, STOP
+    const code = &[_]u8{ 
+        0x60, 0xAA,                     // PUSH1 0xAA
+        0x61, 0x12, 0x34,              // PUSH2 0x1234  
+        0x62, 0xAB, 0xCD, 0xEF,        // PUSH3 0xABCDEF
+        0x63, 0x11, 0x22, 0x33, 0x44,  // PUSH4 0x11223344
+        0x00                            // STOP
+    };
+    
+    var result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
+    
+    // Verify metadata contains precomputed values for PUSH1-4
+    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]);        // PUSH1
+    try std.testing.expectEqual(@as(u32, 0x1234), result.metadata[1]);      // PUSH2  
+    try std.testing.expectEqual(@as(u32, 0xABCDEF), result.metadata[2]);    // PUSH3
+    try std.testing.expectEqual(@as(u32, 0x11223344), result.metadata[3]);  // PUSH4
+    try std.testing.expectEqual(@as(u32, 0), result.metadata[4]);           // STOP (no metadata)
+}

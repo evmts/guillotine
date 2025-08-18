@@ -305,35 +305,41 @@ pub fn op_push0(frame: *StackFrame) Error!noreturn {
 
 // Handle PUSH operations with data bytes
 pub fn op_push(frame: *StackFrame) Error!noreturn {
-    // Use cached analysis for O(1) lookup
+    // Get the PC to determine opcode type
     const pc = frame.analysis.getPc(@intCast(frame.ip));
-    if (pc != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE) {
-        const bytecode = frame.analysis.bytecode;
-        if (pc < bytecode.len) {
-            const opcode = bytecode[pc];
+    if (pc == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or pc >= frame.analysis.bytecode.len) {
+        return Error.InvalidOpcode;
+    }
 
-            // Handle PUSH0
-            if (opcode == 0x5F) {
-                frame.stack.append_unsafe(0);
-                return next(frame);
-            }
+    const opcode = frame.analysis.bytecode[pc];
 
-            // Handle PUSH1-PUSH32
-            if (opcode >= 0x60 and opcode <= 0x7F) {
-                const push_size = opcode - 0x5F;
-                const value_start = pc + 1;
+    // Handle PUSH0 - fast path
+    if (opcode == 0x5F) {
+        frame.stack.append_unsafe(0);
+        return next(frame);
+    }
 
-                // Read push value directly from bytecode
-                var value: u256 = 0;
-                var i: usize = 0;
-                while (i < push_size and value_start + i < bytecode.len) : (i += 1) {
-                    value = (value << 8) | bytecode[value_start + i];
-                }
+    // Handle PUSH1-PUSH32
+    if (opcode >= 0x60 and opcode <= 0x7F) {
+        const push_size = opcode - 0x5F;
 
-                frame.stack.append_unsafe(value);
-                return next(frame);
-            }
+        // Fast path for PUSH1-4: use precomputed metadata (O(1))
+        if (push_size <= 4) {
+            const value = frame.metadata[frame.ip];
+            frame.stack.append_unsafe(value);
+            return next(frame);
         }
+
+        // Slow path for PUSH5-32: read from bytecode
+        const value_start = pc + 1;
+        var value: u256 = 0;
+        var i: usize = 0;
+        while (i < push_size and value_start + i < frame.analysis.bytecode.len) : (i += 1) {
+            value = (value << 8) | frame.analysis.bytecode[value_start + i];
+        }
+
+        frame.stack.append_unsafe(value);
+        return next(frame);
     }
 
     // If we get here, something is wrong with the analysis
