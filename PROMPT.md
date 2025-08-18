@@ -124,3 +124,131 @@ StackFrame.init should:
 4. Update interpret2.zig to remove allocations
 5. Update component init functions to accept pre-allocated buffers
 6. Add comprehensive tests for each tier
+
+---
+
+## AMENDMENT (Based on Implementation Experience)
+
+### What Was Accomplished
+
+1. **Component Allocation Functions** ✅
+   - Stack: Added `calculate_allocation()` returning fixed 32KB
+   - Analysis2: Added separate functions for analysis, metadata, and ops arrays
+   - Created unified `AllocationInfo` struct with size, alignment, and can_grow fields
+
+2. **Allocation Tier System** ✅
+   - Created `allocation_tier.zig` with 5 tiers (4KB to 64KB)
+   - Implemented `select_tier()` and `buffer_size()` methods
+   - Added alignment calculations for proper memory layout
+
+3. **StackFrame Buffer Management** ✅
+   - Added `static_buffer` and `buffer_allocator` fields
+   - Created `init_with_bytecode_size()` method
+   - Maintained backward compatibility with original `init()`
+   - Added `get_buffer_allocator()` for external access
+
+4. **Pre-allocated Prepare Function** ✅
+   - Created `prepare_with_buffers()` in analysis2.zig
+   - Accepts pre-allocated slices instead of allocating internally
+   - Maintains fusion logic from original implementation
+
+### Key Learnings and Design Changes
+
+1. **AllocationInfo Structure**
+   - Original prompt suggested simple `{size, can_grow}` struct
+   - Reality: Need alignment information for proper memory layout
+   - Solution: Added `alignment` field with sensible defaults
+
+2. **FixedBufferAllocator Management**
+   - Issue: FBA is a value type that gets modified during allocation
+   - Solution: Store as pointer (`*std.heap.FixedBufferAllocator`) in StackFrame
+   - Properly allocate/deallocate the FBA itself
+
+3. **Compatibility Strategy**
+   - Keep original methods for gradual migration
+   - New methods have explicit names (`init_with_bytecode_size`, `prepare_with_buffers`)
+   - Legacy paths still work during transition
+
+4. **Import Path Issues**
+   - Some modules have circular dependencies or incorrect relative imports
+   - Need to be careful about module boundaries
+   - May need to reorganize some imports as part of cleanup
+
+### What the Original Prompt Should Have Included
+
+1. **Concrete Types**
+   ```zig
+   pub const AllocationInfo = struct {
+       size: usize,
+       alignment: usize = 8,
+       can_grow: bool = false,
+   };
+   ```
+
+2. **Alignment Considerations**
+   - Different types need different alignments (u256 needs 32-byte alignment)
+   - Buffer allocator must handle alignment properly
+   - Include alignment helper functions
+
+3. **Error Handling**
+   - Define specific error types for allocation failures
+   - Handle buffer size verification with proper errors
+   - Use debug assertions for development, but have production error paths
+
+4. **Testing Strategy Details**
+   - Test each component's allocation function independently
+   - Test tier selection with boundary conditions
+   - Verify alignment is maintained in allocated buffers
+
+### Remaining Work
+
+1. **Update Stack.init** 🔄
+   - Create `init_with_buffer()` accepting pre-allocated memory
+   - Ensure proper handling of buffer vs heap allocation in deinit
+
+2. **Update call2.zig** 🔄
+   - Use `StackFrame.init_with_bytecode_size()` instead of `init()`
+   - Call `prepare_with_buffers()` using frame's buffer allocator
+   - Remove empty analysis/metadata/ops initialization
+
+3. **Clean up interpret2.zig** 🔄
+   - Remove static buffer and FBA
+   - Remove call to `prepare()`
+   - Add assertion that analysis is pre-prepared
+   - Use frame's pre-allocated data
+
+4. **Fix Import Issues** 🔄
+   - Resolve circular dependencies
+   - Fix relative import paths
+   - Ensure all modules can access needed types
+
+5. **Comprehensive Testing** 🔄
+   - Test with real contracts of various sizes
+   - Benchmark allocation performance
+   - Verify no memory leaks with valgrind
+   - Test error paths and edge cases
+
+### Performance Expectations (Refined)
+
+- **Memory usage**: Reduced by ~50-90% for small contracts (4KB vs 1MB)
+- **Allocation overhead**: Single allocation vs 5-10 allocations per frame
+- **Cache locality**: All frame data in contiguous memory block
+- **Predictability**: Allocation size known before execution begins
+- **Fragmentation**: Eliminated for frame-local allocations
+
+### Gotchas Discovered
+
+1. **FBA Lifetime**: FixedBufferAllocator must outlive all allocations from it
+2. **Alignment Math**: Must align each sub-allocation properly within buffer
+3. **Buffer Ownership**: Clear ownership model prevents use-after-free
+4. **Test Isolation**: Some tests assume specific memory layouts
+5. **Conditional Compilation**: Debug assertions affect struct sizes
+
+### Recommended Next Steps
+
+1. Fix the import path issues first (blocking tests)
+2. Update Stack to support pre-allocated buffers
+3. Modify call2.zig to use new initialization
+4. Clean up interpret2.zig
+5. Run comprehensive tests with real contracts
+6. Benchmark before/after to verify improvements
