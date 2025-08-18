@@ -1884,7 +1884,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
         const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
         const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
         const code = &[_]u8{0x00}; // STOP
-        const table = OpcodeMetadata.DEFAULT;
+        _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
         const result = try SimpleAnalysis.analyze(allocator, code);
         defer result.analysis.deinit(allocator);
         defer allocator.free(result.metadata);
@@ -1975,7 +1975,7 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
         const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
         const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
         const code = &[_]u8{0x00}; // STOP
-        const table = OpcodeMetadata.DEFAULT;
+        _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
         const result = try SimpleAnalysis.analyze(allocator, code);
         defer result.analysis.deinit(allocator);
         defer allocator.free(result.metadata);
@@ -2029,10 +2029,10 @@ test "EIP-150 gas calculations for nested calls" {
     const allocator = testing.allocator;
 
     // Create a proper frame for testing
-    const LocalAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const code = &[_]u8{0x00}; // STOP
-    const table = OpcodeMetadata.DEFAULT;
+    _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
@@ -2098,7 +2098,7 @@ test "EIP-150 minimum gas retention" {
 
     // Create minimal test infrastructure
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
-    const LocalAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
     const MockHost = @import("../host.zig").MockHost;
     const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
 
@@ -2106,7 +2106,7 @@ test "EIP-150 minimum gas retention" {
     defer memory_db.deinit();
 
     const code = &[_]u8{0x00}; // STOP
-    const table = OpcodeMetadata.DEFAULT;
+    _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
@@ -2165,10 +2165,10 @@ test "EIP-150 stipend edge cases" {
     const allocator = testing.allocator;
 
     // Create a proper frame for testing
-    const LocalAnalysis = @import("../analysis.zig").CodeAnalysis;
+    const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
     const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
     const code = &[_]u8{0x00}; // STOP
-    const table = OpcodeMetadata.DEFAULT;
+    _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);

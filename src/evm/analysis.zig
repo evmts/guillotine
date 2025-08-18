@@ -11,6 +11,9 @@ pub const CodeAnalysis = struct {
     metadata: []u32,
     allocator: std.mem.Allocator,
     code: []const u8, // Compatibility field for old interface
+    code_len: usize, // Compatibility field for old interface
+    instructions: []const u8, // Compatibility field - maps to bytecode for now
+    size2_instructions: usize, // Compatibility field for instruction count
 
     /// Create analysis from bytecode (old interface compatibility)
     pub fn from_code(allocator: std.mem.Allocator, code: []const u8, _jump_table: anytype) !CodeAnalysis {
@@ -21,6 +24,9 @@ pub const CodeAnalysis = struct {
             .metadata = result.metadata,
             .allocator = allocator,
             .code = code,
+            .code_len = code.len,
+            .instructions = code, // Map to bytecode for compatibility
+            .size2_instructions = result.analysis.inst_count,
         };
     }
 

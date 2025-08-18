@@ -76,7 +76,7 @@ pub const Frame = struct {
 
     // Legacy field kept for compatibility - will be removed when all systems use tailcall_analysis
     // TODO: Remove this field once all systems migrate to tailcall dispatch
-    analysis: ?*const anyopaque = null, // Legacy field for backwards compatibility
+    analysis: ?*const @import("analysis.zig").CodeAnalysis = null, // Legacy field for backwards compatibility
 
     /// Initialize a Frame with required parameters
     pub fn init(
@@ -86,7 +86,7 @@ pub const Frame = struct {
         contract_address: primitives.Address.Address,
         caller: primitives.Address.Address,
         value: u256,
-        analysis: ?*const anyopaque, // Legacy parameter - set to null for new tailcall dispatch
+        analysis: ?*const @import("analysis.zig").CodeAnalysis, // Legacy parameter - set to null for new tailcall dispatch
         host: Host,
         state: DatabaseInterface,
         allocator: std.mem.Allocator,

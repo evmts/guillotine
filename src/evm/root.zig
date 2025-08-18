@@ -27,7 +27,7 @@
 //! - Error mapping utilities for consistent handling
 //!
 //! ### Utilities
-//! - **CodeAnalysis**: Bytecode analysis and jump destination detection
+//! - **SimpleAnalysis**: Simplified bytecode analysis for tailcall dispatch
 //! - **Hardfork**: Fork-specific behavior configuration
 //! - **gas_constants**: Gas cost calculations
 //! - **chain_rules**: Chain-specific validation rules
@@ -62,8 +62,8 @@ pub const primitives = @import("primitives");
 
 // Import all EVM modules
 
-/// Bytecode analysis for jump destination detection
-pub const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
+/// Simplified bytecode analysis for tailcall dispatch
+pub const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
 
 /// Unified error types for EVM execution
 pub const ExecutionError = @import("execution/execution_error.zig");
