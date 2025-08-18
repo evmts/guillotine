@@ -276,7 +276,7 @@ test "inline hot ops maintains correctness" {
     // Test that inlined operations produce same results as regular dispatch
     const testing = std.testing;
     const OpcodeMetadata = @import("opcode_metadata.zig");
-    const Frame = @import("../frame.zig").Frame;
+    const Frame = @import("../stack_frame.zig").StackFrame;
     const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
     const MockHost = @import("../host.zig").MockHost;
     const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;

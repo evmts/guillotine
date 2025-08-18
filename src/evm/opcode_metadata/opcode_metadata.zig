@@ -7,7 +7,7 @@ const ExecutionFunc = @import("../execution_func.zig").ExecutionFunc;
 const Hardfork = @import("../hardforks/hardfork.zig").Hardfork;
 const ExecutionError = @import("../execution/execution_error.zig");
 const Stack = @import("../stack/stack.zig");
-const ExecutionContext = @import("../frame.zig").Frame;
+const ExecutionContext = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
 const GasConstants = primitives.GasConstants;
@@ -19,6 +19,16 @@ const execution = @import("../execution/package.zig");
 const stack_ops = execution.stack;
 const log = execution.log;
 const operation_config = @import("operation_config.zig");
+const adapter = @import("../execution/adapter.zig");
+
+// Local wrapper for opcodes that take Frame*
+fn wrap_ctx(comptime OpFn: *const fn (*@import("../stack_frame.zig").StackFrame) ExecutionError.Error!void) ExecutionFunc {
+    return struct {
+        pub fn f(ctx: *anyopaque) ExecutionError.Error!void {
+            return adapter.call_ctx(OpFn, ctx);
+        }
+    }.f;
+}
 
 /// EVM opcode metadata for efficient opcode dispatch.
 ///
@@ -239,7 +249,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     if (comptime builtin.mode == .ReleaseSmall) {
         // PUSH0 - EIP-3855 (available from Shanghai)
         if (@intFromEnum(hardfork) >= @intFromEnum(Hardfork.SHANGHAI)) {
-            jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+            jt.execute_funcs[0x5f] = wrap_ctx(execution.null_opcode.op_invalid);
             jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
             jt.min_stack[0x5f] = 0;
             jt.max_stack[0x5f] = Stack.CAPACITY - 1;
@@ -250,7 +260,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         }
 
         // PUSH1 - most common
-        jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
+        jt.execute_funcs[0x60] = wrap_ctx(execution.null_opcode.op_invalid);
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
         jt.max_stack[0x60] = Stack.CAPACITY - 1;
@@ -262,7 +272,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         // so stack validation and block gas accounting have correct values.
         for (1..32) |i| {
             const idx = 0x60 + i;
-            jt.execute_funcs[idx] = execution.null_opcode.op_invalid; // unreachable at runtime
+            jt.execute_funcs[idx] = wrap_ctx(execution.null_opcode.op_invalid); // unreachable at runtime
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = 0;
             jt.max_stack[idx] = Stack.CAPACITY - 1;
@@ -271,7 +281,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
     } else {
         // PUSH0 - EIP-3855 (available from Shanghai)
         if (@intFromEnum(hardfork) >= @intFromEnum(Hardfork.SHANGHAI)) {
-            jt.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+            jt.execute_funcs[0x5f] = wrap_ctx(execution.null_opcode.op_invalid);
             jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
             jt.min_stack[0x5f] = 0;
             jt.max_stack[0x5f] = Stack.CAPACITY - 1;
@@ -282,7 +292,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         }
 
         // PUSH1 - most common, optimized with direct byte access
-        jt.execute_funcs[0x60] = execution.null_opcode.op_invalid;
+        jt.execute_funcs[0x60] = wrap_ctx(execution.null_opcode.op_invalid);
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
         jt.max_stack[0x60] = Stack.CAPACITY - 1;
@@ -291,7 +301,7 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         // PUSH2-PUSH32 inline execution; provide metadata only
         inline for (1..32) |i| {
             const opcode_idx = 0x60 + i;
-            jt.execute_funcs[opcode_idx] = execution.null_opcode.op_invalid; // unreachable
+            jt.execute_funcs[opcode_idx] = wrap_ctx(execution.null_opcode.op_invalid); // unreachable
             jt.constant_gas[opcode_idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[opcode_idx] = 0;
             jt.max_stack[opcode_idx] = Stack.CAPACITY - 1;
@@ -458,7 +468,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
 
     // PUSH0
     if (flags.eip3855_push0) {
-        metadata.execute_funcs[0x5f] = execution.null_opcode.op_invalid;
+        metadata.execute_funcs[0x5f] = wrap_ctx(execution.null_opcode.op_invalid);
         metadata.constant_gas[0x5f] = GasConstants.GasQuickStep;
         metadata.min_stack[0x5f] = 0;
         metadata.max_stack[0x5f] = Stack.CAPACITY - 1;
@@ -470,7 +480,7 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
     i = 0;
     while (i < 32) : (i += 1) {
         const opcode = 0x60 + i;
-        metadata.execute_funcs[opcode] = execution.null_opcode.op_invalid;
+        metadata.execute_funcs[opcode] = wrap_ctx(execution.null_opcode.op_invalid);
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = 0;
         metadata.max_stack[opcode] = Stack.CAPACITY - 1;
