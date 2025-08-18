@@ -17,18 +17,25 @@ const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
 
+pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+    return _call(self, params, true);
+}
+pub fn inner_call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+    return _call(self, params, false);
+}
+
 /// EVM execution using the new interpret2 interpreter with tailcall dispatch
 /// This wraps interpret2 similar to how call wraps interpret
-pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: bool) ExecutionError.Error!CallResult {
     const Log = @import("../log.zig");
     Log.debug("[call] Starting execution with interpret2", .{});
 
-    // Create host interface
+    // host is a virtual interface back to the evm
+    // so the opcodes can recursively call into the evm
+    // Host also holds on to rarely accessed state to keep
+    // Frame lean
     const host = Host.init(self);
 
-    // Check if top-level call
-    const is_top_level_call = !self.is_currently_executing();
-    Log.debug("[call] is_top_level_call={}, is_executing={}, current_frame_depth={}", .{ is_top_level_call, self.is_currently_executing(), self.current_frame_depth });
     const snapshot_id = if (!is_top_level_call) host.create_snapshot() else 0;
 
     // Extract call parameters
@@ -165,17 +172,16 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
 
     // Create a StackFrame for interpret2
     const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
-    
+
     // Create analysis with bytecode - interpret2 will analyze and fill the rest
     const empty_analysis = SimpleAnalysis{
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = call_code,
-        .inst_count = 0,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
-    
+
     var frame = try StackFrame.init(
         gas_after_base,
         call_address,
