@@ -878,6 +878,143 @@ pub fn op_push_then_swap1(frame: *StackFrame) Error!noreturn {
     return next(frame);
 }
 
+// === SMALL VALUE FUSION OPERATIONS (PUSH1-4) ===
+// These operations read the push value directly from metadata for O(1) access
+
+// Memory operation fusions - small values
+pub fn op_push_then_mload_small(frame: *StackFrame) Error!noreturn {
+    const offset = frame.metadata[frame.ip];
+
+    // Push offset to stack then call mload
+    frame.stack.append_unsafe(offset);
+    try execution.memory.op_mload(frame);
+    return next(frame);
+}
+
+pub fn op_push_then_mstore_small(frame: *StackFrame) Error!noreturn {
+    const offset = frame.metadata[frame.ip];
+    const value = frame.stack.peek_unsafe();
+
+    // Push value and offset to stack then call mstore
+    frame.stack.set_top_unsafe(value);
+    frame.stack.append_unsafe(offset);
+    try execution.memory.op_mstore(frame);
+    return next(frame);
+}
+
+// Comparison operation fusions - small values
+pub fn op_push_then_eq_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    const result: u256 = if (other == push_val) 1 else 0;
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+pub fn op_push_then_lt_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    // Note: In EVM, LT pops a then b, and checks if a < b
+    // PUSH pushes the value that becomes 'a', so we check push_val < other
+    const result: u256 = if (push_val < other) 1 else 0;
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+pub fn op_push_then_gt_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    // Note: In EVM, GT pops a then b, and checks if a > b
+    // PUSH pushes the value that becomes 'a', so we check push_val > other
+    const result: u256 = if (push_val > other) 1 else 0;
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+// Bitwise operation fusions - small values
+pub fn op_push_then_and_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    const result = other & push_val;
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+// Arithmetic operation fusions - small values
+pub fn op_push_then_add_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    const result = other +% push_val; // Wrapping add
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+pub fn op_push_then_sub_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    // Note: In EVM, SUB pops a then b, and computes a - b
+    // PUSH pushes the value that becomes 'a', so we compute push_val - other
+    const result = push_val -% other; // Wrapping sub
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+pub fn op_push_then_mul_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    const result = other *% push_val; // Wrapping mul
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+pub fn op_push_then_div_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const other = frame.stack.peek_unsafe();
+
+    // Note: In EVM, DIV pops a then b, and computes a / b
+    // PUSH pushes the value that becomes 'a', so we compute push_val / other
+    const result = if (other == 0) 0 else push_val / other;
+    frame.stack.set_top_unsafe(result);
+    return next(frame);
+}
+
+// Storage operation fusions - small values
+pub fn op_push_then_sload_small(frame: *StackFrame) Error!noreturn {
+    const key = frame.metadata[frame.ip];
+
+    // Push key to stack then call sload
+    frame.stack.append_unsafe(key);
+    try execution.storage.op_sload(frame);
+    return next(frame);
+}
+
+// Stack operation fusions - small values
+pub fn op_push_then_dup1_small(frame: *StackFrame) Error!noreturn {
+    const value = frame.metadata[frame.ip];
+
+    // Push the value twice (PUSH then DUP1 effect)
+    frame.stack.append_unsafe(value);
+    frame.stack.append_unsafe(value);
+    return next(frame);
+}
+
+pub fn op_push_then_swap1_small(frame: *StackFrame) Error!noreturn {
+    const push_val = frame.metadata[frame.ip];
+    const top = frame.stack.peek_unsafe();
+
+    // Push in swapped order
+    frame.stack.set_top_unsafe(push_val);
+    frame.stack.append_unsafe(top);
+    return next(frame);
+}
+
 // Log operations
 pub fn op_log0(frame: *StackFrame) Error!noreturn {
     try execution.log.log_0(frame);

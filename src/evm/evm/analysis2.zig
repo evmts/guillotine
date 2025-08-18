@@ -338,19 +338,48 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
                 }
             }
 
-            if (fused == null and next_op == OP_MLOAD) fused = @ptrCast(&tailcalls.op_push_then_mload);
-            if (fused == null and next_op == OP_MSTORE) fused = @ptrCast(&tailcalls.op_push_then_mstore);
-            if (fused == null and next_op == OP_EQ) fused = @ptrCast(&tailcalls.op_push_then_eq);
-            if (fused == null and next_op == OP_LT) fused = @ptrCast(&tailcalls.op_push_then_lt);
-            if (fused == null and next_op == OP_GT) fused = @ptrCast(&tailcalls.op_push_then_gt);
-            if (fused == null and next_op == OP_AND) fused = @ptrCast(&tailcalls.op_push_then_and);
-            if (fused == null and next_op == OP_ADD) fused = @ptrCast(&tailcalls.op_push_then_add);
-            if (fused == null and next_op == OP_SUB) fused = @ptrCast(&tailcalls.op_push_then_sub);
-            if (fused == null and next_op == OP_MUL) fused = @ptrCast(&tailcalls.op_push_then_mul);
-            if (fused == null and next_op == OP_DIV) fused = @ptrCast(&tailcalls.op_push_then_div);
-            if (fused == null and next_op == OP_SLOAD) fused = @ptrCast(&tailcalls.op_push_then_sload);
-            if (fused == null and next_op == OP_DUP1) fused = @ptrCast(&tailcalls.op_push_then_dup1);
-            if (fused == null and next_op == OP_SWAP1) fused = @ptrCast(&tailcalls.op_push_then_swap1);
+            // Check if this is a small push (PUSH1-4) that has value stored in metadata
+            const is_small_push = push_size <= 4 and @as(usize, inst_pc) + 1 + push_size <= code.len;
+
+            if (fused == null and next_op == OP_MLOAD) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_mload_small) else @ptrCast(&tailcalls.op_push_then_mload);
+            }
+            if (fused == null and next_op == OP_MSTORE) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_mstore_small) else @ptrCast(&tailcalls.op_push_then_mstore);
+            }
+            if (fused == null and next_op == OP_EQ) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_eq_small) else @ptrCast(&tailcalls.op_push_then_eq);
+            }
+            if (fused == null and next_op == OP_LT) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_lt_small) else @ptrCast(&tailcalls.op_push_then_lt);
+            }
+            if (fused == null and next_op == OP_GT) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_gt_small) else @ptrCast(&tailcalls.op_push_then_gt);
+            }
+            if (fused == null and next_op == OP_AND) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_and_small) else @ptrCast(&tailcalls.op_push_then_and);
+            }
+            if (fused == null and next_op == OP_ADD) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_add_small) else @ptrCast(&tailcalls.op_push_then_add);
+            }
+            if (fused == null and next_op == OP_SUB) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_sub_small) else @ptrCast(&tailcalls.op_push_then_sub);
+            }
+            if (fused == null and next_op == OP_MUL) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_mul_small) else @ptrCast(&tailcalls.op_push_then_mul);
+            }
+            if (fused == null and next_op == OP_DIV) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_div_small) else @ptrCast(&tailcalls.op_push_then_div);
+            }
+            if (fused == null and next_op == OP_SLOAD) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_sload_small) else @ptrCast(&tailcalls.op_push_then_sload);
+            }
+            if (fused == null and next_op == OP_DUP1) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_dup1_small) else @ptrCast(&tailcalls.op_push_then_dup1);
+            }
+            if (fused == null and next_op == OP_SWAP1) {
+                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_swap1_small) else @ptrCast(&tailcalls.op_push_then_swap1);
+            }
 
             if (fused == null) continue;
 
