@@ -19,7 +19,7 @@ const builtin = @import("builtin");
 const Operation = @import("../opcodes/operation.zig");
 const Log = @import("../log.zig");
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const Stack = @import("../stack/stack.zig");
 const GasConstants = @import("primitives").GasConstants;
 
@@ -32,8 +32,7 @@ const SAFE_MEMORY_EXPANSION = builtin.mode != .ReleaseFast and builtin.mode != .
 ///
 /// Loads 32 bytes from memory starting at the given offset.
 /// Stack: [offset] → [value]
-pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mload(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         if (frame.stack.size() < 1) {
             @branchHint(.cold);
@@ -72,8 +71,7 @@ pub fn op_mload(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Stores 32 bytes to memory starting at the given offset.
 /// Stack: [offset, value] → []
-pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mstore(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         if (frame.stack.size() < 2) {
             @branchHint(.cold);
@@ -118,8 +116,7 @@ pub fn op_mstore(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Stores a single byte (LSB of the value) to memory at the given offset.
 /// Stack: [offset, value] → []
-pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mstore8(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         if (frame.stack.size() < 2) {
             @branchHint(.cold);
@@ -159,8 +156,7 @@ pub fn op_mstore8(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Returns the size of active memory in bytes, rounded up to the nearest word (32 bytes).
 /// Stack: [] → [size]
-pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_msize(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         if (frame.stack.size() >= Stack.CAPACITY) {
             @branchHint(.cold);
@@ -182,8 +178,7 @@ pub fn op_msize(context: *anyopaque) ExecutionError.Error!void {
 /// Copies data within memory from source to destination (EIP-5656, Cancun).
 /// Handles overlapping regions correctly.
 /// Stack: [dest, src, length] → []
-pub fn op_mcopy(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mcopy(frame: *Frame) ExecutionError.Error!void {
 
     if (SAFE_STACK_CHECKS) {
         if (frame.stack.size() < 3) {

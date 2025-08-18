@@ -1,7 +1,7 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const builtin = @import("builtin");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const Evm = @import("../evm.zig");
 const Vm = Evm; // Alias for compatibility
 const primitives = @import("primitives");
@@ -466,8 +466,8 @@ pub fn calculate_call_gas(
 // ============================================================================
 
 // Gas opcode handler
-pub fn gas_op(context: *Frame) ExecutionError.Error!void {
-    context.stack.append_unsafe(@as(u256, @intCast(context.gas_remaining)));
+pub fn gas_op(frame: *Frame) ExecutionError.Error!void {
+    frame.stack.append_unsafe(@as(u256, @intCast(frame.gas_remaining)));
 }
 
 // Helper to check if u256 fits in usize
@@ -526,8 +526,7 @@ pub fn revert_to_snapshot(vm: *Vm, snapshot_id: usize) !void {
     try vm.revert_to_snapshot(snapshot_id);
 }
 
-pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_create(frame: *Frame) ExecutionError.Error!void {
 
     // Pop parameters from stack using optimized pop3
     // Stack order: [value, offset, size] with size on top
@@ -680,8 +679,7 @@ pub fn op_create(context: *anyopaque) ExecutionError.Error!void {
 }
 
 /// CREATE2 opcode - Create contract with deterministic address
-pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
 
     // Pop parameters from stack using optimized pop methods
     // Stack order (top to bottom): value, offset, size, salt
@@ -827,8 +825,7 @@ pub fn op_create2(context: *anyopaque) ExecutionError.Error!void {
     }
 }
 
-pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_call(frame: *Frame) ExecutionError.Error!void {
 
     // EVM stack order (top -> bottom): gas, to, value, in_offset, in_size, out_offset, out_size
     // Pop in that order for clarity
@@ -963,8 +960,7 @@ pub fn op_call(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.append_unsafe(if (call_result.success) 1 else 0);
 }
 
-pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_callcode(frame: *Frame) ExecutionError.Error!void {
 
     // Pop parameters from stack (same layout as CALL) using optimized methods
     const params1 = frame.stack.pop3_unsafe();
@@ -1076,8 +1072,7 @@ pub fn op_callcode(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.append_unsafe(if (call_result.success) 1 else 0);
 }
 
-pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
 
     const params1 = frame.stack.pop2_unsafe();
     const gas = params1.a;
@@ -1184,8 +1179,7 @@ pub fn op_delegatecall(context: *anyopaque) ExecutionError.Error!void {
     frame.stack.append_unsafe(if (call_result.success) 1 else 0);
 }
 
-pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
 
     // Debug: Capture original frame pointer
     const original_frame_ptr = @intFromPtr(frame);
@@ -1381,8 +1375,7 @@ pub fn op_staticcall(context: *anyopaque) ExecutionError.Error!void {
 /// Gas: Variable based on hardfork and account creation
 /// Memory: No memory access
 /// Storage: Contract marked for destruction (if created in same tx)
-pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_selfdestruct(frame: *Frame) ExecutionError.Error!void {
 
     // Check static call restriction
     if (frame.is_static) {
@@ -1437,8 +1430,8 @@ pub fn op_selfdestruct(context: *anyopaque) ExecutionError.Error!void {
 
 /// EXTCALL opcode (0xF8): External call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extcall(context: *anyopaque) ExecutionError.Error!void {
-    _ = context;
+pub fn op_extcall(frame: *Frame) ExecutionError.Error!void {
+    _ = frame;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
     return ExecutionError.Error.EOFNotSupported;
@@ -1446,8 +1439,8 @@ pub fn op_extcall(context: *anyopaque) ExecutionError.Error!void {
 
 /// EXTDELEGATECALL opcode (0xF9): External delegate call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extdelegatecall(context: *anyopaque) ExecutionError.Error!void {
-    _ = context;
+pub fn op_extdelegatecall(frame: *Frame) ExecutionError.Error!void {
+    _ = frame;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
     return ExecutionError.Error.EOFNotSupported;
@@ -1455,8 +1448,8 @@ pub fn op_extdelegatecall(context: *anyopaque) ExecutionError.Error!void {
 
 /// EXTSTATICCALL opcode (0xFB): External static call with EOF validation
 /// Not implemented - EOF feature
-pub fn op_extstaticcall(context: *anyopaque) ExecutionError.Error!void {
-    _ = context;
+pub fn op_extstaticcall(frame: *Frame) ExecutionError.Error!void {
+    _ = frame;
 
     // This is an EOF (EVM Object Format) opcode, not yet implemented
     return ExecutionError.Error.EOFNotSupported;

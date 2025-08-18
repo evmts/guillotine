@@ -17,7 +17,7 @@
 
 const std = @import("std");
 const Operation = @import("../opcodes/operation.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Vm = @import("../evm.zig");
@@ -29,8 +29,7 @@ const Address = @import("primitives").Address;
 ///
 /// Removes and discards the top item from the stack.
 /// Stack: [a] → []
-pub fn op_pop(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_pop(frame: *Frame) ExecutionError.Error!void {
     _ = try frame.stack.pop();
 }
 
@@ -40,8 +39,8 @@ pub fn op_pop(context: *anyopaque) ExecutionError.Error!void {
 /// The created function duplicates the nth item and pushes it to the top.
 pub fn make_dup_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
     return struct {
-        pub fn dup_ec(context: *Frame) ExecutionError.Error!void {
-            return dup_impl_context(n, context);
+        pub fn dup_ec(frame: *Frame) ExecutionError.Error!void {
+            return dup_impl_context(n, frame);
         }
     }.dup_ec;
 }
@@ -50,27 +49,26 @@ pub fn make_dup_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
 ///
 /// Duplicates the nth item from the top of the stack (1-indexed).
 /// DUP1 duplicates the top item, DUP2 the second from top, etc.
-fn dup_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
+fn dup_impl_context(n: u8, frame: *Frame) ExecutionError.Error!void {
     // Compile-time validation: DUP operations pop 0 items, push 1
     // At compile time, this validates that DUP has valid EVM stack effects
     // At runtime, this ensures sufficient stack depth for DUPn operations
-    try StackValidation.validateStackRequirements(0, 1, context.stack.size());
+    try StackValidation.validateStackRequirements(0, 1, frame.stack.size());
 
     // Additional runtime check for DUP depth (n must be available on stack)
-    if (context.stack.size() < n) {
+    if (frame.stack.size() < n) {
         @branchHint(.cold);
         return ExecutionError.Error.StackUnderflow;
     }
 
-    try context.stack.dup(n);
+    try frame.stack.dup(n);
 }
 
 /// DUP1 opcode (0x80) - Duplicate 1st stack item
 ///
 /// Duplicates the top stack item.
 /// Stack: [a] → [a, a]
-pub fn op_dup1(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup1(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(1, frame);
 }
 
@@ -78,78 +76,63 @@ pub fn op_dup1(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Duplicates the second item from the top.
 /// Stack: [a, b] → [a, b, a]
-pub fn op_dup2(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup2(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(2, frame);
 }
 
-pub fn op_dup3(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup3(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(3, frame);
 }
 
-pub fn op_dup4(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup4(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(4, frame);
 }
 
-pub fn op_dup5(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup5(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(5, frame);
 }
 
-pub fn op_dup6(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup6(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(6, frame);
 }
 
-pub fn op_dup7(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup7(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(7, frame);
 }
 
-pub fn op_dup8(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup8(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(8, frame);
 }
 
-pub fn op_dup9(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup9(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(9, frame);
 }
 
-pub fn op_dup10(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup10(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(10, frame);
 }
 
-pub fn op_dup11(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup11(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(11, frame);
 }
 
-pub fn op_dup12(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup12(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(12, frame);
 }
 
-pub fn op_dup13(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup13(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(13, frame);
 }
 
-pub fn op_dup14(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup14(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(14, frame);
 }
 
-pub fn op_dup15(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup15(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(15, frame);
 }
 
-pub fn op_dup16(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_dup16(frame: *Frame) ExecutionError.Error!void {
     return dup_impl_context(16, frame);
 }
 
@@ -161,8 +144,8 @@ pub fn op_dup16(context: *anyopaque) ExecutionError.Error!void {
 /// SWAP1 exchanges top with 2nd, SWAP2 exchanges top with 3rd, etc.
 pub fn make_swap_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
     return struct {
-        pub fn swap_ec(context: *Frame) ExecutionError.Error!void {
-            return swap_impl_context(n, context);
+        pub fn swap_ec(frame: *Frame) ExecutionError.Error!void {
+            return swap_impl_context(n, frame);
         }
     }.swap_ec;
 }
@@ -170,21 +153,20 @@ pub fn make_swap_ec(comptime n: u8) fn (*Frame) ExecutionError.Error!void {
 /// Helper function for SWAP operations
 ///
 /// Swaps the top stack item with the item at position n+1 (1-indexed).
-fn swap_impl_context(n: u8, context: *Frame) ExecutionError.Error!void {
+fn swap_impl_context(n: u8, frame: *Frame) ExecutionError.Error!void {
     // Stack underflow check - SWAP needs n+1 items
-    if (context.stack.size() < n + 1) {
+    if (frame.stack.size() < n + 1) {
         return ExecutionError.Error.StackUnderflow;
     }
 
-    try context.stack.swap(n);
+    try frame.stack.swap(n);
 }
 
 /// SWAP1 opcode (0x90) - Exchange 1st and 2nd stack items
 ///
 /// Swaps the top two stack items.
 /// Stack: [a, b] → [b, a]
-pub fn op_swap1(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap1(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(1, frame);
 }
 
@@ -192,78 +174,63 @@ pub fn op_swap1(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Swaps the top item with the third item.
 /// Stack: [a, b, c] → [c, b, a]
-pub fn op_swap2(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap2(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(2, frame);
 }
 
-pub fn op_swap3(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap3(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(3, frame);
 }
 
-pub fn op_swap4(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap4(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(4, frame);
 }
 
-pub fn op_swap5(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap5(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(5, frame);
 }
 
-pub fn op_swap6(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap6(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(6, frame);
 }
 
-pub fn op_swap7(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap7(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(7, frame);
 }
 
-pub fn op_swap8(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap8(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(8, frame);
 }
 
-pub fn op_swap9(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap9(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(9, frame);
 }
 
-pub fn op_swap10(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap10(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(10, frame);
 }
 
-pub fn op_swap11(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap11(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(11, frame);
 }
 
-pub fn op_swap12(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap12(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(12, frame);
 }
 
-pub fn op_swap13(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap13(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(13, frame);
 }
 
-pub fn op_swap14(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap14(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(14, frame);
 }
 
-pub fn op_swap15(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap15(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(15, frame);
 }
 
-pub fn op_swap16(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_swap16(frame: *Frame) ExecutionError.Error!void {
     return swap_impl_context(16, frame);
 }
 

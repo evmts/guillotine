@@ -17,7 +17,7 @@
 
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 
 /// BLOCKHASH opcode (0x40) - Get hash of specific block
@@ -26,26 +26,25 @@ const primitives = @import("primitives");
 /// is not within this range or is the current block or a future block, returns 0.
 ///
 /// Stack: [block_number] → [hash]
-pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const block_number = context.stack.pop_unsafe();
+pub fn op_blockhash(frame: *Frame) ExecutionError.Error!void {
+    const block_number = frame.stack.pop_unsafe();
 
-    const block_info = context.host.get_block_info();
+    const block_info = frame.host.get_block_info();
     const current_block = block_info.number;
 
     if (block_number >= current_block) {
         @branchHint(.unlikely);
-        context.stack.append_unsafe(0);
+        frame.stack.append_unsafe(0);
     } else if (current_block > block_number + 256) {
         @branchHint(.unlikely);
-        context.stack.append_unsafe(0);
+        frame.stack.append_unsafe(0);
     } else if (block_number == 0) {
         @branchHint(.unlikely);
-        context.stack.append_unsafe(0);
+        frame.stack.append_unsafe(0);
     } else {
         // TODO: Implement proper block hash retrieval from chain history
         const hash = std.hash.Wyhash.hash(0, std.mem.asBytes(&block_number));
-        try context.stack.append(hash);
+        try frame.stack.append(hash);
     }
 }
 
@@ -55,15 +54,14 @@ pub fn op_blockhash(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// Note: After EIP-3651 (Shanghai), the coinbase address is pre-warmed.
 ///
 /// Stack: [] → [coinbase_address]
-pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
+pub fn op_coinbase(frame: *Frame) ExecutionError.Error!void {
 
     // EIP-3651 (Shanghai) COINBASE warming should be handled during pre-execution setup,
     // not at runtime. The coinbase address should be pre-warmed in the access list
     // before execution begins if EIP-3651 is enabled.
 
-    const block_info = context.host.get_block_info();
-    context.stack.append_unsafe(primitives.Address.to_u256(block_info.coinbase));
+    const block_info = frame.host.get_block_info();
+    frame.stack.append_unsafe(primitives.Address.to_u256(block_info.coinbase));
 }
 
 /// TIMESTAMP opcode (0x42) - Get current block timestamp
@@ -71,10 +69,9 @@ pub fn op_coinbase(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// Pushes the Unix timestamp of the current block.
 ///
 /// Stack: [] → [timestamp]
-pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const block_info = context.host.get_block_info();
-    context.stack.append_unsafe(@as(u256, @intCast(block_info.timestamp)));
+pub fn op_timestamp(frame: *Frame) ExecutionError.Error!void {
+    const block_info = frame.host.get_block_info();
+    frame.stack.append_unsafe(@as(u256, @intCast(block_info.timestamp)));
 }
 
 /// NUMBER opcode (0x43) - Get current block number
@@ -82,10 +79,9 @@ pub fn op_timestamp(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// Pushes the number of the current block.
 ///
 /// Stack: [] → [block_number]
-pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const block_info = context.host.get_block_info();
-    context.stack.append_unsafe(@as(u256, @intCast(block_info.number)));
+pub fn op_number(frame: *Frame) ExecutionError.Error!void {
+    const block_info = frame.host.get_block_info();
+    frame.stack.append_unsafe(@as(u256, @intCast(block_info.number)));
 }
 
 /// DIFFICULTY/PREVRANDAO opcode (0x44) - Get block difficulty or prevrandao
@@ -94,12 +90,11 @@ pub fn op_number(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// Post-merge (EIP-4399): Returns the prevrandao value from the beacon chain.
 ///
 /// Stack: [] → [difficulty/prevrandao]
-pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
+pub fn op_difficulty(frame: *Frame) ExecutionError.Error!void {
     // Post-merge this returns PREVRANDAO, pre-merge it returns difficulty
     // The host is responsible for providing the correct value based on hardfork
-    const block_info = context.host.get_block_info();
-    context.stack.append_unsafe(block_info.difficulty);
+    const block_info = frame.host.get_block_info();
+    frame.stack.append_unsafe(block_info.difficulty);
 }
 
 /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge
@@ -108,9 +103,9 @@ pub fn op_difficulty(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// This is an alias for DIFFICULTY that makes the semantic change explicit.
 ///
 /// Stack: [] → [prevrandao]
-pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
+pub fn op_prevrandao(frame: *Frame) ExecutionError.Error!void {
     // Same as difficulty post-merge
-    return op_difficulty(context_ptr);
+    return op_difficulty(frame);
 }
 
 /// GASLIMIT opcode (0x45) - Get current block gas limit
@@ -118,10 +113,9 @@ pub fn op_prevrandao(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// Pushes the gas limit of the current block.
 ///
 /// Stack: [] → [gas_limit]
-pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const block_info = context.host.get_block_info();
-    context.stack.append_unsafe(@as(u256, @intCast(block_info.gas_limit)));
+pub fn op_gaslimit(frame: *Frame) ExecutionError.Error!void {
+    const block_info = frame.host.get_block_info();
+    frame.stack.append_unsafe(@as(u256, @intCast(block_info.gas_limit)));
 }
 
 /// BASEFEE opcode (0x48) - Get current block base fee
@@ -130,8 +124,7 @@ pub fn op_gaslimit(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// This value is determined by the network's fee market mechanism.
 ///
 /// Stack: [] → [base_fee]
-pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
+pub fn op_basefee(frame: *Frame) ExecutionError.Error!void {
 
     // EIP-3198 validation should be handled during bytecode analysis phase,
     // not at runtime. Invalid BASEFEE opcodes should be rejected during code analysis.
@@ -141,8 +134,8 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
     // transaction/client layer, not in the EVM interpreter itself.
     // The EVM only needs to expose the base fee value via this opcode.
 
-    const block_info = context.host.get_block_info();
-    context.stack.append_unsafe(block_info.base_fee);
+    const block_info = frame.host.get_block_info();
+    frame.stack.append_unsafe(block_info.base_fee);
 }
 
 /// BLOBHASH opcode (0x49) - Get versioned hash of blob
@@ -151,23 +144,22 @@ pub fn op_basefee(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// If index is out of bounds, returns 0.
 ///
 /// Stack: [index] → [blob_hash]
-pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
-    const index = context.stack.pop_unsafe();
+pub fn op_blobhash(frame: *Frame) ExecutionError.Error!void {
+    const index = frame.stack.pop_unsafe();
 
     // TODO: Need blob_hashes field in ExecutionContext
     // EIP-4844: Get blob hash at index
-    // if (index >= context.blob_hashes.len) {
+    // if (index >= frame.blob_hashes.len) {
     //     @branchHint(.unlikely);
-    //     try context.stack.append(0);
+    //     try frame.stack.append(0);
     // } else {
     //     const idx = @as(usize, @intCast(index));
-    //     try context.stack.append(context.blob_hashes[idx]);
+    //     try frame.stack.append(frame.blob_hashes[idx]);
     // }
 
     // Placeholder implementation - always return zero
     _ = index;
-    context.stack.append_unsafe(0);
+    frame.stack.append_unsafe(0);
 }
 
 /// BLOBBASEFEE opcode (0x4A) - Get current blob base fee
@@ -176,12 +168,11 @@ pub fn op_blobhash(context_ptr: *anyopaque) ExecutionError.Error!void {
 /// Used for blob transaction pricing.
 ///
 /// Stack: [] → [blob_base_fee]
-pub fn op_blobbasefee(context_ptr: *anyopaque) ExecutionError.Error!void {
-    const context: *Frame = @ptrCast(@alignCast(context_ptr));
+pub fn op_blobbasefee(frame: *Frame) ExecutionError.Error!void {
     // Push blob base fee (EIP-4844, Cancun+)
     // If not available (pre-Cancun), should be handled by jump table gating
     // TODO: Add blob_base_fee to BlockInfo - for now return 0 as REVM likely does
-    context.stack.append_unsafe(0);
+    frame.stack.append_unsafe(0);
 }
 
 // Tests

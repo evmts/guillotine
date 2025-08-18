@@ -16,7 +16,7 @@
 
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
 
@@ -30,8 +30,7 @@ const Stack = @import("../stack/stack.zig");
 ///
 /// Pops two values and pushes 1 if the first is less than the second, 0 otherwise.
 /// Stack: [a, b] → [a < b]
-pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_lt(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand
@@ -55,8 +54,7 @@ pub fn op_lt(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pops two values and pushes 1 if the first is greater than the second, 0 otherwise.
 /// Stack: [a, b] → [a > b]
-pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_gt(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand
@@ -81,8 +79,7 @@ pub fn op_gt(context: *anyopaque) ExecutionError.Error!void {
 /// Pops two values, interprets them as signed integers, and pushes 1 if the
 /// first is less than the second, 0 otherwise.
 /// Stack: [a, b] → [a < b] (signed)
-pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_slt(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand
@@ -110,8 +107,7 @@ pub fn op_slt(context: *anyopaque) ExecutionError.Error!void {
 /// Pops two values, interprets them as signed integers, and pushes 1 if the
 /// first is greater than the second, 0 otherwise.
 /// Stack: [a, b] → [a > b] (signed)
-pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_sgt(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand
@@ -135,8 +131,7 @@ pub fn op_sgt(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pops two values and pushes 1 if they are equal, 0 otherwise.
 /// Stack: [a, b] → [a == b]
-pub fn op_eq(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_eq(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     // Pop the top operand (b)
@@ -154,8 +149,7 @@ pub fn op_eq(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pops one value and pushes 1 if it is zero, 0 otherwise.
 /// Stack: [a] → [a == 0]
-pub fn op_iszero(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_iszero(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 1);
 
     // Peek the operand

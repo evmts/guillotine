@@ -25,7 +25,7 @@
 /// non-fused counterparts. Stack bounds are still checked by the jump table.
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 
@@ -33,25 +33,25 @@ const U256 = primitives.Uint(256, 4);
 // The interpreter handles these cases inline. These are kept to avoid breaking the analysis phase.
 
 /// PUSH + ADD fusion - NOT USED (handled inline by interpreter)
-pub fn op_push_add_fusion(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_push_add_fusion(frame: *Frame) ExecutionError.Error!void {
     _ = context;
     unreachable; // Should never be called
 }
 
 /// PUSH + SUB fusion - NOT USED (handled inline by interpreter)
-pub fn op_push_sub_fusion(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_push_sub_fusion(frame: *Frame) ExecutionError.Error!void {
     _ = context;
     unreachable; // Should never be called
 }
 
 /// PUSH + MUL fusion - NOT USED (handled inline by interpreter)
-pub fn op_push_mul_fusion(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_push_mul_fusion(frame: *Frame) ExecutionError.Error!void {
     _ = context;
     unreachable; // Should never be called
 }
 
 /// PUSH + DIV fusion - NOT USED (handled inline by interpreter)
-pub fn op_push_div_fusion(context: *anyopaque) ExecutionError.Error!void {
+pub fn op_push_div_fusion(frame: *Frame) ExecutionError.Error!void {
     _ = context;
     unreachable; // Should never be called
 }
@@ -59,8 +59,7 @@ pub fn op_push_div_fusion(context: *anyopaque) ExecutionError.Error!void {
 /// Inline version of ISZERO for hot path optimization
 /// Stack: [a] => [(a == 0)]
 /// This is one of the most frequently used operations
-pub fn op_iszero_inline(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_iszero_inline(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 1);
 
     const value = try frame.stack.peek_unsafe();
@@ -71,8 +70,7 @@ pub fn op_iszero_inline(context: *anyopaque) ExecutionError.Error!void {
 /// Inline version of EQ for hot path optimization
 /// Stack: [a, b] => [(a == b)]
 /// This is one of the most frequently used operations
-pub fn op_eq_inline(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_eq_inline(frame: *Frame) ExecutionError.Error!void {
     std.debug.assert(frame.stack.size() >= 2);
 
     const b = frame.stack.pop_unsafe();

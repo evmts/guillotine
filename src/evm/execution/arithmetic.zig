@@ -54,7 +54,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 const Log = @import("../log.zig");
@@ -83,8 +83,7 @@ const MemoryDatabase = @import("../state/memory_database.zig");
 const Operation = @import("../opcodes/operation.zig");
 
 /// ADD opcode (0x01) - Addition with wrapping overflow
-pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_add(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -119,8 +118,7 @@ pub fn op_add(context: *anyopaque) ExecutionError.Error!void {
 /// ## Example
 /// Stack: [10, 20] => [200]
 /// Stack: [2^128, 2^128] => [0] (overflow wraps)
-pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mul(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -161,8 +159,7 @@ pub fn op_mul(context: *anyopaque) ExecutionError.Error!void {
 /// ## Example
 /// Stack: [30, 10] => [20]
 /// Stack: [10, 20] => [2^256 - 10] (underflow wraps)
-pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_sub(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -205,8 +202,7 @@ pub fn op_sub(context: *anyopaque) ExecutionError.Error!void {
 /// Unlike most programming languages, EVM division by zero does not
 /// throw an error but returns 0. This is a deliberate design choice
 /// to avoid exceptional halting conditions.
-pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_div(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -261,8 +257,7 @@ pub fn op_div(context: *anyopaque) ExecutionError.Error!void {
 /// The special case for MIN_I256 / -1 prevents integer overflow,
 /// as the mathematical result (2^255) cannot be represented in i256.
 /// In this case, we return MIN_I256 to match EVM behavior.
-pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_sdiv(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -324,8 +319,7 @@ pub fn op_sdiv(context: *anyopaque) ExecutionError.Error!void {
 /// ## Note
 /// The result is always in range [0, b-1] for b > 0.
 /// Like DIV, modulo by zero returns 0 rather than throwing an error.
-pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mod(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -383,8 +377,7 @@ pub fn op_mod(context: *anyopaque) ExecutionError.Error!void {
 /// In signed modulo, the result has the same sign as the dividend (a).
 /// This follows the Euclidean division convention where:
 /// a = b * q + r, where |r| < |b| and sign(r) = sign(a)
-pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_smod(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -442,8 +435,7 @@ pub fn op_smod(context: *anyopaque) ExecutionError.Error!void {
 /// This operation correctly computes (a + b) mod n even when
 /// a + b exceeds 2^256, using specialized algorithms to avoid
 /// intermediate overflow.
-pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_addmod(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 3);
     }
@@ -512,8 +504,7 @@ pub fn op_addmod(context: *anyopaque) ExecutionError.Error!void {
 /// ## Note
 /// This operation correctly computes (a * b) mod n even when
 /// a * b exceeds 2^256, unlike naive (a *% b) % n approach.
-pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_mulmod(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 3);
     }
@@ -584,8 +575,7 @@ pub fn op_mulmod(context: *anyopaque) ExecutionError.Error!void {
 /// - 2^10: 10 + 50*1 = 60 gas (exponent fits in 1 byte)
 /// - 2^256: 10 + 50*2 = 110 gas (exponent needs 2 bytes)
 /// - 2^(2^255): 10 + 50*32 = 1610 gas (huge exponent)
-pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_exp(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }
@@ -693,8 +683,7 @@ pub fn op_exp(context: *anyopaque) ExecutionError.Error!void {
 /// - Converting int8/int16/etc to int256
 /// - Arithmetic on mixed-width signed integers
 /// - Implementing higher-level language semantics
-pub fn op_signextend(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_signextend(frame: *Frame) ExecutionError.Error!void {
     if (SAFE_STACK_CHECKS) {
         std.debug.assert(frame.stack.size() >= 2);
     }

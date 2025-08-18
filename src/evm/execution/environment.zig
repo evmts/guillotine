@@ -20,7 +20,7 @@
 
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
@@ -31,8 +31,7 @@ const log = std.log.scoped(.default);
 ///
 /// Pushes the address of the currently executing contract.
 /// Stack: [] → [address]
-pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_address(frame: *Frame) ExecutionError.Error!void {
     const addr = to_u256(frame.contract_address);
     frame.stack.append_unsafe(addr);
 }
@@ -42,8 +41,7 @@ pub fn op_address(context: *anyopaque) ExecutionError.Error!void {
 /// Pops an address and pushes the balance of that account in wei.
 /// Subject to EIP-2929 gas costs for cold account access.
 /// Stack: [address] → [balance]
-pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_balance(frame: *Frame) ExecutionError.Error!void {
     const address_u256 = try frame.stack.peek_unsafe();
     const address = from_u256(address_u256);
 
@@ -60,8 +58,7 @@ pub fn op_balance(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the address of the account that initiated the transaction.
 /// Stack: [] → [origin]
-pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_origin(frame: *Frame) ExecutionError.Error!void {
     // TODO: Need tx_origin field in ExecutionContext
     // const origin = to_u256(frame.tx_origin);
     // try frame.stack.append(origin);
@@ -74,8 +71,7 @@ pub fn op_origin(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the address of the account that directly called this contract.
 /// Stack: [] → [caller]
-pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_caller(frame: *Frame) ExecutionError.Error!void {
     const caller = to_u256(frame.caller);
     frame.stack.append_unsafe(caller);
 }
@@ -84,8 +80,7 @@ pub fn op_caller(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the value in wei sent with the current call.
 /// Stack: [] → [value]
-pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_callvalue(frame: *Frame) ExecutionError.Error!void {
     frame.stack.append_unsafe(frame.value);
 }
 
@@ -93,8 +88,7 @@ pub fn op_callvalue(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the gas price of the current transaction.
 /// Stack: [] → [gas_price]
-pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_gasprice(frame: *Frame) ExecutionError.Error!void {
     // TODO: Need gas_price field in ExecutionContext
     // try frame.stack.append(frame.gas_price);
 
@@ -107,8 +101,7 @@ pub fn op_gasprice(context: *anyopaque) ExecutionError.Error!void {
 /// Pops an address and pushes the size of that account's code in bytes.
 /// Subject to EIP-2929 gas costs for cold account access.
 /// Stack: [address] → [size]
-pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_extcodesize(frame: *Frame) ExecutionError.Error!void {
     const address_u256 = frame.stack.pop_unsafe();
     const address = from_u256(address_u256);
 
@@ -126,8 +119,7 @@ pub fn op_extcodesize(context: *anyopaque) ExecutionError.Error!void {
 /// Copies code from an external account to memory.
 /// Subject to EIP-2929 gas costs for cold account access.
 /// Stack: [address, mem_offset, code_offset, size] → []
-pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_extcodecopy(frame: *Frame) ExecutionError.Error!void {
     // EVM stack order (top -> bottom): address, destOffset, offset, length
     // So we pop in reverse: length, offset, destOffset, address
     const address_u256 = frame.stack.pop_unsafe();
@@ -178,8 +170,7 @@ pub fn op_extcodecopy(context: *anyopaque) ExecutionError.Error!void {
 /// Pops an address and pushes the keccak256 hash of that account's code.
 /// Returns 0 for empty accounts. Subject to EIP-2929 gas costs.
 /// Stack: [address] → [hash]
-pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_extcodehash(frame: *Frame) ExecutionError.Error!void {
     const address_u256 = frame.stack.pop_unsafe();
     const address = from_u256(address_u256);
 
@@ -217,8 +208,7 @@ pub fn op_extcodehash(context: *anyopaque) ExecutionError.Error!void {
 /// Pushes the balance of the currently executing contract (EIP-1884).
 /// More efficient than using BALANCE with ADDRESS.
 /// Stack: [] → [balance]
-pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_selfbalance(frame: *Frame) ExecutionError.Error!void {
     // Get balance of current executing contract
     const self_address = frame.contract_address;
     const balance = try frame.state.get_balance(self_address);
@@ -229,8 +219,7 @@ pub fn op_selfbalance(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the chain ID of the current blockchain (EIP-1344).
 /// Stack: [] → [chain_id]
-pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_chainid(frame: *Frame) ExecutionError.Error!void {
     // TODO: Need chain_id field in ExecutionContext
     // Push chain ID from transaction context
     // try frame.stack.append(frame.chain_id);
@@ -243,8 +232,7 @@ pub fn op_chainid(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the size of the calldata in bytes.
 /// Stack: [] → [size]
-pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_calldatasize(frame: *Frame) ExecutionError.Error!void {
     frame.stack.append_unsafe(@as(u256, @intCast(frame.host.get_input().len)));
 }
 
@@ -252,10 +240,10 @@ pub fn op_calldatasize(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the size of the currently executing contract's code in bytes.
 /// Stack: [] → [size]
-pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_codesize(frame: *Frame) ExecutionError.Error!void {
     // Push size of current contract's code
-    frame.stack.append_unsafe(@as(u256, @intCast(frame.analysis.code_len)));
+    const code_len = frame.analysis.code_len;
+    frame.stack.append_unsafe(@as(u256, @intCast(code_len)));
 }
 
 /// CALLDATALOAD opcode (0x35) - Load input data
@@ -263,8 +251,7 @@ pub fn op_codesize(context: *anyopaque) ExecutionError.Error!void {
 /// Loads 32 bytes from calldata at the given offset. Zero-pads if reading
 /// past the end of calldata.
 /// Stack: [offset] → [data]
-pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_calldataload(frame: *Frame) ExecutionError.Error!void {
     const offset = frame.stack.pop_unsafe();
     if (offset > std.math.maxInt(usize)) {
         @branchHint(.unlikely);
@@ -295,8 +282,7 @@ pub fn op_calldataload(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Copies data from calldata to memory. Zero-pads if reading past the end.
 /// Stack: [mem_offset, data_offset, size] → []
-pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_calldatacopy(frame: *Frame) ExecutionError.Error!void {
     // Stack (top -> bottom): mem_offset, data_offset, size
     // EVM pops top-first
     const mem_offset = frame.stack.pop_unsafe();
@@ -331,8 +317,7 @@ pub fn op_calldatacopy(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Copies the currently executing contract's code to memory.
 /// Stack: [mem_offset, code_offset, size] → []
-pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_codecopy(frame: *Frame) ExecutionError.Error!void {
     // Stack (top -> bottom): mem_offset, code_offset, size
     // EVM pops top-first
     const mem_offset = frame.stack.pop_unsafe();
@@ -361,7 +346,7 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
     const word_size = (size_usize + 31) / 32;
     try frame.consume_gas(GasConstants.CopyGas * word_size);
 
-    // Copy from current contract bytecode (from analysis)
+    // Copy from current contract bytecode (from analysis or frame)
     const code = frame.analysis.code;
     const Log = @import("../log.zig");
     Log.debug("CODECOPY: mem_offset={}, code_offset={}, size={}, code.len={}", .{ mem_offset_usize, code_offset_usize, size_usize, code.len });
@@ -377,8 +362,7 @@ pub fn op_codecopy(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Pushes the size of the return data from the previous call.
 /// Stack: [] → [size]
-pub fn op_returndatasize(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_returndatasize(frame: *Frame) ExecutionError.Error!void {
     // TODO: Need return_data field in ExecutionContext
     // Push size of return data from last call
     // const size = frame.return_data.len;
@@ -392,8 +376,7 @@ pub fn op_returndatasize(context: *anyopaque) ExecutionError.Error!void {
 ///
 /// Copies data from the return data buffer to memory.
 /// Stack: [mem_offset, data_offset, size] → []
-pub fn op_returndatacopy(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_returndatacopy(frame: *Frame) ExecutionError.Error!void {
     // Stack (top -> bottom): mem_offset, data_offset, size
     const mem_offset = frame.stack.pop_unsafe();
     const data_offset = frame.stack.pop_unsafe();
@@ -433,8 +416,7 @@ pub fn op_returndatacopy(context: *anyopaque) ExecutionError.Error!void {
 /// Loads 32 bytes from the return data buffer at the given offset (EOF opcode).
 /// Reverts if offset + 32 exceeds return data size.
 /// Stack: [offset] → [data]
-pub fn op_returndataload(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn op_returndataload(frame: *Frame) ExecutionError.Error!void {
     // TODO: Need return_data field in ExecutionContext
     // Pop offset from stack
     const offset = frame.stack.pop_unsafe();

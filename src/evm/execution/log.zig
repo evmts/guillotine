@@ -1,5 +1,5 @@
 const std = @import("std");
-const Frame = @import("../frame.zig").Frame;
+const Frame = @import("../stack_frame.zig").StackFrame;
 const ExecutionError = @import("execution_error.zig");
 const Stack = @import("../stack/stack.zig");
 const Vm = @import("../evm.zig");
@@ -76,28 +76,23 @@ pub fn make_log(comptime num_topics: u8) fn (*Frame) ExecutionError.Error!void {
 // Runtime dispatch versions for LOG operations (used in ReleaseSmall mode)
 // Each LOG operation gets its own function to avoid opcode detection issues
 
-pub fn log_0(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn log_0(frame: *Frame) ExecutionError.Error!void {
     return log_impl(0, frame);
 }
 
-pub fn log_1(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn log_1(frame: *Frame) ExecutionError.Error!void {
     return log_impl(1, frame);
 }
 
-pub fn log_2(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn log_2(frame: *Frame) ExecutionError.Error!void {
     return log_impl(2, frame);
 }
 
-pub fn log_3(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn log_3(frame: *Frame) ExecutionError.Error!void {
     return log_impl(3, frame);
 }
 
-pub fn log_4(context: *anyopaque) ExecutionError.Error!void {
-    const frame = @as(*Frame, @ptrCast(@alignCast(context)));
+pub fn log_4(frame: *Frame) ExecutionError.Error!void {
     return log_impl(4, frame);
 }
 
