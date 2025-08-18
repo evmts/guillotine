@@ -130,8 +130,7 @@ pub const StackFrame = struct {
 
     /// Set output data for RETURN/REVERT operations
     pub fn set_output(self: *StackFrame, data: []const u8) ExecutionError.Error!void {
-        self.host.set_output(data) catch |err| {
-            _ = err;
+        self.host.set_output(data) catch {
             return ExecutionError.Error.OutOfMemory;
         };
     }
