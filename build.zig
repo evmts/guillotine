@@ -818,33 +818,7 @@ pub fn build(b: *std.Build) void {
     const stack_test_step = b.step("test-stack", "Run Stack tests");
     stack_test_step.dependOn(&run_stack_test.step);
 
-    // Add Analysis comprehensive tests
-    const analysis_test = b.addTest(.{
-        .name = "analysis-comprehensive-test",
-        .root_source_file = b.path("test/evm/analysis_comprehensive_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    analysis_test.root_module.addImport("evm", evm_mod);
-    analysis_test.root_module.addImport("primitives", primitives_mod);
-
-    const run_analysis_test = b.addRunArtifact(analysis_test);
-    const analysis_test_step = b.step("test-analysis", "Run Analysis comprehensive tests");
-    analysis_test_step.dependOn(&run_analysis_test.step);
-    
-    // Analysis corner cases tests
-    const analysis_corner_test = b.addTest(.{
-        .name = "analysis-corner-cases-test",
-        .root_source_file = b.path("test/evm/analysis_corner_cases_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    analysis_corner_test.root_module.addImport("evm", evm_mod);
-    analysis_corner_test.root_module.addImport("primitives", primitives_mod);
-    
-    const run_analysis_corner_test = b.addRunArtifact(analysis_corner_test);
-    const analysis_corner_test_step = b.step("test-analysis-corner", "Run Analysis corner cases tests");
-    analysis_corner_test_step.dependOn(&run_analysis_corner_test.step);
+    // Analysis comprehensive tests removed - files no longer exist
     
     // Interpret comprehensive tests
     const interpret_test = b.addTest(.{
@@ -1199,21 +1173,7 @@ pub fn build(b: *std.Build) void {
     const minimal_call_test_step = b.step("test-minimal-call", "Run Minimal Call test");
     minimal_call_test_step.dependOn(&run_minimal_call_test.step);
 
-    // Add Debug Analysis Test
-    const debug_analysis_test = b.addTest(.{
-        .name = "debug-analysis-test",
-        .root_source_file = b.path("test/evm/debug_analysis_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .single_threaded = true,
-    });
-    debug_analysis_test.root_module.stack_check = false;
-    debug_analysis_test.root_module.addImport("primitives", primitives_mod);
-    debug_analysis_test.root_module.addImport("evm", evm_mod);
-
-    const run_debug_analysis_test = b.addRunArtifact(debug_analysis_test);
-    const debug_analysis_test_step = b.step("test-debug-analysis", "Run Debug Analysis test");
-    debug_analysis_test_step.dependOn(&run_debug_analysis_test.step);
+    // Debug Analysis Test removed - file no longer exists
 
     // Add Super Minimal Test
     const super_minimal_test = b.addTest(.{
@@ -2069,7 +2029,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_unit_tests.step);
     test_step.dependOn(&run_memory_test.step);
     test_step.dependOn(&run_stack_test.step);
-    test_step.dependOn(&run_analysis_test.step);
+    // run_analysis_test removed - file no longer exists
     test_step.dependOn(&run_newevm_test.step);
     test_step.dependOn(&run_stack_validation_test.step);
     test_step.dependOn(&run_jump_table_test.step);
