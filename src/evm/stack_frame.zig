@@ -102,9 +102,17 @@ pub const StackFrame = struct {
         state: DatabaseInterface,
         allocator: std.mem.Allocator,
     ) !StackFrame {
+        // Debug assertions for input validation
+        std.debug.assert(bytecode_size > 0);
+        std.debug.assert(gas_remaining <= std.math.maxInt(u32));
+        
         // Select tier and allocate buffer
         const tier = AllocationTier.select_tier(bytecode_size);
         const buffer_size = tier.buffer_size();
+        
+        // Debug assertion: buffer size should be reasonable
+        std.debug.assert(buffer_size > 0);
+        std.debug.assert(buffer_size <= 2 * 1024 * 1024); // Max 2MB
         
         const static_buffer = try allocator.alloc(u8, buffer_size);
         errdefer allocator.free(static_buffer);
@@ -114,8 +122,11 @@ pub const StackFrame = struct {
         fba_ptr.* = std.heap.FixedBufferAllocator.init(static_buffer);
         const fba_allocator = fba_ptr.allocator();
         
-        // Pre-allocate stack
-        const stack = try Stack.init(fba_allocator);
+        // Pre-allocate stack from buffer
+        const stack_alloc_info = Stack.calculate_allocation(bytecode_size);
+        // We know stack alignment is always @alignOf(u256) = 32
+        const stack_buffer = try fba_allocator.alignedAlloc(u8, @alignOf(u256), stack_alloc_info.size);
+        const stack = try Stack.init_with_buffer(stack_buffer);
         
         // Memory uses heap allocator (can grow)
         const memory = try Memory.init_default(allocator);
@@ -145,22 +156,17 @@ pub const StackFrame = struct {
     }
 
     pub fn deinit(self: *StackFrame) void {
-        // For the legacy init method, stack uses the heap allocator
-        // For init_with_bytecode_size, stack uses the buffer allocator
-        // We need to handle both cases correctly
-        if (self.static_buffer.len > 0) {
-            // Stack was allocated from buffer, no need to free individually
-            // Just free the entire buffer and the FBA
-            self.allocator.destroy(self.buffer_allocator);
-            self.allocator.free(self.static_buffer);
-        } else {
-            // Legacy path - free stack normally
-            self.stack.deinit(self.allocator);
-        }
-        
         // Memory always uses heap allocator (can grow)
         self.memory.deinit();
+        
+        // Free the buffer allocator and static buffer
+        if (self.static_buffer.len > 0) {
+            self.allocator.destroy(self.buffer_allocator);
+            self.allocator.free(self.static_buffer);
+        }
 
+        // NOTE: Stack is allocated from the static buffer when using init_with_bytecode_size,
+        // so it gets freed with the buffer. For legacy init, it's freed separately.
         // NOTE: analysis, metadata, and ops are managed by interpret2
         // which allocates them with its own FixedBufferAllocator and
         // frees them when it exits. We should NOT free them here.
