@@ -1,4 +1,5 @@
 const Memory = @import("./memory.zig").Memory;
+const context = @import("context.zig");
 
 /// Get a mutable slice to the entire memory buffer (context-relative)
 pub fn slice(self: *const Memory) []u8 {
