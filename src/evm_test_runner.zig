@@ -1,6 +1,7 @@
 const std = @import("std");
 const Evm = @import("evm");
 const Address = @import("primitives").Address;
+const CallParams = @import("evm").CallParams;
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -48,16 +49,18 @@ pub fn main() !void {
     try vm.state.set_code(contract_address, bytecode);
     try vm.state.set_balance(caller, std.math.maxInt(u256));
     
-    // Call contract
-    const result = try vm.call_contract(
-        caller,
-        contract_address,
-        0,
-        calldata,
-        1_000_000,
-        false
-    );
-    defer if (result.output) |output| allocator.free(output);
+    // Call contract using the CallParams interface
+    const params = CallParams{
+        .call = .{
+            .caller = caller,
+            .to = contract_address,
+            .value = 0,
+            .input = calldata,
+            .gas = 1_000_000,
+        },
+    };
+    const result = try vm.call(params);
+    // Note: output is VM-owned memory, no need to free
     
     // Output results in a parseable format
     std.debug.print("success: {}\n", .{result.success});
