@@ -18,6 +18,9 @@ pub const AllocationTier = enum(u32) {
 
     /// Select appropriate tier based on bytecode size
     pub fn select_tier(bytecode_size: usize) AllocationTier {
+        // Debug assertion: bytecode size should be reasonable
+        std.debug.assert(bytecode_size <= 65536); // Max theoretical contract size
+        
         if (bytecode_size <= 4096) return .tiny;
         if (bytecode_size <= 8192) return .small;
         if (bytecode_size <= 16384) return .medium;
@@ -34,6 +37,12 @@ pub const AllocationTier = enum(u32) {
         const analysis_alloc = analysis2.calculate_analysis_allocation(bytecode_size);
         const metadata_alloc = analysis2.calculate_metadata_allocation(bytecode_size);
         const ops_alloc = analysis2.calculate_ops_allocation(bytecode_size);
+        
+        // Debug assertions: all allocations should be non-zero
+        std.debug.assert(stack_alloc.size > 0);
+        std.debug.assert(analysis_alloc.size > 0);
+        std.debug.assert(metadata_alloc.size > 0);
+        std.debug.assert(ops_alloc.size > 0);
         
         // Sum up all allocations with alignment padding
         var total: usize = 0;
@@ -56,6 +65,10 @@ pub const AllocationTier = enum(u32) {
         
         // Add 10% padding for safety
         total = total + total / 10;
+        
+        // Debug assertion: total should be reasonable
+        std.debug.assert(total > 0);
+        std.debug.assert(total <= 2 * 1024 * 1024); // Max 2MB per frame
         
         return total;
     }
@@ -121,4 +134,65 @@ test "allocation tier alignment" {
     try testing.expectEqual(@as(usize, 16), align_forward(13, 16));
     try testing.expectEqual(@as(usize, 32), align_forward(17, 32));
     try testing.expectEqual(@as(usize, 64), align_forward(33, 64));
+}
+
+test "allocation tier complete functionality" {
+    const testing = std.testing;
+    const allocator = std.testing.allocator;
+    
+    // Test each tier with actual allocations
+    const tiers = [_]AllocationTier{ .tiny, .small, .medium, .large, .huge };
+    const test_sizes = [_]usize{ 1024, 5000, 10000, 20000, 50000 };
+    
+    for (tiers, test_sizes) |tier, bytecode_size| {
+        // Get buffer size for tier
+        const buffer_size = tier.buffer_size();
+        
+        // Allocate buffer
+        const buffer = try allocator.alloc(u8, buffer_size);
+        defer allocator.free(buffer);
+        
+        // Create FixedBufferAllocator
+        var fba = std.heap.FixedBufferAllocator.init(buffer);
+        const fba_allocator = fba.allocator();
+        
+        // Verify we can allocate all required components
+        const stack_alloc = Stack.calculate_allocation(bytecode_size);
+        
+        // Allocate stack buffer
+        const stack_buffer = try fba_allocator.alignedAlloc(u8, @alignOf(u256), stack_alloc.size);
+        try testing.expect(stack_buffer.len == stack_alloc.size);
+        
+        // Allocate analysis arrays
+        const inst_to_pc = try fba_allocator.alloc(u16, bytecode_size);
+        try testing.expect(inst_to_pc.len == bytecode_size);
+        
+        const pc_to_inst = try fba_allocator.alloc(u16, bytecode_size);
+        try testing.expect(pc_to_inst.len == bytecode_size);
+        
+        // Allocate metadata
+        const metadata = try fba_allocator.alloc(u32, bytecode_size);
+        try testing.expect(metadata.len == bytecode_size);
+        
+        // Allocate ops
+        const ops = try fba_allocator.alloc(*const anyopaque, bytecode_size + 1);
+        try testing.expect(ops.len == bytecode_size + 1);
+    }
+}
+
+test "allocation tier edge cases" {
+    const testing = std.testing;
+    
+    // Test exact boundaries
+    try testing.expectEqual(AllocationTier.tiny, AllocationTier.select_tier(4096));
+    try testing.expectEqual(AllocationTier.small, AllocationTier.select_tier(4097));
+    try testing.expectEqual(AllocationTier.small, AllocationTier.select_tier(8192));
+    try testing.expectEqual(AllocationTier.medium, AllocationTier.select_tier(8193));
+    
+    // Test very small sizes
+    try testing.expectEqual(AllocationTier.tiny, AllocationTier.select_tier(1));
+    try testing.expectEqual(AllocationTier.tiny, AllocationTier.select_tier(100));
+    
+    // Test maximum size
+    try testing.expectEqual(AllocationTier.huge, AllocationTier.select_tier(65536));
 }
