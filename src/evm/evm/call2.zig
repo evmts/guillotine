@@ -181,6 +181,8 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = call_code,
+        .inst_count = 0,
+        .block_boundaries = empty_block_boundaries,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
