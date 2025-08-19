@@ -14,12 +14,15 @@ pub const SimpleAnalysis = struct {
     bytecode: []const u8,
     /// Total number of instructions
     inst_count: u16,
+    /// Block boundaries bitset - true for each instruction that starts a basic block
+    block_boundaries: std.bit_set.DynamicBitSet,
 
     pub const MAX_USIZE: u16 = std.math.maxInt(u16);
 
     pub fn deinit(self: *SimpleAnalysis, allocator: std.mem.Allocator) void {
         allocator.free(self.inst_to_pc);
         allocator.free(self.pc_to_inst);
+        self.block_boundaries.deinit();
     }
 
     /// Get the PC value for a given instruction index
@@ -32,6 +35,11 @@ pub const SimpleAnalysis = struct {
         return self.pc_to_inst[pc];
     }
 
+    /// Check if an instruction starts a basic block
+    pub fn isBlockStart(self: *const SimpleAnalysis, inst_idx: u16) bool {
+        return self.block_boundaries.isSet(inst_idx);
+    }
+
     /// Validate if a PC location is a valid jump destination and return instruction index
     pub fn validate_jump_dest(self: *const SimpleAnalysis, dest_pc: usize) ?u16 {
         if (dest_pc >= self.bytecode.len) return null;
@@ -41,6 +49,21 @@ pub const SimpleAnalysis = struct {
         if (dest_inst_idx == SimpleAnalysis.MAX_USIZE) return null;
 
         return dest_inst_idx;
+    }
+
+    /// Check if an opcode is a block terminator
+    inline fn isTerminator(opcode: u8) bool {
+        return switch (opcode) {
+            0x00, // STOP
+            0x56, // JUMP
+            0x57, // JUMPI
+            0xF3, // RETURN
+            0xFD, // REVERT
+            0xFF, // SELFDESTRUCT
+            0xFE, // INVALID
+            => true,
+            else => false,
+        };
     }
 
     /// Build analysis from bytecode and return metadata separately
@@ -55,8 +78,13 @@ pub const SimpleAnalysis = struct {
         var pc_to_inst = try allocator.alloc(u16, code.len);
         @memset(pc_to_inst, MAX_USIZE);
 
+        // Estimate max instructions (each byte could be an instruction)
+        var block_boundaries = try std.bit_set.DynamicBitSet.initEmpty(allocator, code.len);
+        errdefer block_boundaries.deinit();
+
         var pc: u16 = 0;
         var inst_idx: u16 = 0;
+        var prev_byte: u8 = 0;
 
         while (pc < code.len) {
             const byte = code[pc];
@@ -64,6 +92,18 @@ pub const SimpleAnalysis = struct {
             // Record instruction start
             try inst_to_pc_list.append(pc);
             pc_to_inst[pc] = inst_idx;
+
+            // Mark block boundaries
+            if (inst_idx == 0) {
+                // First instruction is always a block start
+                block_boundaries.set(inst_idx);
+            } else if (byte == 0x5B) {
+                // JUMPDEST starts a new block
+                block_boundaries.set(inst_idx);
+            } else if (inst_idx > 0 and isTerminator(prev_byte)) {
+                // Instruction after terminator starts new block
+                block_boundaries.set(inst_idx);
+            }
 
             // Build metadata for this instruction
             if (byte >= 0x60 and byte <= 0x7F) {
@@ -101,8 +141,23 @@ pub const SimpleAnalysis = struct {
                 pc += 1;
             }
 
+            prev_byte = byte;
             inst_idx += 1;
         }
+
+        // Resize block_boundaries to actual instruction count
+        var final_block_boundaries = try std.bit_set.DynamicBitSet.initEmpty(allocator, inst_idx);
+        errdefer final_block_boundaries.deinit();
+        
+        // Copy over the block boundary information
+        var i: u16 = 0;
+        while (i < inst_idx) : (i += 1) {
+            if (block_boundaries.isSet(i)) {
+                final_block_boundaries.set(i);
+            }
+        }
+        
+        block_boundaries.deinit();
 
         return .{
             .analysis = SimpleAnalysis{
@@ -110,6 +165,7 @@ pub const SimpleAnalysis = struct {
                 .pc_to_inst = pc_to_inst,
                 .bytecode = code,
                 .inst_count = inst_idx,
+                .block_boundaries = final_block_boundaries,
             },
             .metadata = try metadata_list.toOwnedSlice(),
         };
@@ -525,4 +581,62 @@ test "analysis2: loop fusion pattern detection" {
 
     // Verify metadata contains the jump destination instruction index for the JUMPDEST (instruction 5)
     try std.testing.expectEqual(@as(u32, 5), prep_result.metadata[3]); // PUSH1 dest metadata
+}
+
+test "analysis2: block boundary detection basic" {
+    const allocator = std.testing.allocator;
+    
+    // Simple bytecode: PUSH1 0, JUMPDEST, STOP, PUSH1 1, STOP
+    // Block boundaries should be at: 0 (start), 1 (JUMPDEST), 3 (after STOP)
+    const code = &[_]u8{
+        0x60, 0x00, // PUSH1 0 (instruction 0)
+        0x5B,       // JUMPDEST (instruction 1) - block boundary
+        0x00,       // STOP (instruction 2) - terminator
+        0x60, 0x01, // PUSH1 1 (instruction 3) - should be block boundary after STOP
+        0x00,       // STOP (instruction 4)
+    };
+    
+    var result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
+    
+    // Check that block boundaries are correctly identified
+    try std.testing.expect(result.analysis.isBlockStart(0)); // First instruction
+    try std.testing.expect(result.analysis.isBlockStart(1)); // JUMPDEST
+    try std.testing.expect(result.analysis.isBlockStart(3)); // After STOP
+    
+    // Non-block boundaries
+    try std.testing.expect(!result.analysis.isBlockStart(2)); // STOP itself is not a block start
+    try std.testing.expect(!result.analysis.isBlockStart(4)); // Regular instruction
+}
+
+test "analysis2: block boundary detection with jumps" {
+    const allocator = std.testing.allocator;
+    
+    // Code with JUMP and JUMPI: PUSH1 5, JUMP, STOP, JUMPDEST, PUSH1 0, JUMPI, STOP
+    // Block boundaries: 0 (start), 2 (after JUMP), 3 (JUMPDEST), 6 (after JUMPI)
+    const code = &[_]u8{
+        0x60, 0x05, // PUSH1 5 (instruction 0)
+        0x56,       // JUMP (instruction 1) - terminator
+        0x00,       // STOP (instruction 2) - should be block boundary after JUMP
+        0x5B,       // JUMPDEST (instruction 3) - block boundary
+        0x60, 0x00, // PUSH1 0 (instruction 4)
+        0x57,       // JUMPI (instruction 5) - terminator
+        0x00,       // STOP (instruction 6) - should be block boundary after JUMPI
+    };
+    
+    var result = try SimpleAnalysis.analyze(allocator, code);
+    defer result.analysis.deinit(allocator);
+    defer allocator.free(result.metadata);
+    
+    // Verify block boundaries
+    try std.testing.expect(result.analysis.isBlockStart(0)); // First instruction
+    try std.testing.expect(result.analysis.isBlockStart(2)); // After JUMP
+    try std.testing.expect(result.analysis.isBlockStart(3)); // JUMPDEST
+    try std.testing.expect(result.analysis.isBlockStart(6)); // After JUMPI
+    
+    // Non-block boundaries
+    try std.testing.expect(!result.analysis.isBlockStart(1)); // JUMP itself
+    try std.testing.expect(!result.analysis.isBlockStart(4)); // PUSH1 after JUMPDEST
+    try std.testing.expect(!result.analysis.isBlockStart(5)); // JUMPI itself
 }

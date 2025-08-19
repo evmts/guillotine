@@ -12,10 +12,15 @@ pub const Error = ExecutionError.Error;
 // Function pointer type for tailcall dispatch - only takes StackFrame
 const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
 
-inline fn prefetch_next(frame: *StackFrame) void {
-    @prefetch(frame.ops.ptr + frame.ip + 1, PrefetchOptions{ .rw = .read, .locality = 1, .cache = .data });
-    @prefetch(frame.ops[frame.ip + 1], PrefetchOptions{ .rw = .read, .locality = 1, .cache = .instruction });
-    // @prefetch(frame.metadata.ptr + frame.ip + 1, PrefetchOptions{ .rw = .read, .locality = 1, .cache = .data });
+inline fn prefetchBlockAt(frame: *StackFrame, target_idx: u16) void {
+    inline for (0..2) |i| {
+        const idx = target_idx + i;
+        if (idx < frame.ops.len) {
+            @prefetch(frame.ops.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
+            @prefetch(frame.metadata.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
+            @prefetch(frame.ops[idx], .{ .rw = .read, .locality = 2, .cache = .instruction });
+        }
+    }
 }
 
 pub inline fn next(frame: *StackFrame) Error!noreturn {
@@ -32,334 +37,284 @@ pub fn op_stop(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_add(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_add(frame);
     return next(frame);
 }
 
 pub fn op_mul(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_mul(frame);
     return next(frame);
 }
 
 pub fn op_sub(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_sub(frame);
     return next(frame);
 }
 
 pub fn op_div(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_div(frame);
     return next(frame);
 }
 
 pub fn op_sdiv(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_sdiv(frame);
     return next(frame);
 }
 
 pub fn op_mod(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_mod(frame);
     return next(frame);
 }
 
 pub fn op_smod(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_smod(frame);
     return next(frame);
 }
 
 pub fn op_addmod(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_addmod(frame);
     return next(frame);
 }
 
 pub fn op_mulmod(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_mulmod(frame);
     return next(frame);
 }
 
 pub fn op_exp(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_exp(frame);
     return next(frame);
 }
 
 pub fn op_signextend(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.arithmetic.op_signextend(frame);
     return next(frame);
 }
 
 pub fn op_lt(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.comparison.op_lt(frame);
     return next(frame);
 }
 
 pub fn op_gt(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.comparison.op_gt(frame);
     return next(frame);
 }
 
 pub fn op_slt(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.comparison.op_slt(frame);
     return next(frame);
 }
 
 pub fn op_sgt(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.comparison.op_sgt(frame);
     return next(frame);
 }
 
 pub fn op_eq(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.comparison.op_eq(frame);
     return next(frame);
 }
 
 pub fn op_iszero(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.comparison.op_iszero(frame);
     return next(frame);
 }
 
 pub fn op_and(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_and(frame);
     return next(frame);
 }
 
 pub fn op_or(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_or(frame);
     return next(frame);
 }
 
 pub fn op_xor(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_xor(frame);
     return next(frame);
 }
 
 pub fn op_not(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_not(frame);
     return next(frame);
 }
 
 pub fn op_byte(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_byte(frame);
     return next(frame);
 }
 
 pub fn op_shl(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_shl(frame);
     return next(frame);
 }
 
 pub fn op_shr(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_shr(frame);
     return next(frame);
 }
 
 pub fn op_sar(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.bitwise.op_sar(frame);
     return next(frame);
 }
 
 pub fn op_keccak256(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
+    inline for (0..2) |i| {
+        @prefetch(frame.ops.ptr + frame.ip + i, .{ .rw = .read, .locality = 3, .cache = .data });
+        @prefetch(frame.metadata.ptr + frame.ip + i, .{ .rw = .read, .locality = 3, .cache = .data });
+    }
+
     try execution.crypto.op_keccak256(frame);
     return next(frame);
 }
 
 // Continue with more opcodes...
 pub fn op_address(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_address(frame);
     return next(frame);
 }
 
 pub fn op_balance(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_balance(frame);
     return next(frame);
 }
 
 pub fn op_origin(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_origin(frame);
     return next(frame);
 }
 
 pub fn op_caller(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_caller(frame);
     return next(frame);
 }
 
 pub fn op_callvalue(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_callvalue(frame);
     return next(frame);
 }
 
 pub fn op_calldataload(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_calldataload(frame);
     return next(frame);
 }
 
 pub fn op_calldatasize(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_calldatasize(frame);
     return next(frame);
 }
 
 pub fn op_calldatacopy(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_calldatacopy(frame);
     return next(frame);
 }
 
 pub fn op_codesize(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_codesize(frame);
     return next(frame);
 }
 
 pub fn op_codecopy(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_codecopy(frame);
     return next(frame);
 }
 
 pub fn op_gasprice(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_gasprice(frame);
     return next(frame);
 }
 
 pub fn op_extcodesize(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_extcodesize(frame);
     return next(frame);
 }
 
 pub fn op_extcodecopy(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_extcodecopy(frame);
     return next(frame);
 }
 
 pub fn op_returndatasize(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_returndatasize(frame);
     return next(frame);
 }
 
 pub fn op_returndatacopy(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_returndatacopy(frame);
     return next(frame);
 }
 
 pub fn op_extcodehash(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_extcodehash(frame);
     return next(frame);
 }
 
 // Block info opcodes
 pub fn op_blockhash(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_blockhash(frame);
     return next(frame);
 }
 
 pub fn op_coinbase(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_coinbase(frame);
     return next(frame);
 }
 
 pub fn op_timestamp(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_timestamp(frame);
     return next(frame);
 }
 
 pub fn op_number(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_number(frame);
     return next(frame);
 }
 
 pub fn op_difficulty(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_difficulty(frame);
     return next(frame);
 }
 
 pub fn op_gaslimit(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_gaslimit(frame);
     return next(frame);
 }
 
 pub fn op_chainid(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_chainid(frame);
     return next(frame);
 }
 
 pub fn op_selfbalance(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.environment.op_selfbalance(frame);
     return next(frame);
 }
 
 pub fn op_basefee(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_basefee(frame);
     return next(frame);
 }
 
 pub fn op_blobhash(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_blobhash(frame);
     return next(frame);
 }
 
 pub fn op_blobbasefee(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.block.op_blobbasefee(frame);
     return next(frame);
 }
 
 // Stack operations
 pub fn op_pop(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_pop(frame);
     return next(frame);
 }
 
 pub fn op_push0(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     frame.stack.append_unsafe(0);
     return next(frame);
 }
@@ -372,8 +327,6 @@ pub fn op_push(frame: *StackFrame) Error!noreturn {
         @branchHint(.cold);
         return Error.InvalidOpcode;
     }
-
-    prefetch_next(frame);
 
     const opcode = frame.analysis.bytecode[pc];
 
@@ -407,250 +360,209 @@ pub fn op_push(frame: *StackFrame) Error!noreturn {
 
 // DUP operations
 pub fn op_dup1(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup1(frame);
     return next(frame);
 }
 
 pub fn op_dup2(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup2(frame);
     return next(frame);
 }
 
 pub fn op_dup3(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup3(frame);
     return next(frame);
 }
 
 pub fn op_dup4(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup4(frame);
     return next(frame);
 }
 
 pub fn op_dup5(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup5(frame);
     return next(frame);
 }
 
 pub fn op_dup6(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup6(frame);
     return next(frame);
 }
 
 pub fn op_dup7(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup7(frame);
     return next(frame);
 }
 
 pub fn op_dup8(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup8(frame);
     return next(frame);
 }
 
 pub fn op_dup9(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup9(frame);
     return next(frame);
 }
 
 pub fn op_dup10(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup10(frame);
     return next(frame);
 }
 
 pub fn op_dup11(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup11(frame);
     return next(frame);
 }
 
 pub fn op_dup12(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup12(frame);
     return next(frame);
 }
 
 pub fn op_dup13(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup13(frame);
     return next(frame);
 }
 
 pub fn op_dup14(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup14(frame);
     return next(frame);
 }
 
 pub fn op_dup15(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup15(frame);
     return next(frame);
 }
 
 pub fn op_dup16(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_dup16(frame);
     return next(frame);
 }
 
 // SWAP operations
 pub fn op_swap1(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap1(frame);
     return next(frame);
 }
 
 pub fn op_swap2(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap2(frame);
     return next(frame);
 }
 
 pub fn op_swap3(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap3(frame);
     return next(frame);
 }
 
 pub fn op_swap4(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap4(frame);
     return next(frame);
 }
 
 pub fn op_swap5(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap5(frame);
     return next(frame);
 }
 
 pub fn op_swap6(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap6(frame);
     return next(frame);
 }
 
 pub fn op_swap7(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap7(frame);
     return next(frame);
 }
 
 pub fn op_swap8(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap8(frame);
     return next(frame);
 }
 
 pub fn op_swap9(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap9(frame);
     return next(frame);
 }
 
 pub fn op_swap10(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap10(frame);
     return next(frame);
 }
 
 pub fn op_swap11(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap11(frame);
     return next(frame);
 }
 
 pub fn op_swap12(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap12(frame);
     return next(frame);
 }
 
 pub fn op_swap13(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap13(frame);
     return next(frame);
 }
 
 pub fn op_swap14(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap14(frame);
     return next(frame);
 }
 
 pub fn op_swap15(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap15(frame);
     return next(frame);
 }
 
 pub fn op_swap16(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.stack.op_swap16(frame);
     return next(frame);
 }
 
 // Memory operations
 pub fn op_mload(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.memory.op_mload(frame);
     return next(frame);
 }
 
 pub fn op_mstore(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.memory.op_mstore(frame);
     return next(frame);
 }
 
 pub fn op_mstore8(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.memory.op_mstore8(frame);
     return next(frame);
 }
 
 pub fn op_msize(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.memory.op_msize(frame);
     return next(frame);
 }
 
 pub fn op_mcopy(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.memory.op_mcopy(frame);
     return next(frame);
 }
 
 // Storage operations
 pub fn op_sload(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.storage.op_sload(frame);
     return next(frame);
 }
 
 pub fn op_sstore(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.storage.op_sstore(frame);
     return next(frame);
 }
 
 pub fn op_tload(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.storage.op_tload(frame);
     return next(frame);
 }
 
 pub fn op_tstore(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.storage.op_tstore(frame);
     return next(frame);
 }
@@ -658,55 +570,54 @@ pub fn op_tstore(frame: *StackFrame) Error!noreturn {
 // Control flow - TODO: Implement jump logic
 pub fn op_jump(frame: *StackFrame) Error!noreturn {
     const dest = frame.stack.pop_unsafe();
-
     const inst_idx = frame.analysis.getInstIdx(@intCast(dest));
-    const code = frame.analysis.bytecode;
 
-    if (inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or dest >= code.len or code[@intCast(dest)] != 0x5B) {
+    if (inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or
+        dest >= frame.analysis.bytecode.len or
+        frame.analysis.bytecode[@intCast(dest)] != 0x5B)
+    {
         @branchHint(.cold);
         return Error.InvalidJump;
     }
 
-    // Safe to commit ip change and prefetch now
+    prefetchBlockAt(frame, inst_idx);
+
     frame.ip = inst_idx;
-    prefetch_next(frame);
     return next(frame);
 }
 
 pub fn op_jumpi(frame: *StackFrame) Error!noreturn {
-    // Likely not jumping; prefetch sequential next
-    prefetch_next(frame);
-
     const dest = frame.stack.pop_unsafe();
     const condition = frame.stack.pop_unsafe();
 
     if (condition != 0) {
-        @branchHint(.unlikely);
-
+        // Validate jump
         const inst_idx = frame.analysis.getInstIdx(@intCast(dest));
-        const code = frame.analysis.bytecode;
-
-        if (inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or dest >= code.len or code[@intCast(dest)] != 0x5B) {
+        if (inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or
+            dest >= frame.analysis.bytecode.len or
+            frame.analysis.bytecode[@intCast(dest)] != 0x5B)
+        {
             @branchHint(.cold);
             return Error.InvalidJump;
         }
 
+        prefetchBlockAt(frame, inst_idx);
+
         frame.ip = inst_idx;
-        prefetch_next(frame);
         return next(frame);
     }
+
+    // Fallthrough case - prefetch sequential instructions
     return next(frame);
 }
 
 pub fn op_pc(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     const pc = frame.metadata[frame.ip];
     frame.stack.append_unsafe(pc);
     return next(frame);
 }
 
 pub fn op_gas(frame: *StackFrame) Error!noreturn {
-    prefetch_next(frame);
     try execution.control.op_gas(frame);
     return next(frame);
 }
@@ -728,45 +639,45 @@ pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
     if (comptime SAFE) {
         if (dest_inst_idx >= frame.analysis.inst_count) return Error.InvalidJump;
         const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
-        if (dest_pc >= frame.analysis.bytecode.len or frame.analysis.bytecode[dest_pc] != 0x5B)
+        if (dest_pc >= frame.analysis.bytecode.len or
+            frame.analysis.bytecode[dest_pc] != 0x5B)
+        {
             return Error.InvalidJump;
+        }
     }
 
+    prefetchBlockAt(frame, @intCast(dest_inst_idx));
+
     frame.ip = dest_inst_idx;
-    prefetch_next(frame);
     return next(frame);
 }
 
 // Fused PUSH+JUMPI operation
 pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
-    // Pop the condition value
     const condition = frame.stack.pop_unsafe();
 
-    // If condition is non-zero, take the jump
     if (condition != 0) {
-        // Read jump destination instruction index directly from metadata
         const dest_inst_idx = frame.metadata[frame.ip];
 
-        // Validate the destination index
         if (dest_inst_idx >= frame.analysis.inst_count) {
             return Error.InvalidJump;
         }
 
-        // In Debug/ReleaseSafe, validate it's a JUMPDEST
         if (comptime SAFE) {
             const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
-            if (dest_pc >= frame.analysis.bytecode.len or frame.analysis.bytecode[dest_pc] != 0x5B) {
+            if (dest_pc >= frame.analysis.bytecode.len or
+                frame.analysis.bytecode[dest_pc] != 0x5B)
+            {
                 return Error.InvalidJump;
             }
         }
 
-        // Jump to the destination
+        prefetchBlockAt(frame, @intCast(dest_inst_idx));
         frame.ip = dest_inst_idx;
         return next(frame);
-    } else {
-        // Condition is zero, continue to next instruction
-        return next(frame);
     }
+
+    return next(frame);
 }
 
 // Helper function to read push value from bytecode
@@ -1180,21 +1091,18 @@ pub fn op_loop_condition(frame: *StackFrame) Error!noreturn {
 
     const dest_inst_idx = frame.metadata[frame.ip + 3];
 
-    inline for (0..3) |i| {
-        const target_idx = dest_inst_idx + i;
-        @prefetch(frame.ops.ptr + target_idx, PrefetchOptions{ .rw = .read, .locality = 3, .cache = .data });
-        @prefetch(frame.ops[target_idx], PrefetchOptions{ .rw = .read, .locality = 3, .cache = .instruction });
-        @prefetch(frame.metadata.ptr + target_idx, PrefetchOptions{ .rw = .read, .locality = 3, .cache = .data });
-    }
+    // This is always a back-edge (loop)
+    prefetchBlockAt(frame, @intCast(dest_inst_idx));
 
     // 5. JUMPI logic: Pop condition and jump if true
     const condition = frame.stack.pop_unsafe();
 
     if (condition == 0) {
-        @branchHint(.unlikely);
+        @branchHint(.unlikely); // Loop exit uncommon
         frame.ip += 4; // Skip 4 more since next() will add 1
         return next(frame);
     }
+
     if (comptime SAFE) {
         if (dest_inst_idx >= frame.analysis.inst_count) {
             return Error.InvalidJump;
@@ -1204,6 +1112,7 @@ pub fn op_loop_condition(frame: *StackFrame) Error!noreturn {
             return Error.InvalidJump;
         }
     }
+
     frame.ip = dest_inst_idx;
     return next(frame);
 }

@@ -167,11 +167,15 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
     
     // Create analysis with bytecode - interpret2 will analyze and fill the rest
+    var empty_block_boundaries = std.bit_set.DynamicBitSet.initEmpty(self.allocator, 0) catch return error.OutOfMemory;
+    defer empty_block_boundaries.deinit();
+    
     const empty_analysis = SimpleAnalysis{
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = call_code,
         .inst_count = 0,
+        .block_boundaries = empty_block_boundaries,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
