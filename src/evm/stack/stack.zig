@@ -44,7 +44,38 @@ data: *[CAPACITY]u256,
 
 pub fn init(allocator: std.mem.Allocator) !Stack {
     const data: *[CAPACITY]u256 = try allocator.create([CAPACITY]u256);
-    errdefer allocator.free(data);
+    errdefer allocator.destroy(data);
+    return Stack{
+        .data = data,
+        .current = 0,
+    };
+}
+
+/// Initialize Stack with pre-allocated buffer
+/// The buffer must be at least CAPACITY * @sizeOf(u256) bytes and properly aligned
+pub fn init_with_buffer(buffer: []u8) !Stack {
+    // Debug assertions
+    std.debug.assert(buffer.len > 0);
+    
+    // Verify buffer is large enough
+    const required_size = CAPACITY * @sizeOf(u256);
+    if (buffer.len < required_size) {
+        return error.BufferTooSmall;
+    }
+    
+    // Verify alignment
+    const ptr_addr = @intFromPtr(buffer.ptr);
+    if (ptr_addr % @alignOf(u256) != 0) {
+        return error.MisalignedBuffer;
+    }
+    
+    // Cast buffer to our data array
+    const data: *[CAPACITY]u256 = @ptrCast(@alignCast(buffer.ptr));
+    
+    // Debug assertion: verify cast succeeded
+    std.debug.assert(@intFromPtr(data) == ptr_addr);
+    std.debug.assert(@intFromPtr(data) % @alignOf(u256) == 0);
+    
     return Stack{
         .data = data,
         .current = 0,
@@ -52,7 +83,7 @@ pub fn init(allocator: std.mem.Allocator) !Stack {
 }
 
 pub fn deinit(self: *Stack, allocator: std.mem.Allocator) void {
-    allocator.free(self.data);
+    allocator.destroy(self.data);
 }
 
 pub fn clear(self: *Stack) void {
@@ -970,6 +1001,36 @@ test "stack calculate_allocation returns fixed size" {
     try std.testing.expectEqual(CAPACITY * @sizeOf(u256), small_alloc.size);
     try std.testing.expectEqual(@alignOf(u256), small_alloc.alignment);
     try std.testing.expectEqual(false, small_alloc.can_grow);
+}
+
+test "stack init_with_buffer" {
+    const allocator = std.testing.allocator;
+    
+    // Allocate a properly aligned buffer
+    const alloc_info = calculate_allocation(0);
+    const buffer = try allocator.alignedAlloc(u8, alloc_info.alignment, alloc_info.size);
+    defer allocator.free(buffer);
+    
+    // Initialize stack with buffer
+    var stack = try Stack.init_with_buffer(buffer);
+    
+    // Test basic operations
+    try stack.append(42);
+    try stack.append(100);
+    try std.testing.expectEqual(@as(u256, 100), try stack.pop());
+    try std.testing.expectEqual(@as(u256, 42), try stack.pop());
+    try std.testing.expect(stack.is_empty());
+    
+    // Test buffer too small error
+    const small_buffer = try allocator.alloc(u8, 100);
+    defer allocator.free(small_buffer);
+    try std.testing.expectError(error.BufferTooSmall, Stack.init_with_buffer(small_buffer));
+    
+    // Test misaligned buffer error
+    const misaligned_buffer = try allocator.alloc(u8, alloc_info.size + 1);
+    defer allocator.free(misaligned_buffer);
+    const misaligned_slice = misaligned_buffer[1..]; // Offset by 1 to misalign
+    try std.testing.expectError(error.MisalignedBuffer, Stack.init_with_buffer(misaligned_slice));
 }
 
 test "stack_concurrent_safety_simulation" {

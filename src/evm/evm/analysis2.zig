@@ -4,6 +4,149 @@ const opcode_mod = @import("../opcodes/opcode.zig");
 const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
 
+/// Map an opcode byte to its tailcall function pointer
+fn get_tailcall_for_opcode(opcode_byte: u8) *const anyopaque {
+    // Handle push opcodes
+    if (opcode_mod.is_push(opcode_byte)) {
+        return @ptrCast(&tailcalls.op_push);
+    }
+    
+    // Handle invalid opcodes
+    if (!opcode_mod.is_valid_opcode(opcode_byte)) {
+        return @ptrCast(&tailcalls.op_invalid);
+    }
+    
+    const opcode = @as(Opcode, @enumFromInt(opcode_byte));
+    return switch (opcode) {
+        .STOP => @ptrCast(&tailcalls.op_stop),
+        .ADD => @ptrCast(&tailcalls.op_add),
+        .MUL => @ptrCast(&tailcalls.op_mul),
+        .SUB => @ptrCast(&tailcalls.op_sub),
+        .DIV => @ptrCast(&tailcalls.op_div),
+        .SDIV => @ptrCast(&tailcalls.op_sdiv),
+        .MOD => @ptrCast(&tailcalls.op_mod),
+        .SMOD => @ptrCast(&tailcalls.op_smod),
+        .ADDMOD => @ptrCast(&tailcalls.op_addmod),
+        .MULMOD => @ptrCast(&tailcalls.op_mulmod),
+        .EXP => @ptrCast(&tailcalls.op_exp),
+        .SIGNEXTEND => @ptrCast(&tailcalls.op_signextend),
+        .LT => @ptrCast(&tailcalls.op_lt),
+        .GT => @ptrCast(&tailcalls.op_gt),
+        .SLT => @ptrCast(&tailcalls.op_slt),
+        .SGT => @ptrCast(&tailcalls.op_sgt),
+        .EQ => @ptrCast(&tailcalls.op_eq),
+        .ISZERO => @ptrCast(&tailcalls.op_iszero),
+        .AND => @ptrCast(&tailcalls.op_and),
+        .OR => @ptrCast(&tailcalls.op_or),
+        .XOR => @ptrCast(&tailcalls.op_xor),
+        .NOT => @ptrCast(&tailcalls.op_not),
+        .BYTE => @ptrCast(&tailcalls.op_byte),
+        .SHL => @ptrCast(&tailcalls.op_shl),
+        .SHR => @ptrCast(&tailcalls.op_shr),
+        .SAR => @ptrCast(&tailcalls.op_sar),
+        .KECCAK256 => @ptrCast(&tailcalls.op_keccak256),
+        .ADDRESS => @ptrCast(&tailcalls.op_address),
+        .BALANCE => @ptrCast(&tailcalls.op_balance),
+        .ORIGIN => @ptrCast(&tailcalls.op_origin),
+        .CALLER => @ptrCast(&tailcalls.op_caller),
+        .CALLVALUE => @ptrCast(&tailcalls.op_callvalue),
+        .CALLDATALOAD => @ptrCast(&tailcalls.op_calldataload),
+        .CALLDATASIZE => @ptrCast(&tailcalls.op_calldatasize),
+        .CALLDATACOPY => @ptrCast(&tailcalls.op_calldatacopy),
+        .CODESIZE => @ptrCast(&tailcalls.op_codesize),
+        .CODECOPY => @ptrCast(&tailcalls.op_codecopy),
+        .GASPRICE => @ptrCast(&tailcalls.op_gasprice),
+        .EXTCODESIZE => @ptrCast(&tailcalls.op_extcodesize),
+        .EXTCODECOPY => @ptrCast(&tailcalls.op_extcodecopy),
+        .RETURNDATASIZE => @ptrCast(&tailcalls.op_returndatasize),
+        .RETURNDATACOPY => @ptrCast(&tailcalls.op_returndatacopy),
+        .EXTCODEHASH => @ptrCast(&tailcalls.op_extcodehash),
+        .BLOCKHASH => @ptrCast(&tailcalls.op_blockhash),
+        .COINBASE => @ptrCast(&tailcalls.op_coinbase),
+        .TIMESTAMP => @ptrCast(&tailcalls.op_timestamp),
+        .NUMBER => @ptrCast(&tailcalls.op_number),
+        .PREVRANDAO => @ptrCast(&tailcalls.op_difficulty),
+        .GASLIMIT => @ptrCast(&tailcalls.op_gaslimit),
+        .CHAINID => @ptrCast(&tailcalls.op_chainid),
+        .SELFBALANCE => @ptrCast(&tailcalls.op_selfbalance),
+        .BASEFEE => @ptrCast(&tailcalls.op_basefee),
+        .BLOBHASH => @ptrCast(&tailcalls.op_blobhash),
+        .BLOBBASEFEE => @ptrCast(&tailcalls.op_blobbasefee),
+        .POP => @ptrCast(&tailcalls.op_pop),
+        .MLOAD => @ptrCast(&tailcalls.op_mload),
+        .MSTORE => @ptrCast(&tailcalls.op_mstore),
+        .MSTORE8 => @ptrCast(&tailcalls.op_mstore8),
+        .SLOAD => @ptrCast(&tailcalls.op_sload),
+        .SSTORE => @ptrCast(&tailcalls.op_sstore),
+        .JUMP => @ptrCast(&tailcalls.op_jump),
+        .JUMPI => @ptrCast(&tailcalls.op_jumpi),
+        .PC => @ptrCast(&tailcalls.op_pc),
+        .MSIZE => @ptrCast(&tailcalls.op_msize),
+        .GAS => @ptrCast(&tailcalls.op_gas),
+        .JUMPDEST => @ptrCast(&tailcalls.op_jumpdest),
+        .TLOAD => @ptrCast(&tailcalls.op_tload),
+        .TSTORE => @ptrCast(&tailcalls.op_tstore),
+        .MCOPY => @ptrCast(&tailcalls.op_mcopy),
+        .PUSH0 => @ptrCast(&tailcalls.op_push0),
+        .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
+        .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
+        .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
+        .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => unreachable, // handled above
+        .DUP1 => @ptrCast(&tailcalls.op_dup1),
+        .DUP2 => @ptrCast(&tailcalls.op_dup2),
+        .DUP3 => @ptrCast(&tailcalls.op_dup3),
+        .DUP4 => @ptrCast(&tailcalls.op_dup4),
+        .DUP5 => @ptrCast(&tailcalls.op_dup5),
+        .DUP6 => @ptrCast(&tailcalls.op_dup6),
+        .DUP7 => @ptrCast(&tailcalls.op_dup7),
+        .DUP8 => @ptrCast(&tailcalls.op_dup8),
+        .DUP9 => @ptrCast(&tailcalls.op_dup9),
+        .DUP10 => @ptrCast(&tailcalls.op_dup10),
+        .DUP11 => @ptrCast(&tailcalls.op_dup11),
+        .DUP12 => @ptrCast(&tailcalls.op_dup12),
+        .DUP13 => @ptrCast(&tailcalls.op_dup13),
+        .DUP14 => @ptrCast(&tailcalls.op_dup14),
+        .DUP15 => @ptrCast(&tailcalls.op_dup15),
+        .DUP16 => @ptrCast(&tailcalls.op_dup16),
+        .SWAP1 => @ptrCast(&tailcalls.op_swap1),
+        .SWAP2 => @ptrCast(&tailcalls.op_swap2),
+        .SWAP3 => @ptrCast(&tailcalls.op_swap3),
+        .SWAP4 => @ptrCast(&tailcalls.op_swap4),
+        .SWAP5 => @ptrCast(&tailcalls.op_swap5),
+        .SWAP6 => @ptrCast(&tailcalls.op_swap6),
+        .SWAP7 => @ptrCast(&tailcalls.op_swap7),
+        .SWAP8 => @ptrCast(&tailcalls.op_swap8),
+        .SWAP9 => @ptrCast(&tailcalls.op_swap9),
+        .SWAP10 => @ptrCast(&tailcalls.op_swap10),
+        .SWAP11 => @ptrCast(&tailcalls.op_swap11),
+        .SWAP12 => @ptrCast(&tailcalls.op_swap12),
+        .SWAP13 => @ptrCast(&tailcalls.op_swap13),
+        .SWAP14 => @ptrCast(&tailcalls.op_swap14),
+        .SWAP15 => @ptrCast(&tailcalls.op_swap15),
+        .SWAP16 => @ptrCast(&tailcalls.op_swap16),
+        .LOG0 => @ptrCast(&tailcalls.op_log0),
+        .LOG1 => @ptrCast(&tailcalls.op_log1),
+        .LOG2 => @ptrCast(&tailcalls.op_log2),
+        .LOG3 => @ptrCast(&tailcalls.op_log3),
+        .LOG4 => @ptrCast(&tailcalls.op_log4),
+        .CREATE => @ptrCast(&tailcalls.op_create),
+        .CALL => @ptrCast(&tailcalls.op_call),
+        .CALLCODE => @ptrCast(&tailcalls.op_callcode),
+        .RETURN => @ptrCast(&tailcalls.op_return),
+        .DELEGATECALL => @ptrCast(&tailcalls.op_delegatecall),
+        .CREATE2 => @ptrCast(&tailcalls.op_create2),
+        .STATICCALL => @ptrCast(&tailcalls.op_staticcall),
+        .REVERT => @ptrCast(&tailcalls.op_revert),
+        .INVALID => @ptrCast(&tailcalls.op_invalid),
+        .SELFDESTRUCT => @ptrCast(&tailcalls.op_selfdestruct),
+        // New EOF opcodes - not yet implemented
+        .RETURNDATALOAD => @ptrCast(&tailcalls.op_invalid),
+        .EXTCALL => @ptrCast(&tailcalls.op_invalid),
+        .EXTDELEGATECALL => @ptrCast(&tailcalls.op_invalid),
+        .EXTSTATICCALL => @ptrCast(&tailcalls.op_invalid),
+    };
+}
+
 /// Simple analysis result for tailcall dispatch with precomputed mappings
 pub const SimpleAnalysis = struct {
     /// Mapping from instruction index to PC value
@@ -270,10 +413,11 @@ pub fn prepare_with_buffers(
                     0x11 => &tailcalls.op_push_then_gt,
                     0x14 => &tailcalls.op_push_then_eq,
                     0x16 => &tailcalls.op_push_then_and,
-                    0x17 => &tailcalls.op_push_then_or,
-                    0x18 => &tailcalls.op_push_then_xor,
-                    0x1B => &tailcalls.op_push_then_shl,
-                    0x1C => &tailcalls.op_push_then_shr,
+                    // TODO: implement these fusion operations
+                    // 0x17 => &tailcalls.op_push_then_or,
+                    // 0x18 => &tailcalls.op_push_then_xor,
+                    // 0x1B => &tailcalls.op_push_then_shl,
+                    // 0x1C => &tailcalls.op_push_then_shr,
                     else => null,
                 };
                 
@@ -287,7 +431,7 @@ pub fn prepare_with_buffers(
         }
         
         // Regular opcode mapping
-        ops[i] = @ptrCast(tailcalls.opcode_to_tailcall(opcode));
+        ops[i] = @ptrCast(get_tailcall_for_opcode(opcode));
     }
     
     // Add terminating op_stop
