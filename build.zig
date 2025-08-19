@@ -291,16 +291,6 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
 
-    // Add evm_test_runner executable
-    const evm_test_runner = b.addExecutable(.{
-        .name = "evm_test_runner",
-        .root_source_file = b.path("src/evm_test_runner.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    evm_test_runner.root_module.addImport("evm", evm_mod);
-    evm_test_runner.root_module.addImport("primitives", primitives_mod);
-    b.installArtifact(evm_test_runner);
 
     // WASM library build optimized for size
     const wasm_target = wasm.setupWasmTarget(b);
