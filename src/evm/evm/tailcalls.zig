@@ -875,10 +875,7 @@ pub fn op_push_then_mload_small(frame: *StackFrame) Error!noreturn {
 
 pub fn op_push_then_mstore_small(frame: *StackFrame) Error!noreturn {
     const offset = frame.metadata[frame.ip];
-    const value = frame.stack.peek_unsafe();
-
-    // Push value and offset to stack then call mstore
-    frame.stack.set_top_unsafe(value);
+    // TODO we shouldn't be pushingto stack
     frame.stack.append_unsafe(offset);
     try execution.memory.op_mstore(frame);
     return next(frame);

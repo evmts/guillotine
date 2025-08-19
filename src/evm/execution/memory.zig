@@ -72,15 +72,8 @@ pub fn op_mload(frame: *Frame) ExecutionError.Error!void {
 /// Stores 32 bytes to memory starting at the given offset.
 /// Stack: [offset, value] → []
 pub fn op_mstore(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        if (frame.stack.size() < 2) {
-            @branchHint(.cold);
-            unreachable;
-        }
-    }
+    std.debug.assert(frame.stack.size() >= 2);
 
-    // Pop two values unsafely using batch operation - bounds checking is done in jump_table.zig
-    // EVM Stack: [..., value, offset] where offset is on top
     const popped = frame.stack.pop2_unsafe();
     const value = popped.a; // First popped (was second from top)
     const offset = popped.b; // Second popped (was top)
@@ -105,7 +98,7 @@ pub fn op_mstore(frame: *Frame) ExecutionError.Error!void {
     Log.debug("MSTORE: offset={}, value={x:0>64}, first_few_bytes={x}", .{ offset_usize, value, std.fmt.fmtSliceHexLower(bytes[0..@min(16, bytes.len)]) });
 
     // Use unsafe write since we just ensured capacity
-    if (SAFE_MEMORY_EXPANSION) {
+    if (comptime SAFE_MEMORY_EXPANSION) {
         try frame.memory.set_data(offset_usize, &bytes);
     } else {
         frame.memory.set_data_unsafe(offset_usize, &bytes);
@@ -179,7 +172,6 @@ pub fn op_msize(frame: *Frame) ExecutionError.Error!void {
 /// Handles overlapping regions correctly.
 /// Stack: [dest, src, length] → []
 pub fn op_mcopy(frame: *Frame) ExecutionError.Error!void {
-
     if (SAFE_STACK_CHECKS) {
         if (frame.stack.size() < 3) {
             @branchHint(.cold);
