@@ -163,27 +163,64 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         };
     }
 
-    const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
+    const analysis2 = @import("analysis2.zig");
 
-    const empty_analysis = SimpleAnalysis{
-        .inst_to_pc = &.{},
-        .pc_to_inst = &.{},
-        .bytecode = call_code,
-    };
-    const empty_metadata: []u32 = &.{};
-    const empty_ops: []*const anyopaque = &.{};
-
-    var frame = try StackFrame.init(
+    // Use tiered pre-allocation based on bytecode size
+    var frame = StackFrame.init_with_bytecode_size(
+        call_code.len,
         gas_after_base,
         call_context.address,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
         host,
         self.state.database,
         self.allocator,
-    );
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.BufferTooSmall, error.MisalignedBuffer => {
+            // These should never happen with our allocation strategy
+            unreachable;
+        },
+    };
     defer frame.deinit();
+    
+    // Pre-allocate buffers from frame's buffer allocator
+    const buffer_allocator = frame.get_buffer_allocator();
+    
+    // Allocate analysis arrays
+    const analysis_alloc = analysis2.calculate_analysis_allocation(call_code.len);
+    const metadata_alloc = analysis2.calculate_metadata_allocation(call_code.len);
+    const ops_alloc = analysis2.calculate_ops_allocation(call_code.len);
+    
+    // Debug assertions: verify allocation info is reasonable
+    std.debug.assert(analysis_alloc.size > 0);
+    std.debug.assert(metadata_alloc.size > 0);
+    std.debug.assert(ops_alloc.size > 0);
+    
+    const inst_to_pc = try buffer_allocator.alloc(u16, call_code.len);
+    const pc_to_inst = try buffer_allocator.alloc(u16, call_code.len);
+    const metadata = try buffer_allocator.alloc(u32, call_code.len);
+    const ops = try buffer_allocator.alloc(*const anyopaque, call_code.len + 1);
+    
+    // Debug assertions: verify allocations succeeded
+    std.debug.assert(inst_to_pc.len >= call_code.len);
+    std.debug.assert(pc_to_inst.len >= call_code.len);
+    std.debug.assert(metadata.len >= call_code.len);
+    std.debug.assert(ops.len >= call_code.len + 1);
+    
+    // Prepare analysis with pre-allocated buffers
+    const prep_result = analysis2.prepare_with_buffers(
+        inst_to_pc,
+        pc_to_inst,
+        metadata,
+        ops,
+        call_code,
+    ) catch |err| switch (err) {
+        error.CodeTooLarge => return error.MAX_CONTRACT_SIZE,
+    };
+    
+    // Update frame with prepared data
+    frame.analysis = prep_result.analysis;
+    frame.metadata = prep_result.metadata;
+    frame.ops = prep_result.ops;
 
     if (self.current_frame_depth < MAX_CALL_DEPTH) {
         self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
