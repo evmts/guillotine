@@ -183,6 +183,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         .bytecode = call_code,
         .inst_count = 0,
         .block_boundaries = empty_block_boundaries,
+        .jump_table = &self.table,
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};

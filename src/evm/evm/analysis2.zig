@@ -3,6 +3,7 @@ const Opcode = @import("../opcodes/opcode.zig").Enum;
 const opcode_mod = @import("../opcodes/opcode.zig");
 const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
+const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
 /// Simple analysis result for tailcall dispatch with precomputed mappings
 pub const SimpleAnalysis = struct {
@@ -16,6 +17,8 @@ pub const SimpleAnalysis = struct {
     inst_count: u16,
     /// Block boundaries bitset - true for each instruction that starts a basic block
     block_boundaries: std.bit_set.DynamicBitSet,
+    /// Jump table for opcode metadata lookup
+    jump_table: *const OpcodeMetadata = &OpcodeMetadata.CANCUN,
 
     pub const MAX_USIZE: u16 = std.math.maxInt(u16);
 
@@ -212,6 +215,10 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
         }
 
         const opcode = @as(Opcode, @enumFromInt(byte));
+        
+        // TODO: Replace this giant switch statement with jump table lookup
+        // 1. Migrate the jump table to using tailcalls instead of ExecutionFunc
+        // 2. Replace this switch with: analysis.jump_table.get_tailcall_func(byte)
         const fn_ptr: *const anyopaque = switch (opcode) {
             .STOP => @ptrCast(&tailcalls.op_stop),
             .ADD => @ptrCast(&tailcalls.op_add),
