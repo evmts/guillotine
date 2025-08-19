@@ -26,9 +26,9 @@ pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     // Create host interface
     const host = Host.init(self);
 
-    // Check if top-level call
-    const is_top_level_call = !self.is_currently_executing();
-    Log.debug("[call] is_top_level_call={}, is_executing={}, current_frame_depth={}", .{ is_top_level_call, self.is_currently_executing(), self.current_frame_depth });
+    // Check if top-level call using frame depth
+    const is_top_level_call = self.current_frame_depth == 0;
+    Log.debug("[call] is_top_level_call={}, current_frame_depth={}", .{ is_top_level_call, self.current_frame_depth });
     const snapshot_id = if (!is_top_level_call) host.create_snapshot() else 0;
 
     // Extract call parameters
