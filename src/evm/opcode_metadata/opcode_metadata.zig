@@ -66,6 +66,130 @@ pub const OpcodeMetadata = @This();
 /// Most modern x86/ARM processors use 64-byte cache lines.
 const CACHE_LINE_SIZE = 64;
 
+/// Stack consumption data for an opcode
+const StackConsumption = struct {
+    inputs: u32,  // How many items popped from stack
+    outputs: u32, // How many items pushed to stack
+};
+
+/// Get stack consumption for a given opcode
+fn get_stack_consumption(opcode: u8) StackConsumption {
+    return switch (opcode) {
+        // 0x00s: Stop and Arithmetic Operations
+        0x00 => .{ .inputs = 0, .outputs = 0 }, // STOP
+        0x01 => .{ .inputs = 2, .outputs = 1 }, // ADD
+        0x02 => .{ .inputs = 2, .outputs = 1 }, // MUL
+        0x03 => .{ .inputs = 2, .outputs = 1 }, // SUB
+        0x04 => .{ .inputs = 2, .outputs = 1 }, // DIV
+        0x05 => .{ .inputs = 2, .outputs = 1 }, // SDIV
+        0x06 => .{ .inputs = 2, .outputs = 1 }, // MOD
+        0x07 => .{ .inputs = 2, .outputs = 1 }, // SMOD
+        0x08 => .{ .inputs = 3, .outputs = 1 }, // ADDMOD
+        0x09 => .{ .inputs = 3, .outputs = 1 }, // MULMOD
+        0x0a => .{ .inputs = 2, .outputs = 1 }, // EXP
+        0x0b => .{ .inputs = 2, .outputs = 1 }, // SIGNEXTEND
+
+        // 0x10s: Comparison & Bitwise Logic Operations
+        0x10 => .{ .inputs = 2, .outputs = 1 }, // LT
+        0x11 => .{ .inputs = 2, .outputs = 1 }, // GT
+        0x12 => .{ .inputs = 2, .outputs = 1 }, // SLT
+        0x13 => .{ .inputs = 2, .outputs = 1 }, // SGT
+        0x14 => .{ .inputs = 2, .outputs = 1 }, // EQ
+        0x15 => .{ .inputs = 1, .outputs = 1 }, // ISZERO
+        0x16 => .{ .inputs = 2, .outputs = 1 }, // AND
+        0x17 => .{ .inputs = 2, .outputs = 1 }, // OR
+        0x18 => .{ .inputs = 2, .outputs = 1 }, // XOR
+        0x19 => .{ .inputs = 1, .outputs = 1 }, // NOT
+        0x1a => .{ .inputs = 2, .outputs = 1 }, // BYTE
+        0x1b => .{ .inputs = 2, .outputs = 1 }, // SHL
+        0x1c => .{ .inputs = 2, .outputs = 1 }, // SHR
+        0x1d => .{ .inputs = 2, .outputs = 1 }, // SAR
+
+        // 0x20s: Crypto
+        0x20 => .{ .inputs = 2, .outputs = 1 }, // SHA3
+
+        // 0x30s: Environmental Information
+        0x30 => .{ .inputs = 0, .outputs = 1 }, // ADDRESS
+        0x31 => .{ .inputs = 1, .outputs = 1 }, // BALANCE
+        0x32 => .{ .inputs = 0, .outputs = 1 }, // ORIGIN
+        0x33 => .{ .inputs = 0, .outputs = 1 }, // CALLER
+        0x34 => .{ .inputs = 0, .outputs = 1 }, // CALLVALUE
+        0x35 => .{ .inputs = 1, .outputs = 1 }, // CALLDATALOAD
+        0x36 => .{ .inputs = 0, .outputs = 1 }, // CALLDATASIZE
+        0x37 => .{ .inputs = 3, .outputs = 0 }, // CALLDATACOPY
+        0x38 => .{ .inputs = 0, .outputs = 1 }, // CODESIZE
+        0x39 => .{ .inputs = 3, .outputs = 0 }, // CODECOPY
+        0x3a => .{ .inputs = 0, .outputs = 1 }, // GASPRICE
+        0x3b => .{ .inputs = 1, .outputs = 1 }, // EXTCODESIZE
+        0x3c => .{ .inputs = 4, .outputs = 0 }, // EXTCODECOPY
+        0x3d => .{ .inputs = 0, .outputs = 1 }, // RETURNDATASIZE
+        0x3e => .{ .inputs = 3, .outputs = 0 }, // RETURNDATACOPY
+        0x3f => .{ .inputs = 1, .outputs = 1 }, // EXTCODEHASH
+
+        // 0x40s: Block Information
+        0x40 => .{ .inputs = 1, .outputs = 1 }, // BLOCKHASH
+        0x41 => .{ .inputs = 0, .outputs = 1 }, // COINBASE
+        0x42 => .{ .inputs = 0, .outputs = 1 }, // TIMESTAMP
+        0x43 => .{ .inputs = 0, .outputs = 1 }, // NUMBER
+        0x44 => .{ .inputs = 0, .outputs = 1 }, // DIFFICULTY
+        0x45 => .{ .inputs = 0, .outputs = 1 }, // GASLIMIT
+        0x46 => .{ .inputs = 0, .outputs = 1 }, // CHAINID
+        0x47 => .{ .inputs = 0, .outputs = 1 }, // SELFBALANCE
+        0x48 => .{ .inputs = 0, .outputs = 1 }, // BASEFEE
+        0x49 => .{ .inputs = 1, .outputs = 1 }, // BLOBHASH
+        0x4a => .{ .inputs = 0, .outputs = 1 }, // BLOBBASEFEE
+
+        // 0x50s: Stack, Memory, Storage and Flow Operations
+        0x50 => .{ .inputs = 1, .outputs = 0 }, // POP
+        0x51 => .{ .inputs = 1, .outputs = 1 }, // MLOAD
+        0x52 => .{ .inputs = 2, .outputs = 0 }, // MSTORE
+        0x53 => .{ .inputs = 2, .outputs = 0 }, // MSTORE8
+        0x54 => .{ .inputs = 1, .outputs = 1 }, // SLOAD
+        0x55 => .{ .inputs = 2, .outputs = 0 }, // SSTORE
+        0x56 => .{ .inputs = 1, .outputs = 0 }, // JUMP
+        0x57 => .{ .inputs = 2, .outputs = 0 }, // JUMPI
+        0x58 => .{ .inputs = 0, .outputs = 1 }, // PC
+        0x59 => .{ .inputs = 0, .outputs = 1 }, // MSIZE
+        0x5a => .{ .inputs = 0, .outputs = 1 }, // GAS
+        0x5b => .{ .inputs = 0, .outputs = 0 }, // JUMPDEST
+        0x5c => .{ .inputs = 1, .outputs = 1 }, // TLOAD
+        0x5d => .{ .inputs = 2, .outputs = 0 }, // TSTORE
+        0x5e => .{ .inputs = 3, .outputs = 0 }, // MCOPY
+        0x5f => .{ .inputs = 0, .outputs = 1 }, // PUSH0
+
+        // 0x60-0x7f: PUSH1-PUSH32
+        0x60...0x7f => .{ .inputs = 0, .outputs = 1 },
+
+        // 0x80-0x8f: DUP1-DUP16
+        0x80...0x8f => .{ .inputs = 0, .outputs = 1 },
+
+        // 0x90-0x9f: SWAP1-SWAP16
+        0x90...0x9f => .{ .inputs = 0, .outputs = 0 },
+
+        // 0xa0-0xa4: LOG0-LOG4
+        0xa0 => .{ .inputs = 2, .outputs = 0 }, // LOG0
+        0xa1 => .{ .inputs = 3, .outputs = 0 }, // LOG1
+        0xa2 => .{ .inputs = 4, .outputs = 0 }, // LOG2
+        0xa3 => .{ .inputs = 5, .outputs = 0 }, // LOG3
+        0xa4 => .{ .inputs = 6, .outputs = 0 }, // LOG4
+
+        // 0xf0s: System operations
+        0xf0 => .{ .inputs = 3, .outputs = 1 }, // CREATE
+        0xf1 => .{ .inputs = 7, .outputs = 1 }, // CALL
+        0xf2 => .{ .inputs = 7, .outputs = 1 }, // CALLCODE
+        0xf3 => .{ .inputs = 2, .outputs = 0 }, // RETURN
+        0xf4 => .{ .inputs = 6, .outputs = 1 }, // DELEGATECALL
+        0xf5 => .{ .inputs = 4, .outputs = 1 }, // CREATE2
+        0xfa => .{ .inputs = 6, .outputs = 1 }, // STATICCALL
+        0xfd => .{ .inputs = 2, .outputs = 0 }, // REVERT
+        0xfe => .{ .inputs = 0, .outputs = 0 }, // INVALID
+        0xff => .{ .inputs = 1, .outputs = 0 }, // SELFDESTRUCT
+
+        // All other opcodes (undefined)
+        else => .{ .inputs = 0, .outputs = 0 },
+    };
+}
+
 /// Hot path arrays - accessed every opcode execution
 execute_funcs: [256]ExecutionFunc align(CACHE_LINE_SIZE),
 constant_gas: [256]u64 align(CACHE_LINE_SIZE),
@@ -73,6 +197,10 @@ constant_gas: [256]u64 align(CACHE_LINE_SIZE),
 /// Validation arrays - accessed for stack checks
 min_stack: [256]u32 align(CACHE_LINE_SIZE),
 max_stack: [256]u32 align(CACHE_LINE_SIZE),
+
+/// Stack consumption arrays - how many items each opcode consumes/produces
+stack_inputs: [256]u32 align(CACHE_LINE_SIZE),
+stack_outputs: [256]u32 align(CACHE_LINE_SIZE),
 
 /// Cold path arrays - rarely accessed
 undefined_flags: [256]bool align(CACHE_LINE_SIZE),
@@ -133,6 +261,8 @@ pub fn init() OpcodeMetadata {
         .constant_gas = [_]u64{0} ** 256,
         .min_stack = [_]u32{0} ** 256,
         .max_stack = [_]u32{Stack.CAPACITY} ** 256,
+        .stack_inputs = [_]u32{0} ** 256,
+        .stack_outputs = [_]u32{0} ** 256,
         .undefined_flags = [_]bool{true} ** 256,
     };
 }
@@ -143,6 +273,8 @@ pub const OperationView = struct {
     constant_gas: u64,
     min_stack: u32,
     max_stack: u32,
+    stack_inputs: u32,
+    stack_outputs: u32,
     undefined: bool,
 };
 
@@ -165,6 +297,8 @@ pub fn get_operation(self: *const OpcodeMetadata, opcode: u8) OperationView {
         .constant_gas = self.constant_gas[opcode],
         .min_stack = self.min_stack[opcode],
         .max_stack = self.max_stack[opcode],
+        .stack_inputs = self.stack_inputs[opcode],
+        .stack_outputs = self.stack_outputs[opcode],
         .undefined = self.undefined_flags[opcode],
     };
 }
@@ -195,6 +329,8 @@ pub fn copy(self: *const OpcodeMetadata, allocator: std.mem.Allocator) !OpcodeMe
         .constant_gas = self.constant_gas,
         .min_stack = self.min_stack,
         .max_stack = self.max_stack,
+        .stack_inputs = self.stack_inputs,
+        .stack_outputs = self.stack_outputs,
         .undefined_flags = self.undefined_flags,
     };
 }
@@ -242,6 +378,11 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.min_stack[idx] = op.min_stack;
             jt.max_stack[idx] = op.max_stack;
             jt.undefined_flags[idx] = false;
+            
+            // Set stack consumption based on opcode
+            const stack_consumption = get_stack_consumption(idx);
+            jt.stack_inputs[idx] = stack_consumption.inputs;
+            jt.stack_outputs[idx] = stack_consumption.outputs;
         }
     }
 
@@ -253,6 +394,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
             jt.min_stack[0x5f] = 0;
             jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+            jt.stack_inputs[0x5f] = 0;
+            jt.stack_outputs[0x5f] = 1;
             jt.undefined_flags[0x5f] = false;
         } else {
             // Before Shanghai, PUSH0 is undefined
@@ -264,6 +407,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
         jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.stack_inputs[0x60] = 0;
+        jt.stack_outputs[0x60] = 1;
         jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH32
@@ -276,6 +421,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = 0;
             jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.stack_inputs[idx] = 0;
+            jt.stack_outputs[idx] = 1;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -285,6 +432,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[0x5f] = execution.GasConstants.GasQuickStep;
             jt.min_stack[0x5f] = 0;
             jt.max_stack[0x5f] = Stack.CAPACITY - 1;
+            jt.stack_inputs[0x5f] = 0;
+            jt.stack_outputs[0x5f] = 1;
             jt.undefined_flags[0x5f] = false;
         } else {
             // Before Shanghai, PUSH0 is undefined
@@ -296,6 +445,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
         jt.constant_gas[0x60] = execution.GasConstants.GasFastestStep;
         jt.min_stack[0x60] = 0;
         jt.max_stack[0x60] = Stack.CAPACITY - 1;
+        jt.stack_inputs[0x60] = 0;
+        jt.stack_outputs[0x60] = 1;
         jt.undefined_flags[0x60] = false;
 
         // PUSH2-PUSH32 inline execution; provide metadata only
@@ -305,6 +456,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[opcode_idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[opcode_idx] = 0;
             jt.max_stack[opcode_idx] = Stack.CAPACITY - 1;
+            jt.stack_inputs[opcode_idx] = 0;
+            jt.stack_outputs[opcode_idx] = 1;
             jt.undefined_flags[opcode_idx] = false;
         }
     }
@@ -325,6 +478,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n);
             jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.stack_inputs[idx] = 0;
+            jt.stack_outputs[idx] = 1;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -342,6 +497,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n);
             jt.max_stack[idx] = Stack.CAPACITY - 1;
+            jt.stack_inputs[idx] = 0;
+            jt.stack_outputs[idx] = 1;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -362,6 +519,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n + 1);
             jt.max_stack[idx] = Stack.CAPACITY;
+            jt.stack_inputs[idx] = 0;
+            jt.stack_outputs[idx] = 0;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -379,6 +538,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.GasFastestStep;
             jt.min_stack[idx] = @intCast(n + 1);
             jt.max_stack[idx] = Stack.CAPACITY;
+            jt.stack_inputs[idx] = 0;
+            jt.stack_outputs[idx] = 0;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -396,6 +557,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
             jt.max_stack[idx] = Stack.CAPACITY;
+            jt.stack_inputs[idx] = @intCast(n + 2);
+            jt.stack_outputs[idx] = 0;
             jt.undefined_flags[idx] = false;
         }
     } else {
@@ -410,6 +573,8 @@ pub fn init_from_hardfork(hardfork: Hardfork) OpcodeMetadata {
             jt.constant_gas[idx] = execution.GasConstants.LogGas + execution.GasConstants.LogTopicGas * n;
             jt.min_stack[idx] = @intCast(n + 2);
             jt.max_stack[idx] = Stack.CAPACITY;
+            jt.stack_inputs[idx] = @intCast(n + 2);
+            jt.stack_outputs[idx] = 0;
             jt.undefined_flags[idx] = false;
         }
     }
@@ -462,6 +627,12 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
             metadata.constant_gas[spec.opcode] = op.constant_gas;
             metadata.min_stack[spec.opcode] = op.min_stack;
             metadata.max_stack[spec.opcode] = op.max_stack;
+            
+            // Set stack consumption based on opcode
+            const stack_consumption = get_stack_consumption(spec.opcode);
+            metadata.stack_inputs[spec.opcode] = stack_consumption.inputs;
+            metadata.stack_outputs[spec.opcode] = stack_consumption.outputs;
+            
             metadata.undefined_flags[spec.opcode] = false;
         }
     }
@@ -472,6 +643,8 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.constant_gas[0x5f] = GasConstants.GasQuickStep;
         metadata.min_stack[0x5f] = 0;
         metadata.max_stack[0x5f] = Stack.CAPACITY - 1;
+        metadata.stack_inputs[0x5f] = 0;
+        metadata.stack_outputs[0x5f] = 1;
         metadata.undefined_flags[0x5f] = false;
     }
 
@@ -484,6 +657,8 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = 0;
         metadata.max_stack[opcode] = Stack.CAPACITY - 1;
+        metadata.stack_inputs[opcode] = 0;
+        metadata.stack_outputs[opcode] = 1;
         metadata.undefined_flags[opcode] = false;
     }
 
@@ -501,6 +676,8 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = @intCast(i + 1);
         metadata.max_stack[opcode] = Stack.CAPACITY - 1;
+        metadata.stack_inputs[opcode] = 0;
+        metadata.stack_outputs[opcode] = 1;
         metadata.undefined_flags[opcode] = false;
     }
 
@@ -518,6 +695,8 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.constant_gas[opcode] = GasConstants.GasFastestStep;
         metadata.min_stack[opcode] = @intCast(i + 2);
         metadata.max_stack[opcode] = Stack.CAPACITY;
+        metadata.stack_inputs[opcode] = 0;
+        metadata.stack_outputs[opcode] = 0;
         metadata.undefined_flags[opcode] = false;
     }
 
@@ -532,6 +711,8 @@ pub fn init_from_eip_flags(comptime flags: EipFlags) OpcodeMetadata {
         metadata.constant_gas[opcode] = GasConstants.LogGas + i * GasConstants.LogTopicGas;
         metadata.min_stack[opcode] = @intCast(2 + i);
         metadata.max_stack[opcode] = Stack.CAPACITY;
+        metadata.stack_inputs[opcode] = @intCast(2 + i);
+        metadata.stack_outputs[opcode] = 0;
         metadata.undefined_flags[opcode] = false;
     }
 
