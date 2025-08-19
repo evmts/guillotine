@@ -6,6 +6,7 @@ const builtin = @import("builtin");
 const PrefetchOptions = @import("std").builtin.PrefetchOptions;
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
+const Log = @import("../log.zig");
 
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
@@ -27,6 +28,12 @@ inline fn prefetchBlockAt(frame: *StackFrame, target_idx: u16) void {
 
 pub inline fn next(frame: *StackFrame) Error!noreturn {
     frame.ip += 1;
+
+    // Bounds check
+    if (frame.ip >= frame.ops.len) {
+        return Error.InvalidJump;
+    }
+
     const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(frame.ops[frame.ip])));
     return @call(.always_tail, func_ptr, .{frame});
 }
