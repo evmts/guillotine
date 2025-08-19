@@ -7,6 +7,7 @@ const Log = @import("../log.zig");
 const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
+const CodeAnalysis = @import("../analysis.zig").CodeAnalysis;
 const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 const Host = @import("../host.zig").Host;
 const evm_limits = @import("../constants/evm_limits.zig");

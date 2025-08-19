@@ -352,7 +352,7 @@ test "COINBASE returns block coinbase address" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute COINBASE opcode
     try op_coinbase(&frame);
@@ -404,7 +404,7 @@ test "TIMESTAMP returns block timestamp" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute TIMESTAMP opcode
     try op_timestamp(&frame);
@@ -456,7 +456,7 @@ test "NUMBER returns block number" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute NUMBER opcode
     try op_number(&frame);
@@ -508,7 +508,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute DIFFICULTY opcode
     try op_difficulty(&frame);
@@ -560,7 +560,7 @@ test "GASLIMIT returns block gas limit" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute GASLIMIT opcode
     try op_gaslimit(&frame);
@@ -612,7 +612,7 @@ test "BASEFEE returns block base fee" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute BASEFEE opcode
     try op_basefee(&frame);
@@ -662,7 +662,7 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Execute BLOBBASEFEE opcode
     try op_blobbasefee(&frame);
@@ -712,7 +712,7 @@ test "BLOCKHASH returns 0 for future blocks" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push future block number
     frame.stack.append_unsafe(1001);
@@ -765,7 +765,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         db_interface,
         allocator,
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Push block number more than 256 blocks in past
     frame.stack.append_unsafe(700);

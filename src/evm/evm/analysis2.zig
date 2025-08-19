@@ -18,15 +18,6 @@ pub const SimpleAnalysis = struct {
     block_boundaries: std.bit_set.DynamicBitSet,
 
     pub const MAX_USIZE: u16 = std.math.maxInt(u16);
-    
-    /// Up-front allocation size for SimpleAnalysis
-    /// This is a worst-case calculation assuming:
-    /// - Maximum bytecode size (64KB = max u16)
-    /// - Every byte is an instruction (worst case)
-    /// - inst_to_pc: max 64K instructions * 2 bytes = 128KB
-    /// - pc_to_inst: 64KB * 2 bytes = 128KB
-    /// Total: 256KB for worst case
-    pub const UP_FRONT_ALLOCATION = (std.math.maxInt(u16) + 1) * @sizeOf(u16) * 2;
 
     pub fn deinit(self: *SimpleAnalysis, allocator: std.mem.Allocator) void {
         allocator.free(self.inst_to_pc);
@@ -180,16 +171,6 @@ pub const SimpleAnalysis = struct {
         };
     }
 };
-
-/// Up-front allocation size for metadata array
-/// Worst case: every instruction needs metadata (1 u32 per instruction)
-/// Maximum 64K instructions * 4 bytes = 256KB
-pub const METADATA_UP_FRONT_ALLOCATION = (std.math.maxInt(u16) + 1) * @sizeOf(u32);
-
-/// Up-front allocation size for ops array
-/// Worst case: every byte is an opcode + 1 for terminating STOP
-/// Maximum 64K opcodes * pointer size
-pub const OPS_UP_FRONT_ALLOCATION = ((std.math.maxInt(u16) + 1) + 1) * @sizeOf(*const anyopaque);
 
 /// Build the tailcall ops array and return together with analysis and metadata
 /// This encapsulates opcode decoding and fusion logic for PUSH+X patterns
