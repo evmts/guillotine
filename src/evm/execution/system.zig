@@ -619,7 +619,7 @@ pub fn op_create(frame: *Frame) ExecutionError.Error!void {
     const snapshot = frame.host.create_snapshot();
 
     // Execute the CREATE through the host
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -766,7 +766,7 @@ pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
     const snapshot = frame.host.create_snapshot();
 
     // Execute the CREATE2 through the host
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -915,7 +915,7 @@ pub fn op_call(frame: *Frame) ExecutionError.Error!void {
     } };
 
     // Perform the call using the host's call method
-    const call_result = host.call(call_params) catch {
+    const call_result = host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         try frame.stack.append(0);
@@ -1035,7 +1035,7 @@ pub fn op_callcode(frame: *Frame) ExecutionError.Error!void {
         .gas = gas_limit,
     } };
 
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
         return;
@@ -1139,7 +1139,7 @@ pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
     };
 
     // Execute the delegatecall through the host
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
@@ -1289,7 +1289,7 @@ pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
         },
     );
 
-    const call_result = frame.host.call(call_params) catch {
+    const call_result = frame.host.inner_call(call_params) catch {
         // On error, revert the snapshot and push 0 (failure)
         frame.host.revert_to_snapshot(snapshot);
         frame.stack.append_unsafe(0);
