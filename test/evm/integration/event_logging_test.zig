@@ -22,7 +22,7 @@ const TEST_CONTRACT_ADDRESS = primitives.Address.from_u256(0x4444444444444444444
 // Helper to convert address to u256
 fn to_u256(address: primitives.Address) u256 {
     var result: u256 = 0;
-    for (address) |byte| {
+    for (address) |_| {
         result = (result << 8) | byte;
     }
     return result;

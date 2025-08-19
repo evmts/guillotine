@@ -49,15 +49,12 @@ test "trace ERC20 deployment only" {
     try vm.state.set_balance(caller, caller_balance);
 
     // Deploy contract
-    std.debug.print("\n=== Deploying ERC20 Contract ===\n", .{});
     const create_result = try vm.create_contract(caller, 0, bytecode, 1_000_000_000 // 1B gas for deployment
     );
-    std.debug.print("Deployment result - success: {}, gas_left: {}, gas_used: {}\n", .{ create_result.success, create_result.gas_left, 1_000_000_000 - create_result.gas_left });
 
     // Write trace to file
     const trace_file = try std.fs.cwd().createFile("zig_erc20_deploy_trace.json", .{});
     defer trace_file.close();
     try trace_file.writeAll(trace_buffer.items);
 
-    std.debug.print("Trace written to zig_erc20_deploy_trace.json\n", .{});
 }

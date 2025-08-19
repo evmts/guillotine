@@ -151,13 +151,13 @@ test "fuzz_state_transient_storage_lifecycle" {
     try testing.expectEqual(@as(u256, 0), state.get_transient_storage(addr, slot));
     
     // Test 3: Memory pressure with many entries
-    for (0..1000) |i| {
+    for (0..1000) |_| {
         const test_addr = primitives.Address.from_u256(@as(u256, i));
         try state.set_transient_storage(test_addr, i, i * 2);
     }
     
     // Verify a sample
-    for (0..100) |i| {
+    for (0..100) |_| {
         const test_addr = primitives.Address.from_u256(@as(u256, i));
         try testing.expectEqual(@as(u256, i * 2), state.get_transient_storage(test_addr, i));
     }
@@ -203,7 +203,7 @@ test "fuzz_state_log_operations" {
     
     // Test log removal in reverse order
     const log_count = state.logs.items.len;
-    for (0..log_count) |i| {
+    for (0..log_count) |_| {
         try state.remove_log(log_count - 1 - i);
         try testing.expectEqual(log_count - 1 - i, state.logs.items.len);
     }
@@ -326,7 +326,7 @@ test "fuzz_state_memory_pressure" {
     var addresses = try allocator.alloc(Address, account_count);
     defer allocator.free(addresses);
     
-    for (0..account_count) |i| {
+    for (0..account_count) |_| {
         addresses[i] = primitives.Address.from_u256(@as(u256, i + 1));
         
         // Set account data

@@ -151,27 +151,17 @@ test "STATICCALL opcode with tracing - debug differential failure" {
     // VM owns guillotine_result.output; do not free here
 
     // Print results for debugging
-    std.debug.print("\n=== STATICCALL Debug Results ===\n", .{});
-    std.debug.print("REVM success: {}, output len: {}\n", .{ revm_result.success, revm_result.output.len });
-    std.debug.print("Guillotine success: {}, output len: {}\n", .{ guillotine_result.success, if (guillotine_result.output) |o| o.len else 0 });
 
     if (revm_result.success and revm_result.output.len >= 96) {
         const revm_call_a = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const revm_call_b = std.mem.readInt(u256, revm_result.output[32..64], .big);
         const revm_call_c = std.mem.readInt(u256, revm_result.output[64..96], .big);
-        std.debug.print("REVM results: A={}, B={}, C={}\n", .{ revm_call_a, revm_call_b, revm_call_c });
     }
 
     if (guillotine_result.success and guillotine_result.output != null and guillotine_result.output.?.len >= 96) {
         const guillotine_call_a = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
         const guillotine_call_b = std.mem.readInt(u256, guillotine_result.output.?[32..64], .big);
         const guillotine_call_c = std.mem.readInt(u256, guillotine_result.output.?[64..96], .big);
-        std.debug.print("Guillotine results: A={}, B={}, C={}\n", .{ guillotine_call_a, guillotine_call_b, guillotine_call_c });
     }
 
-    std.debug.print("\n=== Traces saved ===\n", .{});
-    std.debug.print("REVM trace: {s}\n", .{revm_trace_path});
-    std.debug.print("Guillotine trace: staticcall_debug_traces/staticcall_guillotine_*.json\n", .{});
-    std.debug.print("\nRun the following to compare traces:\n", .{});
-    std.debug.print("diff -u {s} staticcall_debug_traces/staticcall_guillotine_*.json | head -100\n", .{revm_trace_path});
 }

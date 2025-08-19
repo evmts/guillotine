@@ -193,21 +193,21 @@ test "PUSH17-PUSH19: Various sizes" {
 
     // PUSH17
     code[idx] = 0x70;
-    for (1..18) |i| {
+    for (1..18) |_| {
         code[idx + i] = @intCast(i);
     }
     idx += 18;
 
     // PUSH18
     code[idx] = 0x71;
-    for (1..19) |i| {
+    for (1..19) |_| {
         code[idx + i] = @intCast(i);
     }
     idx += 19;
 
     // PUSH19
     code[idx] = 0x72;
-    for (1..20) |i| {
+    for (1..20) |_| {
         code[idx + i] = @intCast(i);
     }
 
@@ -277,35 +277,35 @@ test "PUSH20-PUSH24: Various sizes" {
 
     // PUSH20 (0x73) - 20 bytes is common for addresses
     code[idx] = 0x73;
-    for (1..21) |i| {
+    for (1..21) |_| {
         code[idx + i] = @intCast(i);
     }
     idx += 21;
 
     // PUSH21 (0x74)
     code[idx] = 0x74;
-    for (1..22) |i| {
+    for (1..22) |_| {
         code[idx + i] = @intCast(i);
     }
     idx += 22;
 
     // PUSH22 (0x75)
     code[idx] = 0x75;
-    for (1..23) |i| {
+    for (1..23) |_| {
         code[idx + i] = @intCast(i);
     }
     idx += 23;
 
     // PUSH23 (0x76)
     code[idx] = 0x76;
-    for (1..24) |i| {
+    for (1..24) |_| {
         code[idx + i] = @intCast(i);
     }
     idx += 24;
 
     // PUSH24 (0x77)
     code[idx] = 0x77;
-    for (1..25) |i| {
+    for (1..25) |_| {
         code[idx + i] = @intCast(i);
     }
 
@@ -391,21 +391,21 @@ test "PUSH25-PUSH31: Various sizes" {
 
     // PUSH25 (0x78)
     code[idx] = 0x78;
-    for (1..26) |i| {
+    for (1..26) |_| {
         code[idx + i] = @intCast(i % 256);
     }
     idx += 26;
 
     // PUSH30 (0x7D)
     code[idx] = 0x7D;
-    for (1..31) |i| {
+    for (1..31) |_| {
         code[idx + i] = @intCast(i % 256);
     }
     idx += 31;
 
     // PUSH31 (0x7E)
     code[idx] = 0x7E;
-    for (1..32) |i| {
+    for (1..32) |_| {
         code[idx + i] = @intCast(i % 256);
     }
 
@@ -996,7 +996,7 @@ test "Large PUSH operations with stack near limit" {
     const state: Evm.Operation.State = &frame;
 
     // Fill stack to near capacity (1023 items)
-    for (0..1023) |i| {
+    for (0..1023) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
 

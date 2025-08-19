@@ -81,7 +81,7 @@ test "E2E: JUMPDEST is a no-op" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -155,7 +155,7 @@ test "E2E: RETURN with data from memory" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -276,7 +276,7 @@ test "E2E: REVERT with data from memory" {
     // REVERT should fail but provide output
     try testing.expect(!result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 4), output.len);
         try testing.expectEqual(@as(u8, 0xEF), output[0]);
         try testing.expectEqual(@as(u8, 0xBE), output[1]);
@@ -371,7 +371,7 @@ test "E2E: SELFDESTRUCT in static context fails" {
     const result = try vm.call(params);
     // The call should succeed, but STATICCALL should have failed
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0), value); // STATICCALL failed
@@ -476,7 +476,7 @@ test "E2E: Complex control flow with JUMPI and RETURN" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -515,10 +515,10 @@ test "E2E: RETURN with memory expansion gas cost" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 256), output.len);
         // Memory should be zero-initialized
-        for (output) |byte| {
+        for (output) |_| {
             try testing.expectEqual(@as(u8, 0), byte);
         }
     }
@@ -616,7 +616,7 @@ test "E2E: INVALID opcode in nested call" {
     // Outer call should succeed
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         // Inner call should have failed (0)

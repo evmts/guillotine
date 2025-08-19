@@ -49,13 +49,10 @@ test "trace ERC20 mint deployment only" {
     try vm.state.set_balance(caller, caller_balance);
 
     // Deploy contract
-    std.debug.print("\n=== Deploying ERC20 Contract (for mint test) ===\n", .{});
     const create_result = try vm.create_contract(caller, 0, bytecode, 1_000_000_000 // 1B gas for deployment
     );
-    std.debug.print("Deployment result - success: {}, gas_left: {}, gas_used: {}\n", .{ create_result.success, create_result.gas_left, 1_000_000_000 - create_result.gas_left });
 
     if (!create_result.success) {
-        std.debug.print("Deployment failed! Writing trace for debugging.\n", .{});
     }
 
     // Write trace to file
@@ -63,7 +60,6 @@ test "trace ERC20 mint deployment only" {
     defer trace_file.close();
     try trace_file.writeAll(trace_buffer.items);
 
-    std.debug.print("Trace written to zig_erc20_mint_deploy_trace.json\n", .{});
 
     // Also check for OutOfOffset errors in the trace
     var lines = std.mem.tokenizeScalar(u8, trace_buffer.items, '\n');
@@ -71,5 +67,4 @@ test "trace ERC20 mint deployment only" {
     while (lines.next()) |_| {
         line_count += 1;
     }
-    std.debug.print("Total trace lines: {}\n", .{line_count});
 }

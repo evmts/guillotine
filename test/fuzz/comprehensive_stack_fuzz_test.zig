@@ -296,7 +296,7 @@ test "fuzz_dup_operations_all_positions" {
         };
         
         // Push values onto stack (in reverse order so first value is on top)
-        for (0..dup_position) |i| {
+        for (0..dup_position) |_| {
             try ctx.frame.stack.append(stack_values[dup_position - 1 - i]);
         }
         
@@ -341,7 +341,7 @@ test "fuzz_dup_stack_underflow_cases" {
             }
             
             // Push only stack_depth values (less than required)
-            for (0..stack_depth) |i| {
+            for (0..stack_depth) |_| {
                 try ctx.frame.stack.append(@as(u256, i + 1));
             }
             
@@ -401,7 +401,7 @@ test "fuzz_swap_operations_all_positions" {
         };
         
         // Push enough values for the swap operation (swap_position + 1 minimum)
-        for (0..swap_position + 1) |i| {
+        for (0..swap_position + 1) |_| {
             try ctx.frame.stack.append(stack_values[i]);
         }
         
@@ -447,7 +447,7 @@ test "fuzz_swap_stack_underflow_cases" {
             }
             
             // Push only stack_depth values
-            for (0..stack_depth) |i| {
+            for (0..stack_depth) |_| {
                 try ctx.frame.stack.append(@as(u256, i + 1));
             }
             
@@ -474,7 +474,7 @@ test "fuzz_stack_operations_max_depth" {
     const max_stack_size = 1024; // EVM stack limit
     
     // Fill stack to near maximum
-    for (0..max_stack_size - 1) |i| {
+    for (0..max_stack_size - 1) |_| {
         try ctx.frame.stack.append(@as(u256, i));
     }
     
@@ -486,7 +486,7 @@ test "fuzz_stack_operations_max_depth" {
         
         // Copy stack state
         push_ctx.frame.stack.clearRetainingCapacity();
-        for (0..max_stack_size - 1) |i| {
+        for (0..max_stack_size - 1) |_| {
             try push_ctx.frame.stack.append(@as(u256, i));
         }
         
@@ -509,7 +509,7 @@ test "fuzz_stack_operations_max_depth" {
                 const opcode = 0x80 + dup_pos - 1;
                 
                 ctx.frame.stack.clearRetainingCapacity();
-                for (0..max_stack_size - 1) |i| {
+                for (0..max_stack_size - 1) |_| {
                     try ctx.frame.stack.append(@as(u256, i));
                 }
                 
@@ -624,7 +624,7 @@ test "fuzz_push0_operation" {
     {
         // Fill stack to near maximum
         ctx.frame.stack.clearRetainingCapacity();
-        for (0..1023) |i| {
+        for (0..1023) |_| {
             try ctx.frame.stack.append(@as(u256, i));
         }
         

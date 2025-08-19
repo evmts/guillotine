@@ -354,7 +354,7 @@ test "KECCAK256: Comprehensive hash edge cases" {
         frame.stack.clear();
 
         // Fill memory with pattern
-        for (0..length) |i| {
+        for (0..length) |_| {
             try frame.memory.set_data(i, &[_]u8{@as(u8, @intCast(i & 0xFF))});
         }
 

@@ -58,7 +58,7 @@ test "STOP (0x00): Halt execution" {
     try testing.expectEqual(@as(usize, 0), result.output.?.len);
     
     // Clean up allocated output
-    if (result.output) |output| {
+    if (result.output) |_| {
         
     }
 }
@@ -110,7 +110,7 @@ test "ADD (0x01): Basic addition" {
     try testing.expect(result.success);
     
     // Clean up allocated output
-    if (result.output) |output| {
+    if (result.output) |_| {
         
     }
 }
@@ -175,7 +175,7 @@ test "ADD: Overflow wraps to zero" {
     try testing.expect(result.success);
     
     // Clean up allocated output
-    if (result.output) |output| {
+    if (result.output) |_| {
         
     }
 }

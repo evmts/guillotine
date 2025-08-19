@@ -93,7 +93,7 @@ test "KECCAK256 (0x20): Known test vectors" {
     // Test vector 4: 32 bytes of zeros
     // keccak256(32 zero bytes) = 0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563
     var zero_bytes = [_]u8{0} ** 32;
-    for (0..32) |i| {
+    for (0..32) |_| {
         try frame.memory.set_data(i, &[_]u8{zero_bytes[i]});
     }
     try frame.stack.append(0); // offset
@@ -167,7 +167,7 @@ test "KECCAK256: Gas cost calculations" {
     // Gas cost should be 30 + 1 * 6 = 36
     frame.gas_remaining = 1000;
     const initial_gas3 = frame.gas_remaining;
-    for (0..32) |i| {
+    for (0..32) |_| {
         try frame.memory.set_data(i, &[_]u8{@intCast(i)});
     }
     try frame.stack.append(0); // offset
@@ -181,7 +181,7 @@ test "KECCAK256: Gas cost calculations" {
     // Gas cost should be 30 + 2 * 6 = 42
     frame.gas_remaining = 1000;
     const initial_gas4 = frame.gas_remaining;
-    for (0..64) |i| {
+    for (0..64) |_| {
         try frame.memory.set_data(i, &[_]u8{@intCast(i & 0xFF)});
     }
     try frame.stack.append(0); // offset
@@ -196,7 +196,7 @@ test "KECCAK256: Gas cost calculations" {
     frame.stack.clear();
     frame.gas_remaining = 1000;
     const initial_gas5 = frame.gas_remaining;
-    for (0..256) |i| {
+    for (0..256) |_| {
         try frame.memory.set_data(i, &[_]u8{@intCast(i & 0xFF)});
     }
     try frame.stack.append(0); // offset
@@ -323,7 +323,7 @@ test "KECCAK256: Variable input sizes" {
     const state: Evm.Operation.State = &frame;
 
     // Set up test data pattern
-    for (0..1024) |i| {
+    for (0..1024) |_| {
         try frame.memory.set_data(i, &[_]u8{@intCast(i & 0xFF)});
     }
 
@@ -469,7 +469,7 @@ test "KECCAK256: Edge cases and limits" {
 
     // Test 3: Word boundary alignment (31 bytes vs 32 bytes)
     // 31 bytes should use 1 word, 33 bytes should use 2 words
-    for (0..33) |i| {
+    for (0..33) |_| {
         try frame.memory.set_data(i, &[_]u8{0xAA});
     }
 
@@ -675,7 +675,7 @@ test "KECCAK256: Memory access patterns" {
 
     // Test 2: Reading with gaps in initialized memory
     // Initialize only every other byte
-    for (0..64) |i| {
+    for (0..64) |_| {
         if (i % 2 == 0) {
             try frame.memory.set_data(100 + i, &[_]u8{@intCast(i)});
         }

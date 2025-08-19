@@ -354,7 +354,7 @@ test "Integration: MSTORE8 with bitwise operations" {
     var offset: u256 = 0;
     const bytes = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
 
-    for (bytes) |byte| {
+    for (bytes) |_| {
         try frame.stack.append(byte);
         try frame.stack.append(offset);
         _ = try evm.table.execute(0, interpreter, state, 0x53);

@@ -128,7 +128,7 @@ fn hex_encode(bytes: []const u8) []const u8 {
     result[1] = 'x';
     i = 2;
     
-    for (bytes) |byte| {
+    for (bytes) |_| {
         result[i] = hex_chars[byte >> 4];
         result[i + 1] = hex_chars[byte & 0x0f];
         i += 2;
@@ -140,59 +140,40 @@ fn hex_encode(bytes: []const u8) []const u8 {
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     
-    std.debug.print("=== EVM Opcode Comparison Test ===\n\n", .{});
-    std.debug.print("Running {} test cases...\n\n", .{OPCODE_TESTS.len});
     
     var passed: usize = 0;
     var failed: usize = 0;
     
     for (OPCODE_TESTS) |test_case| {
-        std.debug.print("Test: {s}\n", .{test_case.name});
-        std.debug.print("  Bytecode: 0x", .{});
-        for (test_case.bytecode) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
+        for (test_case.bytecode) |_| {
         }
-        std.debug.print("\n", .{});
         
         // Run our EVM
         const our_result = runOurEvm(allocator, test_case.bytecode) catch |err| {
-            std.debug.print("  Our EVM: ERROR - {}\n", .{err});
             failed += 1;
             continue;
         };
         
-        std.debug.print("  Our EVM: success={}, output=", .{our_result.success});
         if (our_result.output) |out| {
-            std.debug.print("0x{x}", .{out});
         } else {
-            std.debug.print("null", .{});
         }
-        std.debug.print(", gas_used={}\n", .{our_result.gas_used});
         
         // Check against expected
         if (test_case.expected_output) |expected| {
             if (our_result.output) |actual| {
                 if (actual == expected) {
-                    std.debug.print("  Result: ✓ PASS\n", .{});
                     passed += 1;
                 } else {
-                    std.debug.print("  Result: ✗ FAIL (expected 0x{x})\n", .{expected});
                     failed += 1;
                 }
             } else {
-                std.debug.print("  Result: ✗ FAIL (no output)\n", .{});
                 failed += 1;
             }
         } else {
-            std.debug.print("  Result: SKIP (no expected value)\n", .{});
         }
         
-        std.debug.print("\n", .{});
     }
     
-    std.debug.print("=== Summary ===\n", .{});
-    std.debug.print("Passed: {}/{}\n", .{ passed, passed + failed });
-    std.debug.print("Failed: {}/{}\n", .{ failed, passed + failed });
     
     if (failed > 0) {
         std.process.exit(1);

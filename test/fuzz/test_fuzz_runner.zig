@@ -6,7 +6,6 @@ const evm = @import("evm");
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     
-    std.debug.print("Testing fuzz structure...\n", .{});
     
     // Test with a simple input
     const test_input = [_]u8{0x01} ** 96;
@@ -16,12 +15,10 @@ pub fn main() !void {
     
     try fuzz_test.fuzz({}, testOne, .{});
     
-    std.debug.print("Fuzz test structure is valid!\n", .{});
 }
 
 // Helper function that just validates the structure
 fn testOne(context: void, input: []const u8) !void {
     _ = context;
     _ = input;
-    std.debug.print("Test input received, length: {}\n", .{input.len});
 }

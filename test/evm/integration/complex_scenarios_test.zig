@@ -564,7 +564,7 @@ test "complex: call depth limit enforcement" {
     // };
     //
     // const result = try test_helpers.runBytecode(vm, &bytecode, Address.ZERO, 100000, null);
-    // defer if (result.output) |output| 
+    // defer if (result.output) |_| 
     //
     // try testing.expect(result.status == .Success);
     // // Call should succeed (push 1 on success)
@@ -575,7 +575,7 @@ test "complex: call depth limit enforcement" {
     // evm.last_frame.?.stack.size = 0; // Reset stack
     //
     // const result2 = try test_helpers.runBytecode(vm, &bytecode, Address.ZERO, 100000, null);
-    // defer if (result2.output) |output| 
+    // defer if (result2.output) |_| 
     //
     // try testing.expect(result2.status == .Success);
     // // Call should fail due to depth limit (push 0 on failure)

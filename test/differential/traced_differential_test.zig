@@ -92,8 +92,4 @@ test "differential test with tracing - ADD opcode" {
         try testing.expectEqual(@as(u256, 15), guillotine_value);
     }
 
-    std.debug.print("\n=== Differential test with tracing complete ===\n", .{});
-    std.debug.print("REVM trace: {s}\n", .{revm_trace_path});
-    std.debug.print("Guillotine trace: differential_traces/add_guillotine_*.json\n", .{});
-    std.debug.print("You can now compare the traces to see step-by-step execution.\n", .{});
 }

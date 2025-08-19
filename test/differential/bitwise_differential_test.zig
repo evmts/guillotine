@@ -97,7 +97,6 @@ test "AND opcode 0xFF & 0x0F = 0x0F" {
 
         try testing.expectEqual(revm_value, guillotine_value);
         // Let REVM be the source of truth for the expected value
-        std.debug.print("AND test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path
@@ -192,7 +191,6 @@ test "OR opcode 0x0F | 0xF0 = 0xFF" {
 
         try testing.expectEqual(revm_value, guillotine_value);
         // Let REVM be the source of truth for the expected value
-        std.debug.print("OR test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path
@@ -287,10 +285,8 @@ test "SHL opcode 1 << 4 = 16" {
 
         try testing.expectEqual(revm_value, guillotine_value);
         // Let REVM be the source of truth for the expected value
-        std.debug.print("SHL test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SHL, we expect this to succeed
         try testing.expect(false);
@@ -382,10 +378,8 @@ test "XOR opcode 0xF0 ^ 0x0F = 0xFF" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("XOR test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For XOR, we expect this to succeed
         try testing.expect(false);
@@ -472,10 +466,8 @@ test "NOT opcode ~0x0F = 0xFF...F0" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("NOT test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For NOT, we expect this to succeed
         try testing.expect(false);
@@ -567,10 +559,8 @@ test "SHR opcode 16 >> 2 = 4" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("SHR test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SHR, we expect this to succeed
         try testing.expect(false);
@@ -663,10 +653,8 @@ test "SAR opcode arithmetic right shift with sign" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("SAR test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SAR, we expect this to succeed
         try testing.expect(false);
@@ -759,10 +747,8 @@ test "BYTE opcode extract byte from word" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("BYTE test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For BYTE, we expect this to succeed
         try testing.expect(false);

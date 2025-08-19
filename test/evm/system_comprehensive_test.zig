@@ -167,7 +167,7 @@ test "E2E: CREATE in static context fails" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0), value); // STATICCALL failed
     }
@@ -271,7 +271,7 @@ test "E2E: CALL to existing contract" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
     }
@@ -442,7 +442,7 @@ test "E2E: DELEGATECALL preserves original caller" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const value = std.mem.readInt(u256, output[0..32], .big);
         // Should return original caller, not proxy
         try testing.expectEqual(@as(u256, 0xCAFE), value);
@@ -506,7 +506,7 @@ test "E2E: STATICCALL enforces read-only context" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const value = std.mem.readInt(u256, output[0..32], .big);
         // STATICCALL should have failed (0)
         try testing.expectEqual(@as(u256, 0), value);
@@ -547,7 +547,7 @@ test "E2E: GAS opcode returns remaining gas" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const gas_value = std.mem.readInt(u256, output[0..32], .big);
         // Should have some gas remaining
         try testing.expect(gas_value > 0);
@@ -704,7 +704,7 @@ test "E2E: CREATE2 with same salt twice" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const value = std.mem.readInt(u256, output[0..32], .big);
         // Second CREATE2 should fail (address already exists)
         try testing.expectEqual(@as(u256, 0), value);
@@ -774,7 +774,7 @@ test "E2E: DELEGATECALL with calldata forwarding" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x99), value);
     }
@@ -833,7 +833,7 @@ test "E2E: EIP-150 63/64 gas rule" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         const gas_in_callee = std.mem.readInt(u256, output[0..32], .big);
         // Callee should get at most 63/64 of remaining gas
         // This is approximate due to gas consumed by instructions

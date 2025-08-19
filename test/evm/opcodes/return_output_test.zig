@@ -162,7 +162,7 @@ test "constructor returns runtime code" {
     try testing.expect(create_result.success);
     try testing.expect(create_result.output != null);
 
-    if (create_result.output) |output| {
+    if (create_result.output) |_| {
         try testing.expectEqual(@as(usize, 5), output.len);
         try testing.expectEqualSlices(u8, "HELLO", output);
     }

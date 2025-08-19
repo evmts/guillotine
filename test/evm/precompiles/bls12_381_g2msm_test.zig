@@ -13,7 +13,7 @@ test "G2MSM: basic functionality - single pair" {
     try testing.expect(result.is_success());
     try testing.expectEqual(@as(usize, 256), result.get_output_size());
 
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }

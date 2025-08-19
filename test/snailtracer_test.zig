@@ -32,7 +32,6 @@ fn readCaseFile(allocator: std.mem.Allocator, comptime case_name: []const u8, co
 fn deploy(vm: *evm.Evm, caller: primitives.Address.Address, bytecode: []const u8) !primitives.Address.Address {
     const create_result = try vm.create_contract(caller, 0, bytecode, 10_000_000);
     if (!create_result.success) {
-        std.debug.print("TEST FAILURE: deploy failed, success=false, gas_left={}\n", .{create_result.gas_left});
         return error.DeploymentFailed;
     }
     return create_result.address;
@@ -142,7 +141,7 @@ test "snailtracer benchmark high gas consumption" {
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 1_000_000); // Should use at least 1M gas
 
-    if (call_result.output) |output| {
+    if (call_result.output) |_| {
         _ = output; // VM-owned; no assertions here
     }
 }
@@ -195,7 +194,7 @@ test "snailtracer produces expected output format" {
     try std.testing.expect(call_result.success);
 
     // Snailtracer should produce output
-    if (call_result.output) |output| {
+    if (call_result.output) |_| {
         try std.testing.expect(output.len > 0);
     } else {
         return error.NoOutput;
@@ -303,7 +302,7 @@ test "snailtracer using call" {
     try std.testing.expect(gas_used > 0);
 
     // Snailtracer should produce output
-    if (call_result.output) |output| {
+    if (call_result.output) |_| {
         std.log.debug("Snailtracer via call returned {} bytes", .{output.len});
         try std.testing.expect(output.len > 0);
     } else {
@@ -356,7 +355,7 @@ test "snailtracer high gas consumption with call" {
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 1_000_000); // Should use at least 1M gas
 
-    if (call_result.output) |output| {
+    if (call_result.output) |_| {
         _ = output; // VM-owned; no assertions here
     }
 }

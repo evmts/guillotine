@@ -4,6 +4,8 @@ const StackFrame = @import("../stack_frame.zig").StackFrame;
 const execution = @import("../execution/package.zig");
 const builtin = @import("builtin");
 const PrefetchOptions = @import("std").builtin.PrefetchOptions;
+const primitives = @import("primitives");
+const U256 = primitives.Uint(256, 4);
 
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
@@ -750,14 +752,13 @@ pub fn op_push_then_lt(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_gt(frame: *StackFrame) Error!noreturn {
-
-    // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
-    const other = frame.stack.peek_unsafe();
-
-    // Note: In EVM, GT pops a then b, and checks if a > b
-    // PUSH pushes the value that becomes 'a', so we check push_val > other
-    const result: u256 = if (push_val > other) 1 else 0;
+    std.debug.assert(frame.stack.size() >= 1);
+    const top = readPushValue(frame);
+    const second_from_top = frame.stack.peek_unsafe();
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
+        .gt => 1,
+        .eq, .lt => 0,
+    };
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -811,14 +812,14 @@ pub fn op_push_then_mul(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_div(frame: *StackFrame) Error!noreturn {
-
-    // Use frame.analysis directly instead of casting
-    const push_val = readPushValue(frame);
-    const other = frame.stack.peek_unsafe();
-
-    // Note: In EVM, DIV pops a then b, and computes a / b
-    // PUSH pushes the value that becomes 'a', so we compute push_val / other
-    const result = if (other == 0) 0 else push_val / other;
+    const top = readPushValue(frame);
+    const second_from_top = frame.stack.peek_unsafe();
+    const result = if (second_from_top == 0) blk: {
+        break :blk 0;
+    } else blk: {
+        const result_u256 = U256.from_u256_unsafe(top).wrapping_div(U256.from_u256_unsafe(second_from_top));
+        break :blk result_u256.to_u256_unsafe();
+    };
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }

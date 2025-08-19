@@ -49,11 +49,9 @@ test "interpret2_simple: basic MUL" {
     try testing.expectError(evm.ExecutionError.Error.STOP, result);
     
     const stack_size = frame.stack.size();
-    std.debug.print("\nStack size after MUL: {}\n", .{stack_size});
     
     if (stack_size > 0) {
         const top = try frame.stack.pop();
-        std.debug.print("Result of 3 * 10: {}\n", .{top});
         try testing.expectEqual(@as(u256, 30), top);
     } else {
         return error.StackEmpty;

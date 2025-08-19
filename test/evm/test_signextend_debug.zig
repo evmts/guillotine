@@ -48,7 +48,6 @@ test "SIGNEXTEND direct test" {
     try frame_ptr.stack.append(0xFF);  // value
     try frame_ptr.stack.append(0);     // byte_index
     
-    std.debug.print("\nBefore SIGNEXTEND: stack size={}, values=[{}, {}]\n", .{
         frame_ptr.stack.size,
         if (frame_ptr.stack.size > 0) frame_ptr.stack.data[0] else 0,
         if (frame_ptr.stack.size > 1) frame_ptr.stack.data[1] else 0,
@@ -59,7 +58,6 @@ test "SIGNEXTEND direct test" {
     const state: Operation.State = frame_ptr;
     _ = try arithmetic.op_signextend(0, interpreter, state);
     
-    std.debug.print("After SIGNEXTEND: stack size={}, top=0x{x}\n", .{
         frame_ptr.stack.size,
         if (frame_ptr.stack.size > 0) frame_ptr.stack.peek_n(0) catch 0 else 0,
     });

@@ -81,11 +81,9 @@ test "deploy ERC20 contract using CREATE" {
     const deployed_code = vm.state.get_code(deployed_address);
     try std.testing.expect(deployed_code.len > 0);
     
-    std.debug.print("Contract deployed at: {any}\n", .{deployed_address});
-    std.debug.print("Deployed code size: {}\n", .{deployed_code.len});
     
     // Free the output
-    if (deploy_result.output) |output| {
+    if (deploy_result.output) |_| {
         allocator.free(output);
     }
 }
@@ -170,7 +168,7 @@ test "deploy and call simple storage contract" {
     @memcpy(&deployed_address, deploy_result.output.?[0..20]);
     
     // Free deployment output
-    if (deploy_result.output) |output| {
+    if (deploy_result.output) |_| {
         allocator.free(output);
     }
     
@@ -193,7 +191,7 @@ test "deploy and call simple storage contract" {
     try std.testing.expectEqual(@as(u8, 0x42), returned_value);
     
     // Free call output
-    if (call_result.output) |output| {
+    if (call_result.output) |_| {
         allocator.free(output);
     }
 }

@@ -18,19 +18,13 @@ test "SUB operand order verification" {
     
     // What we're calculating
     const our_result = a -% b;
-    std.debug.print("\nOur calculation: 0x{x} - 0x{x} = 0x{x}\n", .{a, b, our_result});
     
     // What REVM gets
     const revm_result: u256 = 0xffffffffffffffff;
-    std.debug.print("REVM result: 0x{x}\n", .{revm_result});
     
     // What would produce REVM's result?
     const reverse_result = b -% a;
-    std.debug.print("Reverse: 0x{x} - 0x{x} = 0x{x}\n", .{b, a, reverse_result});
     
-    std.debug.print("\nConclusion: ", .{});
     if (reverse_result == revm_result) {
-        std.debug.print("REVM is calculating b - a (0x{x} - 0x{x})\n", .{b, a});
-        std.debug.print("This means we have the operands backwards!\n", .{});
     }
 }

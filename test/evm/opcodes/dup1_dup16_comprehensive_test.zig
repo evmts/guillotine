@@ -241,7 +241,7 @@ test "DUP6-DUP10: Mid-range duplications" {
     const state: Evm.Operation.State = &frame;
 
     // Push 10 distinct values
-    for (1..11) |i| {
+    for (1..11) |_| {
         try frame.stack.append(i * 0x10);
     }
 
@@ -310,7 +310,7 @@ test "DUP11-DUP16: High-range duplications" {
     const state: Evm.Operation.State = &frame;
 
     // Push 16 distinct values
-    for (1..17) |i| {
+    for (1..17) |_| {
         try frame.stack.append(i * 0x100);
     }
 
@@ -384,7 +384,7 @@ test "DUP16 (0x8F): Duplicate 16th stack item (maximum)" {
     const state: Evm.Operation.State = &frame;
 
     // Push exactly 16 values
-    for (0..16) |i| {
+    for (0..16) |_| {
         try frame.stack.append(0x1000 + i);
     }
 
@@ -442,12 +442,12 @@ test "DUP1-DUP16: Gas consumption" {
     const state: Evm.Operation.State = &frame;
 
     // Push 16 values to satisfy all DUP operations
-    for (0..16) |i| {
+    for (0..16) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
 
     // Test each DUP operation
-    for (0..16) |i| {
+    for (0..16) |_| {
         frame.pc = i;
         const gas_before = frame.gas_remaining;
 
@@ -523,7 +523,7 @@ test "DUP operations: Stack underflow" {
     try testing.expectEqual(@as(usize, 3), frame.stack.size);
 
     // Push more values
-    for (0..4) |i| {
+    for (0..4) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
 
@@ -575,7 +575,7 @@ test "DUP operations: Stack overflow" {
     const state: Evm.Operation.State = &frame;
 
     // Fill stack to capacity (1024 items)
-    for (0..1024) |i| {
+    for (0..1024) |_| {
         try frame.stack.append(@as(u256, @intCast(i & 0xFF)));
     }
 
@@ -629,7 +629,7 @@ test "DUP operations: Sequential duplications" {
     const state: Evm.Operation.State = &frame;
 
     // Execute PUSH operations
-    for (0..3) |i| {
+    for (0..3) |_| {
         frame.pc = i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }
@@ -698,7 +698,7 @@ test "DUP operations: Pattern verification" {
     const state: Evm.Operation.State = &frame;
 
     // Push a pattern of values
-    for (0..16) |i| {
+    for (0..16) |_| {
         try frame.stack.append(@as(u256, (i + 1) * 0x11)); // 0x11, 0x22, ..., 0x110
     }
 
@@ -780,7 +780,7 @@ test "DUP operations: Boundary test with exact stack size" {
     frame.stack.clear();
 
     // Test DUP16 with exactly 16 items
-    for (1..17) |i| {
+    for (1..17) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
     frame.pc = 1;
@@ -790,7 +790,7 @@ test "DUP operations: Boundary test with exact stack size" {
 
     // Test DUP16 with 15 items (should fail)
     frame.stack.clear();
-    for (1..16) |i| {
+    for (1..16) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
     const result = evm.table.execute(frame.pc, interpreter, state, 0x8F);

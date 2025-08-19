@@ -84,25 +84,17 @@ test "traced STATICCALL execution" {
         .gas = 100000,
     } };
     
-    std.debug.print("\n=== Executing STATICCALL test with tracing ===\n", .{});
     const result = try vm.call(call_params);
     // Print results
-    std.debug.print("Execution success: {}\n", .{result.success});
-    std.debug.print("Gas used: {}\n", .{call_params.call.gas - result.gas_left});
     
-    if (result.output) |output| {
-        std.debug.print("Output length: {} bytes\n", .{output.len});
+    if (result.output) |_| {
         if (output.len >= 32) {
             const first_value = std.mem.readInt(u256, output[0..32], .big);
-            std.debug.print("First 32 bytes (original value): 0x{x}\n", .{first_value});
             
             if (output.len >= 64) {
                 const second_value = std.mem.readInt(u256, output[32..64], .big);
-                std.debug.print("Second 32 bytes (STATICCALL result): 0x{x}\n", .{second_value});
             }
         }
     }
     
-    std.debug.print("\nTrace saved to: {s}/staticcall_guillotine_{d}.json\n", .{ trace_config.output_dir, std.time.timestamp() });
-    std.debug.print("You can compare this trace with REVM's trace to find the divergence point.\n", .{});
 }

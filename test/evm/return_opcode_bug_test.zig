@@ -71,7 +71,7 @@ test "minimal repro - RETURN opcode returns 0 bytes during contract deployment" 
         deploy_result.gas_left,
     });
 
-    if (deploy_result.output) |output| {
+    if (deploy_result.output) |_| {
         std.log.debug("Deployment output length: {}", .{output.len});
 
         // This should fail - we expect 1 byte of runtime code, not 0

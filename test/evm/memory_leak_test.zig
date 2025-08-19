@@ -25,7 +25,7 @@ test "Memory leak prevention: EvmState transaction clearing" {
         const addr = testAddress(@as(u160, @intCast(tx_num % 256)));
 
         // Each transaction emits logs
-        for (0..10) |i| {
+        for (0..10) |_| {
             const topics = [_]u256{tx_num, i};
             const data = try allocator.alloc(u8, 100);
             defer allocator.free(data);
@@ -68,7 +68,7 @@ test "Memory leak stress test: logs allocation pattern" {
         const base_addr = @as(u160, @intCast(iter * 1000));
 
         // State operations
-        for (0..20) |i| {
+        for (0..20) |_| {
             const addr = testAddress(base_addr + i);
             
             // Emit log with allocated data

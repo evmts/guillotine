@@ -46,7 +46,7 @@ test "Comparison: LT (less than) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 1 (true)
             var expected = [_]u8{0} ** 32;
@@ -83,7 +83,7 @@ test "Comparison: LT (less than) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 0 (false)
             var expected = [_]u8{0} ** 32;
@@ -119,7 +119,7 @@ test "Comparison: LT (less than) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 0 (false)
             var expected = [_]u8{0} ** 32;
@@ -166,7 +166,7 @@ test "Comparison: GT (greater than) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 1 (true)
             var expected = [_]u8{0} ** 32;
@@ -214,7 +214,7 @@ test "Comparison: EQ (equal) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 1 (true)
             var expected = [_]u8{0} ** 32;
@@ -251,7 +251,7 @@ test "Comparison: EQ (equal) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 0 (false)
             var expected = [_]u8{0} ** 32;
@@ -297,7 +297,7 @@ test "Comparison: ISZERO operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 1 (true)
             var expected = [_]u8{0} ** 32;
@@ -333,7 +333,7 @@ test "Comparison: ISZERO operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 0 (false)
             var expected = [_]u8{0} ** 32;
@@ -384,7 +384,7 @@ test "Comparison: SLT (signed less than) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 1 (true)
             var expected = [_]u8{0} ** 32;
@@ -436,7 +436,7 @@ test "Comparison: SGT (signed greater than) operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is 1 (true)
             var expected = [_]u8{0} ** 32;

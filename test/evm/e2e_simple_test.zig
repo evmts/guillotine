@@ -18,7 +18,7 @@ const CONTRACT_ADDRESS = primitives.Address.from_u256(0x3333);
 // Helper to convert byte array to u256 (big-endian)
 fn bytes_to_u256(bytes: []const u8) u256 {
     var value: u256 = 0;
-    for (bytes) |byte| {
+    for (bytes) |_| {
         value = (value << 8) | byte;
     }
     return value;
@@ -82,7 +82,7 @@ test "E2E: Basic EVM operations" {
     // Execute the contract with block interpreter
     // SKIP: Bug #3 - interpret_block causes test to hang
     // const result_block = try evm_instance.interpret_block_write(&contract, &[_]u8{});
-    // defer if (result_block.output) |output| 
+    // defer if (result_block.output) |_| 
     const result_block = result; // Use traditional result for now
 
     // Verify execution success for traditional interpreter
@@ -91,7 +91,7 @@ test "E2E: Basic EVM operations" {
     try testing.expect(result_block.status == .Success);
 
     // Check if we have output data for traditional interpreter
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
 
         // Decode returned value (should be 42 in first 32 bytes)
@@ -104,7 +104,7 @@ test "E2E: Basic EVM operations" {
     }
 
     // Check if we have output data for block interpreter
-    if (result_block.output) |output| {
+    if (result_block.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
 
         // Decode returned value (should be 42 in first 32 bytes)

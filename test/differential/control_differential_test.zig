@@ -300,10 +300,6 @@ test "RETURN opcode stops execution during contract deployment" {
         revm_gas_used - guillotine_gas_used;
 
     // Debug: Log gas consumption
-    std.debug.print("\n[RETURN test] Gas consumption:\n", .{});
-    std.debug.print("  REVM gas used: {}\n", .{revm_gas_used});
-    std.debug.print("  Guillotine gas used: {}\n", .{guillotine_gas_used});
-    std.debug.print("  Difference: {}\n", .{gas_difference});
 
     // Allow some difference but not the huge difference that would occur
     // if runtime code was executed (would be 100s of gas units more)

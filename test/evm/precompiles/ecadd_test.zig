@@ -90,7 +90,7 @@ test "ECADD point at infinity addition" {
     try testing.expectEqual(@as(usize, 64), result.get_output_size());
 
     // Result should be point at infinity (0, 0)
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -164,7 +164,7 @@ test "ECADD point doubling" {
     // Result should be 2*(1, 2) which is a specific point on the curve
     // Verify we got a non-zero result (not point at infinity)
     var all_zero = true;
-    for (output) |byte| {
+    for (output) |_| {
         if (byte != 0) {
             all_zero = false;
             break;
@@ -216,7 +216,7 @@ test "ECADD invalid points" {
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
 
     // Result should be point at infinity (0, 0) for invalid input
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -242,7 +242,7 @@ test "ECADD second point invalid" {
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
 
     // Result should be point at infinity (0, 0) for invalid input
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -264,7 +264,7 @@ test "ECADD empty input handling" {
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
 
     // Result should be point at infinity (0, 0)
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -282,7 +282,7 @@ test "ECADD short input handling" {
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
 
     // Should treat as mostly zero input and return point at infinity
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -401,7 +401,7 @@ test "ECADD EIP-196 test vector - inverse points" {
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
 
     // Result should be point at infinity (0, 0)
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -430,7 +430,7 @@ test "ECADD EIP-196 test vector - known point doubling result" {
     // y = 0x7b0d8e8c0f0c1b6c9d8e8c0f0c1b6c9d8e8c0f0c1b6c9d8e8c0f0c1b6c9d8e8c0f
     // For now, just verify we get a non-zero, valid result
     var all_zero = true;
-    for (output) |byte| {
+    for (output) |_| {
         if (byte != 0) {
             all_zero = false;
             break;
@@ -485,7 +485,7 @@ test "ECADD EIP-196 edge case - maximum field values" {
     try testing.expectEqual(@as(u64, 150), result.get_gas_used());
 
     // Result should be point at infinity (0, 0) for invalid coordinates
-    for (output) |byte| {
+    for (output) |_| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }

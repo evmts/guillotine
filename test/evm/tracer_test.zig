@@ -46,7 +46,6 @@ test "tracer captures opcode execution" {
     try testing.expect(trace_output.len > 0);
     
     // Debug print can be removed now that JSON is working
-    // std.debug.print("\nTrace output:\n{s}\n", .{trace_output});
     
     // Parse JSON lines and verify structure
     var line_it = std.mem.tokenizeScalar(u8, trace_output, '\n');

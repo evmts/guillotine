@@ -399,11 +399,8 @@ test "interpret2: arithmetic operations" {
     // Debug: Check stack size
     const stack_size = frame.stack.size();
     if (stack_size == 0) {
-        std.debug.print("\nStack is empty after execution!\n", .{});
     } else {
-        std.debug.print("\nStack has {} items\n", .{stack_size});
         const top = try frame.stack.pop();
-        std.debug.print("Top of stack: {}\n", .{top});
         try testing.expectEqual(@as(u256, 5), top);
     }
 }

@@ -239,7 +239,7 @@ test "REVERT: Empty revert data" {
     defer frame.deinit(allocator);
 
     // Execute instructions
-    for (0..2) |i| {
+    for (0..2) |_| {
         frame.pc = i * 2;
         const interpreter: Evm.Operation.Interpreter = &evm;
         const state: Evm.Operation.State = &frame;

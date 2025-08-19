@@ -64,7 +64,7 @@ test "complex Solidity constructor returns full runtime code" {
 // Helper to convert byte array to u256 (big-endian)
 fn bytes_to_u256(bytes: []const u8) u256 {
     var value: u256 = 0;
-    for (bytes) |byte| {
+    for (bytes) |_| {
         value = (value << 8) | byte;
     }
     return value;

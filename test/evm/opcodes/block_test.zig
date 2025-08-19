@@ -67,11 +67,11 @@ test "Block: BLOCKHASH operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Should return a non-zero hash for recent blocks
             var all_zero = true;
-            for (output) |byte| {
+            for (output) |_| {
                 if (byte != 0) {
                     all_zero = false;
                     break;
@@ -108,7 +108,7 @@ test "Block: BLOCKHASH operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Should return 0 for old blocks
             var expected = [_]u8{0} ** 32;
@@ -143,7 +143,7 @@ test "Block: BLOCKHASH operations" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Should return 0 for future blocks
             var expected = [_]u8{0} ** 32;
@@ -204,7 +204,7 @@ test "Block: COINBASE operations" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is the coinbase address
         var expected = [_]u8{0} ** 32;
@@ -266,7 +266,7 @@ test "Block: TIMESTAMP operations" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 1234567890
         var expected = [_]u8{0} ** 32;
@@ -327,7 +327,7 @@ test "Block: NUMBER operations" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 987654321
         var expected = [_]u8{0} ** 32;
@@ -388,7 +388,7 @@ test "Block: DIFFICULTY/PREVRANDAO operations" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 0x123456789ABCDEF0
         var expected = [_]u8{0} ** 32;
@@ -449,7 +449,7 @@ test "Block: GASLIMIT operations" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 30_000_000
         var expected = [_]u8{0} ** 32;
@@ -510,7 +510,7 @@ test "Block: BASEFEE operations (London)" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 1_000_000_000
         var expected = [_]u8{0} ** 32;
@@ -579,7 +579,7 @@ test "Block: BLOBHASH operations (Cancun)" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is first blob hash
             var expected = [_]u8{0} ** 32;
@@ -615,7 +615,7 @@ test "Block: BLOBHASH operations (Cancun)" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Check that the result is second blob hash
             var expected = [_]u8{0} ** 32;
@@ -651,7 +651,7 @@ test "Block: BLOBHASH operations (Cancun)" {
 
         const result = try vm.call(call_params);
         try testing.expect(result.success);
-        if (result.output) |output| {
+        if (result.output) |_| {
             try testing.expectEqual(@as(usize, 32), output.len);
             // Should return 0 for out of bounds
             var expected = [_]u8{0} ** 32;
@@ -712,7 +712,7 @@ test "Block: BLOBBASEFEE operations (Cancun)" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 100_000_000
         var expected = [_]u8{0} ** 32;

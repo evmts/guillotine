@@ -1254,7 +1254,7 @@ test "Storage: Rapid alternating operations" {
     const slot: u256 = 0x777;
 
     // Rapid store/load alternating pattern
-    for (0..5) |i| {
+    for (0..5) |_| {
         const value = @as(u256, i + 1);
 
         // Store

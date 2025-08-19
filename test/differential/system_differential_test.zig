@@ -17,7 +17,6 @@ fn compareTracesForBytecode(
 ) !void {
     // Only run if tracing is enabled
     if (!build_options.enable_tracing) {
-        std.debug.print("Skipping trace comparison - tracing not enabled. Build with -Denable-tracing=true\n", .{});
         return;
     }
 
@@ -119,7 +118,6 @@ fn compareTracesForBytecode(
     } };
 
     _ = evm_instance.call(call_params) catch |err| {
-        std.debug.print("Zig EVM execution failed: {}\n", .{err});
         return err;
     };
 
@@ -144,10 +142,6 @@ fn compareTracesForBytecode(
         while (lines.next()) |_| zig_line_count += 1;
     }
 
-    std.debug.print("\nREVM trace lines: {}, Zig trace lines: {}\n", .{ revm_line_count, zig_line_count });
-    std.debug.print("\nREVM trace (first 500 chars):\n{s}\n", .{revm_trace_content[0..@min(500, revm_trace_content.len)]});
-    std.debug.print("\nZig trace (first 500 chars):\n{s}\n", .{zig_trace_content[0..@min(500, zig_trace_content.len)]});
-
     // Parse traces line by line
     var revm_lines = std.mem.tokenizeScalar(u8, revm_trace_content, '\n');
     var zig_lines = std.mem.tokenizeScalar(u8, zig_trace_content, '\n');
@@ -162,14 +156,10 @@ fn compareTracesForBytecode(
         line_num += 1;
 
         if (revm_line == null) {
-            std.debug.print("Trace divergence at line {}: REVM trace ended but Zig trace continues\n", .{line_num});
-            std.debug.print("Zig trace line: {s}\n", .{zig_line.?});
             break;
         }
 
         if (zig_line == null) {
-            std.debug.print("Trace divergence at line {}: Zig trace ended but REVM trace continues\n", .{line_num});
-            std.debug.print("REVM trace line: {s}\n", .{revm_line.?});
             break;
         }
 
@@ -188,10 +178,6 @@ fn compareTracesForBytecode(
         const zig_pc = zig_obj.get("pc").?.integer;
 
         if (revm_pc != zig_pc) {
-            std.debug.print("Trace divergence at line {}: PC mismatch\n", .{line_num});
-            std.debug.print("  REVM PC: {}, Zig PC: {}\n", .{ revm_pc, zig_pc });
-            std.debug.print("  REVM: {s}\n", .{revm_line.?});
-            std.debug.print("  Zig:  {s}\n", .{zig_line.?});
             break;
         }
 
@@ -200,10 +186,6 @@ fn compareTracesForBytecode(
         const zig_op = zig_obj.get("op").?.integer;
 
         if (revm_op != zig_op) {
-            std.debug.print("Trace divergence at line {}: Opcode mismatch at PC {}\n", .{ line_num, revm_pc });
-            std.debug.print("  REVM opcode: 0x{x}, Zig opcode: 0x{x}\n", .{ revm_op, zig_op });
-            std.debug.print("  REVM: {s}\n", .{revm_line.?});
-            std.debug.print("  Zig:  {s}\n", .{zig_line.?});
             break;
         }
 
@@ -212,10 +194,6 @@ fn compareTracesForBytecode(
         const zig_stack = zig_obj.get("stack").?.array;
 
         if (revm_stack.items.len != zig_stack.items.len) {
-            std.debug.print("Trace divergence at line {}: Stack size mismatch at PC {}\n", .{ line_num, revm_pc });
-            std.debug.print("  REVM stack size: {}, Zig stack size: {}\n", .{ revm_stack.items.len, zig_stack.items.len });
-            std.debug.print("  REVM: {s}\n", .{revm_line.?});
-            std.debug.print("  Zig:  {s}\n", .{zig_line.?});
 
             // Create minimal reproduction
             createMinimalReproduction(allocator, bytecode, @intCast(revm_pc)) catch {};
@@ -223,15 +201,11 @@ fn compareTracesForBytecode(
         }
 
         // Compare stack values
-        for (revm_stack.items, zig_stack.items, 0..) |revm_val, zig_val, i| {
+        for (revm_stack.items, zig_stack.items) |revm_val, zig_val| {
             const revm_str = revm_val.string;
             const zig_str = zig_val.string;
 
             if (!std.mem.eql(u8, revm_str, zig_str)) {
-                std.debug.print("Trace divergence at line {}: Stack value mismatch at PC {} position {}\n", .{ line_num, revm_pc, i });
-                std.debug.print("  REVM: {s}, Zig: {s}\n", .{ revm_str, zig_str });
-                std.debug.print("  Full REVM: {s}\n", .{revm_line.?});
-                std.debug.print("  Full Zig:  {s}\n", .{zig_line.?});
 
                 // Create minimal reproduction
                 createMinimalReproduction(allocator, bytecode, @intCast(revm_pc)) catch {};
@@ -243,9 +217,6 @@ fn compareTracesForBytecode(
 
 /// Create a minimal bytecode reproduction that stops at the given PC
 fn createMinimalReproduction(allocator: std.mem.Allocator, bytecode: []const u8, stop_pc: usize) !void {
-    std.debug.print("\n=== Minimal Reproduction ===\n", .{});
-    std.debug.print("Original bytecode length: {}\n", .{bytecode.len});
-    std.debug.print("Stop at PC: {}\n", .{stop_pc});
 
     // Find the instruction boundary after stop_pc
     var pc: usize = 0;
@@ -270,20 +241,6 @@ fn createMinimalReproduction(allocator: std.mem.Allocator, bytecode: []const u8,
 
     @memcpy(minimal[0..end_pc], bytecode[0..end_pc]);
     minimal[end_pc] = 0x00; // STOP
-
-    std.debug.print("Minimal bytecode (hex): ", .{});
-    for (minimal) |byte| {
-        std.debug.print("{x:0>2}", .{byte});
-    }
-    std.debug.print("\n", .{});
-
-    std.debug.print("Minimal bytecode (length {}): [", .{minimal.len});
-    for (minimal, 0..) |byte, i| {
-        if (i > 0) std.debug.print(", ", .{});
-        std.debug.print("0x{x:0>2}", .{byte});
-    }
-    std.debug.print("]\n", .{});
-    std.debug.print("=========================\n\n", .{});
 }
 
 test "RETURN opcode returns data from memory" {
@@ -889,26 +846,14 @@ test "STATICCALL opcode enforces read-only execution" {
     const contract_c_address = Address.from_u256(0x5555555555555555555555555555555555555555);
     const contract_d_address = Address.from_u256(0x2222222222222222222222222222222222222222);
 
-    std.debug.print("Setting contract A code (len={})\n", .{contract_a_sstore_bytecode.len});
     try vm_instance.state.set_code(contract_a_address, &contract_a_sstore_bytecode);
-    std.debug.print("Setting contract B code (len={})\n", .{contract_b_log_bytecode.len});
     try vm_instance.state.set_code(contract_b_address, &contract_b_log_bytecode);
-    std.debug.print("Setting contract C code (len={})\n", .{contract_c_readonly_bytecode.len});
     try vm_instance.state.set_code(contract_c_address, &contract_c_readonly_bytecode);
-    std.debug.print("Setting contract D code (len={})\n", .{contract_d_staticcall_bytecode.len});
     try vm_instance.state.set_code(contract_d_address, &contract_d_staticcall_bytecode);
 
     // Verify the code was set correctly
-    const verify_d_code = vm_instance.state.get_code(contract_d_address);
-    std.debug.print("Contract D code after setting: len={}\n", .{verify_d_code.len});
 
     // Also verify other contracts
-    const verify_a_code = vm_instance.state.get_code(contract_a_address);
-    const verify_b_code = vm_instance.state.get_code(contract_b_address);
-    const verify_c_code = vm_instance.state.get_code(contract_c_address);
-    std.debug.print("Contract A (0x3333...) code: len={}\n", .{verify_a_code.len});
-    std.debug.print("Contract B (0x4444...) code: len={}\n", .{verify_b_code.len});
-    std.debug.print("Contract C (0x5555...) code: len={}\n", .{verify_c_code.len});
 
     // Set balance for contract C
     try vm_instance.state.set_balance(contract_c_address, 1000);
@@ -932,7 +877,6 @@ test "STATICCALL opcode enforces read-only execution" {
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
     if (revm_succeeded and guillotine_succeeded) {
-        std.debug.print("[staticcall-test] Guillotine output len={}, hex=0x{X}\n", .{ guillotine_result.output.?.len, std.fmt.fmtSliceHexLower(guillotine_result.output.?) });
         // The output should be 96 bytes (3 u256 values)
         try testing.expect(revm_result.output.len == 96);
         try testing.expect(guillotine_result.output != null);
@@ -947,16 +891,11 @@ test "STATICCALL opcode enforces read-only execution" {
         const guillotine_call_b_result = std.mem.readInt(u256, guillotine_result.output.?[32..64], .big);
         const guillotine_call_c_result = std.mem.readInt(u256, guillotine_result.output.?[64..96], .big);
 
-        std.debug.print("[staticcall-test] REVM A,B,C = {d},{d},{d}\n", .{ revm_call_a_result, revm_call_b_result, revm_call_c_result });
-        std.debug.print("[staticcall-test] ZIG  A,B,C = {d},{d},{d}\n", .{ guillotine_call_a_result, guillotine_call_b_result, guillotine_call_c_result });
-
         // Add detailed logging for debugging
         Log.debug("[staticcall-test] Comparing call A results: REVM={d} vs Guillotine={d}", .{ revm_call_a_result, guillotine_call_a_result });
         Log.debug("[staticcall-test] Call A expected: 0 (SSTORE should fail in STATICCALL)", .{});
 
         // Print hex values for easier debugging
-        std.debug.print("[staticcall-test-debug] REVM call A result (hex): 0x{x}\n", .{revm_call_a_result});
-        std.debug.print("[staticcall-test-debug] Guillotine call A result (hex): 0x{x}\n", .{guillotine_call_a_result});
 
         // Compare B and C parity strictly
         try testing.expectEqual(revm_call_b_result, guillotine_call_b_result);
@@ -1094,7 +1033,6 @@ test "DELEGATECALL opcode executes code in caller's context" {
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
 
-    std.debug.print("DELEGATECALL test: REVM success={}, Guillotine success={}\n", .{ revm_succeeded, guillotine_succeeded });
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
     if (revm_succeeded and guillotine_succeeded) {
@@ -1342,7 +1280,6 @@ test "CREATE opcode with subsequent CALL to deployed contract" {
     const revm_succeeded = revm_result.success;
     const guillotine_succeeded = guillotine_result.success;
 
-    std.debug.print("CREATE test: REVM success={}, Guillotine success={}\n", .{ revm_succeeded, guillotine_succeeded });
     try testing.expect(revm_succeeded == guillotine_succeeded);
 
     if (revm_succeeded and guillotine_succeeded) {
@@ -1377,7 +1314,6 @@ test "trace comparison - simple arithmetic" {
         0xf3, // RETURN
     };
 
-    std.debug.print("\n=== SIMPLE ARITHMETIC TRACE COMPARISON ===\n", .{});
     try compareTracesForBytecode(allocator, bytecode, &.{});
 }
 
@@ -1400,7 +1336,6 @@ test "trace comparison - CREATE2 divergence" {
         0xf3, // RETURN
     };
 
-    std.debug.print("\n=== CREATE2 TRACE COMPARISON ===\n", .{});
     try compareTracesForBytecode(allocator, bytecode, &.{});
 }
 

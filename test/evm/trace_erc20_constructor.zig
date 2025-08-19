@@ -37,7 +37,6 @@ test "trace ERC20 constructor execution" {
     
     // Create contract (deploy)
     const result = try vm.create_contract(caller, 0, bytecode, 1_000_000_000);
-    std.debug.print("\nERC20 Constructor result: success={}, gas_left={}\n", .{
         result.success,
         result.gas_left,
     });
@@ -47,7 +46,6 @@ test "trace ERC20 constructor execution" {
     defer trace_file.close();
     try trace_file.writeAll(trace_buffer.items);
     
-    std.debug.print("Trace written to: zig_erc20_constructor_trace.json\n", .{});
     
     // Parse and analyze key points
     var lines = std.mem.tokenizeScalar(u8, trace_buffer.items, '\n');
@@ -69,15 +67,12 @@ test "trace ERC20 constructor execution" {
         if (entry.op == 0x11 and !found_gt) {
             found_gt = true;
             gt_line_num = line_num;
-            std.debug.print("\nFound first GT at line {} (pc={}):\n", .{line_num, entry.pc});
-            std.debug.print("  Stack before GT: {s}\n", .{line});
             
             // Print next few lines to see what happens
             var context_lines: usize = 0;
             while (lines.next()) |next_line| {
                 line_num += 1;
                 context_lines += 1;
-                std.debug.print("  Line {}: {s}\n", .{line_num, next_line});
                 if (context_lines >= 10) break;
             }
             break;
@@ -85,11 +80,8 @@ test "trace ERC20 constructor execution" {
     }
     
     if (!found_gt) {
-        std.debug.print("\nNo GT opcode found in trace!\n", .{});
     }
     
-    std.debug.print("\nTotal lines in trace: {}\n", .{line_num});
-    std.debug.print("Last PC: {}\n", .{last_pc});
 }
 
 const TraceEntry = struct {

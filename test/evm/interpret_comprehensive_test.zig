@@ -52,7 +52,7 @@ test "E2E: Basic execution path with simple instructions" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 8), value);
@@ -198,7 +198,7 @@ test "E2E: Dynamic gas with memory expansion" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -243,7 +243,7 @@ test "E2E: Fused PUSH+JUMP execution" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -322,7 +322,7 @@ test "E2E: Conditional jump taken" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -369,7 +369,7 @@ test "E2E: Conditional jump not taken" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0xFF), value);
@@ -418,7 +418,7 @@ test "E2E: Dynamic jump (jump_unresolved)" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -469,7 +469,7 @@ test "E2E: Dynamic conditional jump (conditional_jump_unresolved)" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x99), value);
@@ -514,7 +514,7 @@ test "E2E: Word instruction (PUSH operations)" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check first 4 bytes of the pushed value
         try testing.expectEqual(@as(u8, 0x12), output[0]);
@@ -564,7 +564,7 @@ test "E2E: Keccak hash computation" {
     try testing.expect(result.success);
     
     // Keccak256 of 32 zero bytes should produce a specific hash
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // We got a hash output, exact value depends on keccak implementation
         try testing.expect(output[0] != 0 or output[31] != 0); // Non-zero hash
@@ -684,7 +684,7 @@ test "E2E: Complex control flow with nested jumps" {
     const result = try vm.call(params);
     try testing.expect(result.success);
     
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0xAA), value);

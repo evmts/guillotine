@@ -207,18 +207,14 @@ pub fn op_div(frame: *Frame) ExecutionError.Error!void {
         std.debug.assert(frame.stack.size() >= 2);
     }
 
-    const b = frame.stack.pop_unsafe(); // divisor (top)
-    const a = frame.stack.peek_unsafe(); // dividend (second from top)
-
-    // EVM semantics: b / a (top / second_from_top)
-    // REVM computes: top / second_from_top
-    const result = if (a == 0) blk: {
+    const top = frame.stack.pop_unsafe();
+    const second_from_top = frame.stack.peek_unsafe();
+    const result = if (second_from_top == 0) blk: {
         break :blk 0;
     } else blk: {
-        const result_u256 = U256.from_u256_unsafe(b).wrapping_div(U256.from_u256_unsafe(a));
+        const result_u256 = U256.from_u256_unsafe(top).wrapping_div(U256.from_u256_unsafe(second_from_top));
         break :blk result_u256.to_u256_unsafe();
     };
-
     frame.stack.set_top_unsafe(result);
 }
 

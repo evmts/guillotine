@@ -1125,7 +1125,7 @@ test "JUMPDEST: Empty code and no JUMPDEST scenarios" {
     defer contract.deinit(allocator, null);
 
     // No positions should be valid jump destinations
-    for (0..code_no_jumpdest.len) |i| {
+    for (0..code_no_jumpdest.len) |_| {
         try testing.expect(!contract.valid_jumpdest(allocator, @intCast(i)));
     }
 

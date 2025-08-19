@@ -642,7 +642,7 @@ test "fuzz_log_operations_random_stress" {
         
         // Generate random topics
         var topics: [4]u256 = undefined;
-        for (0..num_topics) |i| {
+        for (0..num_topics) |_| {
             topics[i] = random.int(u256);
         }
         
@@ -698,7 +698,7 @@ test "fuzz_sequential_log_operations" {
     const num_logs = 50;
     var expected_logs: usize = 0;
     
-    for (0..num_logs) |i| {
+    for (0..num_logs) |_| {
         const num_topics = @as(u8, @intCast(i % 5)); // 0-4 topics
         const opcode = 0xa0 + num_topics;
         

@@ -85,21 +85,21 @@ test "E2E: Dynamic arrays - push, pop, and indexing" {
     // Test block interpreter results
     try testing.expect(array_result_block.status == .Success);
     
-    if (array_result.output) |output| {
+    if (array_result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the array length (3)
         var length: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             length = (length << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 3), length);
     }
     
-    if (array_result_block.output) |output| {
+    if (array_result_block.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the array length (3)
         var length: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             length = (length << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 3), length);
@@ -169,21 +169,21 @@ test "E2E: Mappings - various key types and nested access" {
     // Test block interpreter results
     try testing.expect(mapping_result_block.status == .Success);
     
-    if (mapping_result.output) |output| {
+    if (mapping_result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the stored balance (1000)
         var balance: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             balance = (balance << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 1000), balance);
     }
     
-    if (mapping_result_block.output) |output| {
+    if (mapping_result_block.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the stored balance (1000)
         var balance: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             balance = (balance << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 1000), balance);
@@ -264,11 +264,11 @@ test "E2E: Struct simulation - packed and unpacked storage" {
     // Execute the contract
     const struct_result = try evm.interpretCompat(&contract, &[_]u8{}, false);
     try testing.expect(struct_result.status == .Success);
-    if (struct_result.output) |output| {
+    if (struct_result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return sum of the two values (0x1111 + 0x2222 = 0x3333)
         var result: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result = (result << 8) | byte;
         }
         try testing.expect(result > 0); // Basic validation that unpacking worked
@@ -332,11 +332,11 @@ test "E2E: String/Bytes operations - encoding and manipulation" {
     // Execute the contract
     const bytes_result = try evm.interpretCompat(&contract, &[_]u8{}, false);
     try testing.expect(bytes_result.status == .Success);
-    if (bytes_result.output) |output| {
+    if (bytes_result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return a non-zero hash
         var hash: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             hash = (hash << 8) | byte;
         }
         try testing.expect(hash != 0);
@@ -410,11 +410,11 @@ test "E2E: Nested structures - arrays of mappings simulation" {
     // Execute the contract
     const nested_result = try evm.interpretCompat(&contract, &[_]u8{}, false);
     try testing.expect(nested_result.status == .Success);
-    if (nested_result.output) |output| {
+    if (nested_result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return the stored value (500)
         var value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             value = (value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 500), value);
@@ -528,17 +528,17 @@ test "E2E: Storage patterns - efficiency and gas optimization" {
     const storage_gas_used = storage_result.gas_used;
 
     // Verify both return the same result (sum = 1+2+3+4 = 10)
-    if (memory_result.output) |output| {
+    if (memory_result.output) |_| {
         var memory_sum: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             memory_sum = (memory_sum << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 10), memory_sum);
     }
 
-    if (storage_result.output) |output| {
+    if (storage_result.output) |_| {
         var storage_sum: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             storage_sum = (storage_sum << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 10), storage_sum);

@@ -70,8 +70,6 @@ fn run_case(case_name: []const u8) !void {
 
 fn run_case_with_call2(case_name: []const u8) !void {
     const allocator = testing.allocator;
-    
-    std.debug.print("\n[call2 test] Running {s}...\n", .{case_name});
 
     const bytecode_hex = try read_case_file(allocator, case_name, "bytecode.txt");
     defer allocator.free(bytecode_hex);
@@ -82,44 +80,40 @@ fn run_case_with_call2(case_name: []const u8) !void {
     // Load calldata if available
     const calldata_hex = read_case_file(allocator, case_name, "calldata.txt") catch "";
     defer if (calldata_hex.len > 0) allocator.free(calldata_hex);
-    
+
     const calldata = if (calldata_hex.len > 0) try hex_decode(allocator, calldata_hex) else &[_]u8{};
     defer if (calldata.len > 0) allocator.free(calldata);
 
-    // REVM: create to get runtime and then call  
+    // REVM: create to get runtime and then call
     var revm_vm = try revm_wrapper.Revm.init(allocator, .{});
     defer revm_vm.deinit();
     const deployer = try Address.from_hex("0x1111111111111111111111111111111111111111");
     _ = try Address.from_hex("0x5FbDB2315678afecb367f032d93F642f64180aa3");
     try revm_vm.setBalance(deployer, std.math.maxInt(u256));
-    
+
     // Deploy with REVM
     var revm_create = try revm_vm.create(deployer, 0, init_code, 10_000_000);
     const revm_runtime = try allocator.dupe(u8, revm_create.output);
     defer allocator.free(revm_runtime);
     defer revm_create.deinit();
-    
+
     // Guillotine: create with call2
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
     defer vm.deinit();
     try vm.state.set_balance(deployer, std.math.maxInt(u256));
-    
-    std.debug.print("[call2 test] Creating contract with call2...\n", .{});
-    
+
     // Use call2 for contract creation
     const create_params = evm.CallParams{ .create = .{
         .caller = deployer,
         .value = 0,
         .init_code = init_code,
         .gas = 10_000_000,
-    }};
-    
+    } };
+
     const create_result = try vm.call2(create_params);
-    std.debug.print("[call2 test] Create result: success={}, gas_left={}, output_len={}\n", 
-        .{create_result.success, create_result.gas_left, if (create_result.output) |o| o.len else 0});
-    
+
     // Compare runtime if creation succeeded
     if (create_result.success) {
         if (create_result.output) |output| {
@@ -128,12 +122,10 @@ fn run_case_with_call2(case_name: []const u8) !void {
         } else {
             return error.NoOutputFromCreate;
         }
-        std.debug.print("[call2 test] Runtime bytecode matches REVM!\n", .{});
     } else {
-        std.debug.print("[call2 test] Contract creation failed!\n", .{});
         return error.CreationFailed;
     }
-    
+
     // Don't free output - it's VM-owned memory per CallResult documentation
     _ = create_result.output;
 }

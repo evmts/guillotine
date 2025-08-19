@@ -505,7 +505,7 @@ test "Journal: Performance - many snapshots and changes" {
     var snapshots: [num_snapshots]usize = undefined;
 
     // Create many nested snapshots with changes
-    for (0..num_snapshots) |i| {
+    for (0..num_snapshots) |_| {
         snapshots[i] = try state.snapshot();
 
         // Make several changes
@@ -517,7 +517,7 @@ test "Journal: Performance - many snapshots and changes" {
     }
 
     // Verify final state has all changes
-    for (0..num_snapshots) |i| {
+    for (0..num_snapshots) |_| {
         for (0..num_changes_per_snapshot) |j| {
             const slot = @as(u256, @intCast(i * num_changes_per_snapshot + j));
             const expected_value = @as(u256, @intCast((i + 1) * (j + 1)));

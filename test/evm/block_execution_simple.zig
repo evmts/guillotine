@@ -81,7 +81,7 @@ test "Simple bytecode works with block execution" {
     // Verify success
     try std.testing.expect(result.success);
 
-    if (result.output) |output| {
+    if (result.output) |_| {
         
         std.log.info("Simple execution output size: {}", .{output.len});
     }

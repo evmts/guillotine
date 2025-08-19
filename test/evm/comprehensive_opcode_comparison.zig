@@ -118,13 +118,9 @@ fn runRevmEvm(allocator: std.mem.Allocator, bytecode: []const u8) !struct { outp
     defer result.deinit();
     
     // Debug logging
-    std.debug.print("  REVM execution result: success={}, gas_used={}, output_len={}\n", .{result.success, result.gas_used, result.output.len});
     if (result.output.len > 0) {
-        std.debug.print("  REVM output bytes: ", .{});
-        for (result.output) |byte| {
-            std.debug.print("{x:0>2} ", .{byte});
+        for (result.output) |_| {
         }
-        std.debug.print("\n", .{});
     }
     
     // Copy the output
@@ -154,11 +150,9 @@ pub fn main() !void {
     defer failing_opcodes.deinit();
     
     for (OPCODE_TESTS) |test_case| {
-        std.debug.print("Testing: {s} - {s}\\n", .{test_case.name, test_case.description});
         
         // Run with REVM
         const revm_result = runRevmEvm(allocator, test_case.bytecode) catch |err| {
-            std.debug.print("  REVM Error: {}\\n", .{err});
             try results.writer().print("| {s} | {s} | ERROR: {} | - | - | ❌ |\\n", .{
                 test_case.name,
                 test_case.description,
@@ -172,7 +166,6 @@ pub fn main() !void {
         
         // Run with Zig EVM
         const zig_result = runZigEvm(allocator, test_case.bytecode) catch |err| {
-            std.debug.print("  Zig Error: {}\\n", .{err});
             const revm_output_value = if (revm_result.output.len == 32)
                 std.mem.readInt(u256, revm_result.output[0..32], .big)
             else
@@ -221,9 +214,6 @@ pub fn main() !void {
             });
         }
         
-        std.debug.print("  REVM Output: {} (gas: {})\\n", .{revm_output_value, revm_result.gas_used});
-        std.debug.print("  Zig Output: {} (gas: {})\\n", .{zig_output_value, zig_result.gas_used});
-        std.debug.print("  Match: {}\\n", .{outputs_match});
     }
     
     const total = passing + failing;
@@ -252,7 +242,4 @@ pub fn main() !void {
     defer file.close();
     try file.writeAll(results.items);
     
-    std.debug.print("\\n=== Summary ===\\n", .{});
-    std.debug.print("Total: {} | Passing: {} ({d:.1}%) | Failing: {}\\n", .{total, passing, pass_rate, failing});
-    std.debug.print("Results written to opcode_implementation_status.md\\n", .{});
 }

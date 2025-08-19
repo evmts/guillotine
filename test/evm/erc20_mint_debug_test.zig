@@ -71,7 +71,7 @@ test "debug: erc20.mint with full logging" {
     std.log.debug("=== CALL COMPLETE ===", .{});
     std.log.debug("Call result - gas_left: {}, success: {}, gas_used: {}", .{ call_result.gas_left, call_result.success, 1_000_000_000 - call_result.gas_left });
 
-    if (call_result.output) |output| {
+    if (call_result.output) |_| {
         std.log.debug("Output length: {}, data: {x}", .{ output.len, output });
     }
 

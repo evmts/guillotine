@@ -53,15 +53,12 @@ test "interpret2: RETURN opcode sets output buffer" {
     // Check that RETURN properly set the output
     // The output_buffer should contain the returned data
     if (frame.output_buffer.len > 0) {
-        std.debug.print("\nRETURN set output buffer with {} bytes\n", .{frame.output_buffer.len});
         try testing.expectEqual(@as(usize, 32), frame.output_buffer.len);
         
         // Check the value
         const output_value = std.mem.readInt(u256, frame.output_buffer[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), output_value);
-        std.debug.print("Output value: 0x{x}\n", .{output_value});
     } else {
-        std.debug.print("\nNote: RETURN opcode executed but output_buffer not set (implementation detail)\n", .{});
     }
 }
 
@@ -122,5 +119,4 @@ test "interpret2: Multiple RETURNs with different values" {
     // Should have taken the jump and returned 0xBB
     const mem_result = try frame.memory.get_u256(0);
     try testing.expectEqual(@as(u256, 0xBB), mem_result);
-    std.debug.print("\nRETURN after JUMPI returned value: 0x{x}\n", .{mem_result});
 }

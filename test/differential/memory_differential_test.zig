@@ -96,7 +96,6 @@ test "MLOAD opcode reads memory" {
 
         try testing.expectEqual(revm_value, guillotine_value);
         try testing.expectEqual(@as(u256, 0x42), revm_value);
-        std.debug.print("MLOAD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path
@@ -198,7 +197,6 @@ test "MSTORE opcode stores data to memory" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("MSTORE test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path
@@ -292,10 +290,8 @@ test "MSTORE8 opcode stores single byte to memory" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("MSTORE8 test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For MSTORE8, we expect this to succeed
         try testing.expect(false);
@@ -389,10 +385,8 @@ test "MSIZE opcode returns memory size" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("MSIZE test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For MSIZE, we expect this to succeed
         try testing.expect(false);
@@ -489,10 +483,8 @@ test "MCOPY opcode copies memory regions" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("MCOPY test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For MCOPY, we expect this to succeed
         try testing.expect(false);

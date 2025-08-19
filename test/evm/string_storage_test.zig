@@ -227,7 +227,7 @@ test "reproduce array bounds panic 0x41" {
     // This might fail with array bounds if our EVM has such checks
     std.log.debug("Create result: success={}, gas_left={}", .{ create_result.success, create_result.gas_left });
     if (!create_result.success) {
-        if (create_result.output) |output| {
+        if (create_result.output) |_| {
             if (output.len >= 4) {
                 const panic_code = std.mem.readInt(u32, output[0..4], .big);
                 std.log.debug("Panic code: 0x{x}", .{panic_code});

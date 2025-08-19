@@ -39,7 +39,7 @@ test "OpcodeMetadata initialization and validation" {
     try std.testing.expectEqual(@as(usize, 256), jt.execute_funcs.len);
 
     // Check that all entries are initially set to undefined
-    for (0..256) |i| {
+    for (0..256) |_| {
         try std.testing.expectEqual(true, jt.undefined_flags[i]);
     }
 
@@ -48,7 +48,7 @@ test "OpcodeMetadata initialization and validation" {
     mutable_jt.validate();
 
     // Check that all entries still have consistent state
-    for (0..256) |i| {
+    for (0..256) |_| {
         const is_undefined = mutable_jt.undefined_flags[i];
         if (is_undefined) {
             try std.testing.expectEqual(@as(u64, 0), mutable_jt.constant_gas[i]);

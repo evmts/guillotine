@@ -333,7 +333,6 @@ test "SUB opcode 10 - 5 = 5" {
     std.testing.log_level = .warn;
     const allocator = testing.allocator;
 
-    std.debug.print("\n=== SUB test: Testing 10 - 5 = 5 ===\n", .{});
 
     const bytecode = [_]u8{
         0x7f, // PUSH32
@@ -416,20 +415,15 @@ test "SUB opcode 10 - 5 = 5" {
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
-        std.debug.print("SUB test results: REVM={}, Guillotine={}, expected={}\n", .{ revm_value, guillotine_value, expected });
 
         // Debug: print first few bytes of output
-        std.debug.print("REVM output bytes: ", .{});
-        for (revm_result.output[0..@min(8, revm_result.output.len)]) |byte| {
-            std.debug.print("{x:0>2} ", .{byte});
+        for (revm_result.output[0..@min(8, revm_result.output.len)]) |_| {
         }
-        std.debug.print("\n", .{});
 
         try testing.expectEqual(revm_value, guillotine_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SUB 10 - 5 = 5, we expect this to succeed
         try testing.expect(false);
@@ -459,9 +453,6 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
         0xf3, // RETURN
     };
     const expected: u256 = std.math.maxInt(u256) - 4; // 5 - 10 wraps to max - 4
-    std.debug.print("\nSUB UNDERFLOW TEST: Expected {} (max - 4)\n", .{expected});
-    std.debug.print("Bytecode pushes 10 then 5, stack will be [10, 5] with 5 on top\n", .{});
-    std.debug.print("SUB should compute: top(5) - second(10) = -5 = max - 4\n", .{});
     // UNIQUE MARKER FOR SUB UNDERFLOW TEST
 
     // Execute on REVM - inline all setup
@@ -525,18 +516,15 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
         const revm_value = std.mem.readInt(u256, revm_result.output[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
-        std.debug.print("SUB underflow results: REVM={}, Guillotine={}, expected={}\n", .{ revm_value, guillotine_value, expected });
 
         // Debug: check if values match what we expect
         if (revm_value != guillotine_value) {
-            std.debug.print("ERROR: Values don't match! Difference: {}\n", .{if (revm_value > guillotine_value) revm_value - guillotine_value else guillotine_value - revm_value});
         }
 
         try testing.expectEqual(revm_value, guillotine_value);
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SUB underflow, we expect this to succeed
         try testing.expect(false);
@@ -643,7 +631,6 @@ test "MUL opcode 7 * 6 = 42" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For MUL 7 * 6 = 42, we expect this to succeed
         try testing.expect(false);
@@ -750,7 +737,6 @@ test "DIV opcode 6 / 42 = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For DIV 6 / 42 = 0, we expect this to succeed
         try testing.expect(false);
@@ -857,7 +843,6 @@ test "DIV opcode division by zero = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For DIV 0 / 42 = 0, we expect this to succeed
         try testing.expect(false);
@@ -964,7 +949,6 @@ test "DIV opcode division by zero 42 / 0 = 0" {
         try testing.expectEqual(expected, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For DIV by zero, we expect this to succeed (EVM spec says div by 0 = 0)
         try testing.expect(false);
@@ -1057,10 +1041,8 @@ test "MOD opcode 50 % 7 = 1" {
 
         try testing.expectEqual(revm_value, guillotine_value);
         // Let REVM be the source of truth for the expected value
-        std.debug.print("MOD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For MOD 50 % 7 = 1, we expect this to succeed
         try testing.expect(false);
@@ -1153,10 +1135,8 @@ test "EXP opcode 2 ** 3 = 8" {
 
         try testing.expectEqual(revm_value, guillotine_value);
         // Let REVM be the source of truth for the expected value
-        std.debug.print("EXP test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For EXP 2 ** 3 = 8, we expect this to succeed
         try testing.expect(false);
@@ -1248,10 +1228,8 @@ test "SDIV opcode signed division -8 / 2 = -4" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("SDIV test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SDIV -8 / 2 = -4, we expect this to succeed
         try testing.expect(false);
@@ -1343,10 +1321,8 @@ test "SMOD opcode signed modulo -8 % 3 = -2" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("SMOD test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SMOD -8 % 3 = -2, we expect this to succeed
         try testing.expect(false);
@@ -1443,10 +1419,8 @@ test "ADDMOD opcode (5 + 10) % 7 = 1" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("ADDMOD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For ADDMOD (5 + 10) % 7 = 1, we expect this to succeed
         try testing.expect(false);
@@ -1543,10 +1517,8 @@ test "MULMOD opcode (5 * 6) % 7 = 2" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("MULMOD test: REVM returned {}, Guillotine returned {}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For MULMOD (5 * 6) % 7 = 2, we expect this to succeed
         try testing.expect(false);
@@ -1639,10 +1611,8 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
         try testing.expectEqual(revm_value, guillotine_value);
-        std.debug.print("SIGNEXTEND test: REVM returned {x}, Guillotine returned {x}\n", .{ revm_value, guillotine_value });
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // Error details not available in new API
         // For SIGNEXTEND, we expect this to succeed
         try testing.expect(false);
@@ -1767,8 +1737,6 @@ test "ADD fusion: PUSH 5, PUSH 10, ADD vs PUSH 5, MSTORE, PUSH 10, ADD" {
     try testing.expectEqual(@as(u256, 15), revm_non_fusion_value);
     try testing.expectEqual(@as(u256, 15), guillotine_fusion_value);
     try testing.expectEqual(@as(u256, 15), guillotine_non_fusion_value);
-
-    std.debug.print("ADD fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
 }
 
 test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
@@ -1777,7 +1745,7 @@ test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
     // Fusion bytecode: PUSH1 5, PUSH1 10, SUB (computes 10 - 5 = 5)
     const fusion_bytecode = [_]u8{
         0x60, 0x05, // PUSH1 5
-        0x60, 0x0A, // PUSH1 10  
+        0x60, 0x0A, // PUSH1 10
         0x03, // SUB
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
@@ -1794,7 +1762,7 @@ test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
         0x60, 0x20, // PUSH1 32 (memory offset to load 5)
         0x51, // MLOAD (load 5 back onto stack)
         0x60, 0x0A, // PUSH1 10
-        0x03, // SUB  
+        0x03, // SUB
         0x60, 0x00, // PUSH1 0 (memory offset)
         0x52, // MSTORE
         0x60, 0x20, // PUSH1 32 (size)
@@ -1885,8 +1853,6 @@ test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
     try testing.expectEqual(@as(u256, 5), revm_non_fusion_value);
     try testing.expectEqual(@as(u256, 5), guillotine_fusion_value);
     try testing.expectEqual(@as(u256, 5), guillotine_non_fusion_value);
-
-    std.debug.print("SUB fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
 }
 
 test "MUL fusion: PUSH 6, PUSH 7, MUL vs PUSH 6, MSTORE, PUSH 7, MUL" {
@@ -2003,8 +1969,6 @@ test "MUL fusion: PUSH 6, PUSH 7, MUL vs PUSH 6, MSTORE, PUSH 7, MUL" {
     try testing.expectEqual(@as(u256, 42), revm_non_fusion_value);
     try testing.expectEqual(@as(u256, 42), guillotine_fusion_value);
     try testing.expectEqual(@as(u256, 42), guillotine_non_fusion_value);
-
-    std.debug.print("MUL fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
 }
 
 test "DIV fusion: PUSH 42, PUSH 6, DIV vs PUSH 42, MSTORE, PUSH 6, DIV" {
@@ -2121,6 +2085,4 @@ test "DIV fusion: PUSH 42, PUSH 6, DIV vs PUSH 42, MSTORE, PUSH 6, DIV" {
     try testing.expectEqual(@as(u256, 0), revm_non_fusion_value);
     try testing.expectEqual(@as(u256, 0), guillotine_fusion_value);
     try testing.expectEqual(@as(u256, 0), guillotine_non_fusion_value);
-
-    std.debug.print("DIV fusion test passed: fusion={}, non-fusion={}\n", .{ guillotine_fusion_value, guillotine_non_fusion_value });
 }

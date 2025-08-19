@@ -9,7 +9,6 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("=== DEBUG: 10K HASHES SINGLE RUN ===\n", .{});
 
     // Read bytecode and calldata
     const bytecode_path = "/Users/williamcory/Guillotine/bench/official/cases/ten-thousand-hashes/bytecode.txt";
@@ -34,8 +33,6 @@ pub fn main() !void {
     const calldata = try hexDecode(allocator, calldata_trimmed);
     defer allocator.free(calldata);
 
-    std.debug.print("Bytecode length: {} bytes\n", .{bytecode.len});
-    std.debug.print("Calldata: {x}\n", .{calldata});
 
     // Set up VM with debug tracing to stderr
     var memory_db = evm.MemoryDatabase.init(allocator);
@@ -60,24 +57,17 @@ pub fn main() !void {
     try vm.state.set_balance(caller, std.math.maxInt(u256));
 
     // Deploy contract
-    std.debug.print("\n--- DEPLOYING CONTRACT ---\n", .{});
     const deploy_result = try vm.create_contract(caller, 0, bytecode, 10_000_000);
     
-    std.debug.print("Deploy success: {}\n", .{deploy_result.success});
-    std.debug.print("Deploy gas_left: {}\n", .{deploy_result.gas_left});
-    std.debug.print("Deploy address: {x}\n", .{primitives.Address.to_u256(deploy_result.address)});
     
-    if (deploy_result.output) |output| {
-        std.debug.print("Deployed code length: {}\n", .{output.len});
+    if (deploy_result.output) |_| {
     }
 
     if (!deploy_result.success) {
-        std.debug.print("DEPLOYMENT FAILED!\n", .{});
         return;
     }
 
     // Call contract
-    std.debug.print("\n--- CALLING CONTRACT ---\n", .{});
     const contract_address = deploy_result.address;
     const call_params = evm.CallParams{ .call = .{
         .caller = caller,
@@ -89,12 +79,8 @@ pub fn main() !void {
 
     const call_result = try vm.call(call_params);
     
-    std.debug.print("\nCall success: {}\n", .{call_result.success});
-    std.debug.print("Call gas_left: {}\n", .{call_result.gas_left});
-    std.debug.print("Gas used: {}\n", .{10_000_000 - call_result.gas_left});
     
-    if (call_result.output) |output| {
-        std.debug.print("Output length: {} bytes\n", .{output.len});
+    if (call_result.output) |_| {
     }
 }
 

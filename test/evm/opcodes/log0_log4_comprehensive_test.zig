@@ -561,7 +561,7 @@ test "LOG operations: Empty data" {
     const state: Evm.Operation.State = &frame;
 
     // Execute push operations
-    for (0..3) |i| {
+    for (0..3) |_| {
         frame.pc = i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }
@@ -845,7 +845,7 @@ test "LOG operations: Multiple logs in sequence" {
     const state: Evm.Operation.State = &frame;
 
     // Execute first LOG0
-    for (0..2) |i| {
+    for (0..2) |_| {
         frame.pc = i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }
@@ -853,7 +853,7 @@ test "LOG operations: Multiple logs in sequence" {
     _ = try evm.table.execute(0, interpreter, state, 0xA0);
 
     // Execute LOG1
-    for (0..3) |i| {
+    for (0..3) |_| {
         frame.pc = 5 + i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }
@@ -861,7 +861,7 @@ test "LOG operations: Multiple logs in sequence" {
     _ = try evm.table.execute(0, interpreter, state, 0xA1);
 
     // Execute second LOG0
-    for (0..2) |i| {
+    for (0..2) |_| {
         frame.pc = 12 + i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }

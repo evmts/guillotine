@@ -25,7 +25,6 @@ test "CALLDATASIZE opcode returns input data size" {
     };
 
     const calldata = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
-    std.debug.print("\n[CALLDATASIZE test] Starting test with calldata.len={}, bytecode: {x}\n", .{ calldata.len, std.fmt.fmtSliceHexLower(&bytecode) });
 
     // Execute on REVM - inline all setup
     const revm_settings = revm_wrapper.RevmSettings{};
@@ -98,7 +97,6 @@ test "CALLDATASIZE opcode returns input data size" {
         const mini_value = std.mem.readInt(u256, mini_result.output.?[0..32], .big);
         const guillotine_value = std.mem.readInt(u256, guillotine_result.output.?[0..32], .big);
 
-        std.debug.print("[CALLDATASIZE test] Values: revm={x}, mini={x}, guillotine={x}\n", .{ revm_value, mini_value, guillotine_value });
 
         // Should return 4 (size of calldata)
         try testing.expectEqual(@as(u256, 4), revm_value);

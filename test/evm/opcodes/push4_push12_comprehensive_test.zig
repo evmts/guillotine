@@ -789,7 +789,7 @@ test "PUSH operations: Sequential pushes filling stack" {
 
     // Create code with many PUSH4 operations
     var code: [1024 * 5]u8 = undefined;
-    for (0..1024) |i| {
+    for (0..1024) |_| {
         code[i * 5] = 0x63; // PUSH4
         code[i * 5 + 1] = @intCast((i >> 24) & 0xFF);
         code[i * 5 + 2] = @intCast((i >> 16) & 0xFF);
@@ -821,7 +821,7 @@ test "PUSH operations: Sequential pushes filling stack" {
     const state: Evm.Operation.State = &frame;
 
     // Push 1023 values (leaving room for one more)
-    for (0..1023) |i| {
+    for (0..1023) |_| {
         frame.pc = i * 5;
         const result = try evm.table.execute(frame.pc, interpreter, state, 0x63);
         try testing.expectEqual(@as(usize, 5), result.bytes_consumed);

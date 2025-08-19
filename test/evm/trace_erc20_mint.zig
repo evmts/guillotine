@@ -49,25 +49,20 @@ test "trace ERC20 mint execution" {
     try vm.state.set_balance(caller, caller_balance);
 
     // Deploy contract
-    std.debug.print("\n=== Deploying ERC20 Contract ===\n", .{});
     const create_result = try vm.create_contract(caller, 0, bytecode, 1_000_000_000 // 1B gas for deployment
     );
-    std.debug.print("Deployment result - success: {}, gas_left: {}, gas_used: {}\n", .{ create_result.success, create_result.gas_left, 1_000_000_000 - create_result.gas_left });
 
     if (!create_result.success) {
-        std.debug.print("Deployment failed!\n", .{});
 
         // Write trace to file for analysis
         const trace_file = try std.fs.cwd().createFile("zig_erc20_mint_deploy_trace.json", .{});
         defer trace_file.close();
         try trace_file.writeAll(trace_buffer.items);
 
-        std.debug.print("Deployment trace written to zig_erc20_mint_deploy_trace.json\n", .{});
         return;
     }
 
     const contract_address = create_result.address;
-    std.debug.print("Contract deployed at: {any}\n", .{contract_address});
 
     // Clear trace for the mint call
     trace_buffer.clearRetainingCapacity();
@@ -76,18 +71,12 @@ test "trace ERC20 mint execution" {
     const calldata = try hexDecode(allocator, "30627b7c");
     defer allocator.free(calldata);
 
-    std.debug.print("\n=== Calling mint function ===\n", .{});
     const call_result = try vm.call_contract(caller, contract_address, 0, calldata, 1_000_000_000, false);
-    std.debug.print("Call result - success: {}, gas_left: {}, gas_used: {}\n", .{ call_result.success, call_result.gas_left, 1_000_000_000 - call_result.gas_left });
 
-    if (call_result.output) |output| {
-        std.debug.print("Output length: {}\n", .{output.len});
+    if (call_result.output) |_| {
         if (output.len > 0) {
-            std.debug.print("Output (hex): ", .{});
-            for (output) |byte| {
-                std.debug.print("{x:0>2}", .{byte});
+            for (output) |_| {
             }
-            std.debug.print("\n", .{});
         }
     }
 
@@ -96,5 +85,4 @@ test "trace ERC20 mint execution" {
     defer trace_file.close();
     try trace_file.writeAll(trace_buffer.items);
 
-    std.debug.print("\nTrace written to zig_erc20_mint_trace.json\n", .{});
 }

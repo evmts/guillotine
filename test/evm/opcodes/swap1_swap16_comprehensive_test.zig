@@ -171,7 +171,7 @@ test "SWAP3-SWAP5: Various swaps" {
     const state: Evm.Operation.State = &frame;
 
     // Push 6 distinct values
-    for (1..7) |i| {
+    for (1..7) |_| {
         try frame.stack.append(i * 0x10); // 0x10, 0x20, ..., 0x60
     }
 
@@ -249,7 +249,7 @@ test "SWAP6-SWAP10: Mid-range swaps" {
     const state: Evm.Operation.State = &frame;
 
     // Push 11 distinct values
-    for (0..11) |i| {
+    for (0..11) |_| {
         try frame.stack.append(0x100 + i); // 0x100, 0x101, ..., 0x10A
     }
 
@@ -320,7 +320,7 @@ test "SWAP11-SWAP16: High-range swaps" {
     const state: Evm.Operation.State = &frame;
 
     // Push 17 distinct values (need 17 for SWAP16)
-    for (0..17) |i| {
+    for (0..17) |_| {
         try frame.stack.append(0x200 + i); // 0x200-0x210
     }
 
@@ -396,7 +396,7 @@ test "SWAP16 (0x9F): Swap with 16th position (maximum)" {
     const state: Evm.Operation.State = &frame;
 
     // Push exactly 17 values (minimum for SWAP16)
-    for (0..17) |i| {
+    for (0..17) |_| {
         try frame.stack.append(0xA00 + i);
     }
 
@@ -458,12 +458,12 @@ test "SWAP1-SWAP16: Gas consumption" {
     const state: Evm.Operation.State = &frame;
 
     // Push 17 values to satisfy all SWAP operations
-    for (0..17) |i| {
+    for (0..17) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
 
     // Test each SWAP operation
-    for (0..16) |i| {
+    for (0..16) |_| {
         frame.pc = i;
         const gas_before = frame.gas_remaining;
 
@@ -545,7 +545,7 @@ test "SWAP operations: Stack underflow" {
     try testing.expectError(ExecutionError.Error.StackUnderflow, result);
 
     // Push more values
-    for (0..5) |i| {
+    for (0..5) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
 
@@ -606,7 +606,7 @@ test "SWAP operations: Sequential swaps" {
     const state: Evm.Operation.State = &frame;
 
     // Execute PUSH operations
-    for (0..4) |i| {
+    for (0..4) |_| {
         frame.pc = i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }
@@ -675,7 +675,7 @@ test "SWAP operations: Pattern verification" {
     const state: Evm.Operation.State = &frame;
 
     // Push a pattern of values (17 values for SWAP16)
-    for (0..17) |i| {
+    for (0..17) |_| {
         try frame.stack.append(0xFF00 + i); // 0xFF00-0xFF10
     }
 
@@ -765,7 +765,7 @@ test "SWAP operations: Boundary test with exact stack size" {
     frame.stack.clear();
 
     // Test SWAP16 with exactly 17 items
-    for (1..18) |i| {
+    for (1..18) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
 
@@ -776,7 +776,7 @@ test "SWAP operations: Boundary test with exact stack size" {
 
     // Test SWAP16 with 16 items (should fail)
     frame.stack.clear();
-    for (1..17) |i| {
+    for (1..17) |_| {
         try frame.stack.append(@as(u256, @intCast(i)));
     }
     const result = evm.table.execute(0, interpreter, state, 0x9F);

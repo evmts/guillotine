@@ -68,7 +68,7 @@ test "CREATE (0xF0): Basic contract creation" {
     // Execute push operations
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    for (0..3) |i| {
+    for (0..3) |_| {
         frame.pc = i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }
@@ -297,7 +297,7 @@ test "CREATE2 (0xF5): Deterministic contract creation" {
     // Execute push operations
     const interpreter: Evm.Operation.Interpreter = &evm;
     const state: Evm.Operation.State = &frame;
-    for (0..4) |i| {
+    for (0..4) |_| {
         frame.pc = i * 2;
         _ = try evm.table.execute(frame.pc, interpreter, state, 0x60);
     }

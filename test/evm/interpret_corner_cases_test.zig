@@ -277,7 +277,7 @@ test "Interpret: JUMPI with condition exactly 1" {
     try testing.expect(result.success);
     
     // Should have jumped and returned 0x42
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x42), value);
@@ -372,7 +372,7 @@ test "Interpret: unresolved JUMP to valid destination" {
     try testing.expect(result.success);
     
     // Should return 0x99
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x99), value);
@@ -423,7 +423,7 @@ test "Interpret: unresolved JUMPI with dynamic destination" {
     try testing.expect(result.success);
     
     // Should jump and return 0x88
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0x88), value);
@@ -470,7 +470,7 @@ test "Interpret: KECCAK with immediate zero size" {
     try testing.expect(result.success);
     
     // Should return keccak256 of empty data
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // keccak256("") = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
         const expected_first_byte = 0xc5;
@@ -631,7 +631,7 @@ test "Interpret: word immediate with value 0" {
     try testing.expect(result.success);
     
     // Should return 0
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         const value = std.mem.readInt(u256, output[0..32], .big);
         try testing.expectEqual(@as(u256, 0), value);

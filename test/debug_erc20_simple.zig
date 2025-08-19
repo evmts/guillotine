@@ -60,7 +60,7 @@ test "simple ERC20 call debug" {
 
     std.log.debug("Call result: success={}, gas_left={}", .{ result.success, result.gas_left });
 
-    if (result.output) |output| {
+    if (result.output) |_| {
         std.log.debug("Output length: {}", .{output.len});
         if (output.len > 0) {
             std.log.debug("Output bytes: {x}", .{output});

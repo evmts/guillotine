@@ -104,17 +104,17 @@ test "E2E: Revert conditions - require and revert opcodes" {
     // Test block interpreter result
     try testing.expect(conditional_result_block.status == .Success);
     
-    if (conditional_result.output) |output| {
+    if (conditional_result.output) |_| {
         var value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             value = (value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 42), value);
     }
     
-    if (conditional_result_block.output) |output| {
+    if (conditional_result_block.output) |_| {
         var value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             value = (value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 42), value);
@@ -203,11 +203,11 @@ test "E2E: Arithmetic overflow - EVM wraparound behavior" {
     // Execute the contract
     const overflow_result = try evm.interpretCompat(&overflow_contract, &[_]u8{}, false);
     try testing.expect(overflow_result.status == .Success);
-    if (overflow_result.output) |output| {
+    if (overflow_result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Should return 0 (MAX_UINT256 + 1 wraps to 0)
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 0), result_value);
@@ -243,9 +243,9 @@ test "E2E: Arithmetic overflow - EVM wraparound behavior" {
     // Execute the contract
     const underflow_result = try evm.interpretCompat(&underflow_contract, &[_]u8{}, false);
     try testing.expect(underflow_result.status == .Success);
-    if (underflow_result.output) |output| {
+    if (underflow_result.output) |_| {
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         try testing.expectEqual(std.math.maxInt(u256), result_value);
@@ -313,9 +313,9 @@ test "E2E: Gas limits - controlled consumption and out-of-gas" {
     try testing.expect(sufficient_result.status == .Success);
     try testing.expect(sufficient_result.gas_used > 0);
 
-    if (sufficient_result.output) |output| {
+    if (sufficient_result.output) |_| {
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         // Result should be: ((1 + 2) * 3 + 4) / 2 = (9 + 4) / 2 = 13 / 2 = 6
@@ -459,9 +459,9 @@ test "E2E: Division by zero - EVM behavior" {
     // Execute the contract
     const div_zero_result = try evm.interpretCompat(&div_zero_contract, &[_]u8{}, false);
     try testing.expect(div_zero_result.status == .Success);
-    if (div_zero_result.output) |output| {
+    if (div_zero_result.output) |_| {
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 0), result_value); // Division by zero returns 0
@@ -497,9 +497,9 @@ test "E2E: Division by zero - EVM behavior" {
     // Execute the contract
     const mod_zero_result = try evm.interpretCompat(&mod_zero_contract, &[_]u8{}, false);
     try testing.expect(mod_zero_result.status == .Success);
-    if (mod_zero_result.output) |output| {
+    if (mod_zero_result.output) |_| {
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 0), result_value); // Modulo by zero returns 0
@@ -562,9 +562,9 @@ test "E2E: Memory expansion - large offset testing" {
     // Execute the contract
     const expansion_result = try evm.interpretCompat(&expansion_contract, &[_]u8{}, false);
     try testing.expect(expansion_result.status == .Success);
-    if (expansion_result.output) |output| {
+    if (expansion_result.output) |_| {
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 0x42), result_value);
@@ -653,9 +653,9 @@ test "E2E: Invalid jumps - bad jump destinations" {
     // Execute the contract
     const valid_jump_result = try evm.interpretCompat(&valid_jump_contract, &[_]u8{}, false);
     try testing.expect(valid_jump_result.status == .Success);
-    if (valid_jump_result.output) |output| {
+    if (valid_jump_result.output) |_| {
         var result_value: u256 = 0;
-        for (output) |byte| {
+        for (output) |_| {
             result_value = (result_value << 8) | byte;
         }
         try testing.expectEqual(@as(u256, 0x42), result_value); // 0x42 = 66 in decimal

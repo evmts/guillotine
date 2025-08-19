@@ -175,7 +175,7 @@ test "Integration: Logging with topics and data" {
     try testing.expectEqual(@as(usize, 1), log.topics.len);
     // Convert log topic bytes to u256 for comparison
     var topic_value: u256 = 0;
-    for (log.topics[0]) |byte| {
+    for (log.topics[0]) |_| {
         topic_value = (topic_value << 8) | byte;
     }
     try testing.expectEqual(transfer_sig, topic_value);

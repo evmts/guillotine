@@ -47,7 +47,7 @@ test "PUSH + ADD fusion optimization" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 15
         var expected = [_]u8{0} ** 32;
@@ -94,7 +94,7 @@ test "PUSH 0 + ADD identity elimination" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 42
         var expected = [_]u8{0} ** 32;
@@ -141,7 +141,7 @@ test "PUSH + PUSH + ADD constant folding" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // Check that the result is 10
         var expected = [_]u8{0} ** 32;
@@ -186,7 +186,7 @@ test "ISZERO inline optimization" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // ISZERO(0) should return 1
         var expected = [_]u8{0} ** 32;
@@ -232,7 +232,7 @@ test "EQ inline optimization" {
 
     const result = try vm.call(call_params);
     try testing.expect(result.success);
-    if (result.output) |output| {
+    if (result.output) |_| {
         try testing.expectEqual(@as(usize, 32), output.len);
         // EQ(5, 5) should return 1
         var expected = [_]u8{0} ** 32;

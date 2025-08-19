@@ -88,17 +88,10 @@ test "KECCAK256 opcode hashes empty data" {
             try testing.expectEqual(byte, guillotine_result.output.?[i]);
         }
 
-        std.debug.print("KECCAK256 empty test: Hashes match\n", .{});
-        std.debug.print("REVM hash: ", .{});
-        for (revm_result.output) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
+        for (revm_result.output) |_| {
         }
-        std.debug.print("\n", .{});
-        std.debug.print("Guillotine hash: ", .{});
-        for (guillotine_result.output.?) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
+        for (guillotine_result.output.?) |_| {
         }
-        std.debug.print("\n", .{});
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path
@@ -192,17 +185,10 @@ test "KECCAK256 opcode hashes test data" {
             try testing.expectEqual(byte, guillotine_result.output.?[i]);
         }
 
-        std.debug.print("KECCAK256 abc test: Hashes match\n", .{});
-        std.debug.print("REVM hash: ", .{});
-        for (revm_result.output) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
+        for (revm_result.output) |_| {
         }
-        std.debug.print("\n", .{});
-        std.debug.print("Guillotine hash: ", .{});
-        for (guillotine_result.output.?) |byte| {
-            std.debug.print("{x:0>2}", .{byte});
+        for (guillotine_result.output.?) |_| {
         }
-        std.debug.print("\n", .{});
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path
@@ -299,17 +285,10 @@ test "KECCAK256 opcode hashes 32-byte data" {
             try testing.expectEqual(byte, guillotine_result.output.?[i]);
         }
 
-        // std.debug.print("KECCAK256 32-byte test: Hashes match\n", .{});
-        // std.debug.print("REVM hash: ", .{});
-        // for (revm_result.output) |byte| {
-        //     std.debug.print("{x:0>2}", .{byte});
+        // for (revm_result.output) |_| {
         // }
-        // std.debug.print("\n", .{});
-        // std.debug.print("Guillotine hash: ", .{});
-        // for (guillotine_result.output.?) |byte| {
-        //     std.debug.print("{x:0>2}", .{byte});
+        // for (guillotine_result.output.?) |_| {
         // }
-        // std.debug.print("\n", .{});
     } else {
         // If either failed, print debug info
         // Debug disabled in compatibility path

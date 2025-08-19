@@ -91,19 +91,14 @@ pub fn compareTraces(
         line_num += 1;
         
         if (revm_line == null) {
-            std.debug.print("Trace divergence at line {}: Guillotine has extra operations\n", .{line_num});
             break;
         }
         
         if (guillotine_line == null) {
-            std.debug.print("Trace divergence at line {}: REVM has extra operations\n", .{line_num});
             break;
         }
         
         if (!std.mem.eql(u8, revm_line.?, guillotine_line.?)) {
-            std.debug.print("Trace divergence at line {}:\n", .{line_num});
-            std.debug.print("  REVM:       {s}\n", .{revm_line.?});
-            std.debug.print("  Guillotine: {s}\n", .{guillotine_line.?});
             
             // Show next few lines for context
             var context: usize = 0;
@@ -112,8 +107,6 @@ pub fn compareTraces(
                 const g = guillotine_lines.next();
                 if (r == null or g == null) break;
                 
-                std.debug.print("  REVM+{}:     {s}\n", .{ context + 1, r.? });
-                std.debug.print("  Guill+{}:    {s}\n", .{ context + 1, g.? });
             }
             break;
         }
@@ -148,7 +141,6 @@ pub fn runWithTracing(
     // Run the test
     test_fn() catch |err| {
         if (config.enable_on_failure) {
-            std.debug.print("Test failed with error: {}, traces saved to {s}/\n", .{ err, config.output_dir });
         }
         return err;
     };

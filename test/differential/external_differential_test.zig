@@ -130,7 +130,6 @@ test "EXTCODESIZE opcode - get size of deployed contract" {
         try testing.expectEqual(@as(u256, deployed_code.len), revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODESIZE, we expect this to succeed
         try testing.expect(false);
     }
@@ -239,7 +238,6 @@ test "EXTCODESIZE opcode - non-existent contract returns 0" {
         try testing.expectEqual(@as(u256, 0), revm_value); // Non-existent contract should return 0
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODESIZE of non-existent contract, we expect this to succeed
         try testing.expect(false);
     }
@@ -357,7 +355,6 @@ test "EXTCODECOPY opcode - copy contract code to memory" {
     } };
 
     const guillotine_result = try vm_instance.call(call_params);
-    
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
@@ -375,7 +372,6 @@ test "EXTCODECOPY opcode - copy contract code to memory" {
         try testing.expectEqualSlices(u8, deployed_code[0..10], revm_result.output);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODECOPY, we expect this to succeed
         try testing.expect(false);
     }
@@ -488,7 +484,6 @@ test "EXTCODECOPY opcode - copy beyond code length pads with zeros" {
     } };
 
     const guillotine_result = try vm_instance.call(call_params);
-    
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
@@ -513,7 +508,6 @@ test "EXTCODECOPY opcode - copy beyond code length pads with zeros" {
         }
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODECOPY with padding, we expect this to succeed
         try testing.expect(false);
     }
@@ -619,7 +613,6 @@ test "EXTCODEHASH opcode - get hash of deployed contract code" {
     } };
 
     const guillotine_result = try vm_instance.call(call_params);
-    
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
@@ -642,7 +635,6 @@ test "EXTCODEHASH opcode - get hash of deployed contract code" {
         try testing.expect(revm_value != 0);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODEHASH, we expect this to succeed
         try testing.expect(false);
     }
@@ -730,7 +722,6 @@ test "EXTCODEHASH opcode - non-existent account returns 0" {
     } };
 
     const guillotine_result = try vm_instance.call(call_params);
-    
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
@@ -751,7 +742,6 @@ test "EXTCODEHASH opcode - non-existent account returns 0" {
         try testing.expectEqual(@as(u256, 0), revm_value); // Non-existent account should return 0
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODEHASH of non-existent account, we expect this to succeed
         try testing.expect(false);
     }
@@ -847,7 +837,6 @@ test "EXTCODEHASH opcode - empty account with balance returns keccak256('')" {
     } };
 
     const guillotine_result = try vm_instance.call(call_params);
-    
 
     // Compare results - both should succeed
     const revm_succeeded = revm_result.success;
@@ -872,7 +861,6 @@ test "EXTCODEHASH opcode - empty account with balance returns keccak256('')" {
         try testing.expectEqual(expected_hash, revm_value);
     } else {
         // If either failed, print debug info
-        std.debug.print("REVM success: {}, Guillotine success: {}\n", .{ revm_succeeded, guillotine_result.success });
         // For EXTCODEHASH of empty account with balance, we expect this to succeed
         try testing.expect(false);
     }

@@ -419,7 +419,7 @@ test "fuzz_control_flow_complex_patterns" {
         defer allocator.free(jump_map);
         
         // Verify all JUMPDEST instructions are correctly identified
-        for (0..test_case.code.len) |i| {
+        for (0..test_case.code.len) |_| {
             if (test_case.code[i] == 0x5B) { // JUMPDEST
                 try testing.expect(ctx.frame.contract.code_analysis.is_valid_jump(jump_map, i));
             }

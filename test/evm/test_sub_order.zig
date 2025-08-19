@@ -31,18 +31,12 @@ test "SUB opcode stack order verification" {
     var result = try vm.execute(caller, contract, 0, &[_]u8{}, 1_000_000);
     defer result.deinit();
     
-    std.debug.print("\nSUB Order Test:\n", .{});
-    std.debug.print("Bytecode: PUSH 10, PUSH 5, SUB\n", .{});
-    std.debug.print("Stack before SUB: [10, 5] (5 on top)\n", .{});
     
     if (result.output.len == 32) {
         const value = std.mem.readInt(u256, result.output[0..32], .big);
-        std.debug.print("REVM result: {}\n", .{value});
         
         if (value == 5) {
-            std.debug.print("REVM does: 10 - 5 = 5 (second - top)\n", .{});
         } else if (value == std.math.maxInt(u256) - 4) {
-            std.debug.print("REVM does: 5 - 10 = -5 (top - second) with underflow\n", .{});
         }
     }
     
@@ -62,17 +56,12 @@ test "SUB opcode stack order verification" {
     var result2 = try vm.execute(caller, contract, 0, &[_]u8{}, 1_000_000);
     defer result2.deinit();
     
-    std.debug.print("\nReverse test - PUSH 5, PUSH 10, SUB:\n", .{});
-    std.debug.print("Stack before SUB: [5, 10] (10 on top)\n", .{});
     
     if (result2.output.len == 32) {
         const value = std.mem.readInt(u256, result2.output[0..32], .big);
-        std.debug.print("REVM result: {}\n", .{value});
         
         if (value == 5) {
-            std.debug.print("REVM does: 10 - 5 = 5 (top - second)\n", .{});
         } else if (value == std.math.maxInt(u256) - 4) {
-            std.debug.print("REVM does: 5 - 10 = -5 (second - top) with underflow\n", .{});
         }
     }
 }

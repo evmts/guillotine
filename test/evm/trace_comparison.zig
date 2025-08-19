@@ -29,7 +29,6 @@ pub fn compareTraces(allocator: std.mem.Allocator, bytecode: []const u8, gas_lim
         try vm.state.set_balance(caller, std.math.maxInt(u256));
         
         const result = try vm.create_contract(caller, 0, bytecode, gas_limit);
-        std.debug.print("\nZig EVM result: success={}, gas_used={}\n", .{result.success, result.gas_used});
     }
     
     // Run with REVM and capture trace
@@ -54,7 +53,6 @@ pub fn compareTraces(allocator: std.mem.Allocator, bytecode: []const u8, gas_lim
         defer allocator.free(trace_json);
         try revm_trace.appendSlice(trace_json);
         
-        std.debug.print("REVM result: success={}, gas_used={}\n", .{result.success, result.gas_used});
     }
     
     // Compare traces line by line
@@ -71,12 +69,10 @@ pub fn compareTraces(allocator: std.mem.Allocator, bytecode: []const u8, gas_lim
         line_num += 1;
         
         if (zig_line == null) {
-            std.debug.print("\n❌ DIVERGENCE at line {}: Zig trace ended early\n", .{line_num});
             break;
         }
         
         if (revm_line == null) {
-            std.debug.print("\n❌ DIVERGENCE at line {}: REVM trace ended early\n", .{line_num});
             break;
         }
         
@@ -88,12 +84,8 @@ pub fn compareTraces(allocator: std.mem.Allocator, bytecode: []const u8, gas_lim
         
         // Compare key fields
         if (!compareTraceEntries(zig_entry.value, revm_entry.value)) {
-            std.debug.print("\n❌ DIVERGENCE at line {} (pc={}):\n", .{line_num, zig_entry.value.pc});
-            std.debug.print("  Zig:  {s}\n", .{zig_line.?});
-            std.debug.print("  REVM: {s}\n", .{revm_line.?});
             
             // Show context (previous 5 lines)
-            std.debug.print("\nContext (previous 5 operations):\n", .{});
             // This would need to track previous lines
             
             break;
@@ -101,7 +93,6 @@ pub fn compareTraces(allocator: std.mem.Allocator, bytecode: []const u8, gas_lim
     }
     
     if (zig_lines.next() == null and revm_lines.next() == null) {
-        std.debug.print("\n✅ Traces match completely!\n", .{});
     }
 }
 
@@ -125,13 +116,11 @@ fn parseTraceLine(allocator: std.mem.Allocator, line: []const u8) !std.json.Pars
 fn compareTraceEntries(a: TraceEntry, b: TraceEntry) bool {
     // Compare PC
     if (a.pc != b.pc) {
-        std.debug.print("  PC mismatch: {} vs {}\n", .{a.pc, b.pc});
         return false;
     }
     
     // Compare opcode
     if (a.op != b.op) {
-        std.debug.print("  Opcode mismatch: 0x{x} ({s}) vs 0x{x} ({s})\n", .{
             a.op, a.opName orelse "?",
             b.op, b.opName orelse "?"
         });
@@ -140,13 +129,11 @@ fn compareTraceEntries(a: TraceEntry, b: TraceEntry) bool {
     
     // Compare stack
     if (a.stack.len != b.stack.len) {
-        std.debug.print("  Stack size mismatch: {} vs {}\n", .{a.stack.len, b.stack.len});
         return false;
     }
     
     for (a.stack, b.stack, 0..) |a_val, b_val, i| {
         if (!std.mem.eql(u8, a_val, b_val)) {
-            std.debug.print("  Stack[{}] mismatch: {s} vs {s}\n", .{i, a_val, b_val});
             return false;
         }
     }

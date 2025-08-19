@@ -339,7 +339,7 @@ test "EXTCODEHASH (0x3F): Get external code hash" {
     var expected_hash: [32]u8 = undefined;
     std.crypto.hash.sha3.Keccak256.hash(&test_code, &expected_hash, .{});
     var expected_u256: u256 = 0;
-    for (expected_hash) |byte| {
+    for (expected_hash) |_| {
         expected_u256 = (expected_u256 << 8) | byte;
     }
 
