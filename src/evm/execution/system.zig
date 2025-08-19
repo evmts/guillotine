@@ -1893,10 +1893,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
 
         var frame = try Frame.init(
             10000, // gas_remaining
-            false, // static_call
             primitives.Address.ZERO_ADDRESS, // contract_address
-            primitives.Address.ZERO_ADDRESS, // caller
-            0, // value
             result.analysis,
             result.metadata,
             &.{}, // empty ops
@@ -1986,10 +1983,7 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
         const prim = @import("primitives");
         var frame = try Frame.init(
             1000, // gas_remaining
-            false, // static_call
             prim.Address.ZERO_ADDRESS, // contract_address
-            prim.Address.ZERO_ADDRESS, // caller
-            0, // value
             result.analysis,
             result.metadata,
             &.{}, // empty ops
@@ -2044,10 +2038,7 @@ test "EIP-150 gas calculations for nested calls" {
     const prim = @import("primitives");
     var frame = try Frame.init(
         100000, // gas_remaining
-        false, // static_call
         prim.Address.ZERO_ADDRESS, // contract_address
-        prim.Address.ZERO_ADDRESS, // caller
-        0, // value
         result.analysis,
         result.metadata,
         &.{}, // empty ops
@@ -2115,10 +2106,7 @@ test "EIP-150 minimum gas retention" {
     // Test that caller always retains at least 1/64 of gas
     var frame = try Frame.init(
         64, // gas_remaining - Exactly 64 gas
-        false, // static_call
         primitives.Address.ZERO_ADDRESS, // contract_address
-        primitives.Address.ZERO_ADDRESS, // caller
-        0, // value
         result.analysis,
         result.metadata,
         &.{}, // empty ops
@@ -2182,10 +2170,7 @@ test "EIP-150 stipend edge cases" {
     const prim = @import("primitives");
     var frame = try Frame.init(
         100, // gas_remaining - Very low gas
-        false, // static_call
         prim.Address.ZERO_ADDRESS, // contract_address
-        prim.Address.ZERO_ADDRESS, // caller
-        0, // value
         result.analysis,
         result.metadata,
         &.{}, // empty ops

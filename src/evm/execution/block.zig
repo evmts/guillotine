@@ -333,6 +333,7 @@ test "COINBASE returns block coinbase address" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -384,6 +385,7 @@ test "TIMESTAMP returns block timestamp" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -435,6 +437,7 @@ test "NUMBER returns block number" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -486,6 +489,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -537,6 +541,7 @@ test "GASLIMIT returns block gas limit" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -588,6 +593,7 @@ test "BASEFEE returns block base fee" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -637,6 +643,7 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -686,6 +693,7 @@ test "BLOCKHASH returns 0 for future blocks" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -738,6 +746,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         .pc_to_inst = &.{},
         .bytecode = &.{},
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};

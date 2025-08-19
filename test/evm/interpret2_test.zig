@@ -27,6 +27,7 @@ test "interpret2: simple ADD operation" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -76,6 +77,7 @@ test "interpret2: PUSH operations" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -127,6 +129,7 @@ test "interpret2: JUMP to valid destination" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -178,6 +181,7 @@ test "interpret2: JUMPI conditional jump taken" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -229,6 +233,7 @@ test "interpret2: JUMPI conditional jump not taken" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -277,6 +282,7 @@ test "interpret2: DUP and SWAP operations" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -326,6 +332,7 @@ test "interpret2: invalid JUMP destination" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};
@@ -377,6 +384,7 @@ test "interpret2: arithmetic operations" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
     const empty_metadata: []u32 = &.{};
     const empty_ops: []*const anyopaque = &.{};

@@ -29,7 +29,7 @@ test "BN254 ECMUL basic functionality" {
     try testing.expectEqual(@as(usize, 64), result.get_output_size());
 
     // Result should be point at infinity (0, 0)
-    for (output) |_| {
+    for (output) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
 }
@@ -70,7 +70,7 @@ test "BN254 ECPAIRING empty input" {
     try testing.expectEqual(@as(usize, 32), result.get_output_size());
 
     // Result should be true (0x0000...0001)
-    for (output[0..31]) |_| {
+    for (output[0..31]) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
     try testing.expectEqual(@as(u8, 1), output[31]);
@@ -90,7 +90,7 @@ test "BN254 ECPAIRING single pair - identity pairing" {
     try testing.expectEqual(@as(u64, gas_needed), result.get_gas_used());
 
     // e(O, O) = 1, so result should be true
-    for (output[0..31]) |_| {
+    for (output[0..31]) |byte| {
         try testing.expectEqual(@as(u8, 0), byte);
     }
     try testing.expectEqual(@as(u8, 1), output[31]);

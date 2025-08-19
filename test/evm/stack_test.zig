@@ -164,7 +164,7 @@ test "Stack: overflow protection" {
     defer stack.deinit(std.testing.allocator);
 
     // Fill stack to capacity - 1
-    for (0..Stack.CAPACITY - 1) |_| {
+    for (0..Stack.CAPACITY - 1) |i| {
         try stack.append(@intCast(i));
     }
     try testing.expectEqual(@as(usize, Stack.CAPACITY - 1), stack.size());

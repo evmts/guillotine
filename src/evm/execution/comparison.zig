@@ -173,7 +173,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
 
         // Create a simple code analysis for testing
         const code = &[_]u8{0x00}; // STOP
-        
+
         // Create empty analysis for StackFrame
         const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
         const empty_analysis = SimpleAnalysis{
@@ -181,6 +181,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
             .pc_to_inst = &.{},
             .bytecode = code,
             .inst_count = 0,
+            .block_boundaries = std.DynamicBitSet.initEmpty(allocator, 0),
         };
         const empty_metadata: []u32 = &.{};
         const empty_ops: []*const anyopaque = &.{};
@@ -189,7 +190,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
         var mock_host = MockHost.init(allocator);
         defer mock_host.deinit();
         const host = mock_host.to_host();
-        
+
         const db_interface = memory_db.to_database_interface();
 
         var context = try Frame.init(

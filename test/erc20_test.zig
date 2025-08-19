@@ -118,7 +118,7 @@ test "erc20 transfer benchmark executes successfully" {
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 0);
     // transfer(address,uint256) should return 32-byte true
-    if (call_result.output) |_| {
+    if (call_result.output) |output| {
         std.log.debug("ERC20 transfer returned {} bytes", .{output.len});
         Log.debug("[erc20-test] Transfer output length: {d}", .{output.len});
         Log.debug("[erc20-test] Call success: {}, gas_left: {d}", .{ call_result.success, call_result.gas_left });
@@ -188,7 +188,7 @@ test "erc20 mint benchmark executes successfully" {
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 0);
     // Many mint implementations return bool; accept either true or empty (if non-standard)
-    if (call_result.output) |_| {
+    if (call_result.output) |output| {
         if (output.len > 0) {
             try std.testing.expect(output.len >= 32);
             try std.testing.expect(output[output.len - 1] == 1);
@@ -238,7 +238,7 @@ test "erc20 approval-transfer benchmark executes successfully" {
     const gas_used = initial_gas - call_result.gas_left;
     try std.testing.expect(gas_used > 0);
     // approve->transfer flow should return bool true on the last call
-    if (call_result.output) |_| {
+    if (call_result.output) |output| {
         try std.testing.expect(output.len >= 32);
         try std.testing.expect(output[output.len - 1] == 1);
     } else {
@@ -301,7 +301,7 @@ test "erc20 benchmark gas usage patterns" {
         const gas_used = initial_gas - call_result.gas_left;
         try std.testing.expect(gas_used >= test_case.expected_min_gas);
 
-        if (call_result.output) |_| {
+        if (call_result.output) |output| {
             _ = output; // no-op; output is VM-owned
         }
     }
@@ -434,7 +434,7 @@ test "erc20 transfer using call" {
     try std.testing.expect(gas_used > 0);
     
     // transfer(address,uint256) should return 32-byte true
-    if (call_result.output) |_| {
+    if (call_result.output) |output| {
         std.log.debug("ERC20 transfer via call returned {} bytes", .{output.len});
         try std.testing.expect(output.len >= 32);
         try std.testing.expect(output[output.len - 1] == 1);
@@ -489,7 +489,7 @@ test "erc20 mint using call" {
     try std.testing.expect(gas_used > 0);
     
     // Many mint implementations return bool; accept either true or empty (if non-standard)
-    if (call_result.output) |_| {
+    if (call_result.output) |output| {
         if (output.len > 0) {
             try std.testing.expect(output.len >= 32);
             try std.testing.expect(output[output.len - 1] == 1);

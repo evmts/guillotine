@@ -59,7 +59,7 @@ test "WORKING dynamic JUMPI to valid JUMPDEST returns 0x01" {
     // The simple test should have returned 32 bytes with value 0x42
     try std.testing.expect(test_res.success);
     try std.testing.expect(test_res.output != null);
-    if (test_res.output) |_| {
+    if (test_res.output) |output| {
         try std.testing.expectEqual(@as(usize, 32), output.len);
         if (output.len >= 32) {
             const value = std.mem.readInt(u256, output[0..32], .big);

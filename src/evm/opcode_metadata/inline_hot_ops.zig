@@ -297,10 +297,7 @@ test "inline hot ops maintains correctness" {
 
         var frame = try Frame.init(
             1000, // gas_remaining
-            false, // static_call
             primitives.Address.ZERO_ADDRESS, // contract_address
-            primitives.Address.ZERO_ADDRESS, // caller
-            0, // value
             result.analysis,
             result.metadata,
             &.{}, // empty ops
@@ -331,10 +328,7 @@ test "inline hot ops maintains correctness" {
 
         var frame = try Frame.init(
             1000, // gas_remaining
-            false, // static_call
             primitives.Address.ZERO_ADDRESS, // contract_address
-            primitives.Address.ZERO_ADDRESS, // caller
-            0, // value
             add_result.analysis,
             add_result.metadata,
             &.{}, // empty ops

@@ -31,9 +31,6 @@ pub fn op_and(frame: *Frame) ExecutionError.Error!void {
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.peek_unsafe();
     const r = a & b;
-    if (b == 0xffffffff) {
-        @import("../log.zig").warn("[AND] a=0x{x:0>64}, mask=0xffffffff, res=0x{x:0>64}", .{ a, r });
-    }
     frame.stack.set_top_unsafe(r);
 }
 

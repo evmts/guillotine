@@ -642,7 +642,7 @@ test "CODECOPY opcode copies contract code to memory" {
 }
 
 test "STATICCALL opcode enforces read-only execution" {
-    testing.log_level = .warn;
+    testing.log_level = .debug;
     const allocator = testing.allocator;
 
     // Contract A bytecode: attempts SSTORE (state modification)
