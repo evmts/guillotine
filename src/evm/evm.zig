@@ -751,7 +751,7 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
         try cache.getOrAnalyze(contract.bytecode, &self.table)
     else blk: {
         // Fallback when no cache available
-        var analysis = try @import("evm/analysis2.zig").SimpleAnalysis.from_code(self.allocator, contract.bytecode);
+        var analysis = try @import("analysis.zig").CodeAnalysis.from_code(self.allocator, contract.bytecode, &self.table);
         break :blk &analysis;
     };
 
@@ -936,14 +936,11 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
 
     // Create empty analysis - interpret2 will handle the actual analysis
     const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
-    var empty_analysis = SimpleAnalysis{
+    const empty_analysis = SimpleAnalysis{
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
         .bytecode = bytecode,
-        .inst_count = 0,
-        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(self.allocator, 0) catch return InterprResult{ .status = .Failure, .output = null, .gas_left = 0, .gas_used = 0, .address = primitives.Address.ZERO_ADDRESS, .success = false },
     };
-    defer empty_analysis.block_boundaries.deinit();
     Log.debug("[CREATE_DEBUG] Created empty analysis for interpret2", .{});
 
     // Pre-charge CREATE base and initcode costs to align with opcode path

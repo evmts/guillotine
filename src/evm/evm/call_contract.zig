@@ -104,16 +104,12 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
         try self.state.set_balance(to, to_balance + value);
     }
 
-    // Create empty analysis - interpret2 will handle the actual analysis
-    const SimpleAnalysis = @import("analysis2.zig").SimpleAnalysis;
-    const empty_analysis = SimpleAnalysis{
-        .inst_to_pc = &.{},
-        .pc_to_inst = &.{},
-        .bytecode = code,
-        .inst_count = 0,
-        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(self.allocator, 0) catch return CallResult{ .success = false, .gas_left = 0, .output = null },
+    // Create code analysis for the contract bytecode
+    var analysis = CodeAnalysis.from_code(self.allocator, code, &self.table) catch |err| {
+        Log.debug("VM.call_contract: Code analysis failed with error: {any}", .{err});
+        return CallResult{ .success = false, .gas_left = 0, .output = null };
     };
-    defer empty_analysis.block_boundaries.deinit();
+    defer analysis.deinit();
 
     // Create host interface from self
     const host = Host.init(self);
@@ -124,8 +120,8 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
     // Create execution context for the contract
     var context = Frame.init(execution_gas, // gas remaining
         to, // contract address
-        empty_analysis, // simple analysis
-        &.{}, // empty metadata array - interpret2 will set this up
+        analysis.analysis, // simple analysis
+        analysis.metadata, // metadata array
         &[_]*const anyopaque{}, // empty ops array - interpret2 will set this up
         host, // host interface from self
         self.state.database, // database interface
