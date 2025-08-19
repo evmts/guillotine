@@ -1,5 +1,5 @@
 const std = @import("std");
-const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
+const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
 const keccak = std.crypto.hash.sha3.Keccak256;
 const Log = @import("log.zig");
 const OpcodeMetadata = @import("opcode_metadata/opcode_metadata.zig");
@@ -33,7 +33,7 @@ pub const CacheKey = [32]u8;
 /// Cache entry containing analyzed code and LRU tracking
 const CacheEntry = struct {
     /// The analyzed code
-    analysis: CodeAnalysis,
+    analysis: SimpleAnalysis,
     /// Key for this entry (code hash)
     key: CacheKey,
     /// Reference count for safe memory management
@@ -95,7 +95,7 @@ pub fn deinit(self: *AnalysisCache) void {
     while (iter.next()) |entry| {
         var cache_entry = entry.value_ptr.*;
         // Deinit the analysis
-        cache_entry.analysis.deinit();
+        cache_entry.analysis.deinit(self.allocator);
         // Free the entry
         self.allocator.destroy(cache_entry);
     }
@@ -171,8 +171,8 @@ fn evictLRU(self: *AnalysisCache) void {
 pub fn getOrAnalyze(
     self: *AnalysisCache,
     code: []const u8,
-    jump_table: *const OpcodeMetadata,
-) !*CodeAnalysis {
+    _: *const OpcodeMetadata,
+) !*SimpleAnalysis {
     self.mutex.lock();
     defer self.mutex.unlock();
 
@@ -196,7 +196,7 @@ pub fn getOrAnalyze(
     Log.debug("[analysis_cache] Cache miss. Analyzing {} bytes of code", .{code.len});
 
     // Perform analysis
-    var analysis = try CodeAnalysis.from_code(self.allocator, code, jump_table);
+    var analysis = try SimpleAnalysis.from_code(self.allocator, code);
     errdefer analysis.deinit();
 
     // Create cache entry
@@ -229,7 +229,7 @@ pub fn getOrAnalyze(
 }
 
 /// Release a reference to an analysis (for reference counting)
-pub fn release(self: *AnalysisCache, analysis: *CodeAnalysis) void {
+pub fn release(self: *AnalysisCache, analysis: *SimpleAnalysis) void {
     _ = self;
     _ = analysis;
     // For now, we don't actually remove entries on release
@@ -246,7 +246,7 @@ pub fn clear(self: *AnalysisCache) void {
     var iter = self.entries.iterator();
     while (iter.next()) |entry| {
         var cache_entry = entry.value_ptr.*;
-        cache_entry.analysis.deinit();
+        cache_entry.analysis.deinit(self.allocator);
         self.allocator.destroy(cache_entry);
     }
 
