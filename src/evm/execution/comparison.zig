@@ -4,13 +4,6 @@
 //! unsigned comparisons (LT, GT), signed comparisons (SLT, SGT),
 //! equality checking (EQ), and zero testing (ISZERO).
 //!
-//! ## Safety Note
-//!
-//! All handlers in this module use `unsafe` stack operations (pop_unsafe, peek_unsafe,
-//! set_top_unsafe) because stack bounds checking and validation is performed by the
-//! interpreter's jump table before dispatching to these handlers. This eliminates
-//! redundant checks and maximizes performance.
-//!
 //! ## Gas Costs
 //! All comparison operations cost 3 gas.
 //!
@@ -22,13 +15,10 @@
 //! All comparison opcodes return 1 for true and 0 for false.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
 const primitives = @import("primitives");
-
-// Safety check constants - only enabled in Debug and ReleaseSafe modes
-const SAFE_STACK_CHECKS = builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall;
+const Log = @import("../log.zig");
 
 // Imports for tests
 const Vm = @import("../evm.zig");
@@ -37,132 +27,139 @@ const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 const Stack = @import("../stack/stack.zig");
 
 /// LT opcode (0x10) - Less than comparison
-/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
-/// Pops two values and pushes 1 if the second from top is less than top, 0 otherwise.
+/// Pops two values and pushes 1 if the first is less than the second, 0 otherwise.
 /// Stack: [a, b] → [a < b]
 pub fn op_lt(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 2);
-    }
+    std.debug.assert(frame.stack.size() >= 2);
 
+    // Pop the top operand
     const top = frame.stack.pop_unsafe();
-    const top_minus_1 = frame.stack.peek_unsafe();
+    // Peek the second from top operand
+    const second_from_top = frame.stack.peek_unsafe();
 
-    // EVM semantics: second_from_top < top
-    const result: u256 = switch (std.math.order(top_minus_1, top)) {
+    // EVM semantics: compare top (b) with second-from-top (a), push b < a
+    // REVM computes: top < second_from_top
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
         .lt => 1,
         .eq, .gt => 0,
     };
 
+    // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
+    Log.debug("LT: top(b)={} second(a)={} -> {} (b < a)", .{ top, second_from_top, result });
 }
 
 /// GT opcode (0x11) - Greater than comparison
-/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
-/// Pops two values and pushes 1 if the second from top is greater than top, 0 otherwise.
+/// Pops two values and pushes 1 if the first is greater than the second, 0 otherwise.
 /// Stack: [a, b] → [a > b]
 pub fn op_gt(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 2);
-    }
+    std.debug.assert(frame.stack.size() >= 2);
 
+    // Pop the top operand
     const top = frame.stack.pop_unsafe();
-    const top_minus_1 = frame.stack.peek_unsafe();
+    // Peek the second from top operand
+    const second_from_top = frame.stack.peek_unsafe();
 
-    // EVM semantics: second_from_top > top
-    const result: u256 = switch (std.math.order(top_minus_1, top)) {
+    // EVM semantics: compare top (b) with second-from-top (a), push b > a
+    // REVM computes: top > second_from_top
+    const result: u256 = switch (std.math.order(top, second_from_top)) {
         .gt => 1,
         .eq, .lt => 0,
     };
+    Log.debug("GT: top(b)={} second(a)={} -> {} (b > a)", .{ top, second_from_top, result });
 
+    // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
 }
 
 /// SLT opcode (0x12) - Signed less than comparison
-/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
 /// Pops two values, interprets them as signed integers, and pushes 1 if the
-/// second from top is less than top, 0 otherwise.
+/// first is less than the second, 0 otherwise.
 /// Stack: [a, b] → [a < b] (signed)
 pub fn op_slt(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 2);
-    }
+    std.debug.assert(frame.stack.size() >= 2);
 
+    // Pop the top operand
     const top = frame.stack.pop_unsafe();
-    const top_minus_1 = frame.stack.peek_unsafe();
+    // Peek the second from top operand
+    const second_from_top = frame.stack.peek_unsafe();
 
-    // EVM semantics: second_from_top < top (signed)
+    // EVM semantics: compare top (b) with second-from-top (a), push b < a (signed)
+    // REVM computes: top < second_from_top
     const top_i256 = @as(i256, @bitCast(top));
-    const top_minus_1_i256 = @as(i256, @bitCast(top_minus_1));
+    const second_from_top_i256 = @as(i256, @bitCast(second_from_top));
 
-    const result: u256 = switch (std.math.order(top_minus_1_i256, top_i256)) {
+    const result: u256 = switch (std.math.order(top_i256, second_from_top_i256)) {
         .lt => 1,
         .eq, .gt => 0,
     };
 
+    // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
+    Log.debug("SLT: top(b)={} second(a)={} -> {} (b < a signed)", .{ top_i256, second_from_top_i256, result });
 }
 
 /// SGT opcode (0x13) - Signed greater than comparison
-/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
 /// Pops two values, interprets them as signed integers, and pushes 1 if the
-/// second from top is greater than top, 0 otherwise.
+/// first is greater than the second, 0 otherwise.
 /// Stack: [a, b] → [a > b] (signed)
 pub fn op_sgt(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 2);
-    }
+    std.debug.assert(frame.stack.size() >= 2);
 
+    // Pop the top operand
     const top = frame.stack.pop_unsafe();
-    const top_minus_1 = frame.stack.peek_unsafe();
+    // Peek the second from top operand
+    const second_from_top = frame.stack.peek_unsafe();
 
-    // EVM semantics: second_from_top > top (signed)
+    // EVM semantics: compare top (b) with second-from-top (a), push b > a (signed)
+    // REVM computes: top > second_from_top
     const top_i256 = @as(i256, @bitCast(top));
-    const top_minus_1_i256 = @as(i256, @bitCast(top_minus_1));
+    const second_from_top_i256 = @as(i256, @bitCast(second_from_top));
 
-    const result: u256 = if (top_minus_1_i256 > top_i256) 1 else 0;
+    const result: u256 = if (top_i256 > second_from_top_i256) 1 else 0;
+    Log.debug("SGT: top(b)={} second(a)={} -> {} (b > a signed)", .{ top_i256, second_from_top_i256, result });
 
+    // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
 }
 
 /// EQ opcode (0x14) - Equality comparison
-/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
 /// Pops two values and pushes 1 if they are equal, 0 otherwise.
 /// Stack: [a, b] → [a == b]
 pub fn op_eq(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 2);
-    }
+    std.debug.assert(frame.stack.size() >= 2);
 
-    const top = frame.stack.pop_unsafe();
-    const top_minus_1 = frame.stack.peek_unsafe();
+    // Pop the top operand (b)
+    const b = frame.stack.pop_unsafe();
+    // Peek the new top operand (a)
+    const a = frame.stack.peek_unsafe();
 
-    const result: u256 = if (top_minus_1 == top) 1 else 0;
+    const result: u256 = if (a == b) 1 else 0;
 
+    // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
 }
 
 /// ISZERO opcode (0x15) - Check if zero
-/// Static gas cost (3 gas) is consumed externally by the interpreter
 ///
 /// Pops one value and pushes 1 if it is zero, 0 otherwise.
 /// Stack: [a] → [a == 0]
 pub fn op_iszero(frame: *Frame) ExecutionError.Error!void {
-    if (SAFE_STACK_CHECKS) {
-        std.debug.assert(frame.stack.size() >= 1);
-    }
+    std.debug.assert(frame.stack.size() >= 1);
 
-    const top = frame.stack.peek_unsafe();
+    // Peek the operand
+    const value = frame.stack.peek_unsafe();
 
     // Optimized: Use @intFromBool for direct bool to int conversion
     // This should compile to more efficient assembly than if/else
-    const result: u256 = @intFromBool(top == 0);
+    const result: u256 = @intFromBool(value == 0);
 
+    // Modify the current top of the stack in-place with the result
     frame.stack.set_top_unsafe(result);
 }
 
