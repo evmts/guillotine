@@ -760,9 +760,9 @@ pub fn op_push_then_lt(frame: *StackFrame) Error!noreturn {
     const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, LT pops a then b, and checks if a < b
-    // PUSH pushes the value that becomes 'a', so we check push_val < other
-    const result: u256 = if (push_val < other) 1 else 0;
+    // EVM LT semantics: pops b (top) then a (second_from_top), checks a < b
+    // After PUSH: stack is [other, push_val], so LT computes other < push_val
+    const result: u256 = if (other < push_val) 1 else 0;
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -773,9 +773,9 @@ pub fn op_push_then_gt(frame: *StackFrame) Error!noreturn {
     const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, GT pops a then b, and checks if a > b
-    // PUSH pushes the value that becomes 'a', so we check push_val > other
-    const result: u256 = if (push_val > other) 1 else 0;
+    // EVM GT semantics: pops b (top) then a (second_from_top), checks a > b
+    // After PUSH: stack is [other, push_val], so GT computes other > push_val
+    const result: u256 = if (other > push_val) 1 else 0;
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -810,9 +810,9 @@ pub fn op_push_then_sub(frame: *StackFrame) Error!noreturn {
     const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, SUB pops a then b, and computes a - b
-    // PUSH pushes the value that becomes 'a', so we compute push_val - other
-    const result = push_val -% other; // Wrapping sub
+    // EVM SUB semantics: pops b (top) then a (second_from_top), computes a - b
+    // After PUSH: stack is [other, push_val], so SUB computes other - push_val
+    const result = other -% push_val; // Wrapping sub
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -834,9 +834,9 @@ pub fn op_push_then_div(frame: *StackFrame) Error!noreturn {
     const push_val = try readPushValue(frame);
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, DIV pops a then b, and computes a / b
-    // PUSH pushes the value that becomes 'a', so we compute push_val / other
-    const result = if (other == 0) 0 else push_val / other;
+    // EVM DIV semantics: pops divisor (top) then dividend (second_from_top)
+    // After PUSH: stack is [other, push_val], so DIV computes other / push_val
+    const result = if (push_val == 0) 0 else other / push_val;
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -915,9 +915,9 @@ pub fn op_push_then_lt_small(frame: *StackFrame) Error!noreturn {
     const push_val = frame.metadata[frame.ip];
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, LT pops a then b, and checks if a < b
-    // PUSH pushes the value that becomes 'a', so we check push_val < other
-    const result: u256 = if (push_val < other) 1 else 0;
+    // EVM LT semantics: pops b (top) then a (second_from_top), checks a < b
+    // After PUSH: stack is [other, push_val], so LT computes other < push_val
+    const result: u256 = if (other < push_val) 1 else 0;
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -926,9 +926,9 @@ pub fn op_push_then_gt_small(frame: *StackFrame) Error!noreturn {
     const push_val = frame.metadata[frame.ip];
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, GT pops a then b, and checks if a > b
-    // PUSH pushes the value that becomes 'a', so we check push_val > other
-    const result: u256 = if (push_val > other) 1 else 0;
+    // EVM GT semantics: pops b (top) then a (second_from_top), checks a > b
+    // After PUSH: stack is [other, push_val], so GT computes other > push_val
+    const result: u256 = if (other > push_val) 1 else 0;
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -957,9 +957,9 @@ pub fn op_push_then_sub_small(frame: *StackFrame) Error!noreturn {
     const push_val = frame.metadata[frame.ip];
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, SUB pops a then b, and computes a - b
-    // PUSH pushes the value that becomes 'a', so we compute push_val - other
-    const result = push_val -% other; // Wrapping sub
+    // EVM SUB semantics: pops b (top) then a (second_from_top), computes a - b
+    // After PUSH: stack is [other, push_val], so SUB computes other - push_val
+    const result = other -% push_val; // Wrapping sub
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
@@ -977,9 +977,9 @@ pub fn op_push_then_div_small(frame: *StackFrame) Error!noreturn {
     const push_val = frame.metadata[frame.ip];
     const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, DIV pops a then b, and computes a / b
-    // PUSH pushes the value that becomes 'a', so we compute push_val / other
-    const result = if (other == 0) 0 else push_val / other;
+    // EVM DIV semantics: pops divisor (top) then dividend (second_from_top)
+    // After PUSH: stack is [other, push_val], so DIV computes other / push_val
+    const result = if (push_val == 0) 0 else other / push_val;
     frame.stack.set_top_unsafe(result);
     return next(frame);
 }
