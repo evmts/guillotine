@@ -51,6 +51,6 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
 }
 
 // Execute function for external use
-pub fn execute(frame: *StackFrame) Error {
+pub fn execute(frame: *StackFrame) Error!noreturn {
     return interpret2(frame);
 }
