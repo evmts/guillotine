@@ -32,6 +32,17 @@ pub const SimpleAnalysis = struct {
         return self.pc_to_inst[pc];
     }
 
+    /// Validate if a PC location is a valid jump destination and return instruction index
+    pub fn validate_jump_dest(self: *const SimpleAnalysis, dest_pc: usize) ?u16 {
+        if (dest_pc >= self.bytecode.len) return null;
+        if (self.bytecode[dest_pc] != 0x5B) return null; // Must be JUMPDEST
+
+        const dest_inst_idx = self.getInstIdx(@intCast(dest_pc));
+        if (dest_inst_idx == SimpleAnalysis.MAX_USIZE) return null;
+
+        return dest_inst_idx;
+    }
+
     /// Build analysis from bytecode and return metadata separately
     pub fn analyze(allocator: std.mem.Allocator, code: []const u8) !struct { analysis: SimpleAnalysis, metadata: []u32 } {
         if (code.len > std.math.maxInt(u16)) return error.OutOfMemory; // enforce u16 bounds
@@ -296,7 +307,55 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
         const OP_SLOAD: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_sload));
         const OP_DUP1: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_dup1));
         const OP_SWAP1: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_swap1));
+
+        // First pass: Check for 5-instruction loop patterns (DUP1, PUSH, LT, PUSH, JUMPI)
         var i: usize = 0;
+        while (i < ops_slice.len - 4) : (i += 1) {
+            // Check for DUP1, PUSH, LT, PUSH, JUMPI pattern
+            if (ops_slice[i] == OP_DUP1 and
+                ops_slice[i + 1] == OP_PUSH and
+                ops_slice[i + 2] == OP_LT and
+                ops_slice[i + 3] == OP_PUSH and
+                ops_slice[i + 4] == OP_JUMPI)
+            {
+                // Validate the second PUSH has a valid JUMPDEST
+                const push_inst_pc = analysis.getPc(@intCast(i + 3));
+                if (push_inst_pc != SimpleAnalysis.MAX_USIZE and push_inst_pc < code.len) {
+                    const push_opcode = code[push_inst_pc];
+                    if (push_opcode >= 0x60 and push_opcode <= 0x7F) {
+                        const push_size = push_opcode - 0x5F;
+                        const value_start = push_inst_pc + 1;
+
+                        // Read the jump destination
+                        var dest_val: usize = 0;
+                        var j: usize = 0;
+                        while (j < push_size and value_start + j < code.len) : (j += 1) {
+                            dest_val = (dest_val << 8) | code[value_start + j];
+                        }
+
+                        // Validate it's a valid JUMPDEST using reusable method
+                        if (analysis.validate_jump_dest(dest_val)) |dest_inst_idx| {
+                            // Store jump destination in metadata for instruction i+3 (PUSH before JUMPI)
+                            metadata[i + 3] = dest_inst_idx;
+
+                            // Replace the 5-instruction sequence with loop fusion
+                            ops_slice[i] = @ptrCast(&tailcalls.op_loop_condition);
+                            ops_slice[i + 1] = @ptrCast(&tailcalls.op_nop);
+                            ops_slice[i + 2] = @ptrCast(&tailcalls.op_nop);
+                            ops_slice[i + 3] = @ptrCast(&tailcalls.op_nop);
+                            ops_slice[i + 4] = @ptrCast(&tailcalls.op_nop);
+
+                            // Skip the fused instructions
+                            i += 4;
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Second pass: Existing PUSH-based fusion patterns
+        i = 0;
         while (i < ops_slice.len - 1) : (i += 1) {
             const is_push = ops_slice[i] == OP_PUSH;
             if (!is_push) continue;
@@ -322,15 +381,11 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
                 while (j < push_size and value_start + j < code.len) : (j += 1) {
                     val = (val << 8) | code[value_start + j];
                 }
-                if (val < code.len and code[val] == 0x5B) {
-                    // Store the jump destination instruction index in metadata for JUMPI
-                    if (next_op == OP_JUMPI) {
-                        const dest_inst_idx = analysis.getInstIdx(@intCast(val));
-                        if (dest_inst_idx != SimpleAnalysis.MAX_USIZE) {
-                            metadata[i] = dest_inst_idx;
-                        }
-                    }
-                    
+
+                if (analysis.validate_jump_dest(val)) |dest_inst_idx| {
+                    // Store destination instruction index for both JUMP and JUMPI
+                    metadata[i] = dest_inst_idx;
+
                     fused = if (next_op == OP_JUMP)
                         @ptrCast(&tailcalls.op_push_then_jump)
                     else
@@ -422,22 +477,52 @@ test "analysis2: PUSH0 metadata and length" {
 test "analysis2: PUSH1-4 metadata fast path optimization" {
     const allocator = std.testing.allocator;
     // PUSH1 0xAA, PUSH2 0x1234, PUSH3 0xABCDEF, PUSH4 0x11223344, STOP
-    const code = &[_]u8{ 
-        0x60, 0xAA,                     // PUSH1 0xAA
-        0x61, 0x12, 0x34,              // PUSH2 0x1234  
-        0x62, 0xAB, 0xCD, 0xEF,        // PUSH3 0xABCDEF
-        0x63, 0x11, 0x22, 0x33, 0x44,  // PUSH4 0x11223344
-        0x00                            // STOP
+    const code = &[_]u8{
+        0x60, 0xAA, // PUSH1 0xAA
+        0x61, 0x12, 0x34, // PUSH2 0x1234
+        0x62, 0xAB, 0xCD, 0xEF, // PUSH3 0xABCDEF
+        0x63, 0x11, 0x22, 0x33, 0x44, // PUSH4 0x11223344
+        0x00, // STOP
     };
-    
+
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
-    
+
     // Verify metadata contains precomputed values for PUSH1-4
-    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]);        // PUSH1
-    try std.testing.expectEqual(@as(u32, 0x1234), result.metadata[1]);      // PUSH2  
-    try std.testing.expectEqual(@as(u32, 0xABCDEF), result.metadata[2]);    // PUSH3
-    try std.testing.expectEqual(@as(u32, 0x11223344), result.metadata[3]);  // PUSH4
-    try std.testing.expectEqual(@as(u32, 0), result.metadata[4]);           // STOP (no metadata)
+    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]); // PUSH1
+    try std.testing.expectEqual(@as(u32, 0x1234), result.metadata[1]); // PUSH2
+    try std.testing.expectEqual(@as(u32, 0xABCDEF), result.metadata[2]); // PUSH3
+    try std.testing.expectEqual(@as(u32, 0x11223344), result.metadata[3]); // PUSH4
+    try std.testing.expectEqual(@as(u32, 0), result.metadata[4]); // STOP (no metadata)
+}
+
+test "analysis2: loop fusion pattern detection" {
+    const allocator = std.testing.allocator;
+    // Create a simple loop pattern: DUP1, PUSH1 10, LT, PUSH1 dest, JUMPI, JUMPDEST
+    // PC layout: DUP1@0, PUSH1@1-2, LT@3, PUSH1@4-5, JUMPI@6, JUMPDEST@7, STOP@8
+    const code = &[_]u8{
+        0x80, // DUP1 (instruction 0, PC 0)
+        0x60, 0x0A, // PUSH1 10 (instruction 1, PC 1-2)
+        0x10, // LT (instruction 2, PC 3)
+        0x60, 0x07, // PUSH1 7 (jump to PC 7 where JUMPDEST is, instruction 3, PC 4-5)
+        0x57, // JUMPI (instruction 4, PC 6)
+        0x5B, // JUMPDEST (instruction 5, PC 7)
+        0x00, // STOP (instruction 6, PC 8)
+    };
+
+    var prep_result = try prepare(allocator, code);
+    defer prep_result.analysis.deinit(allocator);
+    defer allocator.free(prep_result.metadata);
+    defer allocator.free(prep_result.ops);
+
+    // Verify loop fusion was applied
+    try std.testing.expect(prep_result.ops[0] == @as(*const anyopaque, @ptrCast(&tailcalls.op_loop_condition)));
+    try std.testing.expect(prep_result.ops[1] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
+    try std.testing.expect(prep_result.ops[2] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
+    try std.testing.expect(prep_result.ops[3] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
+    try std.testing.expect(prep_result.ops[4] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
+
+    // Verify metadata contains the jump destination instruction index for the JUMPDEST (instruction 5)
+    try std.testing.expectEqual(@as(u32, 5), prep_result.metadata[3]); // PUSH1 dest metadata
 }

@@ -5,12 +5,13 @@ const StackFrame = @import("../stack_frame.zig").StackFrame;
 const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
 const analysis2 = @import("analysis2.zig");
+const PrefetchOptions = @import("std").builtin.PrefetchOptions;
 
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 
 pub const Error = ExecutionError.Error;
 
-// Main interpret function - gets code from frame.analysis.bytecode  
+// Main interpret function - gets code from frame.analysis.bytecode
 pub fn interpret2(frame: *StackFrame) Error!noreturn {
     const code = frame.analysis.bytecode;
     if (code.len > std.math.maxInt(u16)) {
@@ -26,20 +27,26 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
 
     const prep_result = try analysis2.prepare(allocator, code);
 
-    // Update StackFrame with prepared data
+    inline for (0..4) |i| {
+        // Prefetch the function pointer value itself
+        @prefetch(prep_result.ops.ptr + i, PrefetchOptions{ .rw = .read, .locality = 1, .cache = .data });
+        // Prefetch the actual instruction code the function pointer points to
+        @prefetch(prep_result.ops[i], PrefetchOptions{ .rw = .read, .locality = 1, .cache = .instruction });
+        // Prefetch metadata
+        @prefetch(prep_result.metadata.ptr + i, PrefetchOptions{ .rw = .read, .locality = 1, .cache = .data });
+    }
+
     frame.analysis = prep_result.analysis;
     frame.metadata = prep_result.metadata;
     frame.ops = prep_result.ops;
     frame.ip = 0;
 
-    if (prep_result.ops.len == 0) {
-        unreachable;
-    }
+    if (prep_result.ops.len == 0) unreachable;
 
     Log.debug("[interpret2] Starting execution with {} ops", .{prep_result.ops.len});
 
     // Start tailcall execution
-    const first_op: *const fn(*StackFrame) Error!noreturn = @ptrCast(@alignCast(frame.ops[0]));
+    const first_op: *const fn (*StackFrame) Error!noreturn = @ptrCast(@alignCast(frame.ops[0]));
     return try (@call(.always_tail, first_op, .{frame}));
 }
 
