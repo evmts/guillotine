@@ -65,11 +65,9 @@ owns_buffer: bool,
 cached_expansion: struct {
     /// Last calculated memory size in bytes
     last_size: u64,
-    /// Last calculated memory size in words (cached to avoid division)
-    last_words: u64,
     /// Gas cost for the last calculated size
     last_cost: u64,
-} = .{ .last_size = 0, .last_words = 0, .last_cost = 0 },
+} = .{ .last_size = 0, .last_cost = 0 },
 
 /// Initializes the root Memory context that owns the shared buffer.
 /// This is the safe API that eliminates the undefined pointer footgun.
@@ -189,7 +187,7 @@ pub fn clear(self: *Memory) void {
     }
 
     // Reset cached expansion calculations
-    self.cached_expansion = .{ .last_size = 0, .last_words = 0, .last_cost = 0 };
+    self.cached_expansion = .{ .last_size = 0, .last_cost = 0 };
 }
 
 // Read operations
@@ -255,19 +253,20 @@ pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
 
     // Check if we can use cached calculation for larger sizes
     if (new_size == self.cached_expansion.last_size) {
-        // Return cached cost minus cost for current size
-        const current_cost = if (current_size == 0) 0 else calculate_memory_total_cost(current_size);
+        // Return cached cost minus cost for current size - branchless
+        const size_flag = @intFromBool(current_size != 0);
+        const current_cost = size_flag * calculate_memory_total_cost(current_size);
         return self.cached_expansion.last_cost -| current_cost;
     }
 
-    // Calculate new cost and update cache for larger sizes
+    // Calculate new cost and update cache for larger sizes - branchless
     const new_cost = calculate_memory_total_cost(new_size);
-    const current_cost = if (current_size == 0) 0 else calculate_memory_total_cost(current_size);
+    const size_flag = @intFromBool(current_size != 0);
+    const current_cost = size_flag * calculate_memory_total_cost(current_size);
     const expansion_cost = new_cost - current_cost;
 
-    // Update cache with both size and word count
+    // Update cache with size and cost
     self.cached_expansion.last_size = new_size;
-    self.cached_expansion.last_words = new_words;
     self.cached_expansion.last_cost = new_cost;
 
     return expansion_cost;
