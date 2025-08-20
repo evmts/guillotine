@@ -116,7 +116,7 @@ pub fn op_shr(frame: *Frame) ExecutionError.Error!void {
 
     const result = if (shift >= 256) 0 else value >> @intCast(shift);
     if (shift == 224) {
-        @import("../log.zig").warn("[SHR] value=0x{x:0>64} >> 224 = 0x{x:0>64}", .{ value, result });
+        @import("../log.zig").debug("[SHR] value=0x{x:0>64} >> 224 = 0x{x:0>64}", .{ value, result });
     }
 
     frame.stack.set_top_unsafe(result);

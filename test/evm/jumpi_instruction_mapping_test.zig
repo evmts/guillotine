@@ -69,8 +69,8 @@ test "JUMPI instruction mapping - verify correct PUSH value after jump" {
         },
     };
 
-    std.log.warn("=== Executing JUMPI instruction mapping test ===", .{});
-    std.log.warn("Expected: Jump to 0x0A, push 0xAA, store it, and return", .{});
+    std.log.debug("=== Executing JUMPI instruction mapping test ===", .{});
+    std.log.debug("Expected: Jump to 0x0A, push 0xAA, store it, and return", .{});
     
     const result = try vm.call(call_params);
     
@@ -84,7 +84,7 @@ test "JUMPI instruction mapping - verify correct PUSH value after jump" {
     
     // The returned value should be 0xAA, not 0xFF or 0xEE
     const returned_value = std.mem.readInt(u256, output[0..32], .big);
-    std.log.warn("Returned value: 0x{x}", .{returned_value});
+    std.log.debug("Returned value: 0x{x}", .{returned_value});
     
     // This test will fail if the wrong PUSH instruction is executed
     try testing.expectEqual(@as(u256, 0xAA), returned_value);
