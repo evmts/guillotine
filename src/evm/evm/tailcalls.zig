@@ -9,13 +9,12 @@ const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
 pub const Error = ExecutionError.Error;
 
 // Function pointer type for tailcall dispatch - only takes StackFrame
-const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
+pub const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
 
 // Helper to advance to next instruction
 pub inline fn next(frame: *StackFrame) Error!noreturn {
     frame.ip += 1;
-    const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(frame.ops[frame.ip])));
-    return @call(.always_tail, func_ptr, .{frame});
+    return @call(.always_tail, frame.ops[frame.ip], .{frame});
 }
 
 // Opcode implementations
