@@ -27,15 +27,6 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
 
     const prep_result = try analysis2.prepare(allocator, code);
 
-    inline for (0..4) |i| {
-        // Prefetch the function pointer value itself
-        @prefetch(prep_result.ops.ptr + i, PrefetchOptions{ .rw = .read, .locality = 1, .cache = .data });
-        // Prefetch the actual instruction code the function pointer points to
-        @prefetch(prep_result.ops[i], PrefetchOptions{ .rw = .read, .locality = 1, .cache = .instruction });
-        // Prefetch metadata
-        @prefetch(prep_result.metadata.ptr + i, PrefetchOptions{ .rw = .read, .locality = 1, .cache = .data });
-    }
-
     frame.analysis = prep_result.analysis;
     frame.metadata = prep_result.metadata;
     frame.ops = prep_result.ops;
@@ -51,6 +42,6 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
 }
 
 // Execute function for external use
-pub fn execute(frame: *StackFrame) Error!noreturn {
-    return interpret2(frame);
+pub fn execute(frame: *StackFrame) Error!void {
+    _ = try interpret2(frame);
 }
