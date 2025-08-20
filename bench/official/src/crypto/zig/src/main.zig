@@ -1,5 +1,6 @@
 const std = @import("std");
-const bn254 = @import("../../../../src/crypto/bn254.zig");
+const crypto = @import("crypto");
+const bn254 = crypto.bn254;
 const FpMont = bn254.FpMont;
 const Fp2Mont = bn254.Fp2Mont;
 const Fp6Mont = bn254.Fp6Mont;
@@ -11,18 +12,8 @@ const pairing = bn254.pairing;
 
 const print = std.debug.print;
 
-var random_state: u64 = 12345;
-
 fn nextRandom() u256 {
-    random_state = random_state *% 1103515245 +% 12345;
-    const high = @as(u256, random_state) << 192;
-    random_state = random_state *% 1103515245 +% 12345;
-    const mid_high = @as(u256, random_state) << 128;
-    random_state = random_state *% 1103515245 +% 12345;
-    const mid_low = @as(u256, random_state) << 64;
-    random_state = random_state *% 1103515245 +% 12345;
-    const low = @as(u256, random_state);
-    return high | mid_high | mid_low | low;
+    return std.crypto.random.int(u256);
 }
 
 fn randomFpMont() FpMont {
@@ -56,12 +47,10 @@ fn randomG2() G2 {
 }
 
 fn benchmarkFpMontAdd(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(FpMont, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(FpMont, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(FpMont, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(FpMont, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomFpMont();
@@ -77,16 +66,14 @@ fn benchmarkFpMontAdd(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("FpMont.add: {}ns/op\n", .{avg_ns});
+    print("FpMont.add: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkFpMontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(FpMont, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(FpMont, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(FpMont, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(FpMont, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomFpMont();
@@ -102,16 +89,14 @@ fn benchmarkFpMontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("FpMont.mul: {}ns/op\n", .{avg_ns});
+    print("FpMont.mul: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkFp2MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(Fp2Mont, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp2Mont, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(Fp2Mont, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(Fp2Mont, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomFp2Mont();
@@ -127,16 +112,14 @@ fn benchmarkFp2MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("Fp2Mont.mul: {}ns/op\n", .{avg_ns});
+    print("Fp2Mont.mul: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkFp6MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(Fp6Mont, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp6Mont, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(Fp6Mont, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(Fp6Mont, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomFp6Mont();
@@ -152,16 +135,14 @@ fn benchmarkFp6MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("Fp6Mont.mul: {}ns/op\n", .{avg_ns});
+    print("Fp6Mont.mul: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkFp12MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(Fp12Mont, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(Fp12Mont, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(Fp12Mont, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(Fp12Mont, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomFp12Mont();
@@ -177,16 +158,14 @@ fn benchmarkFp12MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("Fp12Mont.mul: {}ns/op\n", .{avg_ns});
+    print("Fp12Mont.mul: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkG1Add(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(G1, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(G1, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(G1, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(G1, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomG1();
@@ -202,16 +181,14 @@ fn benchmarkG1Add(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("G1.add: {}ns/op\n", .{avg_ns});
+    print("G1.add: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkG1Mul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs = try std.testing.allocator.alloc(G1, num_runs);
-    defer std.testing.allocator.free(inputs);
-    var scalars = try std.testing.allocator.alloc(Fr, num_runs);
-    defer std.testing.allocator.free(scalars);
+    var inputs = try allocator.alloc(G1, num_runs);
+    defer allocator.free(inputs);
+    var scalars = try allocator.alloc(Fr, num_runs);
+    defer allocator.free(scalars);
 
     for (0..num_runs) |i| {
         inputs[i] = randomG1();
@@ -227,16 +204,14 @@ fn benchmarkG1Mul(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("G1.mul: {}ns/op\n", .{avg_ns});
+    print("G1.mul: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkG2Add(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs_a = try std.testing.allocator.alloc(G2, num_runs);
-    defer std.testing.allocator.free(inputs_a);
-    var inputs_b = try std.testing.allocator.alloc(G2, num_runs);
-    defer std.testing.allocator.free(inputs_b);
+    var inputs_a = try allocator.alloc(G2, num_runs);
+    defer allocator.free(inputs_a);
+    var inputs_b = try allocator.alloc(G2, num_runs);
+    defer allocator.free(inputs_b);
 
     for (0..num_runs) |i| {
         inputs_a[i] = randomG2();
@@ -252,16 +227,14 @@ fn benchmarkG2Add(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("G2.add: {}ns/op\n", .{avg_ns});
+    print("G2.add: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkG2Mul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var inputs = try std.testing.allocator.alloc(G2, num_runs);
-    defer std.testing.allocator.free(inputs);
-    var scalars = try std.testing.allocator.alloc(Fr, num_runs);
-    defer std.testing.allocator.free(scalars);
+    var inputs = try allocator.alloc(G2, num_runs);
+    defer allocator.free(inputs);
+    var scalars = try allocator.alloc(Fr, num_runs);
+    defer allocator.free(scalars);
 
     for (0..num_runs) |i| {
         inputs[i] = randomG2();
@@ -277,16 +250,14 @@ fn benchmarkG2Mul(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("G2.mul: {}ns/op\n", .{avg_ns});
+    print("G2.mul: {d}ns/op\n", .{avg_ns});
 }
 
 fn benchmarkPairing(allocator: std.mem.Allocator, num_runs: usize) !void {
-    _ = allocator;
-    
-    var g1_inputs = try std.testing.allocator.alloc(G1, num_runs);
-    defer std.testing.allocator.free(g1_inputs);
-    var g2_inputs = try std.testing.allocator.alloc(G2, num_runs);
-    defer std.testing.allocator.free(g2_inputs);
+    var g1_inputs = try allocator.alloc(G1, num_runs);
+    defer allocator.free(g1_inputs);
+    var g2_inputs = try allocator.alloc(G2, num_runs);
+    defer allocator.free(g2_inputs);
 
     for (0..num_runs) |i| {
         g1_inputs[i] = randomG1();
@@ -302,7 +273,7 @@ fn benchmarkPairing(allocator: std.mem.Allocator, num_runs: usize) !void {
 
     const duration_ns = @as(u64, @intCast(end - start));
     const avg_ns = duration_ns / num_runs;
-    print("Pairing: {}ns/op\n", .{avg_ns});
+    print("Pairing: {d}ns/op\n", .{avg_ns});
 }
 
 pub fn main() !void {
@@ -310,11 +281,11 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var args = try std.process.argsAlloc(allocator);
+    const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        print("Usage: {} <num_runs> [internal|external]\n", .{args[0]});
+        print("Usage: {s} <num_runs> [internal|external]\n", .{args[0]});
         return;
     }
 
