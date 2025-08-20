@@ -15,7 +15,7 @@ test "Arithmetic: ADD basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Test 1: Simple addition (5 + 10 = 15)
@@ -103,7 +103,7 @@ test "Arithmetic: SUB basic operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Test: Simple subtraction (100 - 58 = 42)

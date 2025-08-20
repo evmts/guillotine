@@ -40,7 +40,7 @@ test "SELFDESTRUCT in static call fails with WriteProtection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -96,7 +96,7 @@ test "SELFDESTRUCT to self keeps balance" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine with balance
@@ -155,7 +155,7 @@ test "SELFDESTRUCT with refund gas calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -229,7 +229,7 @@ test "SELFDESTRUCT in CREATE context" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -319,7 +319,7 @@ test "SELFDESTRUCT multiple times in same transaction" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contracts in Guillotine

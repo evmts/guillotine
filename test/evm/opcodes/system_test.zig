@@ -24,7 +24,7 @@ test "CREATE: create new contract" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -85,7 +85,7 @@ test "CREATE: empty init code creates empty contract" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -136,7 +136,7 @@ test "CREATE: write protection in static call" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -185,7 +185,7 @@ test "CREATE: depth limit" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -239,7 +239,7 @@ test "CREATE2: create with deterministic address" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -302,7 +302,7 @@ test "CALL: basic call behavior" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -370,7 +370,7 @@ test "CALL: failed call" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -428,7 +428,7 @@ test "CALL: cold address access costs more gas" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -490,7 +490,7 @@ test "CALL: value transfer in static call fails" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -545,7 +545,7 @@ test "DELEGATECALL: execute code in current context" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -606,7 +606,7 @@ test "STATICCALL: read-only call" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -667,7 +667,7 @@ test "CALL: depth limit" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -726,7 +726,7 @@ test "CREATE: gas consumption" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -786,7 +786,7 @@ test "CREATE2: additional gas for hashing" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -848,7 +848,7 @@ test "CREATE: stack underflow" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -895,7 +895,7 @@ test "CALL: stack underflow" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -947,7 +947,7 @@ test "CREATE: memory expansion for init code" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -1010,7 +1010,7 @@ test "CREATE: EIP-3860 initcode size limit" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -1058,7 +1058,7 @@ test "CREATE: EIP-3860 initcode word gas" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract
@@ -1120,7 +1120,7 @@ test "CREATE2: EIP-3860 initcode size limit" {
 
     // Create EVM instance
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create contract

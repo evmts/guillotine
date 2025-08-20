@@ -35,7 +35,7 @@ pub fn main() !void {
     const db_interface = memory_db.to_database_interface();
 
     const stderr = std.io.getStdErr().writer();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, stderr.any());
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, stderr.any());
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);

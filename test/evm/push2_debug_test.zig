@@ -15,7 +15,7 @@ test "PUSH2 value interpretation" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Test PUSH2 0x000f (should push 15)
@@ -68,7 +68,7 @@ test "compare PUSH1 vs PUSH2 jump destinations" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Test 1: PUSH1 0x05 (should jump to position 5)

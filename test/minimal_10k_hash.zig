@@ -22,7 +22,7 @@ test "minimal 10k hash test" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     // Set up accounts
@@ -75,7 +75,7 @@ test "simple hash operation test" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
     
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);

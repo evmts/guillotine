@@ -11,10 +11,11 @@ test "StackFrame owns SimpleAnalysis and execution state" {
     // Create test bytecode
     const code = &[_]u8{ 0x60, 0x05, 0x60, 0x0A, 0x01, 0x00 }; // PUSH 5, PUSH 10, ADD, STOP
     
-    // Analyze code and get metadata
+    // Analyze code and get block gas costs
     const result = try SimpleAnalysis.analyze(allocator, code);
     const analysis = result.analysis;
-    const metadata = result.metadata;
+    const block_gas_costs = result.block_gas_costs;
+    defer allocator.free(block_gas_costs);
     
     // Create ops array (simplified for test)
     const ops = try allocator.alloc(*const anyopaque, analysis.inst_count);
@@ -31,12 +32,8 @@ test "StackFrame owns SimpleAnalysis and execution state" {
     // Create StackFrame that owns everything
     var frame = try StackFrame.init(
         1000000, // gas
-        false, // not static
         primitives.Address.ZERO_ADDRESS,
-        primitives.Address.ZERO_ADDRESS, // caller
-        0, // value
         analysis,
-        metadata,
         ops,
         host,
         db.to_database_interface(),
@@ -47,7 +44,6 @@ test "StackFrame owns SimpleAnalysis and execution state" {
     // Verify ownership
     try std.testing.expectEqual(@as(usize, 0), frame.ip);
     try std.testing.expectEqual(@as(u16, analysis.inst_count), frame.analysis.inst_count);
-    try std.testing.expectEqual(metadata.len, frame.metadata.len);
     try std.testing.expectEqual(ops.len, frame.ops.len);
     
     // Test that we can access analysis data directly

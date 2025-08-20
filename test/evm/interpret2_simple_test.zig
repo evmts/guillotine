@@ -6,7 +6,6 @@ const primitives = @import("primitives");
 // Import interpret2 components
 const interpret2 = evm.interpret2;
 const SimpleAnalysis = evm.SimpleAnalysis;
-const InstructionMetadata = evm.analysis2.InstructionMetadata;
 
 test "interpret2_simple: basic MUL" {
     const allocator = testing.allocator;
@@ -30,19 +29,28 @@ test "interpret2_simple: basic MUL" {
         .pc_to_inst = &.{},
         .bytecode = &code,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     

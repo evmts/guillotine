@@ -53,7 +53,7 @@ test "KECCAK256 opcode hashes empty data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -150,7 +150,7 @@ test "KECCAK256 opcode hashes test data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -250,7 +250,7 @@ test "KECCAK256 opcode hashes 32-byte data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);

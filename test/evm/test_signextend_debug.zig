@@ -13,7 +13,7 @@ test "SIGNEXTEND direct test" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
     

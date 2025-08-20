@@ -27,7 +27,7 @@ test "E2E: Revert conditions - require and revert opcodes" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test REVERT opcode directly
@@ -137,7 +137,7 @@ test "E2E: Arithmetic overflow - EVM wraparound behavior" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test MAX_UINT256 + 1 = 0 (wraparound)
@@ -268,7 +268,7 @@ test "E2E: Gas limits - controlled consumption and out-of-gas" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Simple gas consumption test - just do some operations
@@ -357,7 +357,7 @@ test "E2E: Stack underflow - empty stack operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test stack underflow - POP from empty stack
@@ -426,7 +426,7 @@ test "E2E: Division by zero - EVM behavior" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test division by zero (EVM returns 0)
@@ -522,7 +522,7 @@ test "E2E: Memory expansion - large offset testing" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test memory expansion with reasonable large offset
@@ -591,7 +591,7 @@ test "E2E: Invalid jumps - bad jump destinations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test jump to invalid destination (not JUMPDEST)

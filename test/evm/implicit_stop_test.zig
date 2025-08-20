@@ -15,7 +15,7 @@ test "implicit STOP: basic fall-through execution" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -51,7 +51,7 @@ test "implicit STOP: complex execution without explicit halt" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -84,7 +84,7 @@ test "implicit STOP: jump to bytecode end" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -115,7 +115,7 @@ test "implicit STOP: conditional jump falling through" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -141,7 +141,7 @@ test "implicit STOP: empty bytecode" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -168,7 +168,7 @@ test "implicit STOP: incomplete PUSH instruction at end" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -196,7 +196,7 @@ test "implicit STOP: gas consumption at bytecode end" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -228,7 +228,7 @@ test "implicit STOP: multiple PUSHes ending at exact bytecode boundary" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });
@@ -270,7 +270,7 @@ test "implicit STOP: PC at bytecode boundary after complex execution" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Vm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     var contract = try Evm.Contract.init(allocator, bytecode, .{ .address = Address.ZERO });

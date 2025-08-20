@@ -52,7 +52,7 @@ test "CALLDATASIZE opcode returns input data size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -152,7 +152,7 @@ test "CALLDATALOAD opcode loads 32 bytes from calldata" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -244,7 +244,7 @@ test "CALLDATALOAD opcode edge case - load beyond calldata pads with zeros" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -337,7 +337,7 @@ test "CALLDATACOPY opcode copies data to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -429,7 +429,7 @@ test "CALLDATACOPY edge case - copy beyond calldata pads with zeros" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -514,7 +514,7 @@ test "CALLDATASIZE with empty calldata returns 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);

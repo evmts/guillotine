@@ -87,7 +87,7 @@ test "EXTCODESIZE opcode - get size of deployed contract" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -199,7 +199,7 @@ test "EXTCODESIZE opcode - non-existent contract returns 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -333,7 +333,7 @@ test "EXTCODECOPY opcode - copy contract code to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -462,7 +462,7 @@ test "EXTCODECOPY opcode - copy beyond code length pads with zeros" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -591,7 +591,7 @@ test "EXTCODEHASH opcode - get hash of deployed contract code" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -704,7 +704,7 @@ test "EXTCODEHASH opcode - non-existent account returns 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -815,7 +815,7 @@ test "EXTCODEHASH opcode - empty account with balance returns keccak256('')" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);

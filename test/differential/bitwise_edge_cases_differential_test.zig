@@ -60,7 +60,7 @@ test "SHL opcode max shift (255) leaves only MSB" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -162,7 +162,7 @@ test "SHL opcode shift >= 256 returns 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -263,7 +263,7 @@ test "SHR opcode max shift (255) preserves only LSB" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -364,7 +364,7 @@ test "SAR opcode arithmetic shift of negative number" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -466,7 +466,7 @@ test "BYTE opcode out of range returns 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -567,7 +567,7 @@ test "SAR opcode shift >= 256 preserves sign" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -669,7 +669,7 @@ test "XOR opcode same value = 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);

@@ -55,7 +55,7 @@ test "SSTORE and SLOAD basic operation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -154,7 +154,7 @@ test "SSTORE max u256 value" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -247,7 +247,7 @@ test "SLOAD from uninitialized storage returns zero" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -341,7 +341,7 @@ test "SSTORE in static call fails with WriteProtection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -420,7 +420,7 @@ test "Multiple SSTORE to same slot updates value" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -523,7 +523,7 @@ test "SSTORE and SLOAD with max u256 key" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);

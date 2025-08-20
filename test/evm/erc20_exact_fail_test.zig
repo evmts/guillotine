@@ -15,7 +15,7 @@ test "reproduce exact ERC20 deployment failure" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Caller with funds
@@ -64,7 +64,7 @@ test "trace stack values before JUMPI" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1);

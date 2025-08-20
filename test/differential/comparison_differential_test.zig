@@ -111,7 +111,7 @@ test "LT opcode 5 < 10 = 1 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -195,7 +195,7 @@ test "GT opcode 10 > 5 = 1 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -273,7 +273,7 @@ test "EQ opcode 42 == 42 = 1 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -363,7 +363,7 @@ test "SLT opcode signed -1 < 1 = 1 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -453,7 +453,7 @@ test "SGT opcode signed 1 > -1 = 1 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -530,7 +530,7 @@ test "Simple PUSH and RETURN test (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -598,7 +598,7 @@ test "ISZERO opcode 0 == 0 ? 1 : 0 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);
@@ -683,7 +683,7 @@ test "ISZERO opcode 42 == 0 ? 1 : 0 (3x memory corruption test)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = address.from_u256(0x2222222222222222222222222222222222222222);

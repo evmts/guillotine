@@ -19,7 +19,7 @@ test "E2E: CREATE opcode creates new contract" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Contract that deploys a simple contract
@@ -68,7 +68,7 @@ test "E2E: CREATE with value transfer" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Give contract some balance
@@ -116,7 +116,7 @@ test "E2E: CREATE in static context fails" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Contract that tries CREATE
@@ -179,7 +179,7 @@ test "E2E: CREATE2 with salt creates deterministic address" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -224,7 +224,7 @@ test "E2E: CALL to existing contract" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Target contract that returns 0x42
@@ -283,7 +283,7 @@ test "E2E: CALL with value transfer" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Give caller some balance
@@ -338,7 +338,7 @@ test "E2E: CALLCODE executes in caller's context" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Target code that stores value
@@ -395,7 +395,7 @@ test "E2E: DELEGATECALL preserves original caller" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Target that returns CALLER
@@ -455,7 +455,7 @@ test "E2E: STATICCALL enforces read-only context" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Target that tries to write storage
@@ -519,7 +519,7 @@ test "E2E: GAS opcode returns remaining gas" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -561,7 +561,7 @@ test "E2E: CREATE at max depth fails" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Contract that recursively creates itself
@@ -606,7 +606,7 @@ test "E2E: CALL with insufficient gas" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Simple target
@@ -655,7 +655,7 @@ test "E2E: CREATE2 with same salt twice" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Contract that tries CREATE2 twice with same salt
@@ -717,7 +717,7 @@ test "E2E: DELEGATECALL with calldata forwarding" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Target that returns calldata
@@ -786,7 +786,7 @@ test "E2E: EIP-150 63/64 gas rule" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Target that returns remaining gas

@@ -41,7 +41,7 @@ test "Security: Stack overflow protection across all operation types" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -102,7 +102,7 @@ test "Security: Stack underflow protection across all operation types" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -189,7 +189,7 @@ test "Security: SWAP operations at stack capacity should succeed" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -235,7 +235,7 @@ test "Security: Stack boundary conditions at exactly 1024 elements" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -289,7 +289,7 @@ test "Security: Memory bounds checking with invalid offsets" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -374,7 +374,7 @@ test "Security: Memory expansion limit enforcement (32MB default)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -420,7 +420,7 @@ test "Security: Memory gas cost grows quadratically" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -478,7 +478,7 @@ test "Security: Gas limit enforcement across operation categories" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -540,7 +540,7 @@ test "Security: Gas exhaustion in complex operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -597,7 +597,7 @@ test "Security: Gas refund limits and calculations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -659,7 +659,7 @@ test "Security: Call depth limit enforcement at 1024 levels" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -756,7 +756,7 @@ test "Security: Depth tracking in nested calls" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -826,7 +826,7 @@ test "Security: Arithmetic operations handle integer overflow correctly" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -890,7 +890,7 @@ test "Security: Division by zero handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -953,7 +953,7 @@ test "Security: Modular arithmetic overflow protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1030,7 +1030,7 @@ test "Security: Zero-value transfer handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1088,7 +1088,7 @@ test "Security: Zero-value CREATE operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1140,7 +1140,7 @@ test "Security: Empty contract code execution" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1180,7 +1180,7 @@ test "Security: CALL to empty contract" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1238,7 +1238,7 @@ test "Security: Self-call detection and handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1290,7 +1290,7 @@ test "Security: Reentrancy with depth tracking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1349,7 +1349,7 @@ test "Security: Invalid jump destination handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1414,7 +1414,7 @@ test "Security: Valid jump destination validation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1496,7 +1496,7 @@ test "Security: Static call protection for state modification" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1563,7 +1563,7 @@ test "Security: Combined boundary conditions stress test" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 
@@ -1626,7 +1626,7 @@ test "Security: Attack vector simulation - DoS via resource exhaustion" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.build();
     defer evm.deinit();
 

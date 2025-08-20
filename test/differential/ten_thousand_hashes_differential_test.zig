@@ -73,7 +73,7 @@ test "ten-thousand-hashes differential: runtime and output match REVM" {
     // Guillotine create + call
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     try vm.state.set_balance(deployer, std.math.maxInt(u256));
     

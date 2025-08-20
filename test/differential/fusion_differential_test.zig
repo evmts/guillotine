@@ -26,7 +26,7 @@ fn runBoth(bytecode: []const u8, gas: u64) !struct { revm_ok: bool, revm_out: []
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
     try vm_instance.state.set_code(contract, bytecode);
     const params = evm.CallParams{ .call = .{

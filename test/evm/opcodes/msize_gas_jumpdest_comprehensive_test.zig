@@ -19,7 +19,7 @@ test "MSIZE (0x59): Get current memory size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -98,7 +98,7 @@ test "GAS (0x5A): Get remaining gas" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -171,7 +171,7 @@ test "JUMPDEST (0x5B): Mark valid jump destination" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -249,7 +249,7 @@ test "MSIZE, GAS, JUMPDEST: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -311,7 +311,7 @@ test "MSIZE: Memory expansion scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -367,7 +367,7 @@ test "GAS: Low gas scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -414,7 +414,7 @@ test "JUMPDEST: Code analysis integration" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -483,7 +483,7 @@ test "Stack operations: MSIZE and GAS push exactly one value" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 

@@ -19,7 +19,7 @@ test "POP (0x50): Remove top stack item" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -82,7 +82,7 @@ test "MLOAD (0x51): Load word from memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -142,7 +142,7 @@ test "MSTORE (0x52): Store 32 bytes to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -211,7 +211,7 @@ test "MSTORE8 (0x53): Store single byte to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -280,7 +280,7 @@ test "SLOAD (0x54): Load from storage" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -353,7 +353,7 @@ test "SSTORE (0x55): Store to storage" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -419,7 +419,7 @@ test "JUMP (0x56): Unconditional jump" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -483,7 +483,7 @@ test "JUMPI (0x57): Conditional jump" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -560,7 +560,7 @@ test "PC (0x58): Get program counter" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -622,7 +622,7 @@ test "Stack, Memory, and Control opcodes: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -719,7 +719,7 @@ test "SLOAD/SSTORE: EIP-2929 gas costs" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -776,7 +776,7 @@ test "Invalid opcode 0x4F" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -817,7 +817,7 @@ test "Memory operations: Large offset handling" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -861,7 +861,7 @@ test "Jump operations: Code analysis integration" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 

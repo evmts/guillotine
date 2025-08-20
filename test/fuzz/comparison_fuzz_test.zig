@@ -11,7 +11,7 @@ fn create_evm_context(allocator: std.mem.Allocator) !struct {
     frame: evm.Frame,
 } {
     var db = evm.MemoryDatabase.init(allocator);
-    const vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, 0, false, null);
+    const vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     
     const test_code = [_]u8{0x01}; // Simple ADD opcode
     var contract = evm.Contract.init(

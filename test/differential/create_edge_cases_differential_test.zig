@@ -48,7 +48,7 @@ test "CREATE opcode with insufficient balance fails" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -128,7 +128,7 @@ test "CREATE2 with same salt and init code produces same address" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -202,7 +202,7 @@ test "CREATE in static call fails with WriteProtection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -264,7 +264,7 @@ test "CREATE with no balance succeeds but creates empty contract" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -351,7 +351,7 @@ test "CREATE2 with large init code" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine
@@ -437,7 +437,7 @@ test "CREATE with init code that reverts" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     // Deploy contract in Guillotine

@@ -27,7 +27,7 @@ fn runBoth(bytecode: []const u8, calldata: []const u8, gas: u64) !struct {
     // Zig side
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     try vm.state.set_code(contract, bytecode);
     const params = evm.CallParams{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = calldata, .gas = gas } };
@@ -157,7 +157,7 @@ test "differential: minimal dispatcher parity for match and no-match" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
     try vm_instance.state.set_code(contract, bytecode);
 

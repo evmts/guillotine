@@ -44,7 +44,7 @@ test "debug: erc20.mint with full logging" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var builder = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     var vm = try builder.build();
     defer vm.deinit();
 

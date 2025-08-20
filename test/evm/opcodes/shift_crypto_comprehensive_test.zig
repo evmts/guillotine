@@ -18,7 +18,7 @@ test "SHL: Comprehensive shift left edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -111,7 +111,7 @@ test "SHR: Comprehensive logical shift right edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -199,7 +199,7 @@ test "SAR: Comprehensive arithmetic shift right edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -285,7 +285,7 @@ test "KECCAK256: Comprehensive hash edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -399,7 +399,7 @@ test "KECCAK256: Gas consumption patterns" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -474,7 +474,7 @@ test "KECCAK256: Memory expansion edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -545,7 +545,7 @@ test "Shifts: Combined operations and properties" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -653,7 +653,7 @@ test "Shift and Crypto: Stack underflow errors" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -713,7 +713,7 @@ test "Performance: Rapid shift operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 
@@ -783,7 +783,7 @@ test "KECCAK256: Hash collision resistance" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     defer evm.deinit();
 

@@ -15,7 +15,7 @@ test "RETURN sets output correctly" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     // Bytecode that stores 0xDEADBEEF and returns it
     const bytecode = &[_]u8{
@@ -51,6 +51,12 @@ test "RETURN sets output correctly" {
         .pc_to_inst = &.{},
         .bytecode = bytecode,
         .inst_count = 0,
+        .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
     
     var frame = try StackFrame.init(
@@ -102,7 +108,7 @@ test "Top-level call returns 32-byte value via RETURN" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // runtime: returns 32-byte 0x01
@@ -144,7 +150,7 @@ test "constructor returns runtime code" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     // Simple constructor that returns "HELLO"
     const init_code = &[_]u8{

@@ -38,7 +38,7 @@ fn runOurEvm(allocator: std.mem.Allocator, bytecode: []const u8) !struct { succe
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);

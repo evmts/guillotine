@@ -16,7 +16,7 @@ test "Integration: Arithmetic with conditional jumps" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create a simple contract that:
@@ -108,7 +108,7 @@ test "Integration: Complex arithmetic expression evaluation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -165,7 +165,7 @@ test "Integration: Modular arithmetic chain" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -222,7 +222,7 @@ test "Integration: Division by zero handling in expression" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -274,7 +274,7 @@ test "Integration: Bitwise operations with arithmetic" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -333,7 +333,7 @@ test "Integration: Stack manipulation with arithmetic" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -402,7 +402,7 @@ test "Integration: Comparison chain for range checking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -468,7 +468,7 @@ test "Integration: EXP with modular arithmetic" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses
@@ -520,7 +520,7 @@ test "Integration: Signed arithmetic with comparisons" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Create test addresses

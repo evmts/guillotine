@@ -64,7 +64,7 @@ test "ten-thousand-hashes benchmark executes successfully" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Caller and funding
@@ -115,7 +115,7 @@ test "deploy function creates contract successfully" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -139,7 +139,7 @@ test "deploy function handles deployment failure" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -171,7 +171,7 @@ test "ten-thousand-hashes benchmark gas consumption" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -266,7 +266,7 @@ test "ten-thousand-hashes using call" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null); // Regular mode for deployment
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null); // Regular mode for deployment
     defer vm.deinit();
 
     // Caller and funding
@@ -319,7 +319,7 @@ test "ten-thousand-hashes gas consumption with call" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null); // Regular mode for deployment
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null); // Regular mode for deployment
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);

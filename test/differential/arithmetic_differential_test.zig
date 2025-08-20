@@ -67,7 +67,7 @@ test "ADD opcode 0 + 0 = 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -179,7 +179,7 @@ test "ADD opcode 1 + 1 = 2" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -291,7 +291,7 @@ test "ADD opcode max_u256 + 1 = 0 (overflow)" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -398,7 +398,7 @@ test "SUB opcode 10 - 5 = 5" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -499,7 +499,7 @@ test "SUB opcode underflow 5 - 10 = max_u256 - 4" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -605,7 +605,7 @@ test "MUL opcode 7 * 6 = 42" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -717,7 +717,7 @@ test "DIV opcode 6 / 42 = 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -829,7 +829,7 @@ test "DIV opcode division by zero = 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -941,7 +941,7 @@ test "DIV opcode division by zero 42 / 0 = 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1046,7 +1046,7 @@ test "MOD opcode 50 % 7 = 1" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1140,7 +1140,7 @@ test "EXP opcode 2 ** 3 = 8" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1234,7 +1234,7 @@ test "SDIV opcode signed division -8 / 2 = -4" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1327,7 +1327,7 @@ test "SMOD opcode signed modulo -8 % 3 = -2" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1425,7 +1425,7 @@ test "ADDMOD opcode (5 + 10) % 7 = 1" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1523,7 +1523,7 @@ test "MULMOD opcode (5 * 6) % 7 = 2" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1617,7 +1617,7 @@ test "SIGNEXTEND opcode sign extend byte 1 of 0x80" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm_instance = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm_instance.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1724,7 +1724,7 @@ test "ADD fusion: PUSH 5, PUSH 10, ADD vs PUSH 5, MSTORE, PUSH 10, ADD" {
     defer memory_db_fusion.deinit();
 
     const db_interface_fusion = memory_db_fusion.to_database_interface();
-    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, null);
     defer vm_instance_fusion.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1746,7 +1746,7 @@ test "ADD fusion: PUSH 5, PUSH 10, ADD vs PUSH 5, MSTORE, PUSH 10, ADD" {
     defer memory_db_non_fusion.deinit();
 
     const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
-    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, null);
     defer vm_instance_non_fusion.deinit();
 
     try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
@@ -1840,7 +1840,7 @@ test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
     defer memory_db_fusion.deinit();
 
     const db_interface_fusion = memory_db_fusion.to_database_interface();
-    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, null);
     defer vm_instance_fusion.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1862,7 +1862,7 @@ test "SUB fusion: PUSH 5, PUSH 10, SUB vs PUSH 5, MSTORE, PUSH 10, SUB" {
     defer memory_db_non_fusion.deinit();
 
     const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
-    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, null);
     defer vm_instance_non_fusion.deinit();
 
     try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
@@ -1956,7 +1956,7 @@ test "MUL fusion: PUSH 6, PUSH 7, MUL vs PUSH 6, MSTORE, PUSH 7, MUL" {
     defer memory_db_fusion.deinit();
 
     const db_interface_fusion = memory_db_fusion.to_database_interface();
-    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, null);
     defer vm_instance_fusion.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -1978,7 +1978,7 @@ test "MUL fusion: PUSH 6, PUSH 7, MUL vs PUSH 6, MSTORE, PUSH 7, MUL" {
     defer memory_db_non_fusion.deinit();
 
     const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
-    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, null);
     defer vm_instance_non_fusion.deinit();
 
     try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);
@@ -2072,7 +2072,7 @@ test "DIV fusion: PUSH 42, PUSH 6, DIV vs PUSH 42, MSTORE, PUSH 6, DIV" {
     defer memory_db_fusion.deinit();
 
     const db_interface_fusion = memory_db_fusion.to_database_interface();
-    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, 0, false, null);
+    var vm_instance_fusion = try evm.Evm.init(allocator, db_interface_fusion, null, null, null, null);
     defer vm_instance_fusion.deinit();
 
     const contract_address = Address.from_u256(0x2222222222222222222222222222222222222222);
@@ -2094,7 +2094,7 @@ test "DIV fusion: PUSH 42, PUSH 6, DIV vs PUSH 42, MSTORE, PUSH 6, DIV" {
     defer memory_db_non_fusion.deinit();
 
     const db_interface_non_fusion = memory_db_non_fusion.to_database_interface();
-    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, 0, false, null);
+    var vm_instance_non_fusion = try evm.Evm.init(allocator, db_interface_non_fusion, null, null, null, null);
     defer vm_instance_non_fusion.deinit();
 
     try vm_instance_non_fusion.state.set_code(contract_address, &non_fusion_bytecode);

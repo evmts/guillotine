@@ -46,8 +46,6 @@ pub fn main() !void {
         null, // table
         null, // chain_rules
         null, // context
-        0,    // depth
-        false, // read_only
         stderr.any(), // tracer - this enables debug output
     );
     defer vm.deinit();

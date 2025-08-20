@@ -26,7 +26,7 @@ test "Integration: Complex arithmetic calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 
@@ -94,7 +94,7 @@ test "Integration: Modular arithmetic with overflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 
@@ -158,7 +158,7 @@ test "Integration: Fibonacci sequence calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 
@@ -234,7 +234,7 @@ test "Integration: Conditional arithmetic based on comparison" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 
@@ -327,7 +327,7 @@ test "Integration: Calculate average of multiple values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 
@@ -397,7 +397,7 @@ test "Integration: Complex ADDMOD and MULMOD calculations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 
@@ -484,7 +484,7 @@ test "Integration: Exponentiation chain" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
 
     defer vm.deinit();
 

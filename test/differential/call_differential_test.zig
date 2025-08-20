@@ -23,7 +23,7 @@ fn runBoth(bytecode: []const u8, target: Address.Address, gas: u64) !struct { ok
     const MemoryDatabase = evm.MemoryDatabase;
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     try vm.state.set_code(target, bytecode);
     const params = evm.CallParams{ .call = .{ .caller = caller, .to = target, .value = 0, .input = &[_]u8{}, .gas = gas } };

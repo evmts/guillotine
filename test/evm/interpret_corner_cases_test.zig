@@ -24,7 +24,7 @@ test "Interpret: gas exactly equals block cost" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // 3 PUSH1 operations = 9 gas exactly
@@ -60,7 +60,7 @@ test "Interpret: gas one less than block cost" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -97,7 +97,7 @@ test "Interpret: stack exactly at requirement for block" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // ADD requires exactly 2 stack items
@@ -132,7 +132,7 @@ test "Interpret: stack at exactly 1024 items with growth" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Create bytecode that pushes 1024 items (maximum stack)
@@ -172,7 +172,7 @@ test "Interpret: fused PUSH+JUMP to position 0" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -206,7 +206,7 @@ test "Interpret: fused PUSH+JUMP to out of bounds" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -242,7 +242,7 @@ test "Interpret: JUMPI with condition exactly 1" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -290,7 +290,7 @@ test "Interpret: JUMPI with max u256 condition" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -336,7 +336,7 @@ test "Interpret: unresolved JUMP to valid destination" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Dynamic jump where destination is computed
@@ -385,7 +385,7 @@ test "Interpret: unresolved JUMPI with dynamic destination" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Dynamic conditional jump
@@ -439,7 +439,7 @@ test "Interpret: KECCAK with immediate zero size" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -484,7 +484,7 @@ test "Interpret: KECCAK with max offset causing overflow check" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -526,7 +526,7 @@ test "Interpret: dynamic gas exactly equals remaining" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // MSTORE has dynamic gas cost for memory expansion
@@ -565,7 +565,7 @@ test "Interpret: jump to JUMPDEST with unmapped pc_to_block_start" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Create bytecode with potential edge case in pc mapping
@@ -602,7 +602,7 @@ test "Interpret: word immediate with value 0" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     const bytecode = &[_]u8{
@@ -647,7 +647,7 @@ test "Interpret: dispatcher with collision in function selectors" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Dispatcher checking multiple selectors
@@ -715,7 +715,7 @@ test "Interpret: deep recursion until max depth" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Contract that calls itself
@@ -774,7 +774,7 @@ test "Interpret: instruction with invalid next_instruction" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Bytecode that might cause edge cases in instruction stream
@@ -815,7 +815,7 @@ test "Interpret: approaching MAX_ITERATIONS in safe mode" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     
-    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     
     // Create a very long loop that would exceed MAX_ITERATIONS

@@ -14,7 +14,7 @@ test "REVM comparison: ADD 5 + 10 = 15" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -65,7 +65,7 @@ test "REVM comparison: ADD overflow MAX + 1 = 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -116,7 +116,7 @@ test "REVM comparison: SUB 100 - 58 = 42" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -167,7 +167,7 @@ test "REVM comparison: SUB underflow 5 - 10" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -218,7 +218,7 @@ test "REVM comparison: MUL 7 * 6 = 42" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -269,7 +269,7 @@ test "REVM comparison: DIV 84 / 2 = 42" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -320,7 +320,7 @@ test "REVM comparison: DIV by zero 10 / 0 = 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -371,7 +371,7 @@ test "REVM comparison: MOD 17 % 5 = 2" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -422,7 +422,7 @@ test "REVM comparison: MOD by zero 10 % 0 = 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -473,7 +473,7 @@ test "REVM comparison: SDIV -10 / 3 = -3" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -528,7 +528,7 @@ test "REVM comparison: SDIV by zero -10 / 0 = 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -583,7 +583,7 @@ test "REVM comparison: SMOD -10 % 3 = -1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -638,7 +638,7 @@ test "REVM comparison: SMOD by zero -10 % 0 = 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -693,7 +693,7 @@ test "REVM comparison: SDIV MIN_INT256 / -1 overflow" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -752,7 +752,7 @@ test "REVM comparison: ADDMOD (10 + 10) % 8 = 4" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -803,7 +803,7 @@ test "REVM comparison: ADDMOD (10 + 10) % 0 = 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -854,7 +854,7 @@ test "REVM comparison: ADDMOD MAX + MAX % 10" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -913,7 +913,7 @@ test "REVM comparison: MULMOD (10 * 10) % 8 = 4" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -964,7 +964,7 @@ test "REVM comparison: EXP 2 ** 3 = 8" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1011,7 +1011,7 @@ test "REVM comparison: SIGNEXTEND 0xFF from byte 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1062,7 +1062,7 @@ test "REVM comparison: LT 5 < 10 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1113,7 +1113,7 @@ test "REVM comparison: GT 10 > 5 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1164,7 +1164,7 @@ test "REVM comparison: EQ 42 == 42 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1215,7 +1215,7 @@ test "REVM comparison: ISZERO 0 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1266,7 +1266,7 @@ test "REVM comparison: SLT -1 < 1 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1321,7 +1321,7 @@ test "REVM comparison: SGT 1 > -1 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1376,7 +1376,7 @@ test "REVM comparison: BYTE extracts byte at index" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1423,7 +1423,7 @@ test "REVM comparison: AND 0xFF & 0x0F = 0x0F" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1474,7 +1474,7 @@ test "REVM comparison: OR 0xF0 | 0x0F = 0xFF" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1525,7 +1525,7 @@ test "REVM comparison: XOR 0xFF ^ 0xF0 = 0x0F" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1576,7 +1576,7 @@ test "REVM comparison: NOT ~0 = MAX" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1627,7 +1627,7 @@ test "REVM comparison: SHL 1 << 4 = 16" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1678,7 +1678,7 @@ test "REVM comparison: SHR 16 >> 4 = 1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1729,7 +1729,7 @@ test "REVM comparison: SAR -16 >> 4 = -1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1784,7 +1784,7 @@ test "REVM comparison: POP removes top stack item" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1835,7 +1835,7 @@ test "REVM comparison: MLOAD loads from memory" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1882,7 +1882,7 @@ test "REVM comparison: MSTORE stores to memory" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1929,7 +1929,7 @@ test "REVM comparison: MSTORE8 stores single byte" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -1976,7 +1976,7 @@ test "REVM comparison: MSIZE returns memory size" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2023,7 +2023,7 @@ test "REVM comparison: SLOAD loads from storage" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2070,7 +2070,7 @@ test "REVM comparison: SSTORE in call context" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2117,7 +2117,7 @@ test "REVM comparison: JUMP to valid destination" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2164,7 +2164,7 @@ test "REVM comparison: JUMPI jump taken" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2202,7 +2202,7 @@ test "REVM comparison: PC returns program counter" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2249,7 +2249,7 @@ test "REVM comparison: GAS returns remaining gas" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2296,7 +2296,7 @@ test "REVM comparison: PUSH0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2343,7 +2343,7 @@ test "REVM comparison: PUSH1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2390,7 +2390,7 @@ test "REVM comparison: PUSH2" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2437,7 +2437,7 @@ test "REVM comparison: PUSH3" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2484,7 +2484,7 @@ test "REVM comparison: PUSH4" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2531,7 +2531,7 @@ test "REVM comparison: PUSH5" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2578,7 +2578,7 @@ test "REVM comparison: PUSH6" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2625,7 +2625,7 @@ test "REVM comparison: PUSH7" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2672,7 +2672,7 @@ test "REVM comparison: PUSH8" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2720,7 +2720,7 @@ test "REVM comparison: PUSH9" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2768,7 +2768,7 @@ test "REVM comparison: PUSH10" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2816,7 +2816,7 @@ test "REVM comparison: PUSH11" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2864,7 +2864,7 @@ test "REVM comparison: PUSH12" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2912,7 +2912,7 @@ test "REVM comparison: PUSH13" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -2960,7 +2960,7 @@ test "REVM comparison: PUSH14" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3008,7 +3008,7 @@ test "REVM comparison: PUSH15" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3056,7 +3056,7 @@ test "REVM comparison: PUSH16" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3105,7 +3105,7 @@ test "REVM comparison: PUSH17" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3154,7 +3154,7 @@ test "REVM comparison: PUSH18" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3203,7 +3203,7 @@ test "REVM comparison: PUSH19" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3252,7 +3252,7 @@ test "REVM comparison: PUSH20" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3301,7 +3301,7 @@ test "REVM comparison: PUSH21" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3350,7 +3350,7 @@ test "REVM comparison: PUSH22" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3399,7 +3399,7 @@ test "REVM comparison: PUSH23" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3448,7 +3448,7 @@ test "REVM comparison: PUSH24" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3498,7 +3498,7 @@ test "REVM comparison: PUSH25" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3548,7 +3548,7 @@ test "REVM comparison: PUSH26" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3598,7 +3598,7 @@ test "REVM comparison: PUSH27" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3648,7 +3648,7 @@ test "REVM comparison: PUSH28" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3698,7 +3698,7 @@ test "REVM comparison: PUSH29" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3748,7 +3748,7 @@ test "REVM comparison: PUSH30" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3798,7 +3798,7 @@ test "REVM comparison: PUSH31" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3848,7 +3848,7 @@ test "REVM comparison: PUSH32" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3899,7 +3899,7 @@ test "REVM comparison: DUP1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3946,7 +3946,7 @@ test "REVM comparison: DUP2" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -3993,7 +3993,7 @@ test "REVM comparison: DUP3" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4040,7 +4040,7 @@ test "REVM comparison: DUP4" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4088,7 +4088,7 @@ test "REVM comparison: DUP5" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4136,7 +4136,7 @@ test "REVM comparison: DUP6" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4184,7 +4184,7 @@ test "REVM comparison: DUP7" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4232,7 +4232,7 @@ test "REVM comparison: DUP8" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4281,7 +4281,7 @@ test "REVM comparison: DUP9" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4330,7 +4330,7 @@ test "REVM comparison: DUP10" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4379,7 +4379,7 @@ test "REVM comparison: DUP11" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4428,7 +4428,7 @@ test "REVM comparison: DUP12" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4478,7 +4478,7 @@ test "REVM comparison: DUP13" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4528,7 +4528,7 @@ test "REVM comparison: DUP14" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4578,7 +4578,7 @@ test "REVM comparison: DUP15" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4628,7 +4628,7 @@ test "REVM comparison: DUP16" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4679,7 +4679,7 @@ test "REVM comparison: SWAP1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4726,7 +4726,7 @@ test "REVM comparison: SWAP2" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4773,7 +4773,7 @@ test "REVM comparison: SWAP3" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4821,7 +4821,7 @@ test "REVM comparison: SWAP4" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4869,7 +4869,7 @@ test "REVM comparison: SWAP5" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4917,7 +4917,7 @@ test "REVM comparison: SWAP6" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -4965,7 +4965,7 @@ test "REVM comparison: SWAP7" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5014,7 +5014,7 @@ test "REVM comparison: SWAP8" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5063,7 +5063,7 @@ test "REVM comparison: SWAP9" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5112,7 +5112,7 @@ test "REVM comparison: SWAP10" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5161,7 +5161,7 @@ test "REVM comparison: SWAP11" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5211,7 +5211,7 @@ test "REVM comparison: SWAP12" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5261,7 +5261,7 @@ test "REVM comparison: SWAP13" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5311,7 +5311,7 @@ test "REVM comparison: SWAP14" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5361,7 +5361,7 @@ test "REVM comparison: SWAP15" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5412,7 +5412,7 @@ test "REVM comparison: SWAP16" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5463,7 +5463,7 @@ test "REVM comparison: LOG0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5511,7 +5511,7 @@ test "REVM comparison: LOG1" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5559,7 +5559,7 @@ test "REVM comparison: LOG2" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5607,7 +5607,7 @@ test "REVM comparison: LOG3" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5656,7 +5656,7 @@ test "REVM comparison: LOG4" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5705,7 +5705,7 @@ test "REVM comparison: RETURN" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5752,7 +5752,7 @@ test "REVM comparison: REVERT" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5788,7 +5788,7 @@ test "REVM comparison: CODECOPY copies code to memory" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5836,7 +5836,7 @@ test "REVM comparison: ADDRESS" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5883,7 +5883,7 @@ test "REVM comparison: CALLER" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5930,7 +5930,7 @@ test "REVM comparison: CALLVALUE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -5977,7 +5977,7 @@ test "REVM comparison: CALLDATASIZE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6024,7 +6024,7 @@ test "REVM comparison: CODESIZE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6071,7 +6071,7 @@ test "REVM comparison: GASPRICE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6118,7 +6118,7 @@ test "REVM comparison: BLOCKHASH" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6165,7 +6165,7 @@ test "REVM comparison: COINBASE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6212,7 +6212,7 @@ test "REVM comparison: TIMESTAMP" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6259,7 +6259,7 @@ test "REVM comparison: NUMBER" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6306,7 +6306,7 @@ test "REVM comparison: DIFFICULTY" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6353,7 +6353,7 @@ test "REVM comparison: GASLIMIT" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6400,7 +6400,7 @@ test "REVM comparison: CHAINID" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6447,7 +6447,7 @@ test "REVM comparison: SELFBALANCE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6494,7 +6494,7 @@ test "REVM comparison: BASEFEE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6541,7 +6541,7 @@ test "REVM comparison: KECCAK256 empty" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6588,7 +6588,7 @@ test "REVM comparison: KECCAK256 hello" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6637,7 +6637,7 @@ test "REVM comparison: CALL basic" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6685,7 +6685,7 @@ test "REVM comparison: DELEGATECALL" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6733,7 +6733,7 @@ test "REVM comparison: STATICCALL" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6781,7 +6781,7 @@ test "REVM comparison: CALLCODE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6829,7 +6829,7 @@ test "REVM comparison: CREATE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6878,7 +6878,7 @@ test "REVM comparison: CREATE2" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6926,7 +6926,7 @@ test "REVM comparison: CALLDATALOAD" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -6973,7 +6973,7 @@ test "REVM comparison: CALLDATACOPY" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7021,7 +7021,7 @@ test "REVM comparison: RETURNDATASIZE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7068,7 +7068,7 @@ test "REVM comparison: RETURNDATACOPY empty" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7116,7 +7116,7 @@ test "REVM comparison: EXTCODESIZE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7163,7 +7163,7 @@ test "REVM comparison: EXTCODECOPY" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7211,7 +7211,7 @@ test "REVM comparison: EXTCODEHASH" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7258,7 +7258,7 @@ test "REVM comparison: BALANCE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7305,7 +7305,7 @@ test "REVM comparison: ORIGIN" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7352,7 +7352,7 @@ test "REVM comparison: MCOPY" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7400,7 +7400,7 @@ test "REVM comparison: TLOAD" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7447,7 +7447,7 @@ test "REVM comparison: TSTORE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7494,7 +7494,7 @@ test "REVM comparison: BLOBHASH" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7541,7 +7541,7 @@ test "REVM comparison: BLOBBASEFEE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7588,7 +7588,7 @@ test "REVM comparison: STOP" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7621,7 +7621,7 @@ test "REVM comparison: INVALID" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7657,7 +7657,7 @@ test "REVM comparison: JUMPDEST" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7704,7 +7704,7 @@ test "REVM comparison: SELFDESTRUCT" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7737,7 +7737,7 @@ test "REVM comparison: Precompile ecrecover" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7785,7 +7785,7 @@ test "REVM comparison: Precompile SHA256" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7834,7 +7834,7 @@ test "REVM comparison: Precompile RIPEMD160" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7883,7 +7883,7 @@ test "REVM comparison: Precompile identity" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7932,7 +7932,7 @@ test "REVM comparison: Precompile modexp" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -7984,7 +7984,7 @@ test "REVM comparison: Precompile ecAdd" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8032,7 +8032,7 @@ test "REVM comparison: Precompile ecMul" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8080,7 +8080,7 @@ test "REVM comparison: Precompile ecPairing" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8129,7 +8129,7 @@ test "REVM comparison: Precompile blake2f" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8178,7 +8178,7 @@ test "REVM comparison: MULMOD 10 * 10 % 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8229,7 +8229,7 @@ test "REVM comparison: MULMOD MAX * 2 % 3" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8280,7 +8280,7 @@ test "REVM comparison: EXP 2 ** 256" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8327,7 +8327,7 @@ test "REVM comparison: EXP 0 ** 0" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8374,7 +8374,7 @@ test "REVM comparison: BYTE index 32" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8421,7 +8421,7 @@ test "REVM comparison: SIGNEXTEND byte 31" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8472,7 +8472,7 @@ test "REVM comparison: MLOAD at large offset" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8519,7 +8519,7 @@ test "REVM comparison: ADD with empty stack" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8555,7 +8555,7 @@ test "REVM comparison: Stack depth 1024" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8847,7 +8847,7 @@ test "REVM comparison: JUMP to non-JUMPDEST" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8883,7 +8883,7 @@ test "REVM comparison: JUMPI with MAX condition" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8924,7 +8924,7 @@ test "REVM comparison: CALLDATACOPY beyond data" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -8972,7 +8972,7 @@ test "REVM comparison: RETURNDATACOPY no data" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9008,7 +9008,7 @@ test "REVM comparison: CREATE2 address calc" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9056,7 +9056,7 @@ test "REVM comparison: EXTCODEHASH empty" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9103,7 +9103,7 @@ test "REVM comparison: BLOCKHASH future block" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9150,7 +9150,7 @@ test "REVM comparison: SHL shift > 256" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9197,7 +9197,7 @@ test "REVM comparison: SHR shift > 256" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9248,7 +9248,7 @@ test "REVM comparison: SAR shift > 256 negative" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9299,7 +9299,7 @@ test "REVM comparison: ECRECOVER invalid sig" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9348,7 +9348,7 @@ test "REVM comparison: MSTORE8 at odd offset" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9395,7 +9395,7 @@ test "REVM comparison: ADDMOD MAX + MAX % MAX" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9454,7 +9454,7 @@ test "REVM comparison: CODECOPY beyond code" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9502,7 +9502,7 @@ test "REVM comparison: EXTCODECOPY non-existent" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9550,7 +9550,7 @@ test "REVM comparison: RETURNDATALOAD no data" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);
@@ -9586,7 +9586,7 @@ test "REVM comparison: Insufficient gas for MSTORE" {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = Address.from_u256(0x1100000000000000000000000000000000000000);

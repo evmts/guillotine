@@ -19,7 +19,7 @@ test "EXTCODESIZE (0x3B): Get external code size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Deploy a contract with code
@@ -89,7 +89,7 @@ test "EXTCODECOPY (0x3C): Copy external code to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const external_code = [_]u8{
@@ -172,7 +172,7 @@ test "RETURNDATASIZE (0x3D): Get return data size" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -229,7 +229,7 @@ test "RETURNDATACOPY (0x3E): Copy return data to memory" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -297,7 +297,7 @@ test "EXTCODEHASH (0x3F): Get external code hash" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Set up contract with known code
@@ -361,7 +361,7 @@ test "BLOCKHASH (0x40): Get block hash" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Set up block context
@@ -453,7 +453,7 @@ test "COINBASE (0x41): Get block coinbase" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Set coinbase address
@@ -514,7 +514,7 @@ test "TIMESTAMP (0x42): Get block timestamp" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_cases = [_]u64{
@@ -581,7 +581,7 @@ test "NUMBER (0x43): Get block number" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_cases = [_]u64{
@@ -649,7 +649,7 @@ test "PREVRANDAO (0x44): Get previous RANDAO" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Post-merge, DIFFICULTY opcode returns PREVRANDAO
@@ -720,7 +720,7 @@ test "EXTCODE* opcodes: Gas consumption with EIP-2929" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Set up external code
@@ -777,7 +777,7 @@ test "Block opcodes: Gas consumption" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -850,7 +850,7 @@ test "RETURNDATACOPY: Out of bounds access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -911,7 +911,7 @@ test "Memory copy opcodes: Memory expansion" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Set up external code
@@ -964,7 +964,7 @@ test "BLOCKHASH: Edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const alice_addr = [_]u8{0x11} ** 20;

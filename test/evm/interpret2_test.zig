@@ -3,9 +3,8 @@ const testing = std.testing;
 const evm = @import("evm");
 const primitives = @import("primitives");
 
-// Import interpret2 components
+// Import interpret2 components  
 const interpret2 = evm.interpret2;
-const InstructionMetadata = evm.analysis2.InstructionMetadata;
 
 test "interpret2: simple ADD operation" {
     const allocator = testing.allocator;
@@ -29,20 +28,28 @@ test "interpret2: simple ADD operation" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     // Create frame
     var frame = try evm.Frame.init(
-        1_000_000,                    // gas
+        1_000_000,                    // gas_remaining
         primitives.Address.ZERO_ADDRESS,  // contract_address
         empty_analysis,               // analysis
-        empty_metadata,               // metadata
         empty_ops,                    // ops
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -79,19 +86,27 @@ test "interpret2: PUSH operations" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -131,19 +146,27 @@ test "interpret2: JUMP to valid destination" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -183,19 +206,27 @@ test "interpret2: JUMPI conditional jump taken" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -235,19 +266,27 @@ test "interpret2: JUMPI conditional jump not taken" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -284,19 +323,27 @@ test "interpret2: DUP and SWAP operations" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -334,19 +381,27 @@ test "interpret2: invalid JUMP destination" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     
@@ -386,19 +441,27 @@ test "interpret2: arithmetic operations" {
         .bytecode = &code,
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*evm.Frame) evm.ExecutionError.Error!noreturn = &.{};
     
     var frame = try evm.Frame.init(
-        1_000_000,
-        primitives.Address.ZERO_ADDRESS,
-        empty_analysis,
-        empty_metadata,
-        empty_ops,
-        host,
-        memory_db.to_database_interface(),
-        allocator
+        1_000_000,                    // gas_remaining
+        primitives.Address.ZERO_ADDRESS,  // contract_address
+        empty_analysis,               // analysis
+        empty_ops,                    // ops
+        host,                         // host
+        memory_db.to_database_interface(), // state
+        allocator,                    // allocator
+        false,                        // is_static
+        primitives.Address.ZERO_ADDRESS,  // caller
+        0,                            // value
+        &.{},                         // input_buffer
     );
     defer frame.deinit(allocator);
     

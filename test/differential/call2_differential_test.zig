@@ -95,7 +95,7 @@ test "call2 differential: ERC20 transfer with REVM, call, call, and call2" {
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
         
         try vm.state.set_balance(deployer, std.math.maxInt(u256));
@@ -136,7 +136,7 @@ test "call2 differential: ERC20 transfer with REVM, call, call, and call2" {
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
         
         try vm.state.set_balance(deployer, std.math.maxInt(u256));
@@ -177,7 +177,7 @@ test "call2 differential: ERC20 transfer with REVM, call, call, and call2" {
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
         
         try vm.state.set_balance(deployer, std.math.maxInt(u256));
@@ -264,7 +264,7 @@ test "call2 differential: ten-thousand-hashes with REVM, call, call, and call2" 
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
         
         try vm.state.set_balance(deployer, std.math.maxInt(u256));
@@ -303,7 +303,7 @@ test "call2 differential: ten-thousand-hashes with REVM, call, call, and call2" 
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
         
         try vm.state.set_balance(deployer, std.math.maxInt(u256));
@@ -342,7 +342,7 @@ test "call2 differential: ten-thousand-hashes with REVM, call, call, and call2" 
     {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
         
         try vm.state.set_balance(deployer, std.math.maxInt(u256));

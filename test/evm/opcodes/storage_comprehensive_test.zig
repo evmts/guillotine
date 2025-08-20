@@ -24,7 +24,7 @@ test "SLOAD (0x54): Load from storage" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const code = [_]u8{0x54}; // SLOAD
@@ -73,7 +73,7 @@ test "SLOAD: Load from uninitialized slot returns zero" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -117,7 +117,7 @@ test "SLOAD: Multiple loads from same slot" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -164,7 +164,7 @@ test "SLOAD: EIP-2929 cold/warm access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -227,7 +227,7 @@ test "SSTORE (0x55): Store to storage" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const code = [_]u8{0x55}; // SSTORE
@@ -274,7 +274,7 @@ test "SSTORE: Static call protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -354,7 +354,7 @@ test "SSTORE: EIP-2200 gas cost scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -415,7 +415,7 @@ test "SSTORE: Large storage values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -472,7 +472,7 @@ test "Storage opcodes: Gas consumption patterns" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.with_hardfork(.ISTANBUL).build();
     defer evm.deinit();
 
@@ -537,7 +537,7 @@ test "Storage opcodes: Stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test SLOAD with empty stack
@@ -613,7 +613,7 @@ test "Storage: Multiple consecutive operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const code = [_]u8{
@@ -694,7 +694,7 @@ test "SSTORE: Overwriting values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const slot = 0xBEEF;
@@ -749,7 +749,7 @@ test "SSTORE: EIP-2200 complete gas cost scenarios" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -818,7 +818,7 @@ test "SSTORE: Zero value edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -869,7 +869,7 @@ test "SSTORE: Same value edge cases" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -934,7 +934,7 @@ test "Storage: Boundary value testing" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const boundary_values = [_]u256{
@@ -1000,7 +1000,7 @@ test "Storage: Large slot number testing" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const large_slots = [_]u256{
@@ -1066,7 +1066,7 @@ test "Storage: Contract slot warming pattern" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -1121,7 +1121,7 @@ test "Storage: Complex access patterns" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -1178,7 +1178,7 @@ test "SSTORE: EIP-1706 gas stipend protection" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     var evm = try builder.with_hardfork(.ISTANBUL).build();
     defer evm.deinit();
 
@@ -1223,7 +1223,7 @@ test "Storage: Rapid alternating operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -1280,7 +1280,7 @@ test "Storage: Multiple contracts isolation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create two different contracts

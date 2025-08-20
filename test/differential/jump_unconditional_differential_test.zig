@@ -40,7 +40,7 @@ test "unconditional JUMP (fused PUSH+JUMP) skips revert and returns 1" {
     // Guillotine setup
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     try vm.state.set_code(contract, &bytecode);
     const params = evm.CallParams{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = &[_]u8{}, .gas = 1_000_000 } };
@@ -87,7 +87,7 @@ test "unconditional JUMP to JUMPDEST immediately (no-op jump) returns 1" {
     // Guillotine
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+    var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
     defer vm.deinit();
     try vm.state.set_code(contract, &bytecode);
     const params = evm.CallParams{ .call = .{ .caller = caller, .to = contract, .value = 0, .input = &[_]u8{}, .gas = 1_000_000 } };

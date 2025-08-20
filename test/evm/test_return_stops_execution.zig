@@ -39,7 +39,7 @@ test "RETURN opcode must stop execution during contract deployment - reproduces 
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Set up contract for deployment
@@ -113,7 +113,7 @@ test "Minimal RETURN stops execution test" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = Address.from_u256(0x1000);

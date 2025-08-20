@@ -34,7 +34,7 @@ test "CALL: stub behavior always returns 0" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -90,7 +90,7 @@ test "CALL: memory expansion undercharging" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -156,7 +156,7 @@ test "CALL: value transfer in static context fails" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -209,7 +209,7 @@ test "CALL: with calldata" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -270,7 +270,7 @@ test "CALL: at maximum depth" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -327,7 +327,7 @@ test "CALL: gas calculation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -387,7 +387,7 @@ test "CALL: to zero address" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -439,7 +439,7 @@ test "CALL: insufficient gas" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -497,7 +497,7 @@ test "CALL: overlapping memory regions" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -558,7 +558,7 @@ test "CALL: stack underflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -604,7 +604,7 @@ test "CALL: stack overflow" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -663,7 +663,7 @@ test "CALL: max u256 values" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -723,7 +723,7 @@ test "CALL: self-call recursion" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const contract_addr = [_]u8{0x22} ** 20;
@@ -776,7 +776,7 @@ test "CALL: precompiled contract" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
@@ -830,7 +830,7 @@ test "CALL: gas stipend for value transfer" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const caller = [_]u8{0x11} ** 20;
