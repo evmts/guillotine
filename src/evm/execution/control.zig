@@ -31,7 +31,7 @@ const from_u256 = primitives.Address.from_u256;
 pub fn op_stop(frame: *Frame) ExecutionError.Error!void {
 
     // Debug: log when we hit STOP to understand why ERC20 isn't returning data
-    Log.debug("STOP opcode at stack_size={}, current output len={}", .{ frame.stack.size(), if (frame.host.get_output().len > 0) frame.host.get_output().len else 0 });
+    Log.debug("STOP opcode at stack_size={}, current output len={}", .{ frame.stack.size(), if (frame.output_buffer.len > 0) frame.output_buffer.len else 0 });
 
     return ExecutionError.Error.STOP;
 }

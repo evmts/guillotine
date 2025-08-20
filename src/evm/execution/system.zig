@@ -826,6 +826,10 @@ pub fn op_create2(frame: *Frame) ExecutionError.Error!void {
 }
 
 pub fn op_call(frame: *Frame) ExecutionError.Error!void {
+    // Validate that we have enough stack elements for CALL (requires 7)
+    if (frame.stack.size() < 7) {
+        return ExecutionError.Error.StackUnderflow;
+    }
 
     // EVM stack order (top -> bottom): gas, to, value, in_offset, in_size, out_offset, out_size
     // Pop in that order for clarity
@@ -1131,7 +1135,7 @@ pub fn op_delegatecall(frame: *Frame) ExecutionError.Error!void {
     // This is critical for proxy patterns and library calls
     const call_params = CallParams{
         .delegatecall = .{
-            .caller = frame.host.get_caller(), // Preserve original caller, not current contract
+            .caller = frame.caller, // Preserve original caller, not current contract
             .to = to_address,
             .input = args,
             .gas = gas_limit,
@@ -1278,7 +1282,7 @@ pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
     // Debug: capture stack/frame state before call
     // Get the EVM to check current state
     const evm_ptr = @as(*Evm, @ptrCast(@alignCast(frame.host.ptr)));
-    const evm_depth_before = evm_ptr.current_frame_depth;
+    const evm_depth_before: u32 = @intCast(evm_ptr.frames.items.len);
 
     const pre_stack_size = frame.stack.size();
     Log.debug(
@@ -1297,7 +1301,7 @@ pub fn op_staticcall(frame: *Frame) ExecutionError.Error!void {
     };
 
     // Debug: capture stack/frame state after call
-    const evm_depth_after = evm_ptr.current_frame_depth;
+    const evm_depth_after: u32 = @intCast(evm_ptr.frames.items.len);
     Log.debug(
         "[STATICCALL] post-call: frame={x}, evm_depth_before={}, evm_depth_after={}, stack size={}",
         .{
@@ -1880,7 +1884,7 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
         _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
         const result = try SimpleAnalysis.analyze(allocator, code);
         // Analysis is const from analyze(), cannot deinit here
-        defer allocator.free(result.metadata);
+        defer allocator.free(result.block_gas_costs);
 
         const MockHost = @import("../host.zig").MockHost;
         const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
@@ -1895,11 +1899,14 @@ test "CALL with value guarantees 2300 gas stipend added to forwarded gas (3x mem
             10000, // gas_remaining
             primitives.Address.ZERO_ADDRESS, // contract_address
             result.analysis,
-            result.metadata,
             &.{}, // empty ops
             host,
             db_interface,
             allocator,
+            false, // is_static
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &.{}, // input_buffer
         );
         defer frame.deinit(allocator);
 
@@ -1969,7 +1976,7 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
         _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
         const result = try SimpleAnalysis.analyze(allocator, code);
         // Analysis is const from analyze(), cannot deinit here
-        defer allocator.free(result.metadata);
+        defer allocator.free(result.block_gas_costs);
 
         const MockHost = @import("../host.zig").MockHost;
         const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
@@ -1985,11 +1992,14 @@ test "CALL without value respects gas limit without stipend (3x memory corruptio
             1000, // gas_remaining
             prim.Address.ZERO_ADDRESS, // contract_address
             result.analysis,
-            result.metadata,
             &.{}, // empty ops
             host,
             db_interface,
             allocator,
+            false, // is_static
+            prim.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &.{}, // input_buffer
         );
         defer frame.deinit(allocator);
 
@@ -2024,7 +2034,7 @@ test "EIP-150 gas calculations for nested calls" {
     _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
     // Analysis is const from analyze(), cannot deinit here
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     const MockHost = @import("../host.zig").MockHost;
     const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
@@ -2040,11 +2050,14 @@ test "EIP-150 gas calculations for nested calls" {
         100000, // gas_remaining
         prim.Address.ZERO_ADDRESS, // contract_address
         result.analysis,
-        result.metadata,
         &.{}, // empty ops
         host,
         db_interface,
         allocator,
+        false, // is_static
+        prim.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -2096,7 +2109,7 @@ test "EIP-150 minimum gas retention" {
     _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
     // Analysis is const from analyze(), cannot deinit here
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     var mock_host = MockHost.init(allocator);
     defer mock_host.deinit();
@@ -2108,11 +2121,14 @@ test "EIP-150 minimum gas retention" {
         64, // gas_remaining - Exactly 64 gas
         primitives.Address.ZERO_ADDRESS, // contract_address
         result.analysis,
-        result.metadata,
         &.{}, // empty ops
         host,
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -2156,7 +2172,7 @@ test "EIP-150 stipend edge cases" {
     _ = OpcodeMetadata.DEFAULT; // Unused in new analysis system
     const result = try SimpleAnalysis.analyze(allocator, code);
     // Analysis is const from analyze(), cannot deinit here
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     const MockHost = @import("../host.zig").MockHost;
     const MemDb = @import("../state/memory_database.zig").MemoryDatabase;
@@ -2172,11 +2188,14 @@ test "EIP-150 stipend edge cases" {
         100, // gas_remaining - Very low gas
         prim.Address.ZERO_ADDRESS, // contract_address
         result.analysis,
-        result.metadata,
         &.{}, // empty ops
         host,
         db_interface,
         allocator,
+        false, // is_static
+        prim.Address.ZERO_ADDRESS, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 

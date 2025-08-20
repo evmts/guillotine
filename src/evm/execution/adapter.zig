@@ -25,7 +25,7 @@ pub fn op_returndatasize_adapter(frame: *Frame) ExecutionError.Error!void {
     }
 
     // Push result unsafely - bounds checking is done in jump_table.zig
-    frame.stack.append_unsafe(@as(u256, @intCast(frame.host.get_output().len)));
+    frame.stack.append_unsafe(@as(u256, @intCast(frame.output_buffer.len)));
 }
 
 /// Adapter for op_returndatacopy - copy return data to memory
@@ -57,7 +57,7 @@ pub fn op_returndatacopy_adapter(frame: *Frame) ExecutionError.Error!void {
     const size_usize = @as(usize, @intCast(size));
 
     // Check bounds
-    const output = frame.host.get_output();
+    const output = frame.output_buffer;
     if (data_offset_usize + size_usize > output.len) {
         @branchHint(.unlikely);
         return ExecutionError.Error.ReturnDataOutOfBounds;
