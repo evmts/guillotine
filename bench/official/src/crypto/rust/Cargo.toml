@@ -3,6 +3,8 @@ name = "rust-crypto-bench"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [[bin]]
 name = "rust-crypto-bench"
 path = "src/main.rs"

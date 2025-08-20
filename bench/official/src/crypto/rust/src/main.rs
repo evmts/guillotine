@@ -26,7 +26,7 @@ fn benchmark_fq_add(num_runs: usize) {
     }
     let duration = start.elapsed();
     let avg_ns = duration.as_nanos() as u64 / num_runs as u64;
-    println!("Fq.add: {}ns/op", avg_ns);
+    println!("FpMont.add: {}ns/op", avg_ns);
 }
 
 fn benchmark_fq_mul(num_runs: usize) {
@@ -46,7 +46,7 @@ fn benchmark_fq_mul(num_runs: usize) {
     }
     let duration = start.elapsed();
     let avg_ns = duration.as_nanos() as u64 / num_runs as u64;
-    println!("Fq.mul: {}ns/op", avg_ns);
+    println!("FpMont.mul: {}ns/op", avg_ns);
 }
 
 fn benchmark_fq2_mul(num_runs: usize) {
@@ -66,7 +66,7 @@ fn benchmark_fq2_mul(num_runs: usize) {
     }
     let duration = start.elapsed();
     let avg_ns = duration.as_nanos() as u64 / num_runs as u64;
-    println!("Fq2.mul: {}ns/op", avg_ns);
+    println!("Fp2Mont.mul: {}ns/op", avg_ns);
 }
 
 fn benchmark_fq6_mul(num_runs: usize) {
@@ -86,7 +86,7 @@ fn benchmark_fq6_mul(num_runs: usize) {
     }
     let duration = start.elapsed();
     let avg_ns = duration.as_nanos() as u64 / num_runs as u64;
-    println!("Fq6.mul: {}ns/op", avg_ns);
+    println!("Fp6Mont.mul: {}ns/op", avg_ns);
 }
 
 fn benchmark_fq12_mul(num_runs: usize) {
@@ -106,7 +106,7 @@ fn benchmark_fq12_mul(num_runs: usize) {
     }
     let duration = start.elapsed();
     let avg_ns = duration.as_nanos() as u64 / num_runs as u64;
-    println!("Fq12.mul: {}ns/op", avg_ns);
+    println!("Fp12Mont.mul: {}ns/op", avg_ns);
 }
 
 fn benchmark_g1_add(num_runs: usize) {
