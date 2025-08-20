@@ -7,7 +7,6 @@ const Host = @import("../host.zig").Host;
 const StackFrame = @import("../stack_frame.zig").StackFrame;
 const Frame = StackFrame;
 const Evm = @import("../evm.zig");
-const StackFrameMetadata = Evm.StackFrameMetadata;
 const interpret2 = @import("interpret2.zig").interpret2;
 const primitives = @import("primitives");
 const precompile_addresses = @import("../precompiles/precompile_addresses.zig");
@@ -19,10 +18,33 @@ const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
 // InstructionMetadata no longer exists - using bucketed system
 
 pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
+    // Initialize frame stack for top-level call
+    self.frames.clearRetainingCapacity();
     return _call(self, params, true);
 }
 pub fn inner_call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
-    return _call(self, params, false);
+    // Check max depth with cold branch hint
+    if (self.frames.items.len >= MAX_CALL_DEPTH) {
+        @branchHint(.cold);
+        return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
+    }
+    
+    // Push a placeholder frame (will be filled by _call)
+    // We need to reserve space but the actual frame will be created in _call
+    try self.frames.append(undefined);
+    const result = _call(self, params, false) catch |err| {
+        // Pop the frame on error
+        _ = self.frames.pop();
+        return err;
+    };
+    
+    // Pop the frame on successful completion
+    if (self.frames.pop()) |frame| {
+        var frame_copy = frame;
+        frame_copy.deinit(self.allocator);
+    }
+    
+    return result;
 }
 
 /// EVM execution using the new interpret2 interpreter with tailcall dispatch
@@ -60,12 +82,10 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
             const init_code = if (params == .create) params.create.init_code else params.create2.init_code;
             const gas = if (params == .create) params.create.gas else params.create2.gas;
 
-            // Use the standard create_contract for deployment
-            const result = self.create_contract(caller, value, init_code, gas) catch |err| {
-                Log.debug("[call] create_contract failed: {any}", .{err});
-                return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
-            };
-
+            const nonce = self.state.get_nonce(caller);
+            const new_address = primitives.Address.get_contract_address(caller, nonce);
+            _ = try self.state.increment_nonce(caller);
+            const result = try self.create_contract_at(caller, value, init_code, gas, new_address);
             return CallResult{
                 .success = result.status == .Success,
                 .gas_left = result.gas_left,
@@ -102,7 +122,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
 
     // Validate inputs
     if (call_input.len > MAX_INPUT_SIZE or call_code.len > MAX_CODE_SIZE) {
-        if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
+        if (self.frames.items.len > 0) host.revert_to_snapshot(snapshot_id);
         return CallResult{ .success = false, .gas_left = 0, .output = &.{} };
     }
 
@@ -121,13 +141,13 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     // Check for precompiles
     if (precompile_addresses.get_precompile_id_checked(call_address)) |precompile_id| {
         const precompile_result = self.execute_precompile_call_by_id(precompile_id, call_input, gas_after_base, call_is_static) catch |err| {
-            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
+            if (self.frames.items.len > 0) host.revert_to_snapshot(snapshot_id);
             return switch (err) {
                 else => CallResult{ .success = false, .gas_left = 0, .output = &.{} },
             };
         };
 
-        if (self.current_frame_depth > 0 and !precompile_result.success) {
+        if (self.frames.items.len > 0 and !precompile_result.success) {
             host.revert_to_snapshot(snapshot_id);
         }
 
@@ -136,7 +156,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
 
     // Initialize frame state for top-level calls
     if (is_top_level_call) {
-        self.current_frame_depth = 0;
+        // Frame depth is now managed by frames.items.len
         self.access_list.clear();
 
         self.self_destruct.deinit();
@@ -145,22 +165,13 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         self.created_contracts.deinit();
         self.created_contracts = CreatedContracts.init(self.allocator);
 
-        // Clear output and input state
-        self.current_output = &.{};
+        // Clear input state
         self.current_input = &.{};
 
-        if (self.frame_stack == null) {
-            // Frame stack not needed for StackFrame-based execution
-        }
+        // Frame stack is now always available as ArrayList
     } else {
-        // Nested call - check depth and increment
-        const new_depth = self.current_frame_depth + 1;
-        if (new_depth >= MAX_CALL_DEPTH) {
-            if (self.current_frame_depth > 0) host.revert_to_snapshot(snapshot_id);
-            return CallResult{ .success = false, .gas_left = gas_after_base, .output = &.{} };
-        }
-        // CRITICAL: Actually update the frame depth for nested calls
-        self.current_frame_depth = new_depth;
+        // Nested call - depth is already managed by inner_call frame push
+        // The frame was already pushed in inner_call, so depth = frames.items.len
     }
 
     // Prewarm addresses for Berlin
@@ -177,7 +188,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     // Create analysis with bytecode - interpret2 will analyze and fill the rest
     var empty_block_boundaries = std.bit_set.DynamicBitSet.initEmpty(self.allocator, 0) catch return error.OutOfMemory;
     defer empty_block_boundaries.deinit();
-    
+
     const empty_analysis = SimpleAnalysis{
         .inst_to_pc = &.{},
         .pc_to_inst = &.{},
@@ -194,27 +205,45 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     // No longer need metadata - using bucket system
     const empty_ops: []*const fn (*StackFrame) @import("../execution/execution_error.zig").Error!noreturn = &.{};
 
-    var frame = try StackFrame.init(
-        gas_after_base,
-        call_address,
-        empty_analysis,
-        empty_ops,
-        host,
-        self.state.database,
-        self.allocator,
-    );
-    defer frame.deinit(self.allocator);
-
-    // Set up frame metadata
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
-            .caller = call_caller,
-            .value = call_value,
-            .input_buffer = call_input,
-            .output_buffer = &.{},
-            .is_static = call_is_static,
-            .depth = self.current_frame_depth,
-        };
+    // Create frame and store it appropriately
+    var frame_storage: StackFrame = undefined;
+    var frame: *StackFrame = undefined;
+    
+    if (is_top_level_call) {
+        // Top-level call: use local storage
+        frame_storage = try StackFrame.init(
+            gas_after_base,
+            call_address,
+            empty_analysis,
+            empty_ops,
+            host,
+            self.state.database,
+            self.allocator,
+            call_is_static,
+            call_caller,
+            call_value,
+            call_input,
+        );
+        frame = &frame_storage;
+        defer frame.deinit(self.allocator);
+    } else {
+        // Nested call: store frame in the frames array (placeholder was pushed by inner_call)
+        const frame_index = self.frames.items.len - 1;
+        self.frames.items[frame_index] = try StackFrame.init(
+            gas_after_base,
+            call_address,
+            empty_analysis,
+            empty_ops,
+            host,
+            self.state.database,
+            self.allocator,
+            call_is_static,
+            call_caller,
+            call_value,
+            call_input,
+        );
+        frame = &self.frames.items[frame_index];
+        // Note: frame cleanup handled by inner_call pop
     }
 
     // Store the current input for the host interface to access
@@ -224,7 +253,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     var exec_err: ?ExecutionError.Error = null;
     // Call interpret2 which will handle its own analysis and tailcall dispatch
     Log.debug("[call] About to call interpret2 with code.len={}", .{call_code.len});
-    interpret2(&frame) catch |err| {
+    interpret2(frame) catch |err| {
         Log.debug("[call] interpret2 ended with error: {any}", .{err});
         exec_err = err;
     };
@@ -248,16 +277,14 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         else => false,
     } else false;
 
-    // Return VM-owned view; callers must not free (same as standard call)
-    const output = if (self.current_output.len > 0) self.current_output else &.{};
+    // Return frame-owned output view; callers must not free (same as standard call)
+    const output = if (frame.output_buffer.len > 0) frame.output_buffer else &.{};
 
     // Clear current_input to avoid interference
     self.current_input = &.{};
 
-    // Restore frame depth for nested calls
-    if (!is_top_level_call) {
-        self.current_frame_depth -= 1;
-    }
+    // Frame depth restoration is handled by inner_call pop
+    // No manual depth management needed here
 
     return CallResult{
         .success = success,
