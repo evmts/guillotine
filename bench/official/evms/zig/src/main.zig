@@ -99,7 +99,7 @@ pub fn main() !void {
         var memory_db = evm.MemoryDatabase.init(allocator);
         defer memory_db.deinit();
 
-        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, 0, false, null);
+        var vm = try evm.Evm.init(allocator, memory_db.to_database_interface(), null, null, null, null);
         defer vm.deinit();
 
         // Set deployer balance

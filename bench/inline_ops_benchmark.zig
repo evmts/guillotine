@@ -49,7 +49,7 @@ fn benchmark_inline_vs_dispatch(allocator: std.mem.Allocator) !void {
     defer memory_db.deinit();
     
     const db_interface = memory_db.to_database_interface();
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
     
     const caller = primitives.Address.ZERO;
@@ -106,7 +106,7 @@ fn benchmark_inline_vs_dispatch(allocator: std.mem.Allocator) !void {
         try stdout.print("\nOptimized Implementation (Inline Hot Ops):\n", .{});
         
         // Create a new VM with inline hot ops enabled
-        var vm_inline = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+        var vm_inline = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
         defer vm_inline.deinit();
         
         // TODO: Enable inline hot ops on vm_inline
