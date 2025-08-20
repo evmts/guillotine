@@ -40,7 +40,7 @@ const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const Stack = @import("stack/stack.zig");
 const operation_config = @import("opcode_metadata/operation_config.zig");
 const operation_module = @import("opcodes/operation.zig");
-const ExecutionFunc = @import("execution_func.zig").ExecutionFunc;
+// ExecutionFunc removed - using tailcall dispatch system
 const primitives = @import("primitives");
 const GasConstants = primitives.GasConstants;
 const execution = @import("execution/package.zig");

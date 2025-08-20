@@ -390,8 +390,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
         const opcode = @as(Opcode, @enumFromInt(byte));
 
         // TODO: Replace this giant switch statement with jump table lookup
-        // 1. Migrate the jump table to using tailcalls instead of ExecutionFunc
-        // 2. Replace this switch with: analysis.jump_table.get_tailcall_func(byte)
+        // Replace this switch with: analysis.jump_table.get_tailcall_func(byte)
         const fn_ptr: TailcallFunc = switch (opcode) {
             .STOP => &tailcalls.op_stop,
             .ADD => &tailcalls.op_add,
