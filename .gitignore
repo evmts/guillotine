@@ -172,3 +172,10 @@ diff-trace.log
 
 # Coordination docs
 coordinate.md
+
+# Apple Instruments profiling results
+*_profile.trace/
+*_summary.txt
+profile_results/
+advanced_cpu_profiles/*.trace/
+advanced_cpu_profiles/*_summary.txt
