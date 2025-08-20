@@ -212,7 +212,7 @@ const Host = @import("../host.zig").Host;
 const BlockInfo = @import("../host.zig").BlockInfo;
 const StackFrame = @import("../stack_frame.zig").StackFrame;
 const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
-const InstructionMetadata = @import("../evm/analysis2.zig").InstructionMetadata;
+// InstructionMetadata no longer exists - using bucketed system
 const DatabaseInterface = @import("../state/database_interface.zig").DatabaseInterface;
 const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 
@@ -405,9 +405,14 @@ test "COINBASE returns block coinbase address" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -417,11 +422,14 @@ test "COINBASE returns block coinbase address" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -457,9 +465,14 @@ test "TIMESTAMP returns block timestamp" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -469,11 +482,14 @@ test "TIMESTAMP returns block timestamp" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -509,9 +525,14 @@ test "NUMBER returns block number" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -521,11 +542,14 @@ test "NUMBER returns block number" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -561,9 +585,14 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -573,11 +602,14 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -613,9 +645,14 @@ test "GASLIMIT returns block gas limit" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -625,11 +662,14 @@ test "GASLIMIT returns block gas limit" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -665,9 +705,14 @@ test "BASEFEE returns block base fee" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -677,11 +722,14 @@ test "BASEFEE returns block base fee" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -715,9 +763,14 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -727,11 +780,14 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -765,9 +821,14 @@ test "BLOCKHASH returns 0 for future blocks" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -777,11 +838,14 @@ test "BLOCKHASH returns 0 for future blocks" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 
@@ -818,9 +882,14 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         .bytecode = &.{},
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
@@ -830,11 +899,14 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         1000000, // gas_remaining
         primitives.Address.ZERO, // contract_address
         empty_analysis,
-        empty_metadata,
         empty_ops,
         (&test_host).to_host(),
         db_interface,
         allocator,
+        false, // is_static
+        primitives.Address.ZERO, // caller
+        0, // value
+        &.{}, // input_buffer
     );
     defer frame.deinit(allocator);
 

@@ -285,7 +285,7 @@ test "inline hot ops maintains correctness" {
     {
         const code = &[_]u8{ 0x60, 0x42 }; // PUSH1 0x42
         const result = try SimpleAnalysis.analyze(testing.allocator, code);
-        defer testing.allocator.free(result.metadata);
+        defer testing.allocator.free(result.block_gas_costs);
 
         var memory_db = MemoryDatabase.init(testing.allocator);
         defer memory_db.deinit();
@@ -299,11 +299,14 @@ test "inline hot ops maintains correctness" {
             1000, // gas_remaining
             primitives.Address.ZERO_ADDRESS, // contract_address
             result.analysis,
-            result.metadata,
             &.{}, // empty ops
             host,
             db_interface,
             testing.allocator,
+            false, // is_static
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &.{}, // input_buffer
         );
         defer frame.deinit(testing.allocator);
 
@@ -316,7 +319,7 @@ test "inline hot ops maintains correctness" {
     {
         const code = &[_]u8{0x01}; // ADD
         const add_result = try SimpleAnalysis.analyze(testing.allocator, code);
-        defer testing.allocator.free(add_result.metadata);
+        defer testing.allocator.free(add_result.block_gas_costs);
 
         var memory_db = MemoryDatabase.init(testing.allocator);
         defer memory_db.deinit();
@@ -330,11 +333,14 @@ test "inline hot ops maintains correctness" {
             1000, // gas_remaining
             primitives.Address.ZERO_ADDRESS, // contract_address
             add_result.analysis,
-            add_result.metadata,
             &.{}, // empty ops
             host,
             db_interface,
             testing.allocator,
+            false, // is_static
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &.{}, // input_buffer
         );
         defer frame.deinit(testing.allocator);
 

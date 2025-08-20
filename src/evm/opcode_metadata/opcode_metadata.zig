@@ -728,7 +728,7 @@ test "jump_table_benchmarks" {
     var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var vm = try @import("../evm.zig").init(allocator, db_interface, null, null, null, 0, false, null);
+    var vm = try @import("../evm.zig").init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const iterations = 100000;

@@ -17,7 +17,7 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
-const InstructionMetadata = @import("../evm/analysis2.zig").InstructionMetadata;
+// InstructionMetadata no longer exists - using bucketed system
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
 
@@ -183,9 +183,14 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
             .bytecode = code,
             .inst_count = 0,
             .block_boundaries = try std.bit_set.DynamicBitSet.initEmpty(allocator, 0),
+            .bucket_indices = &.{},
+            .u16_bucket = &.{},
+            .u32_bucket = &.{},
+            .u64_bucket = &.{},
+            .u256_bucket = &.{},
         };
-        const empty_metadata: []InstructionMetadata = &.{};
-        const empty_ops: []*const anyopaque = &.{};
+        // No longer need metadata - using bucket system
+        const empty_ops: []*const fn (*Frame) ExecutionError.Error!noreturn = &.{};
 
         // Create mock host
         var mock_host = MockHost.init(allocator);
@@ -198,11 +203,14 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
             1000000, // gas_remaining
             primitives.Address.ZERO_ADDRESS, // contract_address
             empty_analysis,
-            empty_metadata,
             empty_ops,
             host,
             db_interface,
             allocator,
+            false, // is_static
+            primitives.Address.ZERO_ADDRESS, // caller
+            0, // value
+            &.{}, // input_buffer
         );
         defer context.deinit(allocator);
 
