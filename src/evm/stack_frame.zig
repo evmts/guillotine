@@ -35,6 +35,13 @@ pub const StackFrame = struct {
     state: DatabaseInterface, // 32 bytes - database interface
     analysis: SimpleAnalysis, // Contains all bucketed metadata arrays
     contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
+    is_static: bool, // Whether this frame is in STATICCALL read-only mode
+    
+    // Per-frame call context
+    caller: primitives.Address.Address, // Address that initiated this call
+    value: u256, // ETH value transferred with this call  
+    input_buffer: []const u8, // Input data for this call
+    output_buffer: []const u8, // Output data from this call
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
@@ -45,6 +52,10 @@ pub const StackFrame = struct {
         host: Host,
         state: DatabaseInterface,
         allocator: std.mem.Allocator,
+        is_static: bool,
+        caller: primitives.Address.Address,
+        value: u256,
+        input_buffer: []const u8,
     ) !StackFrame {
         return StackFrame{
             .gas_remaining = gas_remaining,
@@ -56,6 +67,11 @@ pub const StackFrame = struct {
             .host = host,
             .contract_address = contract_address,
             .state = state,
+            .is_static = is_static,
+            .caller = caller,
+            .value = value,
+            .input_buffer = input_buffer,
+            .output_buffer = &.{}, // Initially empty, set via operations
         };
     }
 
@@ -86,9 +102,7 @@ pub const StackFrame = struct {
 
     /// Set output data for RETURN/REVERT operations
     pub fn set_output(self: *StackFrame, data: []const u8) ExecutionError.Error!void {
-        self.host.set_output(data) catch {
-            return ExecutionError.Error.OutOfMemory;
-        };
+        self.output_buffer = data;
     }
 
     /// Storage access operations
