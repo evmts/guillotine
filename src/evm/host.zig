@@ -105,10 +105,6 @@ pub const Host = struct {
         record_storage_change: *const fn (ptr: *anyopaque, address: Address, slot: u256, original_value: u256) anyerror!void,
         /// Get the original storage value from the journal
         get_original_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) ?u256,
-        /// Set the output buffer for the current frame
-        set_output: *const fn (ptr: *anyopaque, output: []const u8) anyerror!void,
-        /// Get the output buffer for the current frame
-        get_output: *const fn (ptr: *anyopaque) []const u8,
         /// Access an address and return the gas cost (EIP-2929)
         access_address: *const fn (ptr: *anyopaque, address: Address) anyerror!u64,
         /// Access a storage slot and return the gas cost (EIP-2929)
@@ -122,13 +118,7 @@ pub const Host = struct {
         get_hardfork: *const fn (ptr: *anyopaque) @import("hardforks/hardfork.zig").Hardfork,
         /// Get metadata for the current frame
         get_is_static: *const fn (ptr: *anyopaque) bool,
-        get_caller: *const fn (ptr: *anyopaque) @import("primitives").Address.Address,
-        get_value: *const fn (ptr: *anyopaque) u256,
-        get_input_buffer: *const fn (ptr: *anyopaque) []const u8,
-        get_output_buffer: *const fn (ptr: *anyopaque) []const u8,
         get_depth: *const fn (ptr: *anyopaque) u11,
-        /// Set output buffer for the current frame
-        set_output_buffer: *const fn (ptr: *anyopaque, output: []const u8) anyerror!void,
     };
 
     /// Initialize a Host interface from any implementation
@@ -201,15 +191,6 @@ pub const Host = struct {
                 return self.get_original_storage(address, slot);
             }
 
-            fn vtable_set_output(ptr: *anyopaque, output: []const u8) anyerror!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.set_output(output);
-            }
-
-            fn vtable_get_output(ptr: *anyopaque) []const u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_output();
-            }
 
             fn vtable_access_address(ptr: *anyopaque, address: Address) anyerror!u64 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
@@ -246,34 +227,9 @@ pub const Host = struct {
                 return self.get_is_static();
             }
 
-            fn vtable_get_caller(ptr: *anyopaque) @import("primitives").Address.Address {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_caller();
-            }
-
-            fn vtable_get_value(ptr: *anyopaque) u256 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_value();
-            }
-
-            fn vtable_get_input_buffer(ptr: *anyopaque) []const u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_input_buffer();
-            }
-
-            fn vtable_get_output_buffer(ptr: *anyopaque) []const u8 {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_output_buffer();
-            }
-
             fn vtable_get_depth(ptr: *anyopaque) u11 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.get_depth();
-            }
-
-            fn vtable_set_output_buffer(ptr: *anyopaque, output: []const u8) anyerror!void {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.set_output_buffer(output);
             }
 
             const vtable = VTable{
@@ -289,8 +245,6 @@ pub const Host = struct {
                 .revert_to_snapshot = vtable_revert_to_snapshot,
                 .record_storage_change = vtable_record_storage_change,
                 .get_original_storage = vtable_get_original_storage,
-                .set_output = vtable_set_output,
-                .get_output = vtable_get_output,
                 .access_address = vtable_access_address,
                 .access_storage_slot = vtable_access_storage_slot,
                 .mark_for_destruction = vtable_mark_for_destruction,
@@ -298,12 +252,7 @@ pub const Host = struct {
                 .is_hardfork_at_least = vtable_is_hardfork_at_least,
                 .get_hardfork = vtable_get_hardfork,
                 .get_is_static = vtable_get_is_static,
-                .get_caller = vtable_get_caller,
-                .get_value = vtable_get_value,
-                .get_input_buffer = vtable_get_input_buffer,
-                .get_output_buffer = vtable_get_output_buffer,
                 .get_depth = vtable_get_depth,
-                .set_output_buffer = vtable_set_output_buffer,
             };
         };
 
@@ -373,15 +322,6 @@ pub const Host = struct {
         return self.vtable.get_original_storage(self.ptr, address, slot);
     }
 
-    /// Set the output buffer for the current frame
-    pub fn set_output(self: Host, output: []const u8) !void {
-        return self.vtable.set_output(self.ptr, output);
-    }
-
-    /// Get the output buffer for the current frame
-    pub fn get_output(self: Host) []const u8 {
-        return self.vtable.get_output(self.ptr);
-    }
 
     /// Access an address and return the gas cost (EIP-2929)
     pub fn access_address(self: Host, address: Address) !u64 {
@@ -417,34 +357,9 @@ pub const Host = struct {
         return self.vtable.get_is_static(self.ptr);
     }
 
-    /// Get the caller address for the current frame
-    pub fn get_caller(self: Host) @import("primitives").Address.Address {
-        return self.vtable.get_caller(self.ptr);
-    }
-
-    /// Get the value transferred with the current call
-    pub fn get_value(self: Host) u256 {
-        return self.vtable.get_value(self.ptr);
-    }
-
-    /// Get the input buffer for the current frame
-    pub fn get_input_buffer(self: Host) []const u8 {
-        return self.vtable.get_input_buffer(self.ptr);
-    }
-
-    /// Get the output buffer for the current frame
-    pub fn get_output_buffer(self: Host) []const u8 {
-        return self.vtable.get_output_buffer(self.ptr);
-    }
-
     /// Get the call depth for the current frame
     pub fn get_depth(self: Host) u11 {
         return self.vtable.get_depth(self.ptr);
-    }
-
-    /// Set the output buffer for the current frame
-    pub fn set_output_buffer(self: Host, output: []const u8) !void {
-        return self.vtable.set_output_buffer(self.ptr, output);
     }
 };
 
