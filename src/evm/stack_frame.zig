@@ -13,6 +13,7 @@ const ExecutionError = @import("execution/execution_error.zig");
 const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+const InstructionMetadata = @import("evm/analysis2.zig").InstructionMetadata;
 
 // Maximum allowed tailcall iterations
 const TAILCALL_MAX_ITERATIONS: usize = 10_000_000;
@@ -30,41 +31,30 @@ pub const StackFrame = struct {
     // CACHE LINE 1 (64 bytes) - ULTRA HOT (accessed every instruction)
     // ===================================================================
     // These fields are accessed by EVERY operation in the hot path
-    ip: usize, // 8 bytes - instruction pointer
+    ip: u16, // 8 bytes - instruction pointer
     gas_remaining: u64, // 8 bytes - checked every instruction
+    ops: []*const anyopaque,
+    metadata: []InstructionMetadata, // 16 bytes - owned metadata array
     stack: Stack, // 48 bytes - struct with ptr (16) + len (8) + cap (8) + allocator (16)
+    host: Host, // 32 bytes - vtable pointer + context pointer
+    // 16 bytes - owned ops array
     // Total: 64 bytes exactly - perfect cache line alignment
 
     // ===================================================================
     // CACHE LINE 2 (64 bytes) - HOT (accessed by most operations)
     // ===================================================================
     // Memory operations (MLOAD/MSTORE/etc) and analysis lookups
+    state: DatabaseInterface, // 32 bytes - database interface
+    contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
     memory: Memory, // 32 bytes - struct with ArrayList
     analysis: SimpleAnalysis, // 32 bytes - inst_to_pc, pc_to_inst, bytecode, inst_count
-    // Total: 64 bytes
-
-    // ===================================================================
-    // CACHE LINE 3 (64 bytes) - WARM (accessed by some operations)
-    // ===================================================================
-    // Control flow and metadata access
-    ops: []*const anyopaque, // 16 bytes - owned ops array
-    metadata: []u32, // 16 bytes - owned metadata array
-    host: Host, // 32 bytes - vtable pointer + context pointer
-    // Total: 64 bytes
-
-    // ===================================================================
-    // CACHE LINE 4+ - COLD (rarely accessed)
-    // ===================================================================
-    // These fields are accessed infrequently
-    contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
-    state: DatabaseInterface, // 32 bytes - database interface
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
         gas_remaining: u64,
         contract_address: primitives.Address.Address,
         analysis: SimpleAnalysis,
-        metadata: []u32,
+        metadata: []InstructionMetadata,
         ops: []*const anyopaque,
         host: Host,
         state: DatabaseInterface,

@@ -535,6 +535,17 @@ pub const MockHost = struct {
         };
     }
 
+    pub fn inner_call(self: *MockHost, params: CallParams) !CallResult {
+        _ = self;
+        _ = params;
+        // Mock implementation - just return success with empty output
+        return CallResult{
+            .success = true,
+            .gas_left = 0,
+            .output = &.{},
+        };
+    }
+
     pub fn register_created_contract(self: *MockHost, address: Address) !void {
         _ = self;
         _ = address;
