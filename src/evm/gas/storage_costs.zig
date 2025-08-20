@@ -150,10 +150,13 @@ pub fn calculateSstoreCost(hardfork: Hardfork, original: u256, current: u256, ne
         return .{ .gas = gas + op_cost, .refund = refund };
     }
 
-    // Istanbul/Berlin/London logic per EIP-2200/2929/3529
-    const sload_gas: u64 = if (is_berlin_or_later) GasConstants.WarmStorageReadCost else 800;
-    const sstore_reset_gas: u64 = if (is_berlin_or_later) (GasConstants.SstoreResetGas - GasConstants.ColdSloadCost) else GasConstants.SstoreResetGas; // 2900 or 5000
-    const clear_refund: i64 = if (is_berlin_or_later) @as(i64, @intCast(GasConstants.SstoreRefundGas)) else 15000;
+    // Istanbul/Berlin/London logic per EIP-2200/2929/3529 - branchless
+    const berlin_flag: u64 = @intFromBool(is_berlin_or_later);
+    const not_berlin_flag: u64 = 1 - berlin_flag;
+    
+    const sload_gas: u64 = berlin_flag * GasConstants.WarmStorageReadCost + not_berlin_flag * 800;
+    const sstore_reset_gas: u64 = berlin_flag * (GasConstants.SstoreResetGas - GasConstants.ColdSloadCost) + not_berlin_flag * GasConstants.SstoreResetGas;
+    const clear_refund: i64 = @as(i64, @intCast(berlin_flag * GasConstants.SstoreRefundGas + not_berlin_flag * 15000));
 
     // If no-op (present == new): charge SLOAD_GAS equivalent
     if (new == current) {

@@ -23,7 +23,9 @@ pub fn op_sload(frame: *Frame) ExecutionError.Error!void {
         const is_cold = frame.mark_storage_slot_warm(slot) catch {
             return ExecutionError.Error.OutOfMemory;
         };
-        const gas_cost = if (is_cold) GasConstants.ColdSloadCost else GasConstants.WarmStorageReadCost;
+        // Branchless gas calculation
+        const cold_flag = @intFromBool(is_cold);
+        const gas_cost = cold_flag * GasConstants.ColdSloadCost + (1 - cold_flag) * GasConstants.WarmStorageReadCost;
         try frame.consume_gas(gas_cost);
     } else {
         // Pre-Berlin: gas is handled by jump table constant_gas
