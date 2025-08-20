@@ -12,6 +12,10 @@ const pairing = bn254.pairing;
 
 const print = std.debug.print;
 
+pub const std_options: std.Options = .{
+    .log_level = .err,
+};
+
 fn nextRandom() u256 {
     return std.crypto.random.int(u256);
 }
@@ -46,234 +50,211 @@ fn randomG2() G2 {
     return G2.GENERATOR.mul(&scalar);
 }
 
-fn benchmarkFpMontAdd(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(FpMont, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(FpMont, num_runs);
-    defer allocator.free(inputs_b);
+fn benchmarkOperation(allocator: std.mem.Allocator, operation: []const u8, internal_runs: usize) !f64 {
+    if (std.mem.eql(u8, operation, "FpMont.add")) {
+        var inputs_a = try allocator.alloc(FpMont, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(FpMont, internal_runs);
+        defer allocator.free(inputs_b);
 
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomFpMont();
-        inputs_b[i] = randomFpMont();
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomFpMont();
+            inputs_b[i] = randomFpMont();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].add(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "FpMont.mul")) {
+        var inputs_a = try allocator.alloc(FpMont, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(FpMont, internal_runs);
+        defer allocator.free(inputs_b);
+
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomFpMont();
+            inputs_b[i] = randomFpMont();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].mul(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "Fp2Mont.mul")) {
+        var inputs_a = try allocator.alloc(Fp2Mont, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(Fp2Mont, internal_runs);
+        defer allocator.free(inputs_b);
+
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomFp2Mont();
+            inputs_b[i] = randomFp2Mont();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].mul(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "Fp6Mont.mul")) {
+        var inputs_a = try allocator.alloc(Fp6Mont, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(Fp6Mont, internal_runs);
+        defer allocator.free(inputs_b);
+
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomFp6Mont();
+            inputs_b[i] = randomFp6Mont();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].mul(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "Fp12Mont.mul")) {
+        var inputs_a = try allocator.alloc(Fp12Mont, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(Fp12Mont, internal_runs);
+        defer allocator.free(inputs_b);
+
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomFp12Mont();
+            inputs_b[i] = randomFp12Mont();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].mul(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "G1.add")) {
+        var inputs_a = try allocator.alloc(G1, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(G1, internal_runs);
+        defer allocator.free(inputs_b);
+
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomG1();
+            inputs_b[i] = randomG1();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].add(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "G1.mul")) {
+        var inputs = try allocator.alloc(G1, internal_runs);
+        defer allocator.free(inputs);
+        var scalars = try allocator.alloc(Fr, internal_runs);
+        defer allocator.free(scalars);
+
+        for (0..internal_runs) |i| {
+            inputs[i] = randomG1();
+            scalars[i] = randomFr();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs[i].mul(&scalars[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "G2.add")) {
+        var inputs_a = try allocator.alloc(G2, internal_runs);
+        defer allocator.free(inputs_a);
+        var inputs_b = try allocator.alloc(G2, internal_runs);
+        defer allocator.free(inputs_b);
+
+        for (0..internal_runs) |i| {
+            inputs_a[i] = randomG2();
+            inputs_b[i] = randomG2();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs_a[i].add(&inputs_b[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "G2.mul")) {
+        var inputs = try allocator.alloc(G2, internal_runs);
+        defer allocator.free(inputs);
+        var scalars = try allocator.alloc(Fr, internal_runs);
+        defer allocator.free(scalars);
+
+        for (0..internal_runs) |i| {
+            inputs[i] = randomG2();
+            scalars[i] = randomFr();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = inputs[i].mul(&scalars[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else if (std.mem.eql(u8, operation, "Pairing")) {
+        var g1_inputs = try allocator.alloc(G1, internal_runs);
+        defer allocator.free(g1_inputs);
+        var g2_inputs = try allocator.alloc(G2, internal_runs);
+        defer allocator.free(g2_inputs);
+
+        for (0..internal_runs) |i| {
+            g1_inputs[i] = randomG1();
+            g2_inputs[i] = randomG2();
+        }
+
+        const start = std.time.nanoTimestamp();
+        for (0..internal_runs) |i| {
+            const result = pairing(&g1_inputs[i], &g2_inputs[i]);
+            std.mem.doNotOptimizeAway(result);
+        }
+        const end = std.time.nanoTimestamp();
+
+        const duration_ns = @as(u64, @intCast(end - start));
+        return @as(f64, @floatFromInt(duration_ns)) / 1_000_000.0;
+    } else {
+        std.debug.print("Error: Unknown operation '{s}'\n", .{operation});
+        std.process.exit(1);
     }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].add(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("FpMont.add: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkFpMontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(FpMont, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(FpMont, num_runs);
-    defer allocator.free(inputs_b);
-
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomFpMont();
-        inputs_b[i] = randomFpMont();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("FpMont.mul: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkFp2MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(Fp2Mont, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(Fp2Mont, num_runs);
-    defer allocator.free(inputs_b);
-
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomFp2Mont();
-        inputs_b[i] = randomFp2Mont();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("Fp2Mont.mul: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkFp6MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(Fp6Mont, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(Fp6Mont, num_runs);
-    defer allocator.free(inputs_b);
-
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomFp6Mont();
-        inputs_b[i] = randomFp6Mont();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("Fp6Mont.mul: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkFp12MontMul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(Fp12Mont, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(Fp12Mont, num_runs);
-    defer allocator.free(inputs_b);
-
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomFp12Mont();
-        inputs_b[i] = randomFp12Mont();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].mul(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("Fp12Mont.mul: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkG1Add(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(G1, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(G1, num_runs);
-    defer allocator.free(inputs_b);
-
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomG1();
-        inputs_b[i] = randomG1();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].add(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("G1.add: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkG1Mul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs = try allocator.alloc(G1, num_runs);
-    defer allocator.free(inputs);
-    var scalars = try allocator.alloc(Fr, num_runs);
-    defer allocator.free(scalars);
-
-    for (0..num_runs) |i| {
-        inputs[i] = randomG1();
-        scalars[i] = randomFr();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs[i].mul(&scalars[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("G1.mul: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkG2Add(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs_a = try allocator.alloc(G2, num_runs);
-    defer allocator.free(inputs_a);
-    var inputs_b = try allocator.alloc(G2, num_runs);
-    defer allocator.free(inputs_b);
-
-    for (0..num_runs) |i| {
-        inputs_a[i] = randomG2();
-        inputs_b[i] = randomG2();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs_a[i].add(&inputs_b[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("G2.add: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkG2Mul(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var inputs = try allocator.alloc(G2, num_runs);
-    defer allocator.free(inputs);
-    var scalars = try allocator.alloc(Fr, num_runs);
-    defer allocator.free(scalars);
-
-    for (0..num_runs) |i| {
-        inputs[i] = randomG2();
-        scalars[i] = randomFr();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = inputs[i].mul(&scalars[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("G2.mul: {d}ns/op\n", .{avg_ns});
-}
-
-fn benchmarkPairing(allocator: std.mem.Allocator, num_runs: usize) !void {
-    var g1_inputs = try allocator.alloc(G1, num_runs);
-    defer allocator.free(g1_inputs);
-    var g2_inputs = try allocator.alloc(G2, num_runs);
-    defer allocator.free(g2_inputs);
-
-    for (0..num_runs) |i| {
-        g1_inputs[i] = randomG1();
-        g2_inputs[i] = randomG2();
-    }
-
-    const start = std.time.nanoTimestamp();
-    for (0..num_runs) |i| {
-        const result = pairing(&g1_inputs[i], &g2_inputs[i]);
-        std.mem.doNotOptimizeAway(result);
-    }
-    const end = std.time.nanoTimestamp();
-
-    const duration_ns = @as(u64, @intCast(end - start));
-    const avg_ns = duration_ns / num_runs;
-    print("Pairing: {d}ns/op\n", .{avg_ns});
 }
 
 pub fn main() !void {
@@ -284,37 +265,72 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 2) {
-        print("Usage: {s} <num_runs> [internal|external]\n", .{args[0]});
-        return;
+    if (args.len < 5) {
+        std.debug.print("Usage: {s} --operation <operation> --num-runs <runs>\n", .{args[0]});
+        std.debug.print("Available operations: FpMont.add, FpMont.mul, Fp2Mont.mul, Fp6Mont.mul, Fp12Mont.mul, G1.add, G1.mul, G2.add, G2.mul, Pairing\n", .{});
+        std.process.exit(1);
     }
 
-    const num_runs = try std.fmt.parseInt(usize, args[1], 10);
-    const is_external = if (args.len > 2) std.mem.eql(u8, args[2], "external") else false;
+    var operation: ?[]const u8 = null;
+    var num_runs: u32 = 1;
 
-    if (is_external) {
-        try benchmarkFpMontAdd(allocator, num_runs);
-        try benchmarkFpMontMul(allocator, num_runs);
-        try benchmarkFp2MontMul(allocator, num_runs);
-        try benchmarkFp6MontMul(allocator, num_runs);
-        try benchmarkFp12MontMul(allocator, num_runs);
-        try benchmarkG1Add(allocator, num_runs);
-        try benchmarkG1Mul(allocator, num_runs);
-        try benchmarkG2Add(allocator, num_runs);
-        try benchmarkG2Mul(allocator, num_runs);
-        try benchmarkPairing(allocator, num_runs);
-    } else {
-        for (0..num_runs) |_| {
-            try benchmarkFpMontAdd(allocator, 1000);
-            try benchmarkFpMontMul(allocator, 1000);
-            try benchmarkFp2MontMul(allocator, 500);
-            try benchmarkFp6MontMul(allocator, 100);
-            try benchmarkFp12MontMul(allocator, 50);
-            try benchmarkG1Add(allocator, 200);
-            try benchmarkG1Mul(allocator, 50);
-            try benchmarkG2Add(allocator, 100);
-            try benchmarkG2Mul(allocator, 25);
-            try benchmarkPairing(allocator, 10);
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--operation")) {
+            if (i + 1 >= args.len) {
+                std.debug.print("Error: --operation requires a value\n", .{});
+                std.process.exit(1);
+            }
+            operation = args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "--num-runs")) {
+            if (i + 1 >= args.len) {
+                std.debug.print("Error: --num-runs requires a value\n", .{});
+                std.process.exit(1);
+            }
+            num_runs = std.fmt.parseInt(u32, args[i + 1], 10) catch {
+                std.debug.print("Error: --num-runs must be a number\n", .{});
+                std.process.exit(1);
+            };
+            i += 1;
+        } else {
+            std.debug.print("Error: Unknown argument {s}\n", .{args[i]});
+            std.process.exit(1);
         }
+    }
+
+    if (operation == null) {
+        std.debug.print("Error: --operation is required\n", .{});
+        std.process.exit(1);
+    }
+
+    // Internal runs scaled based on operation complexity for consistent ~10ms timing
+    const internal_runs: usize = if (std.mem.eql(u8, operation.?, "FpMont.add"))
+        100000
+    else if (std.mem.eql(u8, operation.?, "FpMont.mul"))
+        50000
+    else if (std.mem.eql(u8, operation.?, "Fp2Mont.mul"))
+        25000
+    else if (std.mem.eql(u8, operation.?, "Fp6Mont.mul"))
+        5000
+    else if (std.mem.eql(u8, operation.?, "Fp12Mont.mul"))
+        2500
+    else if (std.mem.eql(u8, operation.?, "G1.add"))
+        10000
+    else if (std.mem.eql(u8, operation.?, "G1.mul"))
+        500
+    else if (std.mem.eql(u8, operation.?, "G2.add"))
+        5000
+    else if (std.mem.eql(u8, operation.?, "G2.mul"))
+        200
+    else if (std.mem.eql(u8, operation.?, "Pairing"))
+        50
+    else
+        1000;
+
+    // Run benchmark num_runs times, outputting timing in milliseconds for each run
+    for (0..num_runs) |_| {
+        const elapsed_ms = try benchmarkOperation(allocator, operation.?, internal_runs);
+        print("{d:.6}\n", .{elapsed_ms});
     }
 }
