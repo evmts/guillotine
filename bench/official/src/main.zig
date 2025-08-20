@@ -26,6 +26,7 @@ pub fn main() !void {
         \\--diff-output <DIR>        Output directory for differential traces (default: differential_traces)
         \\--detailed                 Run detailed performance analysis with additional metrics
         \\--perf-output <DIR>        Output directory for performance reports (default: perf-reports)
+        \\--crypto                   Run crypto benchmarks comparing Zig vs Rust implementations
         \\
     );
 
@@ -69,6 +70,7 @@ pub fn main() !void {
     const diff_output_dir = res.args.@"diff-output" orelse "differential_traces";
     const detailed = res.args.detailed != 0;
     const perf_output_dir = res.args.@"perf-output" orelse "perf-reports";
+    const crypto_mode = res.args.crypto != 0;
 
     if (diff_test) |test_name| {
         // Differential trace mode
@@ -96,6 +98,13 @@ pub fn main() !void {
             }
             std.process.exit(1);
         }
+    } else if (crypto_mode) {
+        // Crypto benchmark mode
+        var orchestrator = try Orchestrator.init(allocator, "crypto", num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, use_call2, show_output);
+        defer orchestrator.deinit();
+        
+        try orchestrator.runCryptoBenchmarks();
+        orchestrator.printCryptoSummary();
     } else if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
         const evms = [_][]const u8{ "zig-call2", "revm", "ethereumjs", "geth", "evmone" };
@@ -410,6 +419,7 @@ fn printHelp() !void {
         \\  --next                     Use block-based execution for Zig EVM (new optimized interpreter)
         \\  --detailed                 Run detailed performance analysis with additional metrics
         \\  --perf-output <DIR>        Output directory for performance reports (default: perf-reports)
+        \\  --crypto                   Run crypto benchmarks comparing Zig vs Rust implementations
         \\
         \\Examples:
         \\  orchestrator                    Run benchmarks with Zig EVM
@@ -422,6 +432,7 @@ fn printHelp() !void {
         \\  orchestrator --diff snailtracer --diff-output traces  Custom output directory
         \\  orchestrator --detailed        Run detailed performance analysis with metrics
         \\  orchestrator --detailed --perf-output results  Custom output directory for perf reports
+        \\  orchestrator --crypto          Run crypto benchmarks between Zig and Rust implementations
         \\
     , .{});
 }
