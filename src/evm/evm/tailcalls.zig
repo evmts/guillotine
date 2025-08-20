@@ -7,22 +7,22 @@ const PrefetchOptions = @import("std").builtin.PrefetchOptions;
 const primitives = @import("primitives");
 const U256 = primitives.Uint(256, 4);
 const Log = @import("../log.zig");
+const analysis2 = @import("analysis2.zig");
 
 const SAFE = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
-
 pub const Error = ExecutionError.Error;
 
 // Function pointer type for tailcall dispatch - only takes StackFrame
 const TailcallFunc = *const fn (frame: *StackFrame) Error!noreturn;
 
-inline fn prefetchBlockAt(frame: *StackFrame, target_idx: u16) void {
-    inline for (0..2) |i| {
-        const idx = target_idx + i;
-        if (idx < frame.ops.len) {
-            @prefetch(frame.ops.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
-            @prefetch(frame.metadata.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
-            @prefetch(frame.ops[idx], .{ .rw = .read, .locality = 2, .cache = .instruction });
-        }
+const PREFETCH_BLOCK_WINDOW: comptime_int = 2; // conservative we should benchmark this
+inline fn prefetchBlockWindow(frame: *StackFrame, start_idx: u16) void {
+    comptime var d: u16 = 0;
+    inline while (d < PREFETCH_BLOCK_WINDOW) : (d += 1) {
+        const idx = start_idx + d;
+        @prefetch(frame.ops.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
+        @prefetch(frame.metadata.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
+        @prefetch(frame.ops[idx], .{ .rw = .read, .locality = 2, .cache = .instruction });
     }
 }
 
@@ -171,9 +171,10 @@ pub fn op_sar(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_keccak256(frame: *StackFrame) Error!noreturn {
-    inline for (0..2) |i| {
-        @prefetch(frame.ops.ptr + frame.ip + i, .{ .rw = .read, .locality = 3, .cache = .data });
-        @prefetch(frame.metadata.ptr + frame.ip + i, .{ .rw = .read, .locality = 3, .cache = .data });
+    // Prefetch next instructions before expensive computation
+    const next_ip = frame.ip + 1;
+    if (next_ip < frame.ops.len) {
+        prefetchBlockWindow(frame, @intCast(next_ip));
     }
 
     try execution.crypto.op_keccak256(frame);
@@ -350,8 +351,9 @@ pub fn op_push(frame: *StackFrame) Error!noreturn {
 
     // Fast path for PUSH1-4: use precomputed metadata (O(1))
     if (push_size <= 4) {
-        const value = frame.metadata[frame.ip];
-        frame.stack.append_unsafe(value);
+        const metadata = frame.metadata[frame.ip];
+        const push_data = metadata.push_small;
+        frame.stack.append_unsafe(push_data.value);
         return next(frame);
     }
 
@@ -581,6 +583,11 @@ pub fn op_jump(frame: *StackFrame) Error!noreturn {
     const dest = frame.stack.pop_unsafe();
     const inst_idx = frame.analysis.getInstIdx(@intCast(dest));
 
+    // Prefetch as soon as we know the destination
+    if (inst_idx != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE and inst_idx < frame.ops.len) {
+        prefetchBlockWindow(frame, @intCast(inst_idx));
+    }
+
     if (inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or
         dest >= frame.analysis.bytecode.len or
         frame.analysis.bytecode[@intCast(dest)] != 0x5B)
@@ -588,8 +595,6 @@ pub fn op_jump(frame: *StackFrame) Error!noreturn {
         @branchHint(.cold);
         return Error.InvalidJump;
     }
-
-    prefetchBlockAt(frame, inst_idx);
 
     frame.ip = inst_idx;
     return next(frame);
@@ -602,6 +607,12 @@ pub fn op_jumpi(frame: *StackFrame) Error!noreturn {
     if (condition != 0) {
         // Validate jump
         const inst_idx = frame.analysis.getInstIdx(@intCast(dest));
+
+        // Prefetch as soon as we know we're jumping and have the destination
+        if (inst_idx != @import("analysis2.zig").SimpleAnalysis.MAX_USIZE and inst_idx < frame.ops.len) {
+            prefetchBlockWindow(frame, @intCast(inst_idx));
+        }
+
         if (inst_idx == @import("analysis2.zig").SimpleAnalysis.MAX_USIZE or
             dest >= frame.analysis.bytecode.len or
             frame.analysis.bytecode[@intCast(dest)] != 0x5B)
@@ -610,19 +621,18 @@ pub fn op_jumpi(frame: *StackFrame) Error!noreturn {
             return Error.InvalidJump;
         }
 
-        prefetchBlockAt(frame, inst_idx);
-
         frame.ip = inst_idx;
         return next(frame);
     }
 
-    // Fallthrough case - prefetch sequential instructions
+    // Fallthrough case - don't prefetch, just continue sequentially
     return next(frame);
 }
 
 pub fn op_pc(frame: *StackFrame) Error!noreturn {
-    const pc = frame.metadata[frame.ip];
-    frame.stack.append_unsafe(pc);
+    const metadata = frame.metadata[frame.ip];
+    const pc_data = metadata.pc;
+    frame.stack.append_unsafe(pc_data.pc);
     return next(frame);
 }
 
@@ -632,7 +642,14 @@ pub fn op_gas(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_jumpdest(frame: *StackFrame) Error!noreturn {
-    // JUMPDEST is a no-op, just continue
+    // Consume static gas cost for the basic block starting at this JUMPDEST
+    const metadata = frame.metadata[frame.ip];
+    const jump_dest_data = metadata.jump_dest;
+    const static_gas_cost = jump_dest_data.static_gas_cost;
+
+    // Consume the precomputed gas cost for this basic block
+    try frame.consume_gas(static_gas_cost);
+
     return next(frame);
 }
 
@@ -643,7 +660,14 @@ pub fn op_nop(frame: *StackFrame) Error!noreturn {
 
 // Fused PUSH+JUMP operation
 pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
-    const dest_inst_idx = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const jump_data = metadata.push_jump;
+    const dest_inst_idx = jump_data.dest_inst_idx;
+
+    // Prefetch as soon as we know the destination
+    if (dest_inst_idx < frame.ops.len) {
+        prefetchBlockWindow(frame, @intCast(dest_inst_idx));
+    }
 
     if (comptime SAFE) {
         if (dest_inst_idx >= frame.analysis.inst_count) return Error.InvalidJump;
@@ -655,8 +679,6 @@ pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
         }
     }
 
-    prefetchBlockAt(frame, @intCast(dest_inst_idx));
-
     frame.ip = dest_inst_idx;
     return next(frame);
 }
@@ -666,7 +688,14 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
     const condition = frame.stack.pop_unsafe();
 
     if (condition != 0) {
-        const dest_inst_idx = frame.metadata[frame.ip];
+        const metadata = frame.metadata[frame.ip];
+        const jumpi_data = metadata.push_jumpi;
+        const dest_inst_idx = jumpi_data.dest_inst_idx;
+
+        // Prefetch as soon as we know we're jumping and have the destination
+        if (dest_inst_idx < frame.ops.len) {
+            prefetchBlockWindow(frame, @intCast(dest_inst_idx));
+        }
 
         if (dest_inst_idx >= frame.analysis.inst_count) {
             return Error.InvalidJump;
@@ -681,11 +710,11 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
             }
         }
 
-        prefetchBlockAt(frame, @intCast(dest_inst_idx));
         frame.ip = dest_inst_idx;
         return next(frame);
     }
 
+    // Fallthrough case - don't prefetch, just continue sequentially
     return next(frame);
 }
 
@@ -872,7 +901,9 @@ pub fn op_push_then_swap1(frame: *StackFrame) Error!noreturn {
 
 // Memory operation fusions - small values
 pub fn op_push_then_mload_small(frame: *StackFrame) Error!noreturn {
-    const offset = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const offset = push_data.value;
 
     // Push offset to stack then call mload
     frame.stack.append_unsafe(offset);
@@ -881,7 +912,9 @@ pub fn op_push_then_mload_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_mstore_small(frame: *StackFrame) Error!noreturn {
-    const offset = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const offset = push_data.value;
     // TODO we shouldn't be pushingto stack
     frame.stack.append_unsafe(offset);
     try execution.memory.op_mstore(frame);
@@ -890,7 +923,9 @@ pub fn op_push_then_mstore_small(frame: *StackFrame) Error!noreturn {
 
 // Comparison operation fusions - small values
 pub fn op_push_then_eq_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     const result: u256 = if (other == push_val) 1 else 0;
@@ -899,7 +934,9 @@ pub fn op_push_then_eq_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_lt_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, LT pops a then b, and checks if a < b
@@ -910,7 +947,9 @@ pub fn op_push_then_lt_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_gt_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, GT pops a then b, and checks if a > b
@@ -922,7 +961,9 @@ pub fn op_push_then_gt_small(frame: *StackFrame) Error!noreturn {
 
 // Bitwise operation fusions - small values
 pub fn op_push_then_and_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     const result = other & push_val;
@@ -932,7 +973,9 @@ pub fn op_push_then_and_small(frame: *StackFrame) Error!noreturn {
 
 // Arithmetic operation fusions - small values
 pub fn op_push_then_add_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     const result = other +% push_val; // Wrapping add
@@ -941,7 +984,9 @@ pub fn op_push_then_add_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_sub_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, SUB pops a then b, and computes a - b
@@ -952,7 +997,9 @@ pub fn op_push_then_sub_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_mul_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     const result = other *% push_val; // Wrapping mul
@@ -961,7 +1008,9 @@ pub fn op_push_then_mul_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_div_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const other = frame.stack.peek_unsafe();
 
     // Note: In EVM, DIV pops a then b, and computes a / b
@@ -973,7 +1022,9 @@ pub fn op_push_then_div_small(frame: *StackFrame) Error!noreturn {
 
 // Storage operation fusions - small values
 pub fn op_push_then_sload_small(frame: *StackFrame) Error!noreturn {
-    const key = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const key = push_data.value;
 
     // Push key to stack then call sload
     frame.stack.append_unsafe(key);
@@ -983,7 +1034,9 @@ pub fn op_push_then_sload_small(frame: *StackFrame) Error!noreturn {
 
 // Stack operation fusions - small values
 pub fn op_push_then_dup1_small(frame: *StackFrame) Error!noreturn {
-    const value = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const value = push_data.value;
 
     // Push the value twice (PUSH then DUP1 effect)
     frame.stack.append_unsafe(value);
@@ -992,7 +1045,9 @@ pub fn op_push_then_dup1_small(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_push_then_swap1_small(frame: *StackFrame) Error!noreturn {
-    const push_val = frame.metadata[frame.ip];
+    const metadata = frame.metadata[frame.ip];
+    const push_data = metadata.push_small;
+    const push_val = push_data.value;
     const top = frame.stack.peek_unsafe();
 
     // Push in swapped order
@@ -1086,7 +1141,8 @@ pub fn op_loop_condition(frame: *StackFrame) Error!noreturn {
     frame.stack.append_unsafe(counter);
 
     // 2. PUSH limit: Get the limit value from metadata for the second instruction
-    const limit = frame.metadata[frame.ip + 1];
+    const limit_metadata = frame.metadata[frame.ip + 1];
+    const limit = limit_metadata.push_small.value;
     frame.stack.append_unsafe(limit);
 
     const b = frame.stack.pop_unsafe(); // limit
@@ -1094,10 +1150,8 @@ pub fn op_loop_condition(frame: *StackFrame) Error!noreturn {
     const is_less: u256 = if (a < b) 1 else 0;
     frame.stack.append_unsafe(is_less);
 
-    const dest_inst_idx = frame.metadata[frame.ip + 3];
-
-    // This is always a back-edge (loop)
-    prefetchBlockAt(frame, @intCast(dest_inst_idx));
+    const jumpi_metadata = frame.metadata[frame.ip + 3];
+    const dest_inst_idx = jumpi_metadata.push_jumpi.dest_inst_idx;
 
     // 5. JUMPI logic: Pop condition and jump if true
     const condition = frame.stack.pop_unsafe();
@@ -1106,6 +1160,11 @@ pub fn op_loop_condition(frame: *StackFrame) Error!noreturn {
         @branchHint(.unlikely); // Loop exit uncommon
         frame.ip += 4; // Skip 4 more since next() will add 1
         return next(frame);
+    }
+
+    // Prefetch as soon as we know we're jumping and have the destination
+    if (dest_inst_idx < frame.ops.len) {
+        prefetchBlockWindow(frame, @intCast(dest_inst_idx));
     }
 
     if (comptime SAFE) {

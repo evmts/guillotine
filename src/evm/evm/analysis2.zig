@@ -5,6 +5,61 @@ const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
 const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
+/// Metadata for PUSH1-8 instructions with precomputed values
+pub const PushSmallMetadata = struct {
+    value: u64,
+};
+
+/// Metadata for PUSH9-32 instructions that store PC for on-demand reading
+pub const PushLargeMetadata = struct {
+    pc: u16,
+};
+
+/// Metadata for PC instruction that stores the current PC value
+pub const PcMetadata = struct {
+    pc: u16,
+};
+
+/// Metadata for PUSH+JUMP fused instructions
+pub const PushJumpMetadata = struct {
+    dest_inst_idx: u16,
+};
+
+/// Metadata for PUSH+JUMPI fused instructions  
+pub const PushJumpiMetadata = struct {
+    dest_inst_idx: u16,
+};
+
+/// Metadata for loop condition fusion (DUP1+PUSH+LT+PUSH+JUMPI)
+/// Only fuses loops with limits that fit in u16 for better performance
+pub const LoopConditionMetadata = struct {
+    loop_limit: u16,      // The comparison limit from the first PUSH (max 65535)
+    dest_inst_idx: u16,   // The jump destination instruction index
+};
+
+/// Metadata for JUMPDEST instructions that start basic blocks
+pub const JumpDestMetadata = struct {
+    static_gas_cost: u16,  // Largest static gas cost is ~1875 (LOG4), fits easily in u16
+};
+
+/// Default metadata for instructions that don't need specific metadata
+pub const DefaultMetadata = struct {
+    // Use a smaller padding to keep union size reasonable
+    _unused: u64,
+};
+
+/// Union of all possible instruction metadata types
+pub const InstructionMetadata = union(enum) {
+    push_small: PushSmallMetadata,
+    push_large: PushLargeMetadata,
+    pc: PcMetadata,
+    push_jump: PushJumpMetadata,
+    push_jumpi: PushJumpiMetadata,
+    loop_condition: LoopConditionMetadata,
+    jump_dest: JumpDestMetadata,
+    default: DefaultMetadata,
+};
+
 /// Simple analysis result for tailcall dispatch with precomputed mappings
 pub const SimpleAnalysis = struct {
     /// Mapping from instruction index to PC value
@@ -70,12 +125,12 @@ pub const SimpleAnalysis = struct {
     }
 
     /// Build analysis from bytecode and return metadata separately
-    pub fn analyze(allocator: std.mem.Allocator, code: []const u8) !struct { analysis: SimpleAnalysis, metadata: []u32 } {
+    pub fn analyze(allocator: std.mem.Allocator, code: []const u8) !struct { analysis: SimpleAnalysis, metadata: []InstructionMetadata, block_gas_costs: []u64 } {
         if (code.len > std.math.maxInt(u16)) return error.OutOfMemory; // enforce u16 bounds
         var inst_to_pc_list = std.ArrayList(u16).init(allocator);
         defer inst_to_pc_list.deinit();
 
-        var metadata_list = std.ArrayList(u32).init(allocator);
+        var metadata_list = std.ArrayList(InstructionMetadata).init(allocator);
         defer metadata_list.deinit();
 
         var pc_to_inst = try allocator.alloc(u16, code.len);
@@ -114,33 +169,37 @@ pub const SimpleAnalysis = struct {
                 const push_size = byte - 0x5F;
 
                 // Metadata usage pattern:
-                // - Small pushes (PUSH1-4): store the immediate value directly when fully available
+                // - Small pushes (PUSH1-8): store the immediate value directly when fully available
                 //   This avoids an extra bytecode read at runtime for the hot path
-                // - Larger pushes (PUSH5-32): store the PC to read the value on demand
+                // - Larger pushes (PUSH9-32): store the PC to read the value on demand
                 // - Truncated small pushes: store PC so runtime can fall back to generic path
-                if (push_size <= 4 and @as(usize, pc) + 1 + push_size <= code.len) {
-                    var value: u32 = 0;
+                if (push_size <= 8 and @as(usize, pc) + 1 + push_size <= code.len) {
+                    var value: u64 = 0;
                     var i: usize = 0;
                     while (i < push_size) : (i += 1) {
                         value = (value << 8) | code[@as(usize, pc) + 1 + i];
                     }
-                    try metadata_list.append(value);
+                    try metadata_list.append(.{ .push_small = .{ .value = value } });
                 } else {
-                    try metadata_list.append(@intCast(pc));
+                    try metadata_list.append(.{ .push_large = .{ .pc = @intCast(pc) } });
                 }
 
                 pc += 1 + push_size;
             } else if (byte == 0x5F) {
                 // PUSH0 - store 0 directly
-                try metadata_list.append(0);
+                try metadata_list.append(.{ .push_small = .{ .value = 0 } });
                 pc += 1;
             } else if (byte == 0x58) {
                 // PC opcode - store the PC value
-                try metadata_list.append(@intCast(pc));
+                try metadata_list.append(.{ .pc = .{ .pc = @intCast(pc) } });
+                pc += 1;
+            } else if (byte == 0x5B) {
+                // JUMPDEST - placeholder metadata, will be updated with gas costs later
+                try metadata_list.append(.{ .default = .{ ._unused = 0 } });
                 pc += 1;
             } else {
                 // Other opcodes - no metadata needed
-                try metadata_list.append(0);
+                try metadata_list.append(.{ .default = .{ ._unused = 0 } });
                 pc += 1;
             }
 
@@ -162,25 +221,95 @@ pub const SimpleAnalysis = struct {
 
         block_boundaries.deinit();
 
+        // Calculate static gas costs for each basic block
+        const block_gas_costs = try allocator.alloc(u64, inst_idx);
+        const analysis = SimpleAnalysis{
+            .inst_to_pc = try inst_to_pc_list.toOwnedSlice(),
+            .pc_to_inst = pc_to_inst,
+            .bytecode = code,
+            .inst_count = inst_idx,
+            .block_boundaries = final_block_boundaries,
+        };
+        
+        // Calculate gas costs for each basic block
+        try calculateBlockGasCosts(code, &analysis, block_gas_costs);
+
+        // Update JUMPDEST metadata with calculated gas costs
+        var metadata_slice = try metadata_list.toOwnedSlice();
+        var inst_idx_update: u16 = 0;
+        while (inst_idx_update < analysis.inst_count) : (inst_idx_update += 1) {
+            const inst_pc = analysis.getPc(inst_idx_update);
+            if (inst_pc < code.len and code[inst_pc] == 0x5B) { // JUMPDEST
+                const gas_cost = block_gas_costs[inst_idx_update];
+                if (gas_cost <= std.math.maxInt(u16)) {
+                    metadata_slice[inst_idx_update] = .{ .jump_dest = .{ .static_gas_cost = @intCast(gas_cost) } };
+                }
+            }
+        }
+
         return .{
-            .analysis = SimpleAnalysis{
-                .inst_to_pc = try inst_to_pc_list.toOwnedSlice(),
-                .pc_to_inst = pc_to_inst,
-                .bytecode = code,
-                .inst_count = inst_idx,
-                .block_boundaries = final_block_boundaries,
-            },
-            .metadata = try metadata_list.toOwnedSlice(),
+            .analysis = analysis,
+            .metadata = metadata_slice,
+            .block_gas_costs = block_gas_costs,
         };
     }
 };
+
+/// Calculate static gas costs for each basic block
+fn calculateBlockGasCosts(code: []const u8, analysis: *const SimpleAnalysis, block_gas_costs: []u64) !void {
+    const opcode_metadata = &OpcodeMetadata.CANCUN;
+    
+    // Initialize all block costs to 0
+    @memset(block_gas_costs, 0);
+    
+    var current_block_start: u16 = 0;
+    var current_block_cost: u64 = 0;
+    
+    var inst_idx: u16 = 0;
+    while (inst_idx < analysis.inst_count) : (inst_idx += 1) {
+        const pc = analysis.getPc(inst_idx);
+        if (pc >= code.len) break;
+        
+        const opcode = code[pc];
+        const operation = opcode_metadata.get_operation(opcode);
+        
+        // Add this instruction's static gas cost to current block
+        current_block_cost += operation.constant_gas;
+        
+        // Check if next instruction starts a new block
+        const is_next_block_start = (inst_idx + 1 < analysis.inst_count) and 
+            analysis.isBlockStart(inst_idx + 1);
+        
+        // Check if this is a terminating instruction (ends current block)
+        const is_terminator = SimpleAnalysis.isTerminator(opcode);
+        
+        // If we're at the end of a block, store the accumulated cost
+        if (is_next_block_start or is_terminator or inst_idx == analysis.inst_count - 1) {
+            // Store cost for all JUMPDEST instructions in this block
+            var block_inst = current_block_start;
+            while (block_inst <= inst_idx) : (block_inst += 1) {
+                const block_pc = analysis.getPc(block_inst);
+                if (block_pc < code.len and code[block_pc] == 0x5B) { // JUMPDEST
+                    block_gas_costs[block_inst] = current_block_cost;
+                }
+            }
+            
+            // Reset for next block
+            if (is_next_block_start) {
+                current_block_start = inst_idx + 1;
+                current_block_cost = 0;
+            }
+        }
+    }
+}
 
 /// Build the tailcall ops array and return together with analysis and metadata
 /// This encapsulates opcode decoding and fusion logic for PUSH+X patterns
 pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
     analysis: SimpleAnalysis,
-    metadata: []u32,
+    metadata: []InstructionMetadata,
     ops: []*const anyopaque,
+    block_gas_costs: []u64,
 } {
     if (code.len > std.math.maxInt(u16)) return error.OutOfMemory;
 
@@ -188,6 +317,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
     const res = try SimpleAnalysis.analyze(allocator, code);
     const analysis = res.analysis;
     const metadata = res.metadata;
+    const block_gas_costs = res.block_gas_costs;
 
     // Phase 1.5: decode to ops array
     var ops_list = std.ArrayList(*const anyopaque).init(allocator);
@@ -371,7 +501,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
 
         // First pass: Check for 5-instruction loop patterns (DUP1, PUSH, LT, PUSH, JUMPI)
         var i: usize = 0;
-        while (i < ops_slice.len - 4) : (i += 1) {
+        while (i + 4 < ops_slice.len) : (i += 1) {
             // Check for DUP1, PUSH, LT, PUSH, JUMPI pattern
             if (ops_slice[i] == OP_DUP1 and
                 ops_slice[i + 1] == OP_PUSH and
@@ -379,36 +509,59 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
                 ops_slice[i + 3] == OP_PUSH and
                 ops_slice[i + 4] == OP_JUMPI)
             {
-                // Validate the second PUSH has a valid JUMPDEST
-                const push_inst_pc = analysis.getPc(@intCast(i + 3));
-                if (push_inst_pc != SimpleAnalysis.MAX_USIZE and push_inst_pc < code.len) {
-                    const push_opcode = code[push_inst_pc];
-                    if (push_opcode >= 0x60 and push_opcode <= 0x7F) {
-                        const push_size = push_opcode - 0x5F;
-                        const value_start = push_inst_pc + 1;
+                // First, extract and validate the loop limit from the first PUSH (i+1)
+                const limit_push_pc = analysis.getPc(@intCast(i + 1));
+                if (limit_push_pc != SimpleAnalysis.MAX_USIZE and limit_push_pc < code.len) {
+                    const limit_opcode = code[limit_push_pc];
+                    if (limit_opcode >= 0x60 and limit_opcode <= 0x7F) {
+                        const limit_push_size = limit_opcode - 0x5F;
+                        const limit_value_start = limit_push_pc + 1;
 
-                        // Read the jump destination
-                        var dest_val: usize = 0;
-                        var j: usize = 0;
-                        while (j < push_size and value_start + j < code.len) : (j += 1) {
-                            dest_val = (dest_val << 8) | code[value_start + j];
+                        // Read the loop limit value
+                        var loop_limit_val: u64 = 0;
+                        var k: usize = 0;
+                        while (k < limit_push_size and limit_value_start + k < code.len) : (k += 1) {
+                            loop_limit_val = (loop_limit_val << 8) | code[limit_value_start + k];
                         }
 
-                        // Validate it's a valid JUMPDEST using reusable method
-                        if (analysis.validate_jump_dest(dest_val)) |dest_inst_idx| {
-                            // Store jump destination in metadata for instruction i+3 (PUSH before JUMPI)
-                            metadata[i + 3] = dest_inst_idx;
+                        // Only proceed with fusion if loop limit fits in u16
+                        if (loop_limit_val <= std.math.maxInt(u16)) {
+                            // Now validate the second PUSH has a valid JUMPDEST
+                            const push_inst_pc = analysis.getPc(@intCast(i + 3));
+                            if (push_inst_pc != SimpleAnalysis.MAX_USIZE and push_inst_pc < code.len) {
+                                const push_opcode = code[push_inst_pc];
+                                if (push_opcode >= 0x60 and push_opcode <= 0x7F) {
+                                    const push_size = push_opcode - 0x5F;
+                                    const value_start = push_inst_pc + 1;
 
-                            // Replace the 5-instruction sequence with loop fusion
-                            ops_slice[i] = @ptrCast(&tailcalls.op_loop_condition);
-                            ops_slice[i + 1] = @ptrCast(&tailcalls.op_nop);
-                            ops_slice[i + 2] = @ptrCast(&tailcalls.op_nop);
-                            ops_slice[i + 3] = @ptrCast(&tailcalls.op_nop);
-                            ops_slice[i + 4] = @ptrCast(&tailcalls.op_nop);
+                                    // Read the jump destination
+                                    var dest_val: usize = 0;
+                                    var j: usize = 0;
+                                    while (j < push_size and value_start + j < code.len) : (j += 1) {
+                                        dest_val = (dest_val << 8) | code[value_start + j];
+                                    }
 
-                            // Skip the fused instructions
-                            i += 4;
-                            continue;
+                                    // Validate it's a valid JUMPDEST using reusable method
+                                    if (analysis.validate_jump_dest(dest_val)) |dest_inst_idx| {
+                                        // Store loop condition metadata for the fused operation
+                                        metadata[i] = .{ .loop_condition = .{ 
+                                            .loop_limit = @intCast(loop_limit_val),
+                                            .dest_inst_idx = dest_inst_idx 
+                                        } };
+
+                                        // Replace the 5-instruction sequence with loop fusion
+                                        ops_slice[i] = @ptrCast(&tailcalls.op_loop_condition);
+                                        ops_slice[i + 1] = @ptrCast(&tailcalls.op_nop);
+                                        ops_slice[i + 2] = @ptrCast(&tailcalls.op_nop);
+                                        ops_slice[i + 3] = @ptrCast(&tailcalls.op_nop);
+                                        ops_slice[i + 4] = @ptrCast(&tailcalls.op_nop);
+
+                                        // Skip the fused instructions
+                                        i += 4;
+                                        continue;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -445,12 +598,13 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
 
                 if (analysis.validate_jump_dest(val)) |dest_inst_idx| {
                     // Store destination instruction index for both JUMP and JUMPI
-                    metadata[i] = dest_inst_idx;
-
-                    fused = if (next_op == OP_JUMP)
-                        @ptrCast(&tailcalls.op_push_then_jump)
-                    else
-                        @ptrCast(&tailcalls.op_push_then_jumpi);
+                    if (next_op == OP_JUMP) {
+                        metadata[i] = .{ .push_jump = .{ .dest_inst_idx = dest_inst_idx } };
+                        fused = @ptrCast(&tailcalls.op_push_then_jump);
+                    } else {
+                        metadata[i] = .{ .push_jumpi = .{ .dest_inst_idx = dest_inst_idx } };
+                        fused = @ptrCast(&tailcalls.op_push_then_jumpi);
+                    }
                 }
             }
 
@@ -506,7 +660,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
     }
 
 
-    return .{ .analysis = analysis, .metadata = metadata, .ops = ops_slice };
+    return .{ .analysis = analysis, .metadata = metadata, .ops = ops_slice, .block_gas_costs = block_gas_costs };
 }
 
 test "analysis2: PUSH small value bounds check and metadata" {
@@ -516,11 +670,12 @@ test "analysis2: PUSH small value bounds check and metadata" {
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
     try std.testing.expectEqual(@as(u16, 0), result.analysis.getInstIdx(0));
     try std.testing.expectEqual(@as(u16, SimpleAnalysis.MAX_USIZE), result.analysis.getInstIdx(1)); // PC 1 is push data, not instruction
     try std.testing.expectEqual(@as(u16, 1), result.analysis.getInstIdx(2));
     // First instruction is PUSH1: metadata should store value 0xAA
-    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]);
+    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0xAA } }, result.metadata[0]);
 }
 
 test "analysis2: PUSH0 metadata and length" {
@@ -530,10 +685,11 @@ test "analysis2: PUSH0 metadata and length" {
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
     // Two instructions
     try std.testing.expectEqual(@as(u16, 2), result.analysis.inst_count);
     // First is PUSH0 -> metadata 0
-    try std.testing.expectEqual(@as(u32, 0), result.metadata[0]);
+    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0 } }, result.metadata[0]);
 }
 
 test "analysis2: PUSH1-4 metadata fast path optimization" {
@@ -550,13 +706,14 @@ test "analysis2: PUSH1-4 metadata fast path optimization" {
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     // Verify metadata contains precomputed values for PUSH1-4
-    try std.testing.expectEqual(@as(u32, 0xAA), result.metadata[0]); // PUSH1
-    try std.testing.expectEqual(@as(u32, 0x1234), result.metadata[1]); // PUSH2
-    try std.testing.expectEqual(@as(u32, 0xABCDEF), result.metadata[2]); // PUSH3
-    try std.testing.expectEqual(@as(u32, 0x11223344), result.metadata[3]); // PUSH4
-    try std.testing.expectEqual(@as(u32, 0), result.metadata[4]); // STOP (no metadata)
+    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0xAA } }, result.metadata[0]); // PUSH1
+    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0x1234 } }, result.metadata[1]); // PUSH2
+    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0xABCDEF } }, result.metadata[2]); // PUSH3
+    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0x11223344 } }, result.metadata[3]); // PUSH4
+    try std.testing.expectEqual(InstructionMetadata{ .default = .{ ._unused = 0 } }, result.metadata[4]); // STOP (no metadata)
 }
 
 test "analysis2: loop fusion pattern detection" {
@@ -577,6 +734,7 @@ test "analysis2: loop fusion pattern detection" {
     defer prep_result.analysis.deinit(allocator);
     defer allocator.free(prep_result.metadata);
     defer allocator.free(prep_result.ops);
+    defer allocator.free(prep_result.block_gas_costs);
 
     // Verify loop fusion was applied
     try std.testing.expect(prep_result.ops[0] == @as(*const anyopaque, @ptrCast(&tailcalls.op_loop_condition)));
@@ -586,7 +744,7 @@ test "analysis2: loop fusion pattern detection" {
     try std.testing.expect(prep_result.ops[4] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
 
     // Verify metadata contains the jump destination instruction index for the JUMPDEST (instruction 5)
-    try std.testing.expectEqual(@as(u32, 5), prep_result.metadata[3]); // PUSH1 dest metadata
+    try std.testing.expectEqual(InstructionMetadata{ .push_jumpi = .{ .dest_inst_idx = 5 } }, prep_result.metadata[3]); // PUSH1 dest metadata
 }
 
 test "analysis2: block boundary detection basic" {
@@ -605,6 +763,7 @@ test "analysis2: block boundary detection basic" {
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     // Check that block boundaries are correctly identified
     try std.testing.expect(result.analysis.isBlockStart(0)); // First instruction
@@ -634,6 +793,7 @@ test "analysis2: block boundary detection with jumps" {
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
     defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     // Verify block boundaries
     try std.testing.expect(result.analysis.isBlockStart(0)); // First instruction

@@ -64,6 +64,8 @@ pub const primitives = @import("primitives");
 
 /// Simplified bytecode analysis for tailcall dispatch
 pub const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+/// Instruction metadata for analysis2
+pub const analysis2 = @import("evm/analysis2.zig");
 /// Compatibility wrapper for the old CodeAnalysis interface
 pub const CodeAnalysis = @import("analysis.zig").CodeAnalysis;
 

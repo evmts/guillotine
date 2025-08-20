@@ -16,6 +16,7 @@ const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+const InstructionMetadata = @import("analysis2.zig").InstructionMetadata;
 
 pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     return _call(self, params, true);
@@ -185,7 +186,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         .block_boundaries = empty_block_boundaries,
         .jump_table = &self.table,
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var frame = try StackFrame.init(

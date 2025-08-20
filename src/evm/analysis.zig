@@ -4,11 +4,13 @@
 
 const std = @import("std");
 const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
+const InstructionMetadata = @import("evm/analysis2.zig").InstructionMetadata;
 
 /// Compatibility wrapper that provides the old CodeAnalysis interface
 pub const CodeAnalysis = struct {
     analysis: SimpleAnalysis,
-    metadata: []u32,
+    metadata: []InstructionMetadata,
+    block_gas_costs: []u64,
     allocator: std.mem.Allocator,
     code: []const u8, // Compatibility field for old interface
     code_len: usize, // Compatibility field for old interface
@@ -32,6 +34,7 @@ pub const CodeAnalysis = struct {
         return CodeAnalysis{
             .analysis = result.analysis,
             .metadata = result.metadata,
+            .block_gas_costs = result.block_gas_costs,
             .allocator = allocator,
             .code = code,
             .code_len = code.len,
@@ -57,6 +60,7 @@ pub const CodeAnalysis = struct {
     pub fn deinit(self: *CodeAnalysis) void {
         self.analysis.deinit(self.allocator);
         self.allocator.free(self.metadata);
+        self.allocator.free(self.block_gas_costs);
     }
 
     /// Forward other methods to the inner analysis
