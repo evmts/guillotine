@@ -15,7 +15,7 @@ test "SimpleAnalysis correctly maps instructions and skips PUSH data" {
     
     const result = try SimpleAnalysis.analyze(allocator, code);
     // Analysis is const from analyze(), cannot deinit here
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
     
     // Verify instruction mapping: position 1 and 2 should NOT be instruction starts
     try std.testing.expectEqual(SimpleAnalysis.MAX_USIZE, result.analysis.getInstIdx(1));
@@ -47,7 +47,7 @@ test "SimpleAnalysis with basic EVM sequence" {
     
     const result = try SimpleAnalysis.analyze(allocator, code);
     // Analysis is const from analyze(), cannot deinit here
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
     
     // Verify instruction mapping for each actual instruction start
     try std.testing.expectEqual(@as(u16, 0), result.analysis.getInstIdx(0)); // PUSH1 0x80
@@ -91,7 +91,7 @@ test "SimpleAnalysis with ERC20 constructor pattern" {
     
     const result = try SimpleAnalysis.analyze(allocator, code);
     // Analysis is const from analyze(), cannot deinit here
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
     
     // Verify key instruction positions
     try std.testing.expectEqual(@as(u16, 0), result.analysis.getInstIdx(0));  // PUSH1 0x80

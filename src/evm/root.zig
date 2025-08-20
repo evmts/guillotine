@@ -129,7 +129,7 @@ pub const EvmBuilder = struct {
     }
 
     pub fn build(self: *EvmBuilder) !Evm {
-        return Evm.init(self.allocator, self.database, null, null, null, 0, false, null);
+        return Evm.init(self.allocator, self.database, null, null, null, null);
     }
 };
 
@@ -184,8 +184,8 @@ pub const ecmul = @import("precompiles/ecmul.zig");
 /// ECPAIRING precompile (0x08)
 pub const ecpairing = @import("precompiles/ecpairing.zig");
 
-/// Tailcall interpreter prototype (simplified version)
-pub const interpret2 = @import("evm/interpret2_simple.zig");
+/// Tailcall interpreter prototype
+pub const interpret2 = @import("evm/interpret2.zig");
 
 /// EIP-4844 blob transaction support (blobs, KZG verification, gas market)
 pub const blob = @import("blob/index.zig");

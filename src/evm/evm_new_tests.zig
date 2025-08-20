@@ -36,7 +36,7 @@ test "Evm.init creates valid instance with defaults" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Test basic initialization
@@ -60,7 +60,7 @@ test "Evm.init with custom hardfork configuration" {
         const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
         const chain_rules = @import("hardforks/chain_rules.zig").for_hardfork(hardfork);
 
-        var evm = try Evm.Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+        var evm = try Evm.Evm.init(allocator, db_interface, jump_table, chain_rules, null, null);
         defer evm.deinit();
 
         try testing.expect(evm.table.hardfork == hardfork);
@@ -99,24 +99,23 @@ test "Frame initialization with minimal parameters" {
     const bytecode = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }; // PUSH1 1, PUSH1 2, ADD
     const result = try SimpleAnalysis.analyze(allocator, bytecode);
     defer result.analysis.deinit(allocator);
-    defer allocator.free(result.metadata);
+    defer allocator.free(result.block_gas_costs);
 
     // Initialize frame
-    var frame = try Frame.init(100_000, // gas
-        false, // static call
-        0, // call depth
-        testAddress(0x1000), // contract address
+    var frame = try Frame.init(
+        100_000, // gas_remaining
+        testAddress(0x1000), // contract_address
+        result.analysis, // analysis
+        &[_]*const fn (*Frame) @import("execution/execution_error.zig").Error!noreturn{}, // ops (empty)
+        host.*, // host
+        memory_db.to_database_interface(), // state
+        allocator, // allocator
+        false, // is_static
         testAddress(0x2000), // caller
         0, // value
-        &result.analysis, &access_list, &journal, host, 0, // snapshot id
-        memory_db.to_database_interface(), @import("hardforks/chain_rules.zig").for_hardfork(.LONDON), null, // self destruct
-        null, // created contracts
-        &[_]u8{}, // input
-        allocator, null, // next frame
-        false, // is create
-        false // is delegate
+        &[_]u8{}, // input_buffer
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Verify frame initialization
     try testing.expectEqual(@as(u64, 100_000), frame.gas_remaining);
@@ -133,7 +132,7 @@ test "Frame execution with simple bytecode" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Create and deploy simple contract
@@ -165,20 +164,20 @@ test "Frame execution with simple bytecode" {
     host.* = Host.init(allocator, db_interface);
     defer host.deinit();
 
-    var frame = try Frame.init(100_000, // gas
-        false, // static call
-        0, // call depth
-        contract_addr, testAddress(0x4000), // caller
+    var frame = try Frame.init(
+        100_000, // gas_remaining
+        contract_addr, // contract_address
+        result2.analysis, // analysis
+        &[_]*const fn (*Frame) @import("execution/execution_error.zig").Error!noreturn{}, // ops (empty)
+        host.*, // host
+        db_interface, // state
+        allocator, // allocator
+        false, // is_static
+        testAddress(0x4000), // caller
         0, // value
-        &result2.analysis, &evm.access_list, &evm.journal, host, 0, // snapshot id
-        db_interface, @import("hardforks/chain_rules.zig").for_hardfork(.LONDON), null, // self destruct
-        null, // created contracts
-        &[_]u8{}, // input
-        allocator, null, // next frame
-        false, // is create
-        false // is delegate
+        &[_]u8{}, // input_buffer
     );
-    defer frame.deinit();
+    defer frame.deinit(allocator);
 
     // Frame is ready for execution
     try testing.expect(frame.gas_remaining > 0);
@@ -196,7 +195,7 @@ test "Evm.call with simple contract" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Deploy simple contract that returns 42
@@ -247,7 +246,7 @@ test "Dynamic runtime JUMP works (no immediate PUSH)" {
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Contract: PUSH1 5; DUP1; JUMP; JUMPDEST; PUSH1 0x2A; PUSH1 0; MSTORE; PUSH1 32; PUSH1 0; RETURN
@@ -274,7 +273,7 @@ test "Evm.call with CREATE operation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const creator_addr = testAddress(0x7000);
@@ -335,7 +334,7 @@ test "Evm state persistence across calls" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Deploy storage contract (SSTORE and SLOAD)
@@ -397,7 +396,7 @@ test "Evm access list tracking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_addr = testAddress(0xA000);
@@ -427,7 +426,7 @@ test "Evm gas consumption tracking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Deploy contract with expensive operations
@@ -490,7 +489,7 @@ test "Evm handles stack underflow gracefully" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Contract with stack underflow
@@ -534,7 +533,7 @@ test "Evm handles out of gas correctly" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // Infinite loop contract
@@ -585,7 +584,7 @@ test "Evm proper cleanup on multiple calls" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const simple_contract = &[_]u8{0x00}; // STOP

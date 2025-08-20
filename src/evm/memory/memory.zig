@@ -200,22 +200,34 @@ pub fn get_expansion_cost(self: *Memory, new_size: u64) u64 {
     const new_words = (new_size + 31) / 32;
     const current_words = (current_size + 31) / 32;
 
-    // Use lookup table for small memory sizes
-    if (new_words <= SMALL_MEMORY_LOOKUP_SIZE and current_words <= SMALL_MEMORY_LOOKUP_SIZE) {
-        return SMALL_MEMORY_LOOKUP_TABLE[@intCast(new_words)] - SMALL_MEMORY_LOOKUP_TABLE[@intCast(current_words)];
+    // Check cache first for all sizes
+    if (new_size <= self.cached_expansion.last_size) {
+        // We've already calculated cost for this size or larger - no additional cost
+        return 0;
     }
 
-    // Check if we can use cached calculation for larger sizes
-    if (new_size == self.cached_expansion.last_size) {
-        // Return cached cost minus cost for current size
-        const current_cost = if (current_size == 0) 0 else calculate_memory_total_cost(current_size);
-        return self.cached_expansion.last_cost -| current_cost;
+    // Use lookup table for small memory sizes
+    if (new_words <= SMALL_MEMORY_LOOKUP_SIZE and current_words <= SMALL_MEMORY_LOOKUP_SIZE) {
+        const expansion_cost = SMALL_MEMORY_LOOKUP_TABLE[@intCast(new_words)] - SMALL_MEMORY_LOOKUP_TABLE[@intCast(current_words)];
+        
+        // Update cache for consistency with larger size logic
+        if (new_size > self.cached_expansion.last_size) {
+            self.cached_expansion.last_size = new_size;
+            self.cached_expansion.last_words = new_words;
+            self.cached_expansion.last_cost = SMALL_MEMORY_LOOKUP_TABLE[@intCast(new_words)];
+        }
+        
+        return expansion_cost;
     }
+
+
+    // Calculate cost from the last cached size (or current size, whichever is larger)
+    const base_size = @max(current_size, self.cached_expansion.last_size);
 
     // Calculate new cost and update cache for larger sizes
     const new_cost = calculate_memory_total_cost(new_size);
-    const current_cost = if (current_size == 0) 0 else calculate_memory_total_cost(current_size);
-    const expansion_cost = new_cost - current_cost;
+    const base_cost = if (base_size == 0) 0 else calculate_memory_total_cost(base_size);
+    const expansion_cost = new_cost - base_cost;
 
     // Update cache with both size and word count
     self.cached_expansion.last_size = new_size;
