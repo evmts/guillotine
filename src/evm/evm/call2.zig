@@ -16,7 +16,7 @@ const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
-const InstructionMetadata = @import("analysis2.zig").InstructionMetadata;
+// InstructionMetadata no longer exists - using bucketed system
 
 pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     return _call(self, params, true);
@@ -185,15 +185,19 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
         .inst_count = 0,
         .block_boundaries = empty_block_boundaries,
         .jump_table = &self.table,
+        .bucket_indices = &.{},
+        .u16_bucket = &.{},
+        .u32_bucket = &.{},
+        .u64_bucket = &.{},
+        .u256_bucket = &.{},
     };
-    const empty_metadata: []InstructionMetadata = &.{};
-    const empty_ops: []*const anyopaque = &.{};
+    // No longer need metadata - using bucket system
+    const empty_ops: []*const fn (*StackFrame) @import("../execution/execution_error.zig").Error!noreturn = &.{};
 
     var frame = try StackFrame.init(
         gas_after_base,
         call_address,
         empty_analysis,
-        empty_metadata,
         empty_ops,
         host,
         self.state.database,

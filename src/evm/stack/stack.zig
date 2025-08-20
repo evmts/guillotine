@@ -20,7 +20,11 @@ data: *[CAPACITY]u256,
 
 pub fn init(allocator: std.mem.Allocator) !Stack {
     const data: *[CAPACITY]u256 = try allocator.create([CAPACITY]u256);
-    errdefer allocator.free(data);
+    errdefer allocator.destroy(data);
+    
+    // Initialize all stack slots to 0 to prevent garbage values
+    @memset(std.mem.sliceAsBytes(data), 0);
+    
     return Stack{
         .data = data,
         .current = 0,
@@ -28,7 +32,7 @@ pub fn init(allocator: std.mem.Allocator) !Stack {
 }
 
 pub fn deinit(self: *Stack, allocator: std.mem.Allocator) void {
-    allocator.free(self.data);
+    allocator.destroy(self.data);
 }
 
 pub fn clear(self: *Stack) void {

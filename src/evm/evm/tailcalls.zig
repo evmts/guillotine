@@ -21,7 +21,27 @@ inline fn prefetchBlockWindow(frame: *StackFrame, start_idx: u16) void {
     inline while (d < PREFETCH_BLOCK_WINDOW) : (d += 1) {
         const idx = start_idx + d;
         @prefetch(frame.ops.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
-        @prefetch(frame.metadata.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
+        // Prefetch bucket indices and bucket data
+        if (idx < frame.analysis.bucket_indices.len) {
+            @prefetch(frame.analysis.bucket_indices.ptr + idx, .{ .rw = .read, .locality = 2, .cache = .data });
+            // Prefetch the actual bucket data based on bucket type
+            const bucket_info = frame.analysis.bucket_indices[idx];
+            switch (bucket_info.bucket) {
+                .u16_bucket => if (bucket_info.index < frame.analysis.u16_bucket.len) {
+                    @prefetch(frame.analysis.u16_bucket.ptr + bucket_info.index, .{ .rw = .read, .locality = 2, .cache = .data });
+                },
+                .u32_bucket => if (bucket_info.index < frame.analysis.u32_bucket.len) {
+                    @prefetch(frame.analysis.u32_bucket.ptr + bucket_info.index, .{ .rw = .read, .locality = 2, .cache = .data });
+                },
+                .u64_bucket => if (bucket_info.index < frame.analysis.u64_bucket.len) {
+                    @prefetch(frame.analysis.u64_bucket.ptr + bucket_info.index, .{ .rw = .read, .locality = 2, .cache = .data });
+                },
+                .u256_bucket => if (bucket_info.index < frame.analysis.u256_bucket.len) {
+                    @prefetch(frame.analysis.u256_bucket.ptr + bucket_info.index, .{ .rw = .read, .locality = 2, .cache = .data });
+                },
+                .none => {},
+            }
+        }
         @prefetch(frame.ops[idx], .{ .rw = .read, .locality = 2, .cache = .instruction });
     }
 }
@@ -34,7 +54,8 @@ pub inline fn next(frame: *StackFrame) Error!noreturn {
         return Error.InvalidJump;
     }
 
-    const func_ptr = @as(TailcallFunc, @ptrCast(@alignCast(frame.ops[frame.ip])));
+    // Now that ops is correctly typed, no casting needed
+    const func_ptr = frame.ops[frame.ip];
     return @call(.always_tail, func_ptr, .{frame});
 }
 
@@ -349,15 +370,21 @@ pub fn op_push(frame: *StackFrame) Error!noreturn {
     std.debug.assert(opcode >= 0x60 and opcode <= 0x7F);
     const push_size = opcode - 0x5F;
 
-    // Fast path for PUSH1-4: use precomputed metadata (O(1))
-    if (push_size <= 4) {
-        const metadata = frame.metadata[frame.ip];
-        const push_data = metadata.push_small;
-        frame.stack.append_unsafe(push_data.value);
+    // Fast path for PUSH1-8: use precomputed metadata from u64 bucket (O(1))
+    if (push_size <= 8) {
+        if (frame.get_u64_metadata()) |metadata| {
+            frame.stack.append_unsafe(metadata.push_value);
+            return next(frame);
+        }
+    }
+
+    // Fast path for PUSH9-32: use precomputed metadata from u256 bucket (O(1))
+    if (frame.get_u256_metadata()) |metadata| {
+        frame.stack.append_unsafe(metadata.push_large_value);
         return next(frame);
     }
 
-    // Slow path for PUSH5-32: read from bytecode
+    // Fallback path for truncated pushes: read from bytecode
     const value_start = pc + 1;
     var value: u256 = 0;
     var i: usize = 0;
@@ -630,9 +657,14 @@ pub fn op_jumpi(frame: *StackFrame) Error!noreturn {
 }
 
 pub fn op_pc(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const pc_data = metadata.pc;
-    frame.stack.append_unsafe(pc_data.pc);
+    if (frame.get_u16_metadata()) |metadata| {
+        frame.stack.append_unsafe(metadata.pc);
+        return next(frame);
+    }
+
+    // Fallback: calculate PC from analysis
+    const pc = frame.analysis.getPc(@intCast(frame.ip));
+    frame.stack.append_unsafe(pc);
     return next(frame);
 }
 
@@ -643,12 +675,9 @@ pub fn op_gas(frame: *StackFrame) Error!noreturn {
 
 pub fn op_jumpdest(frame: *StackFrame) Error!noreturn {
     // Consume static gas cost for the basic block starting at this JUMPDEST
-    const metadata = frame.metadata[frame.ip];
-    const jump_dest_data = metadata.jump_dest;
-    const static_gas_cost = jump_dest_data.static_gas_cost;
-
-    // Consume the precomputed gas cost for this basic block
-    try frame.consume_gas(static_gas_cost);
+    if (frame.get_u16_metadata()) |metadata| {
+        try frame.consume_gas(metadata.static_gas_cost);
+    }
 
     return next(frame);
 }
@@ -660,48 +689,16 @@ pub fn op_nop(frame: *StackFrame) Error!noreturn {
 
 // Fused PUSH+JUMP operation
 pub fn op_push_then_jump(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const jump_data = metadata.push_jump;
-    const dest_inst_idx = jump_data.dest_inst_idx;
+    if (frame.get_u32_metadata()) |metadata| {
+        const dest_inst_idx = metadata.push_jump.dest_inst_idx;
 
-    // Prefetch as soon as we know the destination
-    if (dest_inst_idx < frame.ops.len) {
-        prefetchBlockWindow(frame, @intCast(dest_inst_idx));
-    }
-
-    if (comptime SAFE) {
-        if (dest_inst_idx >= frame.analysis.inst_count) return Error.InvalidJump;
-        const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
-        if (dest_pc >= frame.analysis.bytecode.len or
-            frame.analysis.bytecode[dest_pc] != 0x5B)
-        {
-            return Error.InvalidJump;
-        }
-    }
-
-    frame.ip = dest_inst_idx;
-    return next(frame);
-}
-
-// Fused PUSH+JUMPI operation
-pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
-    const condition = frame.stack.pop_unsafe();
-
-    if (condition != 0) {
-        const metadata = frame.metadata[frame.ip];
-        const jumpi_data = metadata.push_jumpi;
-        const dest_inst_idx = jumpi_data.dest_inst_idx;
-
-        // Prefetch as soon as we know we're jumping and have the destination
+        // Prefetch as soon as we know the destination
         if (dest_inst_idx < frame.ops.len) {
             prefetchBlockWindow(frame, @intCast(dest_inst_idx));
         }
 
-        if (dest_inst_idx >= frame.analysis.inst_count) {
-            return Error.InvalidJump;
-        }
-
         if (comptime SAFE) {
+            if (dest_inst_idx >= frame.analysis.inst_count) return Error.InvalidJump;
             const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
             if (dest_pc >= frame.analysis.bytecode.len or
                 frame.analysis.bytecode[dest_pc] != 0x5B)
@@ -712,6 +709,42 @@ pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
 
         frame.ip = dest_inst_idx;
         return next(frame);
+    }
+
+    return Error.InvalidJump;
+}
+
+// Fused PUSH+JUMPI operation
+pub fn op_push_then_jumpi(frame: *StackFrame) Error!noreturn {
+    const condition = frame.stack.pop_unsafe();
+
+    if (condition != 0) {
+        if (frame.get_u32_metadata()) |metadata| {
+            const dest_inst_idx = metadata.push_jumpi.dest_inst_idx;
+
+            // Prefetch as soon as we know we're jumping and have the destination
+            if (dest_inst_idx < frame.ops.len) {
+                prefetchBlockWindow(frame, @intCast(dest_inst_idx));
+            }
+
+            if (dest_inst_idx >= frame.analysis.inst_count) {
+                return Error.InvalidJump;
+            }
+
+            if (comptime SAFE) {
+                const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
+                if (dest_pc >= frame.analysis.bytecode.len or
+                    frame.analysis.bytecode[dest_pc] != 0x5B)
+                {
+                    return Error.InvalidJump;
+                }
+            }
+
+            frame.ip = dest_inst_idx;
+            return next(frame);
+        }
+
+        return Error.InvalidJump;
     }
 
     // Fallthrough case - don't prefetch, just continue sequentially
@@ -901,159 +934,185 @@ pub fn op_push_then_swap1(frame: *StackFrame) Error!noreturn {
 
 // Memory operation fusions - small values
 pub fn op_push_then_mload_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const offset = push_data.value;
+    if (frame.get_u64_metadata()) |metadata| {
+        const offset = metadata.push_value;
 
-    // Push offset to stack then call mload
-    frame.stack.append_unsafe(offset);
-    try execution.memory.op_mload(frame);
-    return next(frame);
+        // Push offset to stack then call mload
+        frame.stack.append_unsafe(offset);
+        try execution.memory.op_mload(frame);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_mstore_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const offset = push_data.value;
-    // TODO we shouldn't be pushingto stack
-    frame.stack.append_unsafe(offset);
-    try execution.memory.op_mstore(frame);
-    return next(frame);
+    if (frame.get_u64_metadata()) |metadata| {
+        const offset = metadata.push_value;
+        // TODO we shouldn't be pushing to stack
+        frame.stack.append_unsafe(offset);
+        try execution.memory.op_mstore(frame);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 // Comparison operation fusions - small values
 pub fn op_push_then_eq_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    const result: u256 = if (other == push_val) 1 else 0;
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        const result: u256 = if (other == push_val) 1 else 0;
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_lt_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, LT pops a then b, and checks if a < b
-    // PUSH pushes the value that becomes 'a', so we check push_val < other
-    const result: u256 = if (push_val < other) 1 else 0;
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        // Note: In EVM, LT pops a then b, and checks if a < b
+        // PUSH pushes the value that becomes 'a', so we check push_val < other
+        const result: u256 = if (push_val < other) 1 else 0;
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_gt_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, GT pops a then b, and checks if a > b
-    // PUSH pushes the value that becomes 'a', so we check push_val > other
-    const result: u256 = if (push_val > other) 1 else 0;
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        // Note: In EVM, GT pops a then b, and checks if a > b
+        // PUSH pushes the value that becomes 'a', so we check push_val > other
+        const result: u256 = if (push_val > other) 1 else 0;
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 // Bitwise operation fusions - small values
 pub fn op_push_then_and_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    const result = other & push_val;
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        const result = other & push_val;
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 // Arithmetic operation fusions - small values
 pub fn op_push_then_add_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    const result = other +% push_val; // Wrapping add
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        const result = other +% push_val; // Wrapping add
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_sub_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, SUB pops a then b, and computes a - b
-    // PUSH pushes the value that becomes 'a', so we compute push_val - other
-    const result = push_val -% other; // Wrapping sub
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        // Note: In EVM, SUB pops a then b, and computes a - b
+        // PUSH pushes the value that becomes 'a', so we compute push_val - other
+        const result = push_val -% other; // Wrapping sub
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_mul_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    const result = other *% push_val; // Wrapping mul
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        const result = other *% push_val; // Wrapping mul
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_div_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const other = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const other = frame.stack.peek_unsafe();
 
-    // Note: In EVM, DIV pops a then b, and computes a / b
-    // PUSH pushes the value that becomes 'a', so we compute push_val / other
-    const result = if (other == 0) 0 else push_val / other;
-    frame.stack.set_top_unsafe(result);
-    return next(frame);
+        // Note: In EVM, DIV pops a then b, and computes a / b
+        // PUSH pushes the value that becomes 'a', so we compute push_val / other
+        const result = if (other == 0) 0 else push_val / other;
+        frame.stack.set_top_unsafe(result);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 // Storage operation fusions - small values
 pub fn op_push_then_sload_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const key = push_data.value;
+    if (frame.get_u64_metadata()) |metadata| {
+        const key = metadata.push_value;
 
-    // Push key to stack then call sload
-    frame.stack.append_unsafe(key);
-    try execution.storage.op_sload(frame);
-    return next(frame);
+        // Push key to stack then call sload
+        frame.stack.append_unsafe(key);
+        try execution.storage.op_sload(frame);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 // Stack operation fusions - small values
 pub fn op_push_then_dup1_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const value = push_data.value;
+    if (frame.get_u64_metadata()) |metadata| {
+        const value = metadata.push_value;
 
-    // Push the value twice (PUSH then DUP1 effect)
-    frame.stack.append_unsafe(value);
-    frame.stack.append_unsafe(value);
-    return next(frame);
+        // Push the value twice (PUSH then DUP1 effect)
+        frame.stack.append_unsafe(value);
+        frame.stack.append_unsafe(value);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 pub fn op_push_then_swap1_small(frame: *StackFrame) Error!noreturn {
-    const metadata = frame.metadata[frame.ip];
-    const push_data = metadata.push_small;
-    const push_val = push_data.value;
-    const top = frame.stack.peek_unsafe();
+    if (frame.get_u64_metadata()) |metadata| {
+        const push_val = metadata.push_value;
+        const top = frame.stack.peek_unsafe();
 
-    // Push in swapped order
-    frame.stack.set_top_unsafe(push_val);
-    frame.stack.append_unsafe(top);
-    return next(frame);
+        // Push in swapped order
+        frame.stack.set_top_unsafe(push_val);
+        frame.stack.append_unsafe(top);
+        return next(frame);
+    }
+
+    return Error.InvalidOpcode;
 }
 
 // Log operations
@@ -1136,47 +1195,49 @@ pub fn op_selfdestruct(frame: *StackFrame) Error!noreturn {
 // Loop condition fusion: DUP1, PUSH, LT, PUSH, JUMPI
 // This pattern appears in compiled for/while loops: DUP1 (counter), PUSH limit, LT, PUSH dest, JUMPI
 pub fn op_loop_condition(frame: *StackFrame) Error!noreturn {
-    // 1. DUP1 logic: Duplicate the loop counter (top of stack)
-    const counter = frame.stack.peek_unsafe();
-    frame.stack.append_unsafe(counter);
+    if (frame.get_u32_metadata()) |metadata| {
+        // 1. DUP1 logic: Duplicate the loop counter (top of stack)
+        const counter = frame.stack.peek_unsafe();
+        frame.stack.append_unsafe(counter);
 
-    // 2. PUSH limit: Get the limit value from metadata for the second instruction
-    const limit_metadata = frame.metadata[frame.ip + 1];
-    const limit = limit_metadata.push_small.value;
-    frame.stack.append_unsafe(limit);
+        // 2. PUSH limit: Get the limit value from the fused metadata
+        const limit = metadata.loop_condition.loop_limit;
+        frame.stack.append_unsafe(limit);
 
-    const b = frame.stack.pop_unsafe(); // limit
-    const a = frame.stack.pop_unsafe(); // counter
-    const is_less: u256 = if (a < b) 1 else 0;
-    frame.stack.append_unsafe(is_less);
+        const b = frame.stack.pop_unsafe(); // limit
+        const a = frame.stack.pop_unsafe(); // counter
+        const is_less: u256 = if (a < b) 1 else 0;
+        frame.stack.append_unsafe(is_less);
 
-    const jumpi_metadata = frame.metadata[frame.ip + 3];
-    const dest_inst_idx = jumpi_metadata.push_jumpi.dest_inst_idx;
+        const dest_inst_idx = metadata.loop_condition.dest_inst_idx;
 
-    // 5. JUMPI logic: Pop condition and jump if true
-    const condition = frame.stack.pop_unsafe();
+        // 5. JUMPI logic: Pop condition and jump if true
+        const condition = frame.stack.pop_unsafe();
 
-    if (condition == 0) {
-        @branchHint(.unlikely); // Loop exit uncommon
-        frame.ip += 4; // Skip 4 more since next() will add 1
+        if (condition == 0) {
+            @branchHint(.unlikely); // Loop exit uncommon
+            frame.ip += 4; // Skip 4 more since next() will add 1
+            return next(frame);
+        }
+
+        // Prefetch as soon as we know we're jumping and have the destination
+        if (dest_inst_idx < frame.ops.len) {
+            prefetchBlockWindow(frame, @intCast(dest_inst_idx));
+        }
+
+        if (comptime SAFE) {
+            if (dest_inst_idx >= frame.analysis.inst_count) {
+                return Error.InvalidJump;
+            }
+            const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
+            if (dest_pc >= frame.analysis.bytecode.len or frame.analysis.bytecode[dest_pc] != 0x5B) {
+                return Error.InvalidJump;
+            }
+        }
+
+        frame.ip = dest_inst_idx;
         return next(frame);
     }
 
-    // Prefetch as soon as we know we're jumping and have the destination
-    if (dest_inst_idx < frame.ops.len) {
-        prefetchBlockWindow(frame, @intCast(dest_inst_idx));
-    }
-
-    if (comptime SAFE) {
-        if (dest_inst_idx >= frame.analysis.inst_count) {
-            return Error.InvalidJump;
-        }
-        const dest_pc = frame.analysis.getPc(@intCast(dest_inst_idx));
-        if (dest_pc >= frame.analysis.bytecode.len or frame.analysis.bytecode[dest_pc] != 0x5B) {
-            return Error.InvalidJump;
-        }
-    }
-
-    frame.ip = dest_inst_idx;
-    return next(frame);
+    return Error.InvalidJump;
 }

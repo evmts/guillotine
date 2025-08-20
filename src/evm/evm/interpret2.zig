@@ -28,7 +28,6 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
     const prep_result = try analysis2.prepare(allocator, code);
 
     frame.analysis = prep_result.analysis;
-    frame.metadata = prep_result.metadata;
     frame.ops = prep_result.ops;
     frame.ip = 0;
 
@@ -37,7 +36,7 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
     Log.debug("[interpret2] Starting execution with {} ops", .{prep_result.ops.len});
 
     // Start tailcall execution
-    const first_op: *const fn (*StackFrame) Error!noreturn = @ptrCast(@alignCast(frame.ops[0]));
+    const first_op = frame.ops[0];
     return try (@call(.always_tail, first_op, .{frame}));
 }
 

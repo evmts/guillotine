@@ -13,7 +13,6 @@ const ExecutionError = @import("execution/execution_error.zig");
 const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
-const InstructionMetadata = @import("evm/analysis2.zig").InstructionMetadata;
 
 // Maximum allowed tailcall iterations
 const TAILCALL_MAX_ITERATIONS: usize = 10_000_000;
@@ -27,35 +26,22 @@ pub const StateError = error{OutOfMemory};
 
 /// StackFrame owns all execution state for the tailcall interpreter
 pub const StackFrame = struct {
-    // ===================================================================
-    // CACHE LINE 1 (64 bytes) - ULTRA HOT (accessed every instruction)
-    // ===================================================================
-    // These fields are accessed by EVERY operation in the hot path
-    ip: u16, // 8 bytes - instruction pointer
-    gas_remaining: u64, // 8 bytes - checked every instruction
-    ops: []*const anyopaque,
-    metadata: []InstructionMetadata, // 16 bytes - owned metadata array
-    stack: Stack, // 48 bytes - struct with ptr (16) + len (8) + cap (8) + allocator (16)
-    host: Host, // 32 bytes - vtable pointer + context pointer
-    // 16 bytes - owned ops array
-    // Total: 64 bytes exactly - perfect cache line alignment
-
-    // ===================================================================
-    // CACHE LINE 2 (64 bytes) - HOT (accessed by most operations)
-    // ===================================================================
-    // Memory operations (MLOAD/MSTORE/etc) and analysis lookups
-    state: DatabaseInterface, // 32 bytes - database interface
-    contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
+    ip: u16,
+    stack: Stack,
+    gas_remaining: u64,
+    ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn,
     memory: Memory, // 32 bytes - struct with ArrayList
-    analysis: SimpleAnalysis, // 32 bytes - inst_to_pc, pc_to_inst, bytecode, inst_count
+    host: Host, // 32 bytes - vtable pointer + context pointer
+    state: DatabaseInterface, // 32 bytes - database interface
+    analysis: SimpleAnalysis, // Contains all bucketed metadata arrays
+    contract_address: primitives.Address.Address, // 20 bytes - only for storage ops
 
     /// Initialize a StackFrame with required parameters
     pub fn init(
         gas_remaining: u64,
         contract_address: primitives.Address.Address,
         analysis: SimpleAnalysis,
-        metadata: []InstructionMetadata,
-        ops: []*const anyopaque,
+        ops: []*const fn (*StackFrame) ExecutionError.Error!noreturn,
         host: Host,
         state: DatabaseInterface,
         allocator: std.mem.Allocator,
@@ -65,7 +51,6 @@ pub const StackFrame = struct {
             .stack = try Stack.init(allocator),
             .memory = try Memory.init_default(allocator),
             .analysis = analysis,
-            .metadata = metadata,
             .ops = ops,
             .ip = 0,
             .host = host,
@@ -78,7 +63,7 @@ pub const StackFrame = struct {
         self.stack.deinit(allocator);
         self.memory.deinit();
 
-        // NOTE: analysis, metadata, and ops are managed by interpret2
+        // NOTE: analysis and ops are managed by interpret2
         // which allocates them with its own FixedBufferAllocator and
         // frees them when it exits. We should NOT free them here.
     }
@@ -147,6 +132,69 @@ pub const StackFrame = struct {
 
     pub fn add_gas_refund(self: *StackFrame, amount: u64) void {
         self.adjust_gas_refund(@as(i64, @intCast(amount)));
+    }
+
+    // Bucketed metadata access helpers
+    const analysis2 = @import("evm/analysis2.zig");
+
+    /// Get u16 metadata for current instruction
+    pub fn get_u16_metadata(self: *const StackFrame) ?analysis2.U16Metadata {
+        if (self.ip >= self.analysis.bucket_indices.len) return null;
+        const bucket_info = self.analysis.bucket_indices[self.ip];
+        if (bucket_info.bucket == .u16_bucket and bucket_info.index < self.analysis.u16_bucket.len) {
+            return self.analysis.u16_bucket[bucket_info.index];
+        }
+        return null;
+    }
+
+    /// Get u32 metadata for current instruction
+    pub fn get_u32_metadata(self: *const StackFrame) ?analysis2.U32Metadata {
+        if (self.ip >= self.analysis.bucket_indices.len) return null;
+        const bucket_info = self.analysis.bucket_indices[self.ip];
+        if (bucket_info.bucket == .u32_bucket and bucket_info.index < self.analysis.u32_bucket.len) {
+            return self.analysis.u32_bucket[bucket_info.index];
+        }
+        return null;
+    }
+
+    /// Get u64 metadata for current instruction
+    pub fn get_u64_metadata(self: *const StackFrame) ?analysis2.U64Metadata {
+        if (self.ip >= self.analysis.bucket_indices.len) return null;
+        const bucket_info = self.analysis.bucket_indices[self.ip];
+        if (bucket_info.bucket == .u64_bucket and bucket_info.index < self.analysis.u64_bucket.len) {
+            return self.analysis.u64_bucket[bucket_info.index];
+        }
+        return null;
+    }
+
+    /// Get u256 metadata for current instruction
+    pub fn get_u256_metadata(self: *const StackFrame) ?analysis2.U256Metadata {
+        if (self.ip >= self.analysis.bucket_indices.len) return null;
+        const bucket_info = self.analysis.bucket_indices[self.ip];
+        if (bucket_info.bucket == .u256_bucket and bucket_info.index < self.analysis.u256_bucket.len) {
+            return self.analysis.u256_bucket[bucket_info.index];
+        }
+        return null;
+    }
+
+    /// Get u64 metadata for specific instruction (used in fusion patterns)
+    pub fn get_u64_metadata_at(self: *const StackFrame, inst_idx: u16) ?analysis2.U64Metadata {
+        if (inst_idx >= self.analysis.bucket_indices.len) return null;
+        const bucket_info = self.analysis.bucket_indices[inst_idx];
+        if (bucket_info.bucket == .u64_bucket and bucket_info.index < self.analysis.u64_bucket.len) {
+            return self.analysis.u64_bucket[bucket_info.index];
+        }
+        return null;
+    }
+
+    /// Get u32 metadata for specific instruction (used in fusion patterns)
+    pub fn get_u32_metadata_at(self: *const StackFrame, inst_idx: u16) ?analysis2.U32Metadata {
+        if (inst_idx >= self.analysis.bucket_indices.len) return null;
+        const bucket_info = self.analysis.bucket_indices[inst_idx];
+        if (bucket_info.bucket == .u32_bucket and bucket_info.index < self.analysis.u32_bucket.len) {
+            return self.analysis.u32_bucket[bucket_info.index];
+        }
+        return null;
     }
 };
 

@@ -5,59 +5,54 @@ const tailcalls = @import("tailcalls.zig");
 const Log = @import("../log.zig");
 const OpcodeMetadata = @import("../opcode_metadata/opcode_metadata.zig");
 
-/// Metadata for PUSH1-8 instructions with precomputed values
-pub const PushSmallMetadata = struct {
-    value: u64,
+/// Bucket IDs for different metadata sizes
+pub const MetadataBucket = enum(u8) {
+    none = 0, // No metadata needed
+    u16_bucket = 1,
+    u32_bucket = 2,
+    u64_bucket = 3,
+    u256_bucket = 4,
 };
 
-/// Metadata for PUSH9-32 instructions that store PC for on-demand reading
-pub const PushLargeMetadata = struct {
-    pc: u16,
+/// Metadata bucket index - maps instruction index to bucket ID and index within bucket
+pub const BucketIndex = struct {
+    bucket: MetadataBucket,
+    index: u16, // Index within the specific bucket
 };
 
-/// Metadata for PC instruction that stores the current PC value
-pub const PcMetadata = struct {
-    pc: u16,
+/// Metadata stored in u16 bucket (2 bytes)
+pub const U16Metadata = union(enum) {
+    pc: u16, // PC instruction value
+    dest_inst_idx: u16, // PUSH+JUMP/JUMPI destination
+    static_gas_cost: u16, // JUMPDEST gas cost
+    loop_limit: u16, // Loop condition limit
 };
 
-/// Metadata for PUSH+JUMP fused instructions
-pub const PushJumpMetadata = struct {
-    dest_inst_idx: u16,
+/// Metadata stored in u32 bucket (4 bytes)
+pub const U32Metadata = union(enum) {
+    loop_condition: packed struct {
+        loop_limit: u16,
+        dest_inst_idx: u16,
+    },
+    push_jump: packed struct {
+        dest_inst_idx: u16,
+        _unused: u16,
+    },
+    push_jumpi: packed struct {
+        dest_inst_idx: u16,
+        _unused: u16,
+    },
 };
 
-/// Metadata for PUSH+JUMPI fused instructions  
-pub const PushJumpiMetadata = struct {
-    dest_inst_idx: u16,
+/// Metadata stored in u64 bucket (8 bytes)
+pub const U64Metadata = union(enum) {
+    push_value: u64, // PUSH1-8 precomputed values
+    default: u64, // Default padding for compatibility
 };
 
-/// Metadata for loop condition fusion (DUP1+PUSH+LT+PUSH+JUMPI)
-/// Only fuses loops with limits that fit in u16 for better performance
-pub const LoopConditionMetadata = struct {
-    loop_limit: u16,      // The comparison limit from the first PUSH (max 65535)
-    dest_inst_idx: u16,   // The jump destination instruction index
-};
-
-/// Metadata for JUMPDEST instructions that start basic blocks
-pub const JumpDestMetadata = struct {
-    static_gas_cost: u16,  // Largest static gas cost is ~1875 (LOG4), fits easily in u16
-};
-
-/// Default metadata for instructions that don't need specific metadata
-pub const DefaultMetadata = struct {
-    // Use a smaller padding to keep union size reasonable
-    _unused: u64,
-};
-
-/// Union of all possible instruction metadata types
-pub const InstructionMetadata = union(enum) {
-    push_small: PushSmallMetadata,
-    push_large: PushLargeMetadata,
-    pc: PcMetadata,
-    push_jump: PushJumpMetadata,
-    push_jumpi: PushJumpiMetadata,
-    loop_condition: LoopConditionMetadata,
-    jump_dest: JumpDestMetadata,
-    default: DefaultMetadata,
+/// Metadata stored in u256 bucket (32 bytes)
+pub const U256Metadata = union(enum) {
+    push_large_value: u256, // PUSH9-32 precomputed values
 };
 
 /// Simple analysis result for tailcall dispatch with precomputed mappings
@@ -68,12 +63,24 @@ pub const SimpleAnalysis = struct {
     pc_to_inst: []u16,
     /// Reference to the original bytecode for reading push values
     bytecode: []const u8,
-    /// Total number of instructions
-    inst_count: u16,
     /// Block boundaries bitset - true for each instruction that starts a basic block
     block_boundaries: std.bit_set.DynamicBitSet,
     /// Jump table for opcode metadata lookup
     jump_table: *const OpcodeMetadata = &OpcodeMetadata.CANCUN,
+    /// Total number of instructions
+    inst_count: u16,
+
+    // Bucketed metadata storage
+    /// Maps instruction index to bucket and index within bucket
+    bucket_indices: []BucketIndex,
+    /// u16 metadata bucket
+    u16_bucket: []U16Metadata,
+    /// u32 metadata bucket
+    u32_bucket: []U32Metadata,
+    /// u64 metadata bucket
+    u64_bucket: []U64Metadata,
+    /// u256 metadata bucket
+    u256_bucket: []U256Metadata,
 
     pub const MAX_USIZE: u16 = std.math.maxInt(u16);
 
@@ -81,6 +88,11 @@ pub const SimpleAnalysis = struct {
         allocator.free(self.inst_to_pc);
         allocator.free(self.pc_to_inst);
         self.block_boundaries.deinit();
+        allocator.free(self.bucket_indices);
+        allocator.free(self.u16_bucket);
+        allocator.free(self.u32_bucket);
+        allocator.free(self.u64_bucket);
+        allocator.free(self.u256_bucket);
     }
 
     /// Get the PC value for a given instruction index
@@ -124,14 +136,23 @@ pub const SimpleAnalysis = struct {
         };
     }
 
-    /// Build analysis from bytecode and return metadata separately
-    pub fn analyze(allocator: std.mem.Allocator, code: []const u8) !struct { analysis: SimpleAnalysis, metadata: []InstructionMetadata, block_gas_costs: []u64 } {
+    /// Build analysis from bytecode and return bucketed metadata separately
+    pub fn analyze(allocator: std.mem.Allocator, code: []const u8) !struct { analysis: SimpleAnalysis, block_gas_costs: []u64 } {
         if (code.len > std.math.maxInt(u16)) return error.OutOfMemory; // enforce u16 bounds
         var inst_to_pc_list = std.ArrayList(u16).init(allocator);
         defer inst_to_pc_list.deinit();
 
-        var metadata_list = std.ArrayList(InstructionMetadata).init(allocator);
-        defer metadata_list.deinit();
+        // Bucket lists for metadata storage
+        var bucket_indices_list = std.ArrayList(BucketIndex).init(allocator);
+        defer bucket_indices_list.deinit();
+        var u16_bucket_list = std.ArrayList(U16Metadata).init(allocator);
+        defer u16_bucket_list.deinit();
+        var u32_bucket_list = std.ArrayList(U32Metadata).init(allocator);
+        defer u32_bucket_list.deinit();
+        var u64_bucket_list = std.ArrayList(U64Metadata).init(allocator);
+        defer u64_bucket_list.deinit();
+        var u256_bucket_list = std.ArrayList(U256Metadata).init(allocator);
+        defer u256_bucket_list.deinit();
 
         var pc_to_inst = try allocator.alloc(u16, code.len);
         @memset(pc_to_inst, MAX_USIZE);
@@ -168,38 +189,54 @@ pub const SimpleAnalysis = struct {
                 // PUSH1-PUSH32
                 const push_size = byte - 0x5F;
 
-                // Metadata usage pattern:
-                // - Small pushes (PUSH1-8): store the immediate value directly when fully available
-                //   This avoids an extra bytecode read at runtime for the hot path
-                // - Larger pushes (PUSH9-32): store the PC to read the value on demand
-                // - Truncated small pushes: store PC so runtime can fall back to generic path
+                // Store push values in appropriate buckets based on size
                 if (push_size <= 8 and @as(usize, pc) + 1 + push_size <= code.len) {
+                    // PUSH1-8: store in u64 bucket
                     var value: u64 = 0;
                     var i: usize = 0;
                     while (i < push_size) : (i += 1) {
                         value = (value << 8) | code[@as(usize, pc) + 1 + i];
                     }
-                    try metadata_list.append(.{ .push_small = .{ .value = value } });
+                    const bucket_idx = @as(u16, @intCast(u64_bucket_list.items.len));
+                    try u64_bucket_list.append(.{ .push_value = value });
+                    try bucket_indices_list.append(.{ .bucket = .u64_bucket, .index = bucket_idx });
+                } else if (push_size <= 32 and @as(usize, pc) + 1 + push_size <= code.len) {
+                    // PUSH9-32: store in u256 bucket (no more PC storage!)
+                    var value: u256 = 0;
+                    var i: usize = 0;
+                    while (i < push_size and @as(usize, pc) + 1 + i < code.len) : (i += 1) {
+                        value = (value << 8) | code[@as(usize, pc) + 1 + i];
+                    }
+                    const bucket_idx = @as(u16, @intCast(u256_bucket_list.items.len));
+                    try u256_bucket_list.append(.{ .push_large_value = value });
+                    try bucket_indices_list.append(.{ .bucket = .u256_bucket, .index = bucket_idx });
                 } else {
-                    try metadata_list.append(.{ .push_large = .{ .pc = @intCast(pc) } });
+                    // Truncated push - no metadata needed
+                    try bucket_indices_list.append(.{ .bucket = .none, .index = 0 });
                 }
 
                 pc += 1 + push_size;
             } else if (byte == 0x5F) {
-                // PUSH0 - store 0 directly
-                try metadata_list.append(.{ .push_small = .{ .value = 0 } });
+                // PUSH0 - store 0 in u64 bucket
+                const bucket_idx = @as(u16, @intCast(u64_bucket_list.items.len));
+                try u64_bucket_list.append(.{ .push_value = 0 });
+                try bucket_indices_list.append(.{ .bucket = .u64_bucket, .index = bucket_idx });
                 pc += 1;
             } else if (byte == 0x58) {
-                // PC opcode - store the PC value
-                try metadata_list.append(.{ .pc = .{ .pc = @intCast(pc) } });
+                // PC opcode - store in u16 bucket
+                const bucket_idx = @as(u16, @intCast(u16_bucket_list.items.len));
+                try u16_bucket_list.append(.{ .pc = @intCast(pc) });
+                try bucket_indices_list.append(.{ .bucket = .u16_bucket, .index = bucket_idx });
                 pc += 1;
             } else if (byte == 0x5B) {
-                // JUMPDEST - placeholder metadata, will be updated with gas costs later
-                try metadata_list.append(.{ .default = .{ ._unused = 0 } });
+                // JUMPDEST - placeholder in u16 bucket, will be updated with gas costs later
+                const bucket_idx = @as(u16, @intCast(u16_bucket_list.items.len));
+                try u16_bucket_list.append(.{ .static_gas_cost = 0 });
+                try bucket_indices_list.append(.{ .bucket = .u16_bucket, .index = bucket_idx });
                 pc += 1;
             } else {
                 // Other opcodes - no metadata needed
-                try metadata_list.append(.{ .default = .{ ._unused = 0 } });
+                try bucket_indices_list.append(.{ .bucket = .none, .index = 0 });
                 pc += 1;
             }
 
@@ -229,27 +266,34 @@ pub const SimpleAnalysis = struct {
             .bytecode = code,
             .inst_count = inst_idx,
             .block_boundaries = final_block_boundaries,
+            .bucket_indices = try bucket_indices_list.toOwnedSlice(),
+            .u16_bucket = try u16_bucket_list.toOwnedSlice(),
+            .u32_bucket = try u32_bucket_list.toOwnedSlice(),
+            .u64_bucket = try u64_bucket_list.toOwnedSlice(),
+            .u256_bucket = try u256_bucket_list.toOwnedSlice(),
         };
-        
+
         // Calculate gas costs for each basic block
         try calculateBlockGasCosts(code, &analysis, block_gas_costs);
 
         // Update JUMPDEST metadata with calculated gas costs
-        var metadata_slice = try metadata_list.toOwnedSlice();
         var inst_idx_update: u16 = 0;
         while (inst_idx_update < analysis.inst_count) : (inst_idx_update += 1) {
             const inst_pc = analysis.getPc(inst_idx_update);
             if (inst_pc < code.len and code[inst_pc] == 0x5B) { // JUMPDEST
-                const gas_cost = block_gas_costs[inst_idx_update];
-                if (gas_cost <= std.math.maxInt(u16)) {
-                    metadata_slice[inst_idx_update] = .{ .jump_dest = .{ .static_gas_cost = @intCast(gas_cost) } };
+                const bucket_info = analysis.bucket_indices[inst_idx_update];
+                if (bucket_info.bucket == .u16_bucket) {
+                    const gas_cost = block_gas_costs[inst_idx_update];
+                    if (gas_cost <= std.math.maxInt(u16)) {
+                        // Update the gas cost directly in the u16 bucket
+                        analysis.u16_bucket[bucket_info.index] = .{ .static_gas_cost = @intCast(gas_cost) };
+                    }
                 }
             }
         }
 
         return .{
             .analysis = analysis,
-            .metadata = metadata_slice,
             .block_gas_costs = block_gas_costs,
         };
     }
@@ -258,31 +302,31 @@ pub const SimpleAnalysis = struct {
 /// Calculate static gas costs for each basic block
 fn calculateBlockGasCosts(code: []const u8, analysis: *const SimpleAnalysis, block_gas_costs: []u64) !void {
     const opcode_metadata = &OpcodeMetadata.CANCUN;
-    
+
     // Initialize all block costs to 0
     @memset(block_gas_costs, 0);
-    
+
     var current_block_start: u16 = 0;
     var current_block_cost: u64 = 0;
-    
+
     var inst_idx: u16 = 0;
     while (inst_idx < analysis.inst_count) : (inst_idx += 1) {
         const pc = analysis.getPc(inst_idx);
         if (pc >= code.len) break;
-        
+
         const opcode = code[pc];
         const operation = opcode_metadata.get_operation(opcode);
-        
+
         // Add this instruction's static gas cost to current block
         current_block_cost += operation.constant_gas;
-        
+
         // Check if next instruction starts a new block
-        const is_next_block_start = (inst_idx + 1 < analysis.inst_count) and 
+        const is_next_block_start = (inst_idx + 1 < analysis.inst_count) and
             analysis.isBlockStart(inst_idx + 1);
-        
+
         // Check if this is a terminating instruction (ends current block)
         const is_terminator = SimpleAnalysis.isTerminator(opcode);
-        
+
         // If we're at the end of a block, store the accumulated cost
         if (is_next_block_start or is_terminator or inst_idx == analysis.inst_count - 1) {
             // Store cost for all JUMPDEST instructions in this block
@@ -293,7 +337,7 @@ fn calculateBlockGasCosts(code: []const u8, analysis: *const SimpleAnalysis, blo
                     block_gas_costs[block_inst] = current_block_cost;
                 }
             }
-            
+
             // Reset for next block
             if (is_next_block_start) {
                 current_block_start = inst_idx + 1;
@@ -307,20 +351,19 @@ fn calculateBlockGasCosts(code: []const u8, analysis: *const SimpleAnalysis, blo
 /// This encapsulates opcode decoding and fusion logic for PUSH+X patterns
 pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
     analysis: SimpleAnalysis,
-    metadata: []InstructionMetadata,
-    ops: []*const anyopaque,
+    ops: []*const fn (*@import("../stack_frame.zig").StackFrame) @import("../execution/execution_error.zig").Error!noreturn,
     block_gas_costs: []u64,
 } {
     if (code.len > std.math.maxInt(u16)) return error.OutOfMemory;
 
-    // Phase 1: basic analysis + metadata
+    // Phase 1: basic analysis + bucketed metadata
     const res = try SimpleAnalysis.analyze(allocator, code);
-    const analysis = res.analysis;
-    const metadata = res.metadata;
+    var analysis = res.analysis;
     const block_gas_costs = res.block_gas_costs;
 
     // Phase 1.5: decode to ops array
-    var ops_list = std.ArrayList(*const anyopaque).init(allocator);
+    const TailcallFunc = *const fn (*@import("../stack_frame.zig").StackFrame) @import("../execution/execution_error.zig").Error!noreturn;
+    var ops_list = std.ArrayList(TailcallFunc).init(allocator);
     errdefer ops_list.deinit();
 
     var pc: usize = 0;
@@ -329,7 +372,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
 
         if (opcode_mod.is_push(byte)) {
             const push_size = opcode_mod.get_push_size(byte);
-            try ops_list.append(@ptrCast(&tailcalls.op_push));
+            try ops_list.append(&tailcalls.op_push);
             pc += 1 + push_size;
             continue;
         }
@@ -339,135 +382,135 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
             if ((byte == 0xa1 or byte == 0xa2) and pc + 1 < code.len and code[pc + 1] == 0x65) {
                 break;
             }
-            try ops_list.append(@ptrCast(&tailcalls.op_invalid));
+            try ops_list.append(&tailcalls.op_invalid);
             pc += 1;
             continue;
         }
 
         const opcode = @as(Opcode, @enumFromInt(byte));
-        
+
         // TODO: Replace this giant switch statement with jump table lookup
         // 1. Migrate the jump table to using tailcalls instead of ExecutionFunc
         // 2. Replace this switch with: analysis.jump_table.get_tailcall_func(byte)
-        const fn_ptr: *const anyopaque = switch (opcode) {
-            .STOP => @ptrCast(&tailcalls.op_stop),
-            .ADD => @ptrCast(&tailcalls.op_add),
-            .MUL => @ptrCast(&tailcalls.op_mul),
-            .SUB => @ptrCast(&tailcalls.op_sub),
-            .DIV => @ptrCast(&tailcalls.op_div),
-            .SDIV => @ptrCast(&tailcalls.op_sdiv),
-            .MOD => @ptrCast(&tailcalls.op_mod),
-            .SMOD => @ptrCast(&tailcalls.op_smod),
-            .ADDMOD => @ptrCast(&tailcalls.op_addmod),
-            .MULMOD => @ptrCast(&tailcalls.op_mulmod),
-            .EXP => @ptrCast(&tailcalls.op_exp),
-            .SIGNEXTEND => @ptrCast(&tailcalls.op_signextend),
-            .LT => @ptrCast(&tailcalls.op_lt),
-            .GT => @ptrCast(&tailcalls.op_gt),
-            .SLT => @ptrCast(&tailcalls.op_slt),
-            .SGT => @ptrCast(&tailcalls.op_sgt),
-            .EQ => @ptrCast(&tailcalls.op_eq),
-            .ISZERO => @ptrCast(&tailcalls.op_iszero),
-            .AND => @ptrCast(&tailcalls.op_and),
-            .OR => @ptrCast(&tailcalls.op_or),
-            .XOR => @ptrCast(&tailcalls.op_xor),
-            .NOT => @ptrCast(&tailcalls.op_not),
-            .BYTE => @ptrCast(&tailcalls.op_byte),
-            .SHL => @ptrCast(&tailcalls.op_shl),
-            .SHR => @ptrCast(&tailcalls.op_shr),
-            .SAR => @ptrCast(&tailcalls.op_sar),
-            .KECCAK256 => @ptrCast(&tailcalls.op_keccak256),
-            .ADDRESS => @ptrCast(&tailcalls.op_address),
-            .BALANCE => @ptrCast(&tailcalls.op_balance),
-            .ORIGIN => @ptrCast(&tailcalls.op_origin),
-            .CALLER => @ptrCast(&tailcalls.op_caller),
-            .CALLVALUE => @ptrCast(&tailcalls.op_callvalue),
-            .CALLDATALOAD => @ptrCast(&tailcalls.op_calldataload),
-            .CALLDATASIZE => @ptrCast(&tailcalls.op_calldatasize),
-            .CALLDATACOPY => @ptrCast(&tailcalls.op_calldatacopy),
-            .CODESIZE => @ptrCast(&tailcalls.op_codesize),
-            .CODECOPY => @ptrCast(&tailcalls.op_codecopy),
-            .GASPRICE => @ptrCast(&tailcalls.op_gasprice),
-            .EXTCODESIZE => @ptrCast(&tailcalls.op_extcodesize),
-            .EXTCODECOPY => @ptrCast(&tailcalls.op_extcodecopy),
-            .RETURNDATASIZE => @ptrCast(&tailcalls.op_returndatasize),
-            .RETURNDATACOPY => @ptrCast(&tailcalls.op_returndatacopy),
-            .EXTCODEHASH => @ptrCast(&tailcalls.op_extcodehash),
-            .BLOCKHASH => @ptrCast(&tailcalls.op_blockhash),
-            .COINBASE => @ptrCast(&tailcalls.op_coinbase),
-            .TIMESTAMP => @ptrCast(&tailcalls.op_timestamp),
-            .NUMBER => @ptrCast(&tailcalls.op_number),
-            .PREVRANDAO => @ptrCast(&tailcalls.op_difficulty),
-            .GASLIMIT => @ptrCast(&tailcalls.op_gaslimit),
-            .CHAINID => @ptrCast(&tailcalls.op_chainid),
-            .SELFBALANCE => @ptrCast(&tailcalls.op_selfbalance),
-            .BASEFEE => @ptrCast(&tailcalls.op_basefee),
-            .BLOBHASH => @ptrCast(&tailcalls.op_blobhash),
-            .BLOBBASEFEE => @ptrCast(&tailcalls.op_blobbasefee),
-            .POP => @ptrCast(&tailcalls.op_pop),
-            .MLOAD => @ptrCast(&tailcalls.op_mload),
-            .MSTORE => @ptrCast(&tailcalls.op_mstore),
-            .MSTORE8 => @ptrCast(&tailcalls.op_mstore8),
-            .SLOAD => @ptrCast(&tailcalls.op_sload),
-            .SSTORE => @ptrCast(&tailcalls.op_sstore),
-            .JUMP => @ptrCast(&tailcalls.op_jump),
-            .JUMPI => @ptrCast(&tailcalls.op_jumpi),
-            .PC => @ptrCast(&tailcalls.op_pc),
-            .MSIZE => @ptrCast(&tailcalls.op_msize),
-            .GAS => @ptrCast(&tailcalls.op_gas),
-            .JUMPDEST => @ptrCast(&tailcalls.op_jumpdest),
-            .TLOAD => @ptrCast(&tailcalls.op_tload),
-            .TSTORE => @ptrCast(&tailcalls.op_tstore),
-            .MCOPY => @ptrCast(&tailcalls.op_mcopy),
-            .PUSH0 => @ptrCast(&tailcalls.op_push0),
-            .DUP1 => @ptrCast(&tailcalls.op_dup1),
-            .DUP2 => @ptrCast(&tailcalls.op_dup2),
-            .DUP3 => @ptrCast(&tailcalls.op_dup3),
-            .DUP4 => @ptrCast(&tailcalls.op_dup4),
-            .DUP5 => @ptrCast(&tailcalls.op_dup5),
-            .DUP6 => @ptrCast(&tailcalls.op_dup6),
-            .DUP7 => @ptrCast(&tailcalls.op_dup7),
-            .DUP8 => @ptrCast(&tailcalls.op_dup8),
-            .DUP9 => @ptrCast(&tailcalls.op_dup9),
-            .DUP10 => @ptrCast(&tailcalls.op_dup10),
-            .DUP11 => @ptrCast(&tailcalls.op_dup11),
-            .DUP12 => @ptrCast(&tailcalls.op_dup12),
-            .DUP13 => @ptrCast(&tailcalls.op_dup13),
-            .DUP14 => @ptrCast(&tailcalls.op_dup14),
-            .DUP15 => @ptrCast(&tailcalls.op_dup15),
-            .DUP16 => @ptrCast(&tailcalls.op_dup16),
-            .SWAP1 => @ptrCast(&tailcalls.op_swap1),
-            .SWAP2 => @ptrCast(&tailcalls.op_swap2),
-            .SWAP3 => @ptrCast(&tailcalls.op_swap3),
-            .SWAP4 => @ptrCast(&tailcalls.op_swap4),
-            .SWAP5 => @ptrCast(&tailcalls.op_swap5),
-            .SWAP6 => @ptrCast(&tailcalls.op_swap6),
-            .SWAP7 => @ptrCast(&tailcalls.op_swap7),
-            .SWAP8 => @ptrCast(&tailcalls.op_swap8),
-            .SWAP9 => @ptrCast(&tailcalls.op_swap9),
-            .SWAP10 => @ptrCast(&tailcalls.op_swap10),
-            .SWAP11 => @ptrCast(&tailcalls.op_swap11),
-            .SWAP12 => @ptrCast(&tailcalls.op_swap12),
-            .SWAP13 => @ptrCast(&tailcalls.op_swap13),
-            .SWAP14 => @ptrCast(&tailcalls.op_swap14),
-            .SWAP15 => @ptrCast(&tailcalls.op_swap15),
-            .SWAP16 => @ptrCast(&tailcalls.op_swap16),
-            .LOG0 => @ptrCast(&tailcalls.op_log0),
-            .LOG1 => @ptrCast(&tailcalls.op_log1),
-            .LOG2 => @ptrCast(&tailcalls.op_log2),
-            .LOG3 => @ptrCast(&tailcalls.op_log3),
-            .LOG4 => @ptrCast(&tailcalls.op_log4),
-            .CREATE => @ptrCast(&tailcalls.op_create),
-            .CALL => @ptrCast(&tailcalls.op_call),
-            .CALLCODE => @ptrCast(&tailcalls.op_callcode),
-            .RETURN => @ptrCast(&tailcalls.op_return),
-            .DELEGATECALL => @ptrCast(&tailcalls.op_delegatecall),
-            .CREATE2 => @ptrCast(&tailcalls.op_create2),
-            .STATICCALL => @ptrCast(&tailcalls.op_staticcall),
-            .REVERT => @ptrCast(&tailcalls.op_revert),
-            .INVALID => @ptrCast(&tailcalls.op_invalid),
-            .SELFDESTRUCT => @ptrCast(&tailcalls.op_selfdestruct),
-            else => @ptrCast(&tailcalls.op_invalid),
+        const fn_ptr: TailcallFunc = switch (opcode) {
+            .STOP => &tailcalls.op_stop,
+            .ADD => &tailcalls.op_add,
+            .MUL => &tailcalls.op_mul,
+            .SUB => &tailcalls.op_sub,
+            .DIV => &tailcalls.op_div,
+            .SDIV => &tailcalls.op_sdiv,
+            .MOD => &tailcalls.op_mod,
+            .SMOD => &tailcalls.op_smod,
+            .ADDMOD => &tailcalls.op_addmod,
+            .MULMOD => &tailcalls.op_mulmod,
+            .EXP => &tailcalls.op_exp,
+            .SIGNEXTEND => &tailcalls.op_signextend,
+            .LT => &tailcalls.op_lt,
+            .GT => &tailcalls.op_gt,
+            .SLT => &tailcalls.op_slt,
+            .SGT => &tailcalls.op_sgt,
+            .EQ => &tailcalls.op_eq,
+            .ISZERO => &tailcalls.op_iszero,
+            .AND => &tailcalls.op_and,
+            .OR => &tailcalls.op_or,
+            .XOR => &tailcalls.op_xor,
+            .NOT => &tailcalls.op_not,
+            .BYTE => &tailcalls.op_byte,
+            .SHL => &tailcalls.op_shl,
+            .SHR => &tailcalls.op_shr,
+            .SAR => &tailcalls.op_sar,
+            .KECCAK256 => &tailcalls.op_keccak256,
+            .ADDRESS => &tailcalls.op_address,
+            .BALANCE => &tailcalls.op_balance,
+            .ORIGIN => &tailcalls.op_origin,
+            .CALLER => &tailcalls.op_caller,
+            .CALLVALUE => &tailcalls.op_callvalue,
+            .CALLDATALOAD => &tailcalls.op_calldataload,
+            .CALLDATASIZE => &tailcalls.op_calldatasize,
+            .CALLDATACOPY => &tailcalls.op_calldatacopy,
+            .CODESIZE => &tailcalls.op_codesize,
+            .CODECOPY => &tailcalls.op_codecopy,
+            .GASPRICE => &tailcalls.op_gasprice,
+            .EXTCODESIZE => &tailcalls.op_extcodesize,
+            .EXTCODECOPY => &tailcalls.op_extcodecopy,
+            .RETURNDATASIZE => &tailcalls.op_returndatasize,
+            .RETURNDATACOPY => &tailcalls.op_returndatacopy,
+            .EXTCODEHASH => &tailcalls.op_extcodehash,
+            .BLOCKHASH => &tailcalls.op_blockhash,
+            .COINBASE => &tailcalls.op_coinbase,
+            .TIMESTAMP => &tailcalls.op_timestamp,
+            .NUMBER => &tailcalls.op_number,
+            .PREVRANDAO => &tailcalls.op_difficulty,
+            .GASLIMIT => &tailcalls.op_gaslimit,
+            .CHAINID => &tailcalls.op_chainid,
+            .SELFBALANCE => &tailcalls.op_selfbalance,
+            .BASEFEE => &tailcalls.op_basefee,
+            .BLOBHASH => &tailcalls.op_blobhash,
+            .BLOBBASEFEE => &tailcalls.op_blobbasefee,
+            .POP => &tailcalls.op_pop,
+            .MLOAD => &tailcalls.op_mload,
+            .MSTORE => &tailcalls.op_mstore,
+            .MSTORE8 => &tailcalls.op_mstore8,
+            .SLOAD => &tailcalls.op_sload,
+            .SSTORE => &tailcalls.op_sstore,
+            .JUMP => &tailcalls.op_jump,
+            .JUMPI => &tailcalls.op_jumpi,
+            .PC => &tailcalls.op_pc,
+            .MSIZE => &tailcalls.op_msize,
+            .GAS => &tailcalls.op_gas,
+            .JUMPDEST => &tailcalls.op_jumpdest,
+            .TLOAD => &tailcalls.op_tload,
+            .TSTORE => &tailcalls.op_tstore,
+            .MCOPY => &tailcalls.op_mcopy,
+            .PUSH0 => &tailcalls.op_push0,
+            .DUP1 => &tailcalls.op_dup1,
+            .DUP2 => &tailcalls.op_dup2,
+            .DUP3 => &tailcalls.op_dup3,
+            .DUP4 => &tailcalls.op_dup4,
+            .DUP5 => &tailcalls.op_dup5,
+            .DUP6 => &tailcalls.op_dup6,
+            .DUP7 => &tailcalls.op_dup7,
+            .DUP8 => &tailcalls.op_dup8,
+            .DUP9 => &tailcalls.op_dup9,
+            .DUP10 => &tailcalls.op_dup10,
+            .DUP11 => &tailcalls.op_dup11,
+            .DUP12 => &tailcalls.op_dup12,
+            .DUP13 => &tailcalls.op_dup13,
+            .DUP14 => &tailcalls.op_dup14,
+            .DUP15 => &tailcalls.op_dup15,
+            .DUP16 => &tailcalls.op_dup16,
+            .SWAP1 => &tailcalls.op_swap1,
+            .SWAP2 => &tailcalls.op_swap2,
+            .SWAP3 => &tailcalls.op_swap3,
+            .SWAP4 => &tailcalls.op_swap4,
+            .SWAP5 => &tailcalls.op_swap5,
+            .SWAP6 => &tailcalls.op_swap6,
+            .SWAP7 => &tailcalls.op_swap7,
+            .SWAP8 => &tailcalls.op_swap8,
+            .SWAP9 => &tailcalls.op_swap9,
+            .SWAP10 => &tailcalls.op_swap10,
+            .SWAP11 => &tailcalls.op_swap11,
+            .SWAP12 => &tailcalls.op_swap12,
+            .SWAP13 => &tailcalls.op_swap13,
+            .SWAP14 => &tailcalls.op_swap14,
+            .SWAP15 => &tailcalls.op_swap15,
+            .SWAP16 => &tailcalls.op_swap16,
+            .LOG0 => &tailcalls.op_log0,
+            .LOG1 => &tailcalls.op_log1,
+            .LOG2 => &tailcalls.op_log2,
+            .LOG3 => &tailcalls.op_log3,
+            .LOG4 => &tailcalls.op_log4,
+            .CREATE => &tailcalls.op_create,
+            .CALL => &tailcalls.op_call,
+            .CALLCODE => &tailcalls.op_callcode,
+            .RETURN => &tailcalls.op_return,
+            .DELEGATECALL => &tailcalls.op_delegatecall,
+            .CREATE2 => &tailcalls.op_create2,
+            .STATICCALL => &tailcalls.op_staticcall,
+            .REVERT => &tailcalls.op_revert,
+            .INVALID => &tailcalls.op_invalid,
+            .SELFDESTRUCT => &tailcalls.op_selfdestruct,
+            else => &tailcalls.op_invalid,
         };
 
         try ops_list.append(fn_ptr);
@@ -475,29 +518,37 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
     }
 
     // Always append STOP at the end for proper termination
-    try ops_list.append(@ptrCast(&tailcalls.op_stop));
+    try ops_list.append(&tailcalls.op_stop);
 
     var ops_slice = try ops_list.toOwnedSlice();
+
+    // Create mutable bucket lists for fusion phase
+    var u16_bucket_list = std.ArrayList(U16Metadata).fromOwnedSlice(allocator, analysis.u16_bucket);
+    defer analysis.u16_bucket = u16_bucket_list.toOwnedSlice() catch analysis.u16_bucket;
+    var u32_bucket_list = std.ArrayList(U32Metadata).fromOwnedSlice(allocator, analysis.u32_bucket);
+    defer analysis.u32_bucket = u32_bucket_list.toOwnedSlice() catch analysis.u32_bucket;
+    var bucket_indices_list = std.ArrayList(BucketIndex).fromOwnedSlice(allocator, analysis.bucket_indices);
+    defer analysis.bucket_indices = bucket_indices_list.toOwnedSlice() catch analysis.bucket_indices;
 
     // Phase 2: fusion pass
     if (ops_slice.len > 1) {
         // Precompute typed pointers for comparisons
-        const OP_PUSH: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_push));
-        const OP_JUMP: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_jump));
-        const OP_JUMPI: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_jumpi));
-        const OP_MLOAD: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_mload));
-        const OP_MSTORE: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_mstore));
-        const OP_EQ: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_eq));
-        const OP_LT: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_lt));
-        const OP_GT: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_gt));
-        const OP_AND: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_and));
-        const OP_ADD: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_add));
-        const OP_SUB: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_sub));
-        const OP_MUL: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_mul));
-        const OP_DIV: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_div));
-        const OP_SLOAD: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_sload));
-        const OP_DUP1: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_dup1));
-        const OP_SWAP1: *const anyopaque = @as(*const anyopaque, @ptrCast(&tailcalls.op_swap1));
+        const OP_PUSH: TailcallFunc = &tailcalls.op_push;
+        const OP_JUMP: TailcallFunc = &tailcalls.op_jump;
+        const OP_JUMPI: TailcallFunc = &tailcalls.op_jumpi;
+        const OP_MLOAD: TailcallFunc = &tailcalls.op_mload;
+        const OP_MSTORE: TailcallFunc = &tailcalls.op_mstore;
+        const OP_EQ: TailcallFunc = &tailcalls.op_eq;
+        const OP_LT: TailcallFunc = &tailcalls.op_lt;
+        const OP_GT: TailcallFunc = &tailcalls.op_gt;
+        const OP_AND: TailcallFunc = &tailcalls.op_and;
+        const OP_ADD: TailcallFunc = &tailcalls.op_add;
+        const OP_SUB: TailcallFunc = &tailcalls.op_sub;
+        const OP_MUL: TailcallFunc = &tailcalls.op_mul;
+        const OP_DIV: TailcallFunc = &tailcalls.op_div;
+        const OP_SLOAD: TailcallFunc = &tailcalls.op_sload;
+        const OP_DUP1: TailcallFunc = &tailcalls.op_dup1;
+        const OP_SWAP1: TailcallFunc = &tailcalls.op_swap1;
 
         // First pass: Check for 5-instruction loop patterns (DUP1, PUSH, LT, PUSH, JUMPI)
         var i: usize = 0;
@@ -543,18 +594,22 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
 
                                     // Validate it's a valid JUMPDEST using reusable method
                                     if (analysis.validate_jump_dest(dest_val)) |dest_inst_idx| {
-                                        // Store loop condition metadata for the fused operation
-                                        metadata[i] = .{ .loop_condition = .{ 
+                                        // Store loop condition metadata in u32 bucket
+                                        const bucket_idx = @as(u16, @intCast(u32_bucket_list.items.len));
+                                        try u32_bucket_list.append(.{ .loop_condition = .{
                                             .loop_limit = @intCast(loop_limit_val),
-                                            .dest_inst_idx = dest_inst_idx 
-                                        } };
+                                            .dest_inst_idx = dest_inst_idx,
+                                        } });
+
+                                        // Update bucket index for the fused instruction
+                                        bucket_indices_list.items[i] = .{ .bucket = .u32_bucket, .index = bucket_idx };
 
                                         // Replace the 5-instruction sequence with loop fusion
-                                        ops_slice[i] = @ptrCast(&tailcalls.op_loop_condition);
-                                        ops_slice[i + 1] = @ptrCast(&tailcalls.op_nop);
-                                        ops_slice[i + 2] = @ptrCast(&tailcalls.op_nop);
-                                        ops_slice[i + 3] = @ptrCast(&tailcalls.op_nop);
-                                        ops_slice[i + 4] = @ptrCast(&tailcalls.op_nop);
+                                        ops_slice[i] = &tailcalls.op_loop_condition;
+                                        ops_slice[i + 1] = &tailcalls.op_nop;
+                                        ops_slice[i + 2] = &tailcalls.op_nop;
+                                        ops_slice[i + 3] = &tailcalls.op_nop;
+                                        ops_slice[i + 4] = &tailcalls.op_nop;
 
                                         // Skip the fused instructions
                                         i += 4;
@@ -585,7 +640,7 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
             const next_op = ops_slice[i + 1];
             const push_size: usize = opbyte - 0x5F;
 
-            var fused: ?*const anyopaque = null;
+            var fused: ?TailcallFunc = null;
 
             // JUMP / JUMPI validation
             if (next_op == OP_JUMP or next_op == OP_JUMPI) {
@@ -597,13 +652,16 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
                 }
 
                 if (analysis.validate_jump_dest(val)) |dest_inst_idx| {
-                    // Store destination instruction index for both JUMP and JUMPI
+                    // Store destination instruction index in u32 bucket for both JUMP and JUMPI
+                    const bucket_idx = @as(u16, @intCast(u32_bucket_list.items.len));
                     if (next_op == OP_JUMP) {
-                        metadata[i] = .{ .push_jump = .{ .dest_inst_idx = dest_inst_idx } };
-                        fused = @ptrCast(&tailcalls.op_push_then_jump);
+                        try u32_bucket_list.append(.{ .push_jump = .{ .dest_inst_idx = dest_inst_idx, ._unused = 0 } });
+                        bucket_indices_list.items[i] = .{ .bucket = .u32_bucket, .index = bucket_idx };
+                        fused = &tailcalls.op_push_then_jump;
                     } else {
-                        metadata[i] = .{ .push_jumpi = .{ .dest_inst_idx = dest_inst_idx } };
-                        fused = @ptrCast(&tailcalls.op_push_then_jumpi);
+                        try u32_bucket_list.append(.{ .push_jumpi = .{ .dest_inst_idx = dest_inst_idx, ._unused = 0 } });
+                        bucket_indices_list.items[i] = .{ .bucket = .u32_bucket, .index = bucket_idx };
+                        fused = &tailcalls.op_push_then_jumpi;
                     }
                 }
             }
@@ -612,55 +670,54 @@ pub fn prepare(allocator: std.mem.Allocator, code: []const u8) !struct {
             const is_small_push = push_size <= 4 and @as(usize, inst_pc) + 1 + push_size <= code.len;
 
             if (fused == null and next_op == OP_MLOAD) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_mload_small) else @ptrCast(&tailcalls.op_push_then_mload);
+                fused = if (is_small_push) &tailcalls.op_push_then_mload_small else &tailcalls.op_push_then_mload;
             }
             if (fused == null and next_op == OP_MSTORE) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_mstore_small) else @ptrCast(&tailcalls.op_push_then_mstore);
+                fused = if (is_small_push) &tailcalls.op_push_then_mstore_small else &tailcalls.op_push_then_mstore;
             }
             if (fused == null and next_op == OP_EQ) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_eq_small) else @ptrCast(&tailcalls.op_push_then_eq);
+                fused = if (is_small_push) &tailcalls.op_push_then_eq_small else &tailcalls.op_push_then_eq;
             }
             if (fused == null and next_op == OP_LT) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_lt_small) else @ptrCast(&tailcalls.op_push_then_lt);
+                fused = if (is_small_push) &tailcalls.op_push_then_lt_small else &tailcalls.op_push_then_lt;
             }
             if (fused == null and next_op == OP_GT) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_gt_small) else @ptrCast(&tailcalls.op_push_then_gt);
+                fused = if (is_small_push) &tailcalls.op_push_then_gt_small else &tailcalls.op_push_then_gt;
             }
             if (fused == null and next_op == OP_AND) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_and_small) else @ptrCast(&tailcalls.op_push_then_and);
+                fused = if (is_small_push) &tailcalls.op_push_then_and_small else &tailcalls.op_push_then_and;
             }
             if (fused == null and next_op == OP_ADD) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_add_small) else @ptrCast(&tailcalls.op_push_then_add);
+                fused = if (is_small_push) &tailcalls.op_push_then_add_small else &tailcalls.op_push_then_add;
             }
             if (fused == null and next_op == OP_SUB) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_sub_small) else @ptrCast(&tailcalls.op_push_then_sub);
+                fused = if (is_small_push) &tailcalls.op_push_then_sub_small else &tailcalls.op_push_then_sub;
             }
             if (fused == null and next_op == OP_MUL) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_mul_small) else @ptrCast(&tailcalls.op_push_then_mul);
+                fused = if (is_small_push) &tailcalls.op_push_then_mul_small else &tailcalls.op_push_then_mul;
             }
             if (fused == null and next_op == OP_DIV) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_div_small) else @ptrCast(&tailcalls.op_push_then_div);
+                fused = if (is_small_push) &tailcalls.op_push_then_div_small else &tailcalls.op_push_then_div;
             }
             if (fused == null and next_op == OP_SLOAD) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_sload_small) else @ptrCast(&tailcalls.op_push_then_sload);
+                fused = if (is_small_push) &tailcalls.op_push_then_sload_small else &tailcalls.op_push_then_sload;
             }
             if (fused == null and next_op == OP_DUP1) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_dup1_small) else @ptrCast(&tailcalls.op_push_then_dup1);
+                fused = if (is_small_push) &tailcalls.op_push_then_dup1_small else &tailcalls.op_push_then_dup1;
             }
             if (fused == null and next_op == OP_SWAP1) {
-                fused = if (is_small_push) @ptrCast(&tailcalls.op_push_then_swap1_small) else @ptrCast(&tailcalls.op_push_then_swap1);
+                fused = if (is_small_push) &tailcalls.op_push_then_swap1_small else &tailcalls.op_push_then_swap1;
             }
 
             if (fused == null) continue;
 
             ops_slice[i] = fused.?;
-            ops_slice[i + 1] = @ptrCast(&tailcalls.op_nop);
+            ops_slice[i + 1] = &tailcalls.op_nop;
             i += 1;
         }
     }
 
-
-    return .{ .analysis = analysis, .metadata = metadata, .ops = ops_slice, .block_gas_costs = block_gas_costs };
+    return .{ .analysis = analysis, .ops = ops_slice, .block_gas_costs = block_gas_costs };
 }
 
 test "analysis2: PUSH small value bounds check and metadata" {
@@ -669,13 +726,15 @@ test "analysis2: PUSH small value bounds check and metadata" {
     const code = &[_]u8{ 0x60, 0xAA, 0x00 };
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
-    defer allocator.free(result.metadata);
     defer allocator.free(result.block_gas_costs);
     try std.testing.expectEqual(@as(u16, 0), result.analysis.getInstIdx(0));
     try std.testing.expectEqual(@as(u16, SimpleAnalysis.MAX_USIZE), result.analysis.getInstIdx(1)); // PC 1 is push data, not instruction
     try std.testing.expectEqual(@as(u16, 1), result.analysis.getInstIdx(2));
-    // First instruction is PUSH1: metadata should store value 0xAA
-    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0xAA } }, result.metadata[0]);
+
+    // First instruction is PUSH1: should be in u64 bucket with value 0xAA
+    const bucket_info = result.analysis.bucket_indices[0];
+    try std.testing.expectEqual(MetadataBucket.u64_bucket, bucket_info.bucket);
+    try std.testing.expectEqual(U64Metadata{ .push_value = 0xAA }, result.analysis.u64_bucket[bucket_info.index]);
 }
 
 test "analysis2: PUSH0 metadata and length" {
@@ -684,12 +743,14 @@ test "analysis2: PUSH0 metadata and length" {
     const code = &[_]u8{ 0x5F, 0x00 };
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
-    defer allocator.free(result.metadata);
     defer allocator.free(result.block_gas_costs);
     // Two instructions
     try std.testing.expectEqual(@as(u16, 2), result.analysis.inst_count);
-    // First is PUSH0 -> metadata 0
-    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0 } }, result.metadata[0]);
+
+    // First is PUSH0 -> should be in u64 bucket with value 0
+    const bucket_info = result.analysis.bucket_indices[0];
+    try std.testing.expectEqual(MetadataBucket.u64_bucket, bucket_info.bucket);
+    try std.testing.expectEqual(U64Metadata{ .push_value = 0 }, result.analysis.u64_bucket[bucket_info.index]);
 }
 
 test "analysis2: PUSH1-4 metadata fast path optimization" {
@@ -705,15 +766,28 @@ test "analysis2: PUSH1-4 metadata fast path optimization" {
 
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
-    defer allocator.free(result.metadata);
     defer allocator.free(result.block_gas_costs);
 
-    // Verify metadata contains precomputed values for PUSH1-4
-    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0xAA } }, result.metadata[0]); // PUSH1
-    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0x1234 } }, result.metadata[1]); // PUSH2
-    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0xABCDEF } }, result.metadata[2]); // PUSH3
-    try std.testing.expectEqual(InstructionMetadata{ .push_small = .{ .value = 0x11223344 } }, result.metadata[3]); // PUSH4
-    try std.testing.expectEqual(InstructionMetadata{ .default = .{ ._unused = 0 } }, result.metadata[4]); // STOP (no metadata)
+    // Verify all PUSH1-4 values are stored in u64 bucket
+    const bucket_info_0 = result.analysis.bucket_indices[0];
+    try std.testing.expectEqual(MetadataBucket.u64_bucket, bucket_info_0.bucket);
+    try std.testing.expectEqual(U64Metadata{ .push_value = 0xAA }, result.analysis.u64_bucket[bucket_info_0.index]);
+
+    const bucket_info_1 = result.analysis.bucket_indices[1];
+    try std.testing.expectEqual(MetadataBucket.u64_bucket, bucket_info_1.bucket);
+    try std.testing.expectEqual(U64Metadata{ .push_value = 0x1234 }, result.analysis.u64_bucket[bucket_info_1.index]);
+
+    const bucket_info_2 = result.analysis.bucket_indices[2];
+    try std.testing.expectEqual(MetadataBucket.u64_bucket, bucket_info_2.bucket);
+    try std.testing.expectEqual(U64Metadata{ .push_value = 0xABCDEF }, result.analysis.u64_bucket[bucket_info_2.index]);
+
+    const bucket_info_3 = result.analysis.bucket_indices[3];
+    try std.testing.expectEqual(MetadataBucket.u64_bucket, bucket_info_3.bucket);
+    try std.testing.expectEqual(U64Metadata{ .push_value = 0x11223344 }, result.analysis.u64_bucket[bucket_info_3.index]);
+
+    // STOP should have no metadata
+    const bucket_info_4 = result.analysis.bucket_indices[4];
+    try std.testing.expectEqual(MetadataBucket.none, bucket_info_4.bucket);
 }
 
 test "analysis2: loop fusion pattern detection" {
@@ -732,26 +806,28 @@ test "analysis2: loop fusion pattern detection" {
 
     var prep_result = try prepare(allocator, code);
     defer prep_result.analysis.deinit(allocator);
-    defer allocator.free(prep_result.metadata);
     defer allocator.free(prep_result.ops);
     defer allocator.free(prep_result.block_gas_costs);
 
     // Verify loop fusion was applied
-    try std.testing.expect(prep_result.ops[0] == @as(*const anyopaque, @ptrCast(&tailcalls.op_loop_condition)));
-    try std.testing.expect(prep_result.ops[1] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
-    try std.testing.expect(prep_result.ops[2] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
-    try std.testing.expect(prep_result.ops[3] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
-    try std.testing.expect(prep_result.ops[4] == @as(*const anyopaque, @ptrCast(&tailcalls.op_nop)));
+    try std.testing.expect(prep_result.ops[0] == @as(*const anyopaque, &tailcalls.op_loop_condition));
+    try std.testing.expect(prep_result.ops[1] == @as(*const anyopaque, &tailcalls.op_nop));
+    try std.testing.expect(prep_result.ops[2] == @as(*const anyopaque, &tailcalls.op_nop));
+    try std.testing.expect(prep_result.ops[3] == @as(*const anyopaque, &tailcalls.op_nop));
+    try std.testing.expect(prep_result.ops[4] == @as(*const anyopaque, &tailcalls.op_nop));
 
-    // Verify metadata contains the jump destination instruction index for the JUMPDEST (instruction 5)
-    try std.testing.expectEqual(InstructionMetadata{ .push_jumpi = .{ .dest_inst_idx = 5 } }, prep_result.metadata[3]); // PUSH1 dest metadata
+    // Verify metadata contains the loop condition in u32 bucket for the fused instruction
+    const bucket_info = prep_result.analysis.bucket_indices[0];
+    try std.testing.expectEqual(MetadataBucket.u32_bucket, bucket_info.bucket);
+    const loop_metadata = prep_result.analysis.u32_bucket[bucket_info.index];
+    try std.testing.expectEqual(U32Metadata{ .loop_condition = .{ .loop_limit = 10, .dest_inst_idx = 5 } }, loop_metadata);
 }
 
 test "analysis2: block boundary detection basic" {
     const allocator = std.testing.allocator;
 
     // Simple bytecode: PUSH1 0, JUMPDEST, STOP, PUSH1 1, STOP
-    // Block boundaries should be at: 0 (start), 1 (JUMPDEST), 3 (after STOP)
+    // Block boundaries should be at: 0 (start, 1 (JUMPDEST, 3 (after STOP)
     const code = &[_]u8{
         0x60, 0x00, // PUSH1 0 (instruction 0)
         0x5B, // JUMPDEST (instruction 1) - block boundary
@@ -762,7 +838,6 @@ test "analysis2: block boundary detection basic" {
 
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
-    defer allocator.free(result.metadata);
     defer allocator.free(result.block_gas_costs);
 
     // Check that block boundaries are correctly identified
@@ -779,7 +854,7 @@ test "analysis2: block boundary detection with jumps" {
     const allocator = std.testing.allocator;
 
     // Code with JUMP and JUMPI: PUSH1 5, JUMP, STOP, JUMPDEST, PUSH1 0, JUMPI, STOP
-    // Block boundaries: 0 (start), 2 (after JUMP), 3 (JUMPDEST), 6 (after JUMPI)
+    // Block boundaries: 0 (start, 2 (after JUMP, 3 (JUMPDEST, 6 (after JUMPI)
     const code = &[_]u8{
         0x60, 0x05, // PUSH1 5 (instruction 0)
         0x56, // JUMP (instruction 1) - terminator
@@ -792,7 +867,6 @@ test "analysis2: block boundary detection with jumps" {
 
     var result = try SimpleAnalysis.analyze(allocator, code);
     defer result.analysis.deinit(allocator);
-    defer allocator.free(result.metadata);
     defer allocator.free(result.block_gas_costs);
 
     // Verify block boundaries

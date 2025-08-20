@@ -774,8 +774,7 @@ pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_st
         contract.gas,
         contract.address,
         analysis_ptr.analysis,
-        analysis_ptr.metadata,
-        &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
+        &[_]*const fn (*StackFrame) @import("execution/execution_error.zig").Error!noreturn{}, // Empty ops array - interpret2 will set this up
         host,
         self.state.database,
         self.allocator,
@@ -1005,8 +1004,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         frame_gas,
         new_address, // contract address being created
         analysis_ptr.analysis,
-        analysis_ptr.metadata,
-        &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
+        &[_]*const fn (*StackFrame) @import("execution/execution_error.zig").Error!noreturn{}, // Empty ops array - interpret2 will set this up
         host,
         self.state.database,
         self.allocator,
