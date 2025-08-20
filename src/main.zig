@@ -103,8 +103,9 @@ pub fn main() !void {
         var orchestrator = try Orchestrator.init(allocator, "crypto", num_runs, internal_runs, js_runs, js_internal_runs, snailtracer_internal_runs, js_snailtracer_internal_runs, include_all_cases, use_next, use_call2, show_output);
         defer orchestrator.deinit();
         
-        try orchestrator.runCryptoBenchmarks();
-        orchestrator.printCryptoSummary();
+        try orchestrator.discoverTestCases();
+        try orchestrator.runBenchmarks();
+        orchestrator.printSummary();
     } else if (compare_mode) {
         // Compare mode: run benchmarks for all available EVMs
         const evms = [_][]const u8{ "zig-call2", "revm", "ethereumjs", "geth", "evmone" };
