@@ -93,5 +93,5 @@ else
 fi
 
 log "Opening results in browser..."
-npx -y markserv "./bench/official/results.md"
+# npx -y markserv "./bench/official/results.md"
 
