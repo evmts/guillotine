@@ -34,7 +34,6 @@ use_call2: bool,
 show_output: bool,
 test_cases: []TestCase,
 results: std.ArrayList(BenchmarkResult),
-crypto_results: std.ArrayList(CryptoBenchmarkResult),
 
 pub const TestCase = struct {
     name: []const u8,
@@ -53,12 +52,6 @@ pub const BenchmarkResult = struct {
     internal_runs: u32,
 };
 
-pub const CryptoBenchmarkResult = struct {
-    operation: []const u8,
-    implementation: []const u8,
-    mean_ns: u64,
-    runs: u32,
-};
 
 pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, internal_runs: u32, js_runs: u32, js_internal_runs: u32, snailtracer_internal_runs: u32, js_snailtracer_internal_runs: u32, include_all_cases: bool, use_next: bool, use_call2: bool, show_output: bool) !Orchestrator {
     return Orchestrator{
@@ -76,7 +69,6 @@ pub fn init(allocator: std.mem.Allocator, evm_name: []const u8, num_runs: u32, i
         .show_output = show_output,
         .test_cases = &[_]TestCase{},
         .results = std.ArrayList(BenchmarkResult).init(allocator),
-        .crypto_results = std.ArrayList(CryptoBenchmarkResult).init(allocator),
     };
 }
 
@@ -724,78 +716,102 @@ pub fn deinit(self: *Orchestrator) void {
         self.allocator.free(result.test_case);
     }
     self.results.deinit();
-    for (self.crypto_results.items) |result| {
-        self.allocator.free(result.operation);
-        self.allocator.free(result.implementation);
-    }
-    self.crypto_results.deinit();
 }
 
 pub fn discoverTestCases(self: *Orchestrator) !void {
-    // Resolve cases directory relative to the installed executable
-    const project_root = try getProjectRoot(self.allocator);
-    defer self.allocator.free(project_root);
-    const cases_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "cases" });
-    defer self.allocator.free(cases_path);
-
-    const cases_dir = try std.fs.openDirAbsolute(cases_path, .{ .iterate = true });
-
     var test_cases = std.ArrayList(TestCase).init(self.allocator);
     defer test_cases.deinit();
 
-    var it = cases_dir.iterate();
-    while (try it.next()) |entry| {
-        if (entry.kind != .directory) continue;
-
-        const bytecode_path = try std.fs.path.join(self.allocator, &[_][]const u8{ cases_path, entry.name, "bytecode.txt" });
-        errdefer self.allocator.free(bytecode_path);
-
-        const calldata_path = try std.fs.path.join(self.allocator, &[_][]const u8{ cases_path, entry.name, "calldata.txt" });
-        errdefer self.allocator.free(calldata_path);
-
-        // Verify files exist
-        if (std.fs.cwd().openFile(bytecode_path, .{})) |file| {
-            file.close();
-        } else |err| {
-            print("Warning: Missing bytecode file for {s}: {}\n", .{ entry.name, err });
-            self.allocator.free(bytecode_path);
-            self.allocator.free(calldata_path);
-            continue;
-        }
-
-        if (std.fs.cwd().openFile(calldata_path, .{})) |file| {
-            file.close();
-        } else |err| {
-            print("Warning: Missing calldata file for {s}: {}\n", .{ entry.name, err });
-            self.allocator.free(bytecode_path);
-            self.allocator.free(calldata_path);
-            continue;
-        }
-
-        // Filter to only working benchmarks unless --all flag is used
-        if (!self.include_all_cases) {
-            const working_benchmarks = [_][]const u8{ "erc20-approval-transfer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes", "snailtracer" };
-
-            var is_working = false;
-            for (working_benchmarks) |working_name| {
-                if (std.mem.eql(u8, entry.name, working_name)) {
-                    is_working = true;
-                    break;
-                }
+    if (std.mem.eql(u8, self.evm_name, "crypto")) {
+        // Discover crypto operations as test cases
+        const crypto_operations = [_][]const u8{
+            "FpMont.add",
+            "FpMont.mul", 
+            "Fp2Mont.mul",
+            "Fp6Mont.mul",
+            "Fp12Mont.mul",
+            "G1.add",
+            "G1.mul",
+            "G2.add",
+            "G2.mul",
+            "Pairing"
+        };
+        
+        const crypto_implementations = [_][]const u8{ "zig", "rust" };
+        
+        for (crypto_operations) |operation| {
+            for (crypto_implementations) |implementation| {
+                const test_name = try std.fmt.allocPrint(self.allocator, "crypto-{s}-{s}", .{ operation, implementation });
+                try test_cases.append(.{
+                    .name = test_name,
+                    .bytecode_path = try self.allocator.dupe(u8, ""), // Not used for crypto
+                    .calldata_path = try self.allocator.dupe(u8, ""), // Not used for crypto
+                });
             }
+        }
+    } else {
+        // Discover EVM test cases
+        const project_root = try getProjectRoot(self.allocator);
+        defer self.allocator.free(project_root);
+        const cases_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "cases" });
+        defer self.allocator.free(cases_path);
 
-            if (!is_working) {
+        const cases_dir = try std.fs.openDirAbsolute(cases_path, .{ .iterate = true });
+
+        var it = cases_dir.iterate();
+        while (try it.next()) |entry| {
+            if (entry.kind != .directory) continue;
+
+            const bytecode_path = try std.fs.path.join(self.allocator, &[_][]const u8{ cases_path, entry.name, "bytecode.txt" });
+            errdefer self.allocator.free(bytecode_path);
+
+            const calldata_path = try std.fs.path.join(self.allocator, &[_][]const u8{ cases_path, entry.name, "calldata.txt" });
+            errdefer self.allocator.free(calldata_path);
+
+            // Verify files exist
+            if (std.fs.cwd().openFile(bytecode_path, .{})) |file| {
+                file.close();
+            } else |err| {
+                print("Warning: Missing bytecode file for {s}: {}\n", .{ entry.name, err });
                 self.allocator.free(bytecode_path);
                 self.allocator.free(calldata_path);
                 continue;
             }
-        }
 
-        try test_cases.append(.{
-            .name = try self.allocator.dupe(u8, entry.name),
-            .bytecode_path = bytecode_path,
-            .calldata_path = calldata_path,
-        });
+            if (std.fs.cwd().openFile(calldata_path, .{})) |file| {
+                file.close();
+            } else |err| {
+                print("Warning: Missing calldata file for {s}: {}\n", .{ entry.name, err });
+                self.allocator.free(bytecode_path);
+                self.allocator.free(calldata_path);
+                continue;
+            }
+
+            // Filter to only working benchmarks unless --all flag is used
+            if (!self.include_all_cases) {
+                const working_benchmarks = [_][]const u8{ "erc20-approval-transfer", "erc20-mint", "erc20-transfer", "ten-thousand-hashes", "snailtracer" };
+
+                var is_working = false;
+                for (working_benchmarks) |working_name| {
+                    if (std.mem.eql(u8, entry.name, working_name)) {
+                        is_working = true;
+                        break;
+                    }
+                }
+
+                if (!is_working) {
+                    self.allocator.free(bytecode_path);
+                    self.allocator.free(calldata_path);
+                    continue;
+                }
+            }
+
+            try test_cases.append(.{
+                .name = try self.allocator.dupe(u8, entry.name),
+                .bytecode_path = bytecode_path,
+                .calldata_path = calldata_path,
+            });
+        }
     }
 
     self.test_cases = try test_cases.toOwnedSlice();
@@ -809,69 +825,105 @@ pub fn runBenchmarks(self: *Orchestrator) !void {
 }
 
 fn runSingleBenchmark(self: *Orchestrator, test_case: TestCase) !void {
-    // Determine runs and internal runs based on EVM type and test case
-    const is_js = std.mem.eql(u8, self.evm_name, "ethereumjs");
-    const is_snailtracer = std.mem.eql(u8, test_case.name, "snailtracer");
-    const is_js_snailtracer = is_js and is_snailtracer;
-
-    const runs_to_use = if (is_js_snailtracer) self.js_runs else self.num_runs;
-
-    // Apply internal runs logic:
-    // 1. If JS snailtracer -> use js_snailtracer_internal_runs
-    // 2. If snailtracer (any EVM) -> use snailtracer_internal_runs
-    // 3. If JS (any test) -> use js_internal_runs
-    // 4. Otherwise -> use internal_runs
-    const internal_runs_to_use = if (is_js_snailtracer)
-        self.js_snailtracer_internal_runs
-    else if (is_snailtracer)
-        self.snailtracer_internal_runs
-    else if (is_js)
-        self.js_internal_runs
-    else
-        self.internal_runs;
-    // Read calldata
-    const calldata_file = try std.fs.cwd().openFile(test_case.calldata_path, .{});
-    defer calldata_file.close();
-
-    const calldata = try calldata_file.readToEndAlloc(self.allocator, 1024 * 1024); // 1MB max
-    defer self.allocator.free(calldata);
-
-    // Trim whitespace
-    const trimmed_calldata = std.mem.trim(u8, calldata, " \t\n\r");
-
-    // Resolve project root and build the runner path relative to it
-    const project_root = try getProjectRoot(self.allocator);
-    defer self.allocator.free(project_root);
-
-    var runner_path: []const u8 = undefined;
-    if (std.mem.eql(u8, self.evm_name, "zig")) {
-        // Default zig to use call2 runner
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
-    } else if (std.mem.eql(u8, self.evm_name, "zig-call2")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
-    } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "ethereumjs", "runner.js" });
-    } else if (std.mem.eql(u8, self.evm_name, "geth")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "geth", "runner" });
-    } else if (std.mem.eql(u8, self.evm_name, "evmone")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "evmone", "build", "evmone-runner" });
+    // Check if this is a crypto test case
+    const is_crypto_test = std.mem.startsWith(u8, test_case.name, "crypto-");
+    
+    var hyperfine_cmd: []const u8 = undefined;
+    var runs_to_use: u32 = undefined;
+    var internal_runs_to_use: u32 = undefined;
+    
+    if (is_crypto_test) {
+        // Parse crypto test case name: "crypto-{operation}-{implementation}"
+        // e.g., "crypto-FpMont.add-zig" or "crypto-Pairing-rust"
+        var parts = std.mem.splitScalar(u8, test_case.name, '-');
+        _ = parts.next(); // Skip "crypto"
+        const operation = parts.next() orelse return error.InvalidCryptoTestName;
+        const implementation = parts.next() orelse return error.InvalidCryptoTestName;
+        
+        // Resolve project root and build the crypto runner path
+        const project_root = try getProjectRoot(self.allocator);
+        defer self.allocator.free(project_root);
+        
+        var runner_path: []const u8 = undefined;
+        if (std.mem.eql(u8, implementation, "zig")) {
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "src", "crypto", "zig", "zig-out", "bin", "zig-crypto-bench" });
+        } else if (std.mem.eql(u8, implementation, "rust")) {
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "src", "crypto", "rust", "target", "release", "rust-crypto-bench" });
+        } else {
+            return error.UnsupportedCryptoImplementation;
+        }
+        defer self.allocator.free(runner_path);
+        
+        runs_to_use = self.num_runs;
+        internal_runs_to_use = self.internal_runs;
+        hyperfine_cmd = try std.fmt.allocPrint(self.allocator, "{s} --operation {s} --num-runs {}", .{ runner_path, operation, internal_runs_to_use });
+        
     } else {
-        const runner_name = try std.fmt.allocPrint(self.allocator, "{s}-runner", .{self.evm_name});
-        defer self.allocator.free(runner_name);
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", self.evm_name, "target", "release", runner_name });
+        // EVM test case - existing logic
+        const is_js = std.mem.eql(u8, self.evm_name, "ethereumjs");
+        const is_snailtracer = std.mem.eql(u8, test_case.name, "snailtracer");
+        const is_js_snailtracer = is_js and is_snailtracer;
+
+        runs_to_use = if (is_js_snailtracer) self.js_runs else self.num_runs;
+
+        // Apply internal runs logic:
+        // 1. If JS snailtracer -> use js_snailtracer_internal_runs
+        // 2. If snailtracer (any EVM) -> use snailtracer_internal_runs
+        // 3. If JS (any test) -> use js_internal_runs
+        // 4. Otherwise -> use internal_runs
+        internal_runs_to_use = if (is_js_snailtracer)
+            self.js_snailtracer_internal_runs
+        else if (is_snailtracer)
+            self.snailtracer_internal_runs
+        else if (is_js)
+            self.js_internal_runs
+        else
+            self.internal_runs;
+            
+        // Read calldata
+        const calldata_file = try std.fs.cwd().openFile(test_case.calldata_path, .{});
+        defer calldata_file.close();
+
+        const calldata = try calldata_file.readToEndAlloc(self.allocator, 1024 * 1024); // 1MB max
+        defer self.allocator.free(calldata);
+
+        // Trim whitespace
+        const trimmed_calldata = std.mem.trim(u8, calldata, " \t\n\r");
+
+        // Resolve project root and build the runner path relative to it
+        const project_root = try getProjectRoot(self.allocator);
+        defer self.allocator.free(project_root);
+
+        var runner_path: []const u8 = undefined;
+        if (std.mem.eql(u8, self.evm_name, "zig")) {
+            // Default zig to use call2 runner
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+        } else if (std.mem.eql(u8, self.evm_name, "zig-call2")) {
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "zig-out", "bin", "evm-runner" });
+        } else if (std.mem.eql(u8, self.evm_name, "ethereumjs")) {
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "ethereumjs", "runner.js" });
+        } else if (std.mem.eql(u8, self.evm_name, "geth")) {
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "geth", "runner" });
+        } else if (std.mem.eql(u8, self.evm_name, "evmone")) {
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", "evmone", "build", "evmone-runner" });
+        } else {
+            const runner_name = try std.fmt.allocPrint(self.allocator, "{s}-runner", .{self.evm_name});
+            defer self.allocator.free(runner_name);
+            runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "evms", self.evm_name, "target", "release", runner_name });
+        }
+        defer self.allocator.free(runner_path);
+
+        // Build hyperfine command (zig now defaults to call2, so no need for --call2 flag)
+        const next_flag = if (self.use_next and std.mem.eql(u8, self.evm_name, "zig")) " --next" else "";
+        const call2_flag = "";
+        // For EthereumJS, invoke via bun explicitly to avoid shebang/exec issues
+        const js_prefix = if (std.mem.eql(u8, self.evm_name, "ethereumjs")) "bun " else "";
+        hyperfine_cmd = try std.fmt.allocPrint(self.allocator, "{s}{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}{s}", .{ js_prefix, runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag, call2_flag });
     }
-    defer self.allocator.free(runner_path);
+    defer self.allocator.free(hyperfine_cmd);
 
     const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{runs_to_use});
     defer self.allocator.free(num_runs_str);
-
-    // Build hyperfine command (zig now defaults to call2, so no need for --call2 flag)
-    const next_flag = if (self.use_next and std.mem.eql(u8, self.evm_name, "zig")) " --next" else "";
-    const call2_flag = "";
-    // For EthereumJS, invoke via bun explicitly to avoid shebang/exec issues
-    const js_prefix = if (std.mem.eql(u8, self.evm_name, "ethereumjs")) "bun " else "";
-    const hyperfine_cmd = try std.fmt.allocPrint(self.allocator, "{s}{s} --contract-code-path {s} --calldata {s} --num-runs {}{s}{s}", .{ js_prefix, runner_path, test_case.bytecode_path, trimmed_calldata, internal_runs_to_use, next_flag, call2_flag });
-    defer self.allocator.free(hyperfine_cmd);
 
     // Prepare export file path to avoid mixing JSON with other output
     const project_root2 = try getProjectRoot(self.allocator);
@@ -1494,125 +1546,6 @@ fn exportMarkdown(self: *Orchestrator) !void {
     print("Results exported to bench/official/results.md\n", .{});
 }
 
-pub fn runCryptoBenchmarks(self: *Orchestrator) !void {
-    const implementations = [_][]const u8{ "zig", "rust" };
-    
-    for (implementations) |impl| {
-        print("\n=== Running crypto benchmarks for {s} ===\n", .{impl});
-        try self.runSingleCryptoImplementation(impl);
-    }
-}
-
-fn runSingleCryptoImplementation(self: *Orchestrator, implementation: []const u8) !void {
-    const project_root = try getProjectRoot(self.allocator);
-    defer self.allocator.free(project_root);
-    
-    var runner_path: []const u8 = undefined;
-    var num_runs: usize = undefined;
-    if (std.mem.eql(u8, implementation, "zig")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "src", "crypto", "zig", "zig-out", "bin", "zig-crypto-bench" });
-        // Zig is slower, so use fewer internal runs for ~10 second target
-        num_runs = if (self.internal_runs == 100) 1300 else self.internal_runs * 13; // Scale proportionally
-    } else if (std.mem.eql(u8, implementation, "rust")) {
-        runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "src", "crypto", "rust", "target", "release", "rust-crypto-bench" });
-        // Rust is faster, so use more internal runs for ~10 second target  
-        num_runs = if (self.internal_runs == 100) 6000 else self.internal_runs * 60; // Scale proportionally
-    } else {
-        return error.UnsupportedImplementation;
-    }
-    defer self.allocator.free(runner_path);
-    
-    const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{num_runs});
-    defer self.allocator.free(num_runs_str);
-    
-    var argv = std.ArrayList([]const u8).init(self.allocator);
-    defer argv.deinit();
-    try argv.appendSlice(&[_][]const u8{ runner_path, num_runs_str, "external" });
-    
-    const result = try std.process.Child.run(.{ .allocator = self.allocator, .argv = argv.items });
-    defer self.allocator.free(result.stdout);
-    defer self.allocator.free(result.stderr);
-    
-    if (result.term.Exited != 0) {
-        if (result.stderr.len > 0) {
-            print("Errors:\n{s}", .{result.stderr});
-        }
-        print("Skipping results for {s} crypto due to non-zero exit code.\n", .{implementation});
-        return;
-    }
-    
-    // Try parsing stdout first, then stderr if stdout is empty
-    const output_to_parse = if (result.stdout.len > 0) result.stdout else result.stderr;
-    try self.parseCryptoOutput(implementation, output_to_parse);
-}
-
-fn parseCryptoOutput(self: *Orchestrator, implementation: []const u8, output: []const u8) !void {
-    var lines = std.mem.splitScalar(u8, output, '\n');
-    
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t\r\n");
-        if (trimmed.len == 0) continue;
-        
-        if (std.mem.indexOf(u8, trimmed, ": ")) |colon_pos| {
-            if (std.mem.indexOf(u8, trimmed[colon_pos + 2..], "ns/op")) |ns_pos| {
-                const operation_name = trimmed[0..colon_pos];
-                const timing_str = trimmed[colon_pos + 2..colon_pos + 2 + ns_pos];
-                
-                if (std.fmt.parseInt(u64, timing_str, 10)) |mean_ns| {
-                    const crypto_result = CryptoBenchmarkResult{
-                        .operation = try self.allocator.dupe(u8, operation_name),
-                        .implementation = try self.allocator.dupe(u8, implementation),
-                        .mean_ns = mean_ns,
-                        .runs = self.internal_runs,
-                    };
-                    try self.crypto_results.append(crypto_result);
-                } else |_| {}
-            }
-        }
-    }
-}
-
-pub fn printCryptoSummary(self: *Orchestrator) void {
-    if (self.crypto_results.items.len == 0) return;
-    
-    print("\n=== Crypto Benchmark Summary ===\n", .{});
-    print("Implementation: Zig vs Rust\n", .{});
-    print("Internal runs per operation: {}\n\n", .{self.internal_runs});
-    
-    print("{s:<25} {s:>15} {s:>15} {s:>15}\n", .{ "Operation", "Zig (ns/op)", "Rust (ns/op)", "Speedup" });
-    print("{s:-<70}\n", .{""});
-    
-    var operations = std.StringHashMap(struct { zig_ns: u64, rust_ns: u64 }).init(self.allocator);
-    defer operations.deinit();
-    
-    for (self.crypto_results.items) |result| {
-        const entry = operations.getOrPut(result.operation) catch continue;
-        if (!entry.found_existing) {
-            entry.value_ptr.* = .{ .zig_ns = 0, .rust_ns = 0 };
-        }
-        
-        if (std.mem.eql(u8, result.implementation, "zig")) {
-            entry.value_ptr.zig_ns = result.mean_ns;
-        } else if (std.mem.eql(u8, result.implementation, "rust")) {
-            entry.value_ptr.rust_ns = result.mean_ns;
-        }
-    }
-    
-    var iterator = operations.iterator();
-    while (iterator.next()) |entry| {
-        const op_name = entry.key_ptr.*;
-        const data = entry.value_ptr.*;
-        
-        if (data.zig_ns > 0 and data.rust_ns > 0) {
-            const speedup = if (data.zig_ns > data.rust_ns) 
-                @as(f64, @floatFromInt(data.zig_ns)) / @as(f64, @floatFromInt(data.rust_ns))
-            else 
-                -(@as(f64, @floatFromInt(data.rust_ns)) / @as(f64, @floatFromInt(data.zig_ns)));
-            
-            print("{s:<25} {d:>15} {d:>15} {d:>14.2}x\n", .{ op_name, data.zig_ns, data.rust_ns, speedup });
-        }
-    }
-}
 
 test "Orchestrator.init creates proper instance" {
     const allocator = std.testing.allocator;
