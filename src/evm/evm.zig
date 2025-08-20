@@ -35,77 +35,18 @@ pub const RunResult = @import("evm/run_result.zig").RunResult;
 const Hardfork = @import("hardforks/hardfork.zig").Hardfork;
 const precompiles = @import("precompiles/precompiles.zig");
 const AnalysisCache = @import("analysis_cache.zig");
+const interpret2 = @import("evm/interpret2.zig");
 
-/// Virtual Machine for executing Ethereum bytecode.
-///
-/// Manages contract execution, gas accounting, state access, and protocol enforcement
-/// according to the configured hardfork rules. Supports the full EVM instruction set
-/// including contract creation, calls, and state modifications.
 const Evm = @This();
 
-/// Maximum call depth supported by EVM (per EIP-150)
 pub const MAX_CALL_DEPTH: u11 = evm_limits.MAX_CALL_DEPTH;
 
-/// Metadata for a single stack frame, moved from StackFrame to EVM
-/// This centralizes frame context data to improve cache locality and simplify frame management
-pub const StackFrameMetadata = struct {
-    /// Address that initiated this call
-    caller: primitives.Address.Address,
-    /// Value transferred with this call (0 for STATICCALL and DELEGATECALL)
-    value: u256,
-    /// Input data for this call
-    input_buffer: []const u8,
-    /// Output data from this call
-    output_buffer: []const u8,
-    /// Whether this call is read-only (STATICCALL)
-    is_static: bool,
-    /// Current depth in the call stack
-    depth: u11,
-};
-
-/// Initial arena capacity for temporary allocations (256KB)
-/// This covers most common contract executions without reallocation
-const ARENA_INITIAL_CAPACITY = 256 * 1024;
-
-// ===================================================================
-// CACHE LINE 1 (64 bytes) - STATE OPERATIONS (HOTTEST)
-// ===================================================================
-// These fields are accessed together during SLOAD/SSTORE/BALANCE operations
-/// World state including accounts, storage, and code
-state: EvmState, // 16 bytes - accessed by storage/balance ops
-/// Warm/cold access tracking for EIP-2929 gas costs
-access_list: AccessList, // 24 bytes - accessed by all address/storage operations
-/// Call journal for transaction revertibility
-journal: CallJournal, // 24 bytes - accessed by state-changing operations
-// Total: 64 bytes exactly - perfect cache line
-
-// ===================================================================
-// CACHE LINE 2 (64 bytes) - EXECUTION CONTROL (HOT)
-// ===================================================================
-// These fields are accessed together during call operations and gas accounting
-/// Normal allocator for data that outlives EVM execution (passed by user)
-allocator: std.mem.Allocator, // 16 bytes - accessed by CALL/CREATE for frame allocation
-/// Transaction-level gas refund accumulator for SSTORE and SELFDESTRUCT
-/// Signed accumulator: EIP-2200 allows negative deltas during execution.
-/// Applied at transaction end with EIP-3529 cap.
-gas_refunds: i64, // 8 bytes - accessed by SSTORE/SELFDESTRUCT
-
-/// Current active frame depth in the frame stack
-current_frame_depth: u11 = 0, // 2 bytes - frame management
-/// Maximum frame depth allocated so far (for efficient cleanup)
-max_allocated_depth: u11 = 0, // 2 bytes - frame management
-/// Current snapshot ID for the frame being executed
-current_snapshot_id: u32 = 0, // 4 bytes - snapshot tracking
-/// Current call depth for overflow protection
-depth: u11 = 0, // 2 bytes - call depth tracking
-
-/// Whether the current context is read-only (STATICCALL)
-read_only: bool = false, // 1 byte - STATICCALL check
-/// Whether the VM is currently executing a call (used to detect nested calls)
-is_executing: bool = false, // 1 byte - execution state
-/// Packed execution flags (bit 0 = read_only, bit 1 = is_executing)
-flags: u8 = 0, // 1 byte - packed flags
-// Padding: 25 bytes used, 39 bytes available = 64 bytes total
+state: EvmState,
+access_list: AccessList,
+journal: CallJournal,
+allocator: std.mem.Allocator,
+gas_refunds: i64,
+current_snapshot_id: u32 = 0,
 
 // ===================================================================
 // CACHE LINE 3 (64 bytes) - TRANSACTION LIFECYCLE (WARM)
@@ -125,9 +66,6 @@ internal_arena: std.heap.ArenaAllocator, // 16 bytes - execution management
 // These fields are accessed together during nested calls
 /// Pool for lazily reusing temporary Frames (e.g., constructor frames)
 frame_pool: FramePool, // ~32 bytes - frame allocation pool
-/// Fixed-size array storing metadata for each call frame in the stack
-/// Index corresponds to frame depth (0 = top-level call, 1 = first nested call, etc.)
-frame_metadata: [MAX_CALL_DEPTH]StackFrameMetadata, // ~32 bytes - call context
 // Total: ~64 bytes
 
 // ===================================================================
@@ -143,21 +81,14 @@ chain_rules: ChainRules, // Configuration, accessed during init
 /// Execution context providing transaction and block information
 context: Context, // Transaction context - rarely accessed
 
-// I/O buffers (accessed only during RETURN/REVERT/CALLDATALOAD)
-/// Output buffer for the current frame (set via Host.set_output)
-current_output: []const u8 = &.{}, // 16 bytes - only for RETURN/REVERT
+// I/O buffers (accessed only during CALLDATALOAD)
 /// Input buffer for the current frame (exposed via Host.get_input)
 current_input: []const u8 = &.{}, // 16 bytes - only for CALLDATALOAD/CALLDATACOPY
-/// Owned copy of current_output to ensure valid lifetime across frame transitions
-owned_output: ?[]u8 = null,
-/// Separate output buffer for mini execution to avoid conflicts with regular execution
-mini_output: ?[]u8 = null,
 
 // Rarely accessed fields
-/// Lazily allocated frame stack for nested calls - only allocates what's needed
-/// Frame at index 0 is allocated when top-level call begins,
-/// additional frames are allocated on-demand during CALL/CREATE operations
-frame_stack: ?[]Frame = null, // 8 bytes - frame storage pointer
+/// Dynamic frame stack for nested calls
+/// Grows as needed for CALL/CREATE operations, depth = frames.items.len
+frames: std.ArrayList(Frame), // Dynamic call stack
 /// LRU cache for code analysis to avoid redundant analysis during nested calls
 analysis_cache: ?AnalysisCache = null, // 8 bytes - analysis cache pointer
 
@@ -171,156 +102,43 @@ trace_file: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == 
 /// Before we can remove this restriction
 initial_thread_id: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) u32 else std.Thread.Id,
 
-// Compile-time validation and optimizations
-comptime {
-    std.debug.assert(@alignOf(Evm) >= 8); // Ensure proper alignment for performance
-    std.debug.assert(@sizeOf(Evm) > 0); // Struct must have size
-}
-
-/// Create a new EVM with specified configuration.
-///
-/// This is the initialization method for EVM instances. All parameters except
-/// allocator and database are optional and will use sensible defaults if not provided.
-///
-/// @param allocator Memory allocator for VM operations
-/// @param database Database interface for state management
-/// @param table Opcode dispatch table (optional, defaults to OpcodeMetadata.DEFAULT)
-/// @param chain_rules Protocol rules (optional, defaults to ChainRules.DEFAULT)
-/// @param context Execution context (optional, defaults to Context.init())
-/// @param depth Current call depth (optional, defaults to 0)
-/// @param read_only Static call flag (optional, defaults to false)
-/// @param tracer Optional tracer for capturing execution traces
-/// @return Configured EVM instance
-/// @throws OutOfMemory if memory initialization fails
-///
-/// Example usage:
-/// ```zig
-/// // Basic initialization with defaults
-/// var evm = try Evm.init(allocator, database, null, null, null, 0, false, null);
-/// defer evm.deinit();
-///
-/// // With custom hardfork and configuration
-/// const table = OpcodeMetadata.init_from_hardfork(.LONDON);
-/// const rules = ChainRules.for_hardfork(.LONDON);
-/// var evm = try Evm.init(allocator, database, table, rules, null, 0, false, null);
-/// defer evm.deinit();
-/// ```
 pub fn init(
     allocator: std.mem.Allocator,
     database: @import("state/database_interface.zig").DatabaseInterface,
     table: ?OpcodeMetadata,
     chain_rules: ?ChainRules,
     context: ?Context,
-    depth: u16,
-    read_only: bool,
     tracer: if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) ?void else ?std.io.AnyWriter,
 ) !Evm {
-    // std.debug.print("[Evm.init] Starting initialization...\n", .{});
-    Log.debug("Evm.init: Initializing EVM with configuration", .{});
-
-    // std.debug.print("[Evm.init] Creating arena allocator...\n", .{});
-    // MEMORY ALLOCATION: Arena allocator for temporary data
-    // Expected size: 256KB (ARENA_INITIAL_CAPACITY)
-    // Lifetime: Per EVM instance (freed on deinit)
-    // Frequency: Once per EVM creation
-    var internal_arena = std.heap.ArenaAllocator.init(allocator);
-    // Preallocate memory to avoid frequent allocations during execution
-    const arena_buffer = try internal_arena.allocator().alloc(u8, ARENA_INITIAL_CAPACITY);
-
-    // Verify arena allocation is exactly what we expect
-    std.debug.assert(arena_buffer.len == ARENA_INITIAL_CAPACITY);
-    std.debug.assert(ARENA_INITIAL_CAPACITY == 256 * 1024); // 256KB
-
-    _ = internal_arena.reset(.retain_capacity);
-
-    // std.debug.print("[Evm.init] Creating EVM state...\n", .{});
     var state = try EvmState.init(allocator, database);
     errdefer state.deinit();
-    // std.debug.print("[Evm.init] EVM state created\n", .{});
-
-    // std.debug.print("[Evm.init] Creating context and access list...\n", .{});
     const ctx = context orelse Context.init();
     var access_list = AccessList.init(allocator, ctx);
-    // std.debug.print("[Evm.init] Access list created\n", .{});
     errdefer access_list.deinit();
-
-    // NOTE: Execution state is left undefined - will be initialized fresh in each call
-    // - frame_stack: initialized in call execution
-    // - self_destruct: initialized in call execution
-
-    // std.debug.print("[Evm.init] Creating Evm struct...\n", .{});
-    Log.debug("Evm.init: EVM initialization complete", .{});
-    const result = Evm{
-        // Cache line 1 - state operations (hottest)
+    return Evm{
         .state = state,
         .access_list = access_list,
         .journal = CallJournal.init(allocator),
-
-        // Cache line 2 - execution control (hot)
         .allocator = allocator,
         .gas_refunds = 0,
-        .current_frame_depth = 0,
-        .max_allocated_depth = 0,
         .current_snapshot_id = 0,
-        .depth = @intCast(depth),
-        .read_only = read_only,
-        .is_executing = false,
-        .flags = @as(u8, if (read_only) 1 else 0),
-
-        // Cache line 3 - transaction lifecycle (warm)
         .created_contracts = CreatedContracts.init(allocator),
         .self_destruct = SelfDestruct.init(allocator),
-        .internal_arena = internal_arena,
-
-        // Cache line 4 - call frame management (warm)
+        .internal_arena = std.heap.ArenaAllocator.init(allocator),
         .frame_pool = try FramePool.init(allocator, MAX_CALL_DEPTH),
-        .frame_metadata = [_]StackFrameMetadata{StackFrameMetadata{
-            .caller = primitives.ZERO_ADDRESS,
-            .value = 0,
-            .input_buffer = &.{},
-            .output_buffer = &.{},
-            .is_static = false,
-            .depth = 0,
-        }} ** MAX_CALL_DEPTH,
-
-        // Cache line 5+ - configuration and I/O (cold)
         .table = table orelse OpcodeMetadata.DEFAULT,
         .chain_rules = chain_rules orelse ChainRules.DEFAULT,
         .context = ctx,
-        .current_output = &.{},
         .current_input = &.{},
-        .owned_output = null,
-        .mini_output = null,
-        .frame_stack = null,
-        // MEMORY ALLOCATION: Analysis cache for bytecode analysis results
-        // Expected size: 50-100KB (128 cache entries * analysis data)
-        // Lifetime: Per EVM instance
-        // Frequency: Once per EVM creation
+        .frames = std.ArrayList(Frame).init(allocator),
         .analysis_cache = AnalysisCache.init(allocator, AnalysisCache.DEFAULT_CACHE_SIZE),
         .tracer = tracer,
         .trace_file = null,
         .initial_thread_id = if (builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding) 0 else std.Thread.getCurrentId(),
     };
-
-    // Debug: verify tracer was stored correctly
-    Log.debug("Evm.init: tracer passed={}, stored tracer={}, self_ptr=0x{x}", .{ tracer != null, result.tracer != null, @intFromPtr(&result) });
-
-    return result;
 }
 
-/// Free all VM resources.
-/// Must be called when finished with the VM to prevent memory leaks.
 pub fn deinit(self: *Evm) void {
-    // Free owned output buffer if present
-    if (self.owned_output) |buf| {
-        self.allocator.free(buf);
-        self.owned_output = null;
-    }
-    // Free mini output buffer if present
-    if (self.mini_output) |buf| {
-        self.allocator.free(buf);
-        self.mini_output = null;
-    }
     if (comptime !(builtin.target.cpu.arch == .wasm32 and builtin.target.os.tag == .freestanding)) {
         if (self.trace_file) |f| {
             // Best-effort close
@@ -344,11 +162,12 @@ pub fn deinit(self: *Evm) void {
     // Clean up created contracts tracking
     self.created_contracts.deinit();
 
-    // Clean up lazily allocated frame stack if it exists
-    if (self.frame_stack) |frames| {
-        std.heap.page_allocator.free(frames);
-        self.frame_stack = null;
+    // Clean up frame stack
+    // Deinit any remaining frames in the stack
+    for (self.frames.items) |*frame| {
+        frame.deinit(self.allocator);
     }
+    self.frames.deinit();
 
     // created_contracts is initialized in init(); single deinit above is sufficient
 }
@@ -391,30 +210,8 @@ pub fn disable_tracing(self: *Evm) void {
 /// This is efficient for executing multiple contracts in sequence.
 /// Clears all state but keeps the allocated memory for reuse.
 pub fn reset(self: *Evm) void {
-    // Free owned output buffer to avoid leaking across runs
-    if (self.owned_output) |buf| {
-        self.allocator.free(buf);
-        self.owned_output = null;
-    }
-    // Free mini output buffer as well
-    if (self.mini_output) |buf| {
-        self.allocator.free(buf);
-        self.mini_output = null;
-    }
-    // Reset internal arena allocator to reuse memory
     _ = self.internal_arena.reset(.retain_capacity);
-
-    // Reset execution state
-    self.depth = 0;
-    self.read_only = false;
-    // Keep flags in sync (clear read_only bit and executing bit)
-    self.flags &= ~@as(u8, 0b11);
-    self.gas_refunds = 0; // Reset refunds for new transaction
-    self.current_frame_depth = 0;
-    self.max_allocated_depth = 0;
-
-    // Keep preallocated frame stack for reuse across calls; frames themselves
-    // are deinitialized at the end of each call execution.
+    self.gas_refunds = 0;
 }
 
 /// Get the internal arena allocator for temporary EVM data
@@ -545,85 +342,26 @@ pub fn get_original_storage(self: *Evm, address: primitives.Address.Address, slo
     return self.journal.get_original_storage(address, slot);
 }
 
-/// Set the output buffer for the current frame (Host interface)
-pub fn set_output(self: *Evm, output: []const u8) !void {
-    Log.debug("[Evm.set_output] Setting output: len={}, frame_depth={}", .{ output.len, self.current_frame_depth });
-    if (output.len > 0 and output.len <= 32) {
-        Log.debug("[Evm.set_output] Output data: {x}", .{std.fmt.fmtSliceHexLower(output)});
-    }
 
-    // Check if this is the same buffer we already own
-    if (self.owned_output) |buf| {
-        if (output.ptr == buf.ptr and output.len == buf.len) {
-            // Same buffer, no need to do anything
-            Log.debug("[Evm.set_output] Same buffer already owned, no change needed", .{});
-            return;
-        }
-        // Different buffer, free the old one
-        self.allocator.free(buf);
-        self.owned_output = null;
-    }
-
-    // Always make an owned copy so data survives child frame teardown
-    if (output.len > 0) {
-        const copy = try self.allocator.dupe(u8, output);
-        self.owned_output = copy;
-        self.current_output = copy;
-    } else {
-        self.current_output = &.{};
-    }
-
-    // Update current frame's visible output buffer if stack exists
-    // Update the frame metadata instead of the frame's output_buffer field
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        self.frame_metadata[self.current_frame_depth].output_buffer = self.current_output;
-    }
-    Log.debug("[Evm.set_output] Output set: current_output.len={}, owned_output.len={}", .{ self.current_output.len, if (self.owned_output) |buf| buf.len else 0 });
-}
-
-/// Get the output buffer for the current frame (Host interface)
-pub fn get_output(self: *Evm) []const u8 {
-    Log.debug("[Evm.get_output] Getting output: frame_stack={}, current_frame_depth={}, current_output.len={}", .{ self.frame_stack != null, self.current_frame_depth, self.current_output.len });
-
-    // Use frame metadata instead of frame's output_buffer field
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        const result = self.frame_metadata[self.current_frame_depth].output_buffer;
-        Log.debug("[Evm.get_output] Using frame output: frame_depth={}, output_len={}", .{ self.current_frame_depth, result.len });
-        return result;
-    }
-    Log.debug("[Evm.get_output] Fallback to current_output, len={}", .{self.current_output.len});
-    return self.current_output;
-}
-
-/// Get the input buffer for the current frame (Host interface)
 pub fn get_input(self: *Evm) []const u8 {
-    // During mini execution, use current_input directly
     if (self.current_input.len > 0) {
         return self.current_input;
-    }
-    // For regular execution, get from frame metadata
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].input_buffer;
     }
     return &.{};
 }
 
-/// Access an address and return the gas cost (Host interface)
 pub fn access_address(self: *Evm, address: primitives.Address.Address) !u64 {
     return self.access_list.access_address(address);
 }
 
-/// Access a storage slot and return the gas cost (Host interface)
 pub fn access_storage_slot(self: *Evm, contract_address: primitives.Address.Address, slot: u256) !u64 {
     return self.access_list.access_storage_slot(contract_address, slot);
 }
 
-/// Mark a contract for destruction (Host interface)
 pub fn mark_for_destruction(self: *Evm, contract_address: primitives.Address.Address, recipient: primitives.Address.Address) !void {
     return self.self_destruct.mark_for_destruction(contract_address, recipient);
 }
 
-/// Hardfork helpers (Host interface)
 pub fn is_hardfork_at_least(self: *Evm, target: Hardfork) bool {
     return @intFromEnum(self.chain_rules.getHardfork()) >= @intFromEnum(target);
 }
@@ -634,98 +372,28 @@ pub fn get_hardfork(self: *Evm) Hardfork {
 
 /// Get whether the current frame is static (read-only) (Host interface)
 pub fn get_is_static(self: *Evm) bool {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].is_static;
+    // Check the top frame in the stack (most recent frame)
+    if (self.frames.items.len > 0) {
+        return self.frames.items[self.frames.items.len - 1].is_static;
     }
-    return self.read_only;
+    // If no frames, assume not static (shouldn't happen during execution)
+    return false;
 }
 
-/// Get the caller address for the current frame (Host interface)
-pub fn get_caller(self: *Evm) primitives.Address.Address {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].caller;
-    }
-    return primitives.ZERO_ADDRESS;
-}
-
-/// Get the value transferred with the current call (Host interface)
-pub fn get_value(self: *Evm) u256 {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].value;
-    }
-    return 0;
-}
-
-/// Get the input buffer for the current frame (Host interface)
-pub fn get_input_buffer(self: *Evm) []const u8 {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].input_buffer;
-    }
-    return &.{};
-}
-
-/// Get the output buffer for the current frame (Host interface)
-pub fn get_output_buffer(self: *Evm) []const u8 {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].output_buffer;
-    }
-    return &.{};
-}
-
-/// Get the call depth for the current frame (Host interface)
+/// Get the current call depth (Host interface)
 pub fn get_depth(self: *Evm) u11 {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        return self.frame_metadata[self.current_frame_depth].depth;
-    }
-    return self.current_frame_depth;
+    return @intCast(self.frames.items.len);
 }
-
-/// Set the output buffer for the current frame (Host interface)
-pub fn set_output_buffer(self: *Evm, output: []const u8) !void {
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        self.frame_metadata[self.current_frame_depth].output_buffer = output;
-    }
-    // Also update the current_output for backward compatibility
-    try self.set_output(output);
-}
-
-// Inline helpers to keep boolean fields and packed flags in sync
-fn set_flag(self: *Evm, bit_index: u3, on: bool) void {
-    const mask: u8 = @as(u8, 1) << bit_index;
-    if (on) {
-        self.flags |= mask;
-    } else {
-        self.flags &= ~mask;
-    }
-}
-
-pub fn set_read_only(self: *Evm, on: bool) void {
-    self.read_only = on;
-    set_flag(self, 0, on);
-}
-
-pub fn is_read_only(self: *const Evm) bool {
-    // Read from canonical boolean to avoid desync with tests that set read_only directly
-    return self.read_only;
-}
-
-// The actual call implementation is in evm/call2.zig
-// Import it with usingnamespace below
 
 pub usingnamespace @import("evm/set_context.zig");
-
-pub usingnamespace @import("evm/call2.zig"); // This provides the call() implementation using interpret2
-
-// Export call2 as an alias for the new call implementation
+pub usingnamespace @import("evm/call2.zig");
+// TODO remove
 pub const call2 = @import("evm/call2.zig").call;
-
-// Alias for benchmark runner compatibility
+// TODO remove
 pub const call_mini = @import("evm/call2.zig").call;
-
 pub usingnamespace @import("evm/call_contract.zig");
 pub usingnamespace @import("evm/execute_precompile_call.zig");
 pub usingnamespace @import("evm/staticcall_contract.zig");
-// pub usingnamespace @import("evm/emit_log.zig"); // Commented out to avoid ambiguity with Host interface
 pub usingnamespace @import("evm/validate_static_context.zig");
 pub usingnamespace @import("evm/set_storage_protected.zig");
 pub usingnamespace @import("evm/set_transient_storage_protected.zig");
@@ -737,6 +405,7 @@ pub usingnamespace @import("evm/selfdestruct_protected.zig");
 pub usingnamespace @import("evm/require_one_thread.zig");
 pub usingnamespace @import("evm/interpret2.zig");
 
+// TODO: have this return a normal result
 // Compatibility wrapper for old interpret API used by tests
 pub const InterprResult = struct {
     pub const Status = enum { Success, Failure, Invalid, Revert, OutOfGas };
@@ -749,182 +418,41 @@ pub const InterprResult = struct {
     success: bool,
 };
 
-// Main interpret function - wrapper around interpret2
-pub fn interpret(self: *Evm, contract: *const Contract, input: []const u8, is_static: bool) !InterprResult {
-
-    // Check for bytecode analysis using cache
-    const analysis_ptr = if (self.analysis_cache) |*cache|
-        try cache.getOrAnalyze(contract.bytecode, &self.table)
-    else blk: {
-        // Fallback when no cache available
-        var analysis = try @import("analysis.zig").CodeAnalysis.from_code(self.allocator, contract.bytecode, &self.table);
-        break :blk &analysis;
-    };
-
-    // Create host interface
-    const host = Host.init(self);
-    const snapshot_id = host.create_snapshot();
-    defer {
-        // Always revert snapshot to clean up any state changes
-        host.revert_to_snapshot(snapshot_id);
-    }
-
-    // Create frame for execution
-    const frame_val = try Frame.init(
-        contract.gas,
-        contract.address,
-        analysis_ptr.analysis,
-        &[_]*const fn (*StackFrame) @import("execution/execution_error.zig").Error!noreturn{}, // Empty ops array - interpret2 will set this up
-        host,
-        self.state.database,
-        self.allocator,
-    );
-    const frame_ptr = try self.frame_pool.acquire();
-    defer self.frame_pool.release(frame_ptr);
-    frame_ptr.* = frame_val;
-
-    // Set up frame metadata
-    if (self.current_frame_depth < MAX_CALL_DEPTH) {
-        self.frame_metadata[self.current_frame_depth] = StackFrameMetadata{
-            .caller = contract.caller,
-            .value = contract.value,
-            .input_buffer = input,
-            .output_buffer = &.{},
-            .is_static = is_static,
-            .depth = self.current_frame_depth,
-        };
-    }
-
-    var exec_err: ?ExecutionError.Error = null;
-    var gas_left = contract.gas;
-
-    // Execute using interpret2
-    @import("evm/interpret2.zig").interpret2(frame_ptr) catch |err| {
-        if (err == ExecutionError.Error.STOP or err == ExecutionError.Error.RETURN) {
-            // Normal termination
-        } else {
-            exec_err = err;
-        }
-    };
-
-    gas_left = frame_ptr.gas_remaining;
-    const gas_used = contract.gas - gas_left;
-
-    // Get output from host
-    const output = host.get_output();
-
-    // Convert error to status
-    const status: InterprResult.Status = if (exec_err) |err| switch (err) {
-        ExecutionError.Error.REVERT => .Revert,
-        ExecutionError.Error.OutOfGas => .OutOfGas,
-        else => .Failure,
-    } else .Success;
-
-    return InterprResult{
-        .status = status,
-        .output = if (output.len > 0) output else null,
-        .gas_left = gas_left,
-        .gas_used = gas_used,
-        .address = contract.address,
-        .success = exec_err == null,
-    };
-}
-
-// Legacy interpret wrapper for test compatibility
-pub fn interpretCompat(self: *Evm, contract: *const anyopaque, input: []const u8, is_static: bool) !InterprResult {
-    _ = self;
-    _ = contract;
-    _ = input;
-    _ = is_static;
-
-    // Return a dummy success result for now to make tests compile
-    return InterprResult{
-        .status = .Success,
-        .output = null,
-        .gas_left = 50000,
-        .gas_used = 50000,
-        .address = primitives_internal.Address.ZERO,
-        .success = true,
-    };
-}
-
-// Contract creation: execute initcode and deploy returned runtime code
+// TODO: move this somewhere
 pub fn create_contract(self: *Evm, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64) !InterprResult {
-    Log.debug("[create_contract] Received bytecode.len: {}, ptr: {*}", .{ bytecode.len, bytecode.ptr });
-    if (bytecode.len > 0) {
-        Log.debug("[create_contract] First bytes: {any}", .{std.fmt.fmtSliceHexLower(bytecode[0..@min(10, bytecode.len)])});
-    }
-
-    // CREATE uses sender address + nonce to calculate contract address
-    // Get the nonce before incrementing it
     const nonce = self.state.get_nonce(caller);
-
-    // Calculate the CREATE address based on creator and nonce
     const new_address = primitives_internal.Address.get_contract_address(caller, nonce);
-
-    // Increment the nonce for the creator account
     _ = try self.state.increment_nonce(caller);
-
-    std.log.debug("[CREATE] caller={any}, nonce={}, new_address={any}", .{ std.fmt.fmtSliceHexLower(&caller), nonce, std.fmt.fmtSliceHexLower(&new_address) });
-
     return self.create_contract_at(caller, value, bytecode, gas, new_address);
 }
 
-/// Compute CREATE2 address per EIP-1014: keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[12..]
+// TODO: move this somewhere
 pub fn compute_create2_address(self: *Evm, caller: primitives_internal.Address.Address, salt: u256, init_code: []const u8) primitives_internal.Address.Address {
     _ = self;
     var preimage: [1 + 20 + 32 + 32]u8 = undefined;
     preimage[0] = 0xff;
-    // caller (20 bytes)
     @memcpy(preimage[1..21], &caller);
-    // salt (32 bytes, big-endian)
     var salt_bytes: [32]u8 = undefined;
     std.mem.writeInt(u256, &salt_bytes, salt, .big);
     @memcpy(preimage[21..53], &salt_bytes);
-    // keccak256(init_code)
     var code_hash: [32]u8 = undefined;
     Keccak256.hash(init_code, &code_hash, .{});
     @memcpy(preimage[53..85], &code_hash);
-
-    // Debug logging
-    std.log.debug("[CREATE2] caller={any}, salt={x}, init_code_len={}, code_hash={any}", .{ std.fmt.fmtSliceHexLower(&caller), salt, init_code.len, std.fmt.fmtSliceHexLower(&code_hash) });
-    std.log.debug("[CREATE2] preimage={any}", .{std.fmt.fmtSliceHexLower(&preimage)});
-
     var out_hash: [32]u8 = undefined;
     Keccak256.hash(&preimage, &out_hash, .{});
-
     var addr: primitives_internal.Address.Address = undefined;
-    // Take the last 20 bytes of the hash
     @memcpy(&addr, out_hash[12..32]);
-
-    std.log.debug("[CREATE2] computed address={any}", .{std.fmt.fmtSliceHexLower(&addr)});
-
     return addr;
 }
 
 /// CREATE/CREATE2 helper that deploys contract at a specified address
+// TODO: move this somewhere
 pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Address, value: u256, bytecode: []const u8, gas: u64, new_address: primitives_internal.Address.Address) !InterprResult {
-    Log.debug("[CREATE_DEBUG] Starting create_contract_at", .{});
-    Log.debug("[CREATE_DEBUG]   caller: {any}", .{std.fmt.fmtSliceHexLower(&caller)});
-    Log.debug("[CREATE_DEBUG]   value: {}", .{value});
-    Log.debug("[CREATE_DEBUG]   bytecode.len: {}", .{bytecode.len});
-    Log.debug("[CREATE_DEBUG]   gas: {}", .{gas});
-    Log.debug("[CREATE_DEBUG]   new_address: {any}", .{std.fmt.fmtSliceHexLower(&new_address)});
-    Log.debug("[CREATE_DEBUG]   current_frame_depth: {}", .{self.current_frame_depth});
-
-    if (bytecode.len > 0) {
-        Log.debug("[CREATE_DEBUG]   bytecode first 32 bytes: {any}", .{std.fmt.fmtSliceHexLower(bytecode[0..@min(bytecode.len, 32)])});
-    }
-
-    // Check if this is a top-level call and charge base transaction cost
-    const is_top_level = self.current_frame_depth == 0;
+    const is_top_level = self.frames.items.len == 0;
     var remaining_gas = gas;
     if (is_top_level) {
         const base_cost = GasConstants.TxGas;
-        Log.debug("[CREATE_DEBUG] Top-level call, charging base cost: {}", .{base_cost});
-
         if (remaining_gas < base_cost) {
-            Log.debug("[CREATE_DEBUG] OutOfGas: remaining_gas {} < base_cost {}", .{ remaining_gas, base_cost });
             return InterprResult{
                 .status = .OutOfGas,
                 .output = null,
@@ -936,17 +464,12 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         }
 
         remaining_gas -= base_cost;
-        Log.debug("[CREATE_DEBUG] After base cost, remaining_gas: {}", .{remaining_gas});
     }
 
-    // Analyze initcode (use cache if available)
-    // Use analysis cache (always initialized in Evm.init)
-    Log.debug("[CREATE_DEBUG] Analyzing bytecode, cache available: {}", .{self.analysis_cache != null});
     const analysis_ptr = blk: {
         if (self.analysis_cache) |*cache| {
-            Log.debug("[CREATE_DEBUG] Using cache for analysis", .{});
             break :blk cache.getOrAnalyze(bytecode, &self.table) catch |err| {
-                Log.debug("[CREATE_DEBUG] Analysis failed: {}", .{err});
+                Log.err("[CREATE_DEBUG] Analysis failed: {}", .{err});
                 return InterprResult{
                     .status = .Failure,
                     .output = null,
@@ -956,35 +479,22 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                     .success = false,
                 };
             };
-        } else {
-            // Fallback: treat as failure if cache unavailable (should not happen)
-            Log.debug("[CREATE_DEBUG] No cache available - failing", .{});
-            return InterprResult{
-                .status = .Failure,
-                .output = null,
-                .gas_left = remaining_gas,
-                .gas_used = 0,
-                .address = new_address,
-                .success = false,
-            };
         }
+        return InterprResult{
+            .status = .Failure,
+            .output = null,
+            .gas_left = remaining_gas,
+            .gas_used = 0,
+            .address = new_address,
+            .success = false,
+        };
     };
-    Log.debug("[CREATE_DEBUG] Analysis complete, ptr: 0x{x}", .{@intFromPtr(analysis_ptr)});
 
-    // Pre-charge CREATE base and initcode costs to align with opcode path
     const GasC = @import("primitives").GasConstants;
     const word_count: u64 = GasC.wordCount(bytecode.len);
     const precharge: u64 = GasC.CreateGas + (word_count * GasC.InitcodeWordGas) + (@as(u64, @intCast(bytecode.len)) * GasC.CreateDataGas);
-    Log.debug("[CREATE_DEBUG] Gas calculation:", .{});
-    Log.debug("[CREATE_DEBUG]   word_count: {}", .{word_count});
-    Log.debug("[CREATE_DEBUG]   CreateGas: {}", .{GasC.CreateGas});
-    Log.debug("[CREATE_DEBUG]   InitcodeWordGas: {}", .{GasC.InitcodeWordGas});
-    Log.debug("[CREATE_DEBUG]   CreateDataGas: {}", .{GasC.CreateDataGas});
-    Log.debug("[CREATE_DEBUG]   precharge total: {}", .{precharge});
 
     if (remaining_gas <= precharge) {
-        // Not enough gas to even pay creation overhead
-        Log.debug("[CREATE_DEBUG] OutOfGas: remaining_gas {} <= precharge {}", .{ remaining_gas, precharge });
         return InterprResult{
             .status = .OutOfGas,
             .output = null,
@@ -995,69 +505,56 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         };
     }
     const frame_gas: u64 = remaining_gas - precharge;
-    Log.debug("[CREATE_DEBUG] Frame gas after precharge: {}", .{frame_gas});
 
-    // Prepare a standalone frame for constructor execution
     const host = @import("host.zig").Host.init(self);
     const snapshot_id: u32 = host.create_snapshot();
+    
+    // Transfer value from caller to new contract address
+    if (value > 0) {
+        // Check caller has sufficient balance
+        const caller_balance = self.state.get_balance(caller);
+        if (caller_balance < value) {
+            host.revert_to_snapshot(snapshot_id);
+            return InterprResult{
+                .status = .Failure,
+                .output = null,
+                .gas_left = remaining_gas,
+                .gas_used = 0,
+                .address = new_address,
+                .success = false,
+            };
+        }
+        
+        // Transfer: debit caller, credit new contract
+        try self.state.set_balance(caller, caller_balance - value);
+        const new_contract_balance = self.state.get_balance(new_address);
+        try self.state.set_balance(new_address, new_contract_balance + value);
+    }
+    
     const frame_val = try Frame.init(
         frame_gas,
-        new_address, // contract address being created
+        new_address,
         analysis_ptr.analysis,
-        &[_]*const fn (*StackFrame) @import("execution/execution_error.zig").Error!noreturn{}, // Empty ops array - interpret2 will set this up
+        &[_]*const fn (*StackFrame) @import("execution/execution_error.zig").Error!noreturn{},
         host,
         self.state.database,
         self.allocator,
+        false, // CREATE operations are never static
+        caller, // Caller who initiated the CREATE
+        value, // ETH value for the contract
+        bytecode, // Input is the init bytecode
     );
     const frame_ptr = try self.frame_pool.acquire();
     frame_ptr.* = frame_val;
 
-    // Set up frame metadata for CREATE
-    const create_frame_depth = self.current_frame_depth + 1;
-    if (create_frame_depth < MAX_CALL_DEPTH) {
-        self.frame_metadata[create_frame_depth] = StackFrameMetadata{
-            .caller = caller,
-            .value = value,
-            .input_buffer = &.{}, // CREATE has no input
-            .output_buffer = &.{},
-            .is_static = false, // CREATE is never static
-            .depth = create_frame_depth,
-        };
-    }
-
-    var exec_err: ?ExecutionError.Error = null;
-    // Save current depth and increment for nested create
-    const saved_depth = self.depth;
-    self.depth += 1;
-    Log.debug("[CREATE_DEBUG] Starting interpret with frame_gas: {}", .{frame_ptr.gas_remaining});
-    Log.debug("[CREATE_DEBUG] Frame details: address={any}, caller={any}, value={}", .{
-        std.fmt.fmtSliceHexLower(&frame_ptr.contract_address),
-        std.fmt.fmtSliceHexLower(&caller), // Use the caller parameter instead
-        value, // Use the value parameter instead
-    });
-    Log.debug("[create_contract_at] Before interpret: depth={}, has_tracer={}, self_ptr=0x{x}, tracer_ptr=0x{x}", .{ self.depth, self.tracer != null, @intFromPtr(self), if (self.tracer) |t| @intFromPtr(&t) else 0 });
-    Log.debug("[create_contract_at] Tracer field check: offset={}, value_exists={}", .{ @offsetOf(Evm, "tracer"), self.tracer != null });
-    Log.debug("[create_contract_at] Calling interpret for CREATE2 at depth={}", .{self.depth});
     @import("evm/interpret2.zig").interpret2(frame_ptr) catch |err| {
-        Log.debug("[CREATE_DEBUG] Interpret finished with error: {}", .{err});
-        Log.debug("[create_contract_at] Interpret finished with error: {}", .{err});
-        if (err != ExecutionError.Error.STOP and err != ExecutionError.Error.RETURN) {
-            exec_err = err;
-        }
-    };
-    // Restore depth after create
-    self.depth = saved_depth;
-    Log.debug("[CREATE_DEBUG] After interpret: exec_err={?}, gas_remaining={}", .{ exec_err, frame_ptr.gas_remaining });
-
-    // Branch on result BEFORE deinitializing frame to safely access output
-    if (exec_err) |e| {
-        switch (e) {
+        switch (err) {
+            ExecutionError.Error.RETURN, ExecutionError.Error.STOP => {
+                @branchHint(.likely);
+            },
             ExecutionError.Error.REVERT => {
-                const output = host.get_output();
-                Log.debug("[create_contract] REVERT with output_len={}", .{output.len});
-                // Revert state changes since snapshot
+                const output = frame_ptr.output_buffer;
                 host.revert_to_snapshot(snapshot_id);
-                // Return view of owned output buffer (no extra allocation)
                 const out: ?[]const u8 = if (output.len > 0) output else null;
                 const gas_left = frame_ptr.gas_remaining;
                 frame_ptr.deinit(self.allocator);
@@ -1086,7 +583,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                 };
             },
             else => {
-                Log.debug("[create_contract] Failure during constructor: {}", .{e});
+                Log.debug("[create_contract] Failure during constructor: {}", .{err});
                 // Treat other errors as failure
                 host.revert_to_snapshot(snapshot_id);
                 frame_ptr.deinit(self.allocator);
@@ -1101,28 +598,22 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
                 };
             },
         }
-    }
+    };
 
-    // Success (STOP or fell off end): deploy runtime code if any
-    const output = host.get_output();
-    Log.debug("[CREATE_DEBUG] Success path: output.len={}", .{output.len});
+    const output = frame_ptr.output_buffer;
     var out: ?[]const u8 = null;
     if (output.len > 0) {
-        Log.debug("[CREATE_DEBUG] Deploying runtime code, first 32 bytes: {any}", .{std.fmt.fmtSliceHexLower(output[0..@min(output.len, 32)])});
-        Log.debug("[create_contract] Success STOP, deploying runtime code len={}, first_bytes={any}", .{ output.len, std.fmt.fmtSliceHexLower(output[0..@min(output.len, 32)]) });
-        // Store code at the new address (MemoryDatabase copies the slice)
         self.state.set_code(new_address, output) catch |err| {
-            Log.debug("[CREATE_DEBUG] Failed to set code: {}", .{err});
+            @branchHint(.cold);
+            Log.err("[CREATE_DEBUG] Failed to set code: {}", .{err});
+            return ExecutionError.Error.ReturnDataOutOfBounds;
         };
-        // Return view of owned output buffer (no extra allocation)
         out = @constCast(output);
-        Log.debug("[CREATE_DEBUG] Code deployed successfully at {any}", .{std.fmt.fmtSliceHexLower(&new_address)});
     } else {
+        @branchHint(.cold);
         Log.debug("[CREATE_DEBUG] Empty runtime code - no code deployed", .{});
-        Log.debug("[create_contract] Success STOP, empty runtime code", .{});
     }
 
-    // Add back the unspent frame gas to the caller, but exclude the precharged overhead
     const gas_left = frame_ptr.gas_remaining;
     frame_ptr.deinit(self.allocator);
     self.frame_pool.release(frame_ptr);
@@ -1132,22 +623,6 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         .gas_left = gas_left,
         .gas_used = 0,
         .address = new_address,
-        .success = true,
-    };
-}
-// Stub for interpret_block_write method used by tests
-pub fn interpret_block_write(self: *Evm, contract: *const anyopaque, input: []const u8) !InterprResult {
-    _ = self;
-    _ = contract;
-    _ = input;
-
-    // Return dummy result for now to make tests compile
-    return InterprResult{
-        .status = .Success,
-        .output = null,
-        .gas_left = 50000,
-        .gas_used = 50000,
-        .address = primitives_internal.Address.ZERO,
         .success = true,
     };
 }
@@ -1168,13 +643,12 @@ test "Evm.init default configuration" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     try testing.expectEqual(@as(u11, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 }
 
 test "Evm.init with custom opcode metadata and chain rules" {
@@ -1187,13 +661,12 @@ test "Evm.init with custom opcode metadata and chain rules" {
     const custom_table = OpcodeMetadata.init_from_hardfork(.BERLIN);
     const custom_rules = ChainRules.for_hardfork(.BERLIN);
 
-    var evm = try Evm.init(allocator, db_interface, custom_table, custom_rules, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, custom_table, custom_rules, null, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     try testing.expectEqual(@as(u11, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 }
 
 test "Evm.init with hardfork" {
@@ -1205,13 +678,12 @@ test "Evm.init with hardfork" {
     const db_interface = memory_db.to_database_interface();
     const jump_table = OpcodeMetadata.init_from_hardfork(Hardfork.LONDON);
     const chain_rules = ChainRules.for_hardfork(Hardfork.LONDON);
-    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     try testing.expectEqual(@as(u11, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 }
 
 test "Evm.deinit proper cleanup" {
@@ -1221,7 +693,7 @@ test "Evm.deinit proper cleanup" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
 
     evm.deinit();
 }
@@ -1233,7 +705,7 @@ test "Evm.init state initialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -1248,7 +720,7 @@ test "Evm.init access list initialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -1263,7 +735,7 @@ test "Evm.init context initialization" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(u64, 0), evm.context.block_number);
@@ -1283,9 +755,9 @@ test "Evm multiple VM instances" {
     const db_interface1 = memory_db1.to_database_interface();
     const db_interface2 = memory_db2.to_database_interface();
 
-    var evm1 = try Evm.init(allocator, db_interface1, null, null, null, 0, false, null);
+    var evm1 = try Evm.init(allocator, db_interface1, null, null, null, null);
     defer evm1.deinit();
-    var evm2 = try Evm.init(allocator, db_interface2, null, null, null, 0, false, null);
+    var evm2 = try Evm.init(allocator, db_interface2, null, null, null, null);
     defer evm2.deinit();
 
     evm1.depth = 5;
@@ -1308,12 +780,11 @@ test "Evm initialization with different hardforks" {
     for (hardforks) |hardfork| {
         const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
         const chain_rules = ChainRules.for_hardfork(hardfork);
-        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, null);
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
         try testing.expectEqual(@as(u11, 0), evm.depth);
-        try testing.expectEqual(false, evm.read_only);
     }
 }
 
@@ -1324,12 +795,11 @@ test "Evm initialization memory invariants" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     try testing.expectEqual(@as(u11, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 }
 
 test "Evm depth tracking" {
@@ -1339,7 +809,7 @@ test "Evm depth tracking" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(u11, 0), evm.depth);
@@ -1351,25 +821,6 @@ test "Evm depth tracking" {
     try testing.expectEqual(@as(u16, 0), evm.depth);
 }
 
-test "Evm read-only flag" {
-    const allocator = testing.allocator;
-
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-
-    const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    defer evm.deinit();
-
-    try testing.expectEqual(false, evm.read_only);
-
-    evm.read_only = true;
-    try testing.expectEqual(true, evm.read_only);
-
-    evm.read_only = false;
-    try testing.expectEqual(false, evm.read_only);
-}
-
 test "Evm return data management" {
     const allocator = testing.allocator;
 
@@ -1377,7 +828,7 @@ test "Evm return data management" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
@@ -1398,7 +849,7 @@ test "Evm state access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -1416,7 +867,7 @@ test "Evm access list operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -1434,7 +885,7 @@ test "Evm opcode metadata access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const add_opcode: u8 = 0x01;
@@ -1449,7 +900,7 @@ test "Evm chain rules access" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     // ChainRules structure verification
@@ -1464,16 +915,14 @@ test "Evm reinitialization behavior" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     evm.depth = 5;
-    evm.read_only = true;
     evm.deinit();
 
-    evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(u11, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 }
 
 test "Evm edge case: maximum depth" {
@@ -1483,7 +932,7 @@ test "Evm edge case: maximum depth" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     evm.depth = std.math.maxInt(u11);
@@ -1508,44 +957,11 @@ test "Evm fuzz: initialization with random hardforks" {
         const hardfork = hardforks[random.intRangeAtMost(usize, 0, hardforks.len - 1)];
         const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
         const chain_rules = ChainRules.for_hardfork(hardfork);
-        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, null);
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
         try testing.expectEqual(@as(u16, 0), evm.depth);
-        try testing.expectEqual(false, evm.read_only);
-    }
-}
-
-test "Evm fuzz: random depth and read_only values" {
-    if (std.process.getEnvVarOwned(std.testing.allocator, "ENABLE_STATE_TESTS")) |_| {
-        // Environment variable set, run the test
-    } else |_| {
-        // Environment variable not set, skip the test - see GitHub issue #562
-        return error.SkipZigTest;
-    }
-    const allocator = testing.allocator;
-
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-
-    const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    defer evm.deinit();
-
-    var prng = std.Random.DefaultPrng.init(123);
-    const random = prng.random();
-
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
-        const random_depth = random.int(u16);
-        const random_read_only = random.boolean();
-
-        evm.depth = @as(u11, @intCast(random_depth % (std.math.maxInt(u11) + 1)));
-        evm.read_only = random_read_only;
-
-        try testing.expectEqual(random_depth, evm.depth);
-        try testing.expectEqual(random_read_only, evm.read_only);
     }
 }
 
@@ -1556,7 +972,7 @@ test "Evm integration: multiple state operations" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const addr1 = [_]u8{0x11} ** 20;
@@ -1582,7 +998,7 @@ test "Evm integration: state and context interaction" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     const test_addr = [_]u8{0x42} ** 20;
@@ -1604,13 +1020,12 @@ test "Evm invariant: all fields properly initialized after init" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expect(evm.allocator.ptr == allocator.ptr);
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     try testing.expectEqual(@as(u16, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 
     try testing.expect(!evm.table.get_operation(0x01).undefined);
     try testing.expect(evm.chain_rules.is_eip150);
@@ -1633,7 +1048,7 @@ test "Evm memory leak detection" {
         defer memory_db.deinit();
 
         const db_interface = memory_db.to_database_interface();
-        var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, null, null, null, null);
         defer evm.deinit();
 
         const test_data = try allocator.alloc(u8, 100);
@@ -1652,7 +1067,7 @@ test "Evm edge case: empty return data" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
@@ -1668,7 +1083,7 @@ test "Evm resource exhaustion simulation" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     evm.depth = 1023;
@@ -1691,7 +1106,6 @@ test "Evm.init creates EVM with custom settings" {
     // Can't test return_data initialization as init doesn't support it
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     try testing.expectEqual(@as(u16, 42), evm.depth);
-    try testing.expectEqual(true, evm.read_only);
 }
 
 test "Evm.init uses defaults for null parameters" {
@@ -1702,14 +1116,13 @@ test "Evm.init uses defaults for null parameters" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     try testing.expectEqual(@as(usize, 0), evm.current_output.len);
     // Stack is now part of Frame, not Evm
     try testing.expectEqual(@as(u11, 0), evm.current_frame_depth);
     try testing.expectEqual(@as(u16, 0), evm.depth);
-    try testing.expectEqual(false, evm.read_only);
 }
 
 test "Evm builder pattern: step by step configuration" {
@@ -1720,18 +1133,16 @@ test "Evm builder pattern: step by step configuration" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm.deinit();
 
     evm.depth = 5;
-    evm.read_only = true;
 
     const test_data = try allocator.dupe(u8, &[_]u8{ 0xde, 0xad, 0xbe, 0xef });
     defer allocator.free(test_data);
     evm.current_output = test_data;
 
     try testing.expectEqual(@as(u16, 5), evm.depth);
-    try testing.expectEqual(true, evm.read_only);
     try testing.expectEqualSlices(u8, &[_]u8{ 0xde, 0xad, 0xbe, 0xef }, evm.current_output);
 }
 
@@ -1743,37 +1154,15 @@ test "Evm init vs init comparison" {
 
     const db_interface = memory_db.to_database_interface();
 
-    var evm1 = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm1 = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm1.deinit();
 
-    var evm2 = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+    var evm2 = try Evm.init(allocator, db_interface, null, null, null, null);
     defer evm2.deinit();
 
     try testing.expectEqual(evm1.depth, evm2.depth);
-    try testing.expectEqual(evm1.read_only, evm2.read_only);
     try testing.expectEqual(evm1.current_output.len, evm2.current_output.len);
     try testing.expectEqual(evm1.current_frame_depth, evm2.current_frame_depth);
-}
-
-test "Evm child instance creation pattern" {
-    const allocator = testing.allocator;
-
-    var memory_db = MemoryDatabase.init(allocator);
-    defer memory_db.deinit();
-
-    const db_interface = memory_db.to_database_interface();
-
-    var parent_evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
-    defer parent_evm.deinit();
-
-    parent_evm.depth = 3;
-    parent_evm.read_only = true;
-
-    var child_evm = try Evm.init(allocator, db_interface, null, null, null, parent_evm.depth + 1, parent_evm.read_only, null);
-    defer child_evm.deinit();
-
-    try testing.expectEqual(@as(u16, 4), child_evm.depth);
-    try testing.expectEqual(true, child_evm.read_only);
 }
 
 test "Evm initialization with different hardforks using builder" {
@@ -1790,7 +1179,7 @@ test "Evm initialization with different hardforks using builder" {
         const table = OpcodeMetadata.init_from_hardfork(hardfork);
         const rules = ChainRules.for_hardfork(hardfork);
 
-        var evm = try Evm.init(allocator, db_interface, table, rules, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, table, rules, null, null);
         defer evm.deinit();
 
         try testing.expect(evm.allocator.ptr == allocator.ptr);
@@ -1807,9 +1196,8 @@ test "Evm builder pattern memory management" {
 
         const db_interface = memory_db.to_database_interface();
 
-        var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, null, null, null, null);
         evm.depth = @intCast(i);
-        evm.read_only = (i % 2 == 0);
         evm.deinit();
     }
 }
@@ -1831,7 +1219,6 @@ test "fuzz_evm_initialization_states" {
 
             // Extract parameters from fuzz input
             const depth = std.mem.readInt(u16, input[0..2], .little) % (MAX_CALL_DEPTH + 10); // Allow testing beyond max
-            const read_only = (input[2] % 2) == 1;
             const hardfork_idx = input[3] % 3; // Test 3 different hardforks
 
             const hardforks = [_]Hardfork{ .FRONTIER, .BERLIN, .LONDON };
@@ -1840,12 +1227,11 @@ test "fuzz_evm_initialization_states" {
             // Test initialization with various state combinations
             const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
             const chain_rules = ChainRules.for_hardfork(hardfork);
-            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, null);
             defer evm.deinit();
 
             // Verify initial state
             try testing.expectEqual(@as(u16, 0), evm.depth);
-            try testing.expectEqual(false, evm.read_only);
             try testing.expect(evm.current_output.len == 0);
 
             // Test state modifications within valid ranges
@@ -1854,11 +1240,8 @@ test "fuzz_evm_initialization_states" {
                 try testing.expectEqual(depth, evm.depth);
             }
 
-            evm.read_only = read_only;
-            try testing.expectEqual(read_only, evm.read_only);
-
             // Verify frame stack is initially null
-            try testing.expect(evm.frame_stack == null);
+            try testing.expect(evm.frames.items.len == 0);
         }
     };
     const input = "test_input_data_for_fuzzing";
@@ -1875,7 +1258,7 @@ test "fuzz_evm_depth_management" {
             defer memory_db.deinit();
             const db_interface = memory_db.to_database_interface();
 
-            var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+            var evm = try Evm.init(allocator, db_interface, null, null, null, null);
             defer evm.deinit();
 
             // Test various depth values from fuzz input
@@ -1904,61 +1287,6 @@ test "fuzz_evm_depth_management" {
     try global.testEvmDepthManagement(input);
 }
 
-test "fuzz_evm_state_consistency" {
-    const global = struct {
-        fn testEvmStateConsistency(input: []const u8) anyerror!void {
-            if (input.len < 16) return;
-
-            const allocator = testing.allocator;
-            var memory_db = MemoryDatabase.init(allocator);
-            defer memory_db.deinit();
-            const db_interface = memory_db.to_database_interface();
-
-            // Create EVM with various initial states
-            const initial_depth = std.mem.readInt(u16, input[0..2], .little) % MAX_CALL_DEPTH;
-            const initial_read_only = (input[2] % 2) == 1;
-
-            var evm = try Evm.init(allocator, db_interface, null, null, null, initial_depth, initial_read_only, null);
-            defer evm.deinit();
-
-            // Verify initial state was set correctly
-            try testing.expectEqual(initial_depth, evm.depth);
-            try testing.expectEqual(initial_read_only, evm.read_only);
-
-            // Test state transitions using fuzz input
-            const operations = @min((input.len - 16) / 4, 8);
-            for (0..operations) |i| {
-                const op_data = input[16 + i * 4 .. 16 + (i + 1) * 4];
-                const op_type = op_data[0] % 3;
-
-                switch (op_type) {
-                    0 => {
-                        // Modify depth
-                        const new_depth = std.mem.readInt(u16, op_data[1..3], .little) % MAX_CALL_DEPTH;
-                        evm.depth = @as(u11, @intCast(new_depth % (std.math.maxInt(u11) + 1)));
-                        try testing.expectEqual(new_depth, evm.depth);
-                    },
-                    1 => {
-                        // Toggle read-only
-                        const new_read_only = (op_data[1] % 2) == 1;
-                        evm.read_only = new_read_only;
-                        try testing.expectEqual(new_read_only, evm.read_only);
-                    },
-                    2 => {
-                        // Verify state consistency
-                        try testing.expect(evm.depth < MAX_CALL_DEPTH);
-                        try testing.expect(evm.allocator.ptr != undefined);
-                        try testing.expect(evm.current_output.len == 0); // Default empty return data
-                    },
-                    else => unreachable,
-                }
-            }
-        }
-    };
-    const input = "test_input_data_for_fuzzing";
-    try global.testEvmStateConsistency(input);
-}
-
 test "fuzz_evm_frame_pool_management" {
     const global = struct {
         fn testEvmFramePoolManagement(input: []const u8) anyerror!void {
@@ -1969,7 +1297,7 @@ test "fuzz_evm_frame_pool_management" {
             defer memory_db.deinit();
             const db_interface = memory_db.to_database_interface();
 
-            var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
+            var evm = try Evm.init(allocator, db_interface, null, null, null, null);
             defer evm.deinit();
 
             // Test frame pool initialization tracking with fuzz input
@@ -1981,7 +1309,7 @@ test "fuzz_evm_frame_pool_management" {
             };
 
             // Verify initial state - frame stack should be null
-            try testing.expect(evm.frame_stack == null);
+            try testing.expect(evm.frames.items.len == 0);
 
             // Test frame bounds
             for (pool_indices) |idx| {
@@ -2026,7 +1354,7 @@ test "fuzz_evm_hardfork_configurations" {
 
             const jump_table = OpcodeMetadata.init_from_hardfork(hardfork);
             const chain_rules = ChainRules.for_hardfork(hardfork);
-            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, 0, false, null);
+            var evm = try Evm.init(allocator, db_interface, jump_table, chain_rules, null, null);
             defer evm.deinit();
 
             // Verify EVM was configured for the specified hardfork
@@ -2035,14 +1363,11 @@ test "fuzz_evm_hardfork_configurations" {
             // Test state modifications with hardfork context
             if (input.len >= 8) {
                 const depth = std.mem.readInt(u16, input[1..3], .little) % MAX_CALL_DEPTH;
-                const read_only = (input[3] % 2) == 1;
 
                 evm.depth = @as(u11, @intCast(depth % (std.math.maxInt(u11) + 1)));
-                evm.read_only = read_only;
 
                 // Verify state changes are consistent regardless of hardfork
                 try testing.expectEqual(depth, evm.depth);
-                try testing.expectEqual(read_only, evm.read_only);
 
                 // Verify hardfork rules remain consistent
                 try testing.expect(evm.chain_rules.getHardfork() == hardfork);
@@ -2055,7 +1380,7 @@ test "fuzz_evm_hardfork_configurations" {
 
                 const second_jump_table = OpcodeMetadata.init_from_hardfork(second_hardfork);
                 const second_chain_rules = ChainRules.for_hardfork(second_hardfork);
-                var evm2 = try Evm.init(allocator, db_interface, second_jump_table, second_chain_rules, null, 0, false, null);
+                var evm2 = try Evm.init(allocator, db_interface, second_jump_table, second_chain_rules, null, null);
                 defer evm2.deinit();
 
                 try testing.expect(evm2.chain_rules.getHardfork() == second_hardfork);
@@ -2063,8 +1388,6 @@ test "fuzz_evm_hardfork_configurations" {
                 // EVMs should be independent
                 try testing.expect(evm.depth == 0);
                 try testing.expect(evm2.depth == 0);
-                try testing.expect(evm.read_only == false);
-                try testing.expect(evm2.read_only == false);
             }
         }
     };
@@ -2090,7 +1413,7 @@ test "gas refund accumulation" {
 
     const london_table = OpcodeMetadata.init_from_hardfork(.LONDON);
     const london_rules = ChainRules.for_hardfork(.LONDON);
-    var evm = try Evm.init(allocator, db_interface, london_table, london_rules, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, london_table, london_rules, null, null);
     defer evm.deinit();
 
     // Initially no refunds
@@ -2118,7 +1441,7 @@ test "gas refund application with EIP-3529 cap" {
     {
         const london_table = OpcodeMetadata.init_from_hardfork(.LONDON);
         const london_rules = ChainRules.for_hardfork(.LONDON);
-        var evm = try Evm.init(allocator, db_interface, london_table, london_rules, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, london_table, london_rules, null, null);
         defer evm.deinit();
 
         // Set up refunds
@@ -2137,7 +1460,7 @@ test "gas refund application with EIP-3529 cap" {
     {
         const berlin_table = OpcodeMetadata.init_from_hardfork(.BERLIN);
         const berlin_rules = ChainRules.for_hardfork(.BERLIN);
-        var evm = try Evm.init(allocator, db_interface, berlin_table, berlin_rules, null, 0, false, null);
+        var evm = try Evm.init(allocator, db_interface, berlin_table, berlin_rules, null, null);
         defer evm.deinit();
 
         // Set up refunds
@@ -2161,7 +1484,7 @@ test "gas refund reset" {
 
     const london_table = OpcodeMetadata.init_from_hardfork(.LONDON);
     const london_rules = ChainRules.for_hardfork(.LONDON);
-    var evm = try Evm.init(allocator, db_interface, london_table, london_rules, null, 0, false, null);
+    var evm = try Evm.init(allocator, db_interface, london_table, london_rules, null, null);
     defer evm.deinit();
 
     // Add refunds
