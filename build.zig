@@ -285,6 +285,10 @@ pub fn build(b: *std.Build) void {
         .name = "Guillotine",
         .root_module = exe_mod,
     });
+    
+    // Add clap dependency for CLI argument parsing (defined later for orchestrator)
+    // We need to wait until clap_dep is defined
+    // This will be handled after the Benchmark Orchestrator section
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -627,6 +631,17 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    
+    // Add clap to main executable now that clap_dep is defined
+    exe.root_module.addImport("clap", clap_dep.module("clap"));
+    // Add import path for Orchestrator.zig from benchmark directory
+    const orchestrator_mod = b.createModule(.{
+        .root_source_file = b.path("bench/official/src/Orchestrator.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    orchestrator_mod.addImport("clap", clap_dep.module("clap"));
+    exe.root_module.addImport("Orchestrator", orchestrator_mod);
 
     const orchestrator_exe = b.addExecutable(.{
         .name = "orchestrator",

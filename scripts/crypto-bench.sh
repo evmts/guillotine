@@ -34,8 +34,8 @@ echo ""
 echo "🚀 Running crypto benchmarks..."
 echo ""
 
-# Run crypto benchmarks
-./zig-out/bin/orchestrator --crypto --internal-runs 1000
+# Run crypto benchmarks (default internal-runs=100 triggers 10-second scaling)
+./zig-out/bin/orchestrator --crypto
 
 echo ""
 echo "✅ Crypto benchmarks completed!"
