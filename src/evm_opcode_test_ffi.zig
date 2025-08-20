@@ -66,7 +66,7 @@ export fn zigEvmCreate() ?*anyopaque {
         return null;
     };
 
-    evm.* = Evm.Evm.init(allocator, db_interface, null, null, null, 0, false, null) catch {
+    evm.* = Evm.Evm.init(allocator, db_interface, null, null, null, null) catch {
         memory_db.deinit();
         allocator.destroy(memory_db);
         allocator.destroy(evm);
