@@ -687,6 +687,25 @@ pub fn build(b: *std.Build) void {
     const build_orchestrator_step = b.step("build-orchestrator", "Build the benchmark orchestrator");
     build_orchestrator_step.dependOn(&b.addInstallArtifact(orchestrator_exe, .{}).step);
 
+    //add benchmark for zig bn254
+
+    const zbench_module = b.dependency("zbench", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("zbench");
+
+    const zbench_bn254 = b.addTest(.{
+        .root_source_file = b.path("src/crypto/bn254/zbench_benchmarks.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    zbench_bn254.root_module.addImport("zbench", zbench_module);
+
+    const run_zbench_bn254 = b.addRunArtifact(zbench_bn254);
+
+    const zbench_bn254_step = b.step("bench-bn254", "Run zbench bn254 benchmarks");
+    zbench_bn254_step.dependOn(&run_zbench_bn254.step);
+
     // Add poop benchmark runner and step
     const poop_runner_exe = b.addExecutable(.{
         .name = "poop-runner",
@@ -831,7 +850,7 @@ pub fn build(b: *std.Build) void {
     const run_analysis_test = b.addRunArtifact(analysis_test);
     const analysis_test_step = b.step("test-analysis", "Run Analysis comprehensive tests");
     analysis_test_step.dependOn(&run_analysis_test.step);
-    
+
     // Analysis corner cases tests
     const analysis_corner_test = b.addTest(.{
         .name = "analysis-corner-cases-test",
@@ -841,11 +860,11 @@ pub fn build(b: *std.Build) void {
     });
     analysis_corner_test.root_module.addImport("evm", evm_mod);
     analysis_corner_test.root_module.addImport("primitives", primitives_mod);
-    
+
     const run_analysis_corner_test = b.addRunArtifact(analysis_corner_test);
     const analysis_corner_test_step = b.step("test-analysis-corner", "Run Analysis corner cases tests");
     analysis_corner_test_step.dependOn(&run_analysis_corner_test.step);
-    
+
     // Interpret comprehensive tests
     const interpret_test = b.addTest(.{
         .name = "interpret-comprehensive-test",
@@ -860,11 +879,11 @@ pub fn build(b: *std.Build) void {
         interpret_test.addIncludePath(b.path("src/bn254_wrapper"));
     }
     interpret_test.root_module.addImport("revm_wrapper", revm_mod);
-    
+
     const run_interpret_test = b.addRunArtifact(interpret_test);
     const interpret_test_step = b.step("test-interpret", "Run Interpret comprehensive tests");
     interpret_test_step.dependOn(&run_interpret_test.step);
-    
+
     // Interpret corner cases tests
     const interpret_corner_test = b.addTest(.{
         .name = "interpret-corner-cases-test",
@@ -874,7 +893,7 @@ pub fn build(b: *std.Build) void {
     });
     interpret_corner_test.root_module.addImport("evm", evm_mod);
     interpret_corner_test.root_module.addImport("primitives", primitives_mod);
-    
+
     const run_interpret_corner_test = b.addRunArtifact(interpret_corner_test);
     const interpret_corner_test_step = b.step("test-interpret-corner", "Run Interpret corner cases tests");
     interpret_corner_test_step.dependOn(&run_interpret_corner_test.step);
@@ -892,7 +911,7 @@ pub fn build(b: *std.Build) void {
         control_test.linkLibrary(bn254);
         control_test.addIncludePath(b.path("src/bn254_wrapper"));
     }
-    
+
     const run_control_test = b.addRunArtifact(control_test);
     const control_test_step = b.step("test-control", "Run Control comprehensive tests");
     control_test_step.dependOn(&run_control_test.step);
@@ -910,7 +929,7 @@ pub fn build(b: *std.Build) void {
         system_test.linkLibrary(bn254);
         system_test.addIncludePath(b.path("src/bn254_wrapper"));
     }
-    
+
     const run_system_test = b.addRunArtifact(system_test);
     const system_test_step = b.step("test-system", "Run System comprehensive tests");
     system_test_step.dependOn(&run_system_test.step);
@@ -928,7 +947,7 @@ pub fn build(b: *std.Build) void {
         tailcall_benchmark.linkLibrary(bn254);
         tailcall_benchmark.addIncludePath(b.path("src/bn254_wrapper"));
     }
-    
+
     const run_tailcall_benchmark = b.addRunArtifact(tailcall_benchmark);
     const tailcall_benchmark_step = b.step("test-tailcall-benchmark", "Run tailcall dispatch benchmark");
     tailcall_benchmark_step.dependOn(&run_tailcall_benchmark.step);
@@ -944,11 +963,11 @@ pub fn build(b: *std.Build) void {
     interpret2_test.root_module.addImport("primitives", primitives_mod);
     interpret2_test.root_module.addImport("crypto", crypto_mod);
     interpret2_test.root_module.addImport("build_options", build_options_mod);
-    
+
     const run_interpret2_test = b.addRunArtifact(interpret2_test);
     const interpret2_test_step = b.step("test-interpret2", "Run interpret2 tests");
     interpret2_test_step.dependOn(&run_interpret2_test.step);
-    
+
     // Interpret2 simple test
     const interpret2_simple_test = b.addTest(.{
         .name = "interpret2-simple-test",
@@ -960,11 +979,11 @@ pub fn build(b: *std.Build) void {
     interpret2_simple_test.root_module.addImport("primitives", primitives_mod);
     interpret2_simple_test.root_module.addImport("crypto", crypto_mod);
     interpret2_simple_test.root_module.addImport("build_options", build_options_mod);
-    
+
     const run_interpret2_simple_test = b.addRunArtifact(interpret2_simple_test);
     const interpret2_simple_test_step = b.step("test-interpret2-simple", "Run interpret2 simple tests");
     interpret2_simple_test_step.dependOn(&run_interpret2_simple_test.step);
-    
+
     // Interpret2 comprehensive test
     const interpret2_comprehensive_test = b.addTest(.{
         .name = "interpret2-comprehensive-test",
@@ -976,11 +995,11 @@ pub fn build(b: *std.Build) void {
     interpret2_comprehensive_test.root_module.addImport("primitives", primitives_mod);
     interpret2_comprehensive_test.root_module.addImport("crypto", crypto_mod);
     interpret2_comprehensive_test.root_module.addImport("build_options", build_options_mod);
-    
+
     const run_interpret2_comprehensive_test = b.addRunArtifact(interpret2_comprehensive_test);
     const interpret2_comprehensive_test_step = b.step("test-interpret2-comprehensive", "Run interpret2 comprehensive tests");
     interpret2_comprehensive_test_step.dependOn(&run_interpret2_comprehensive_test.step);
-    
+
     // Environment and block opcodes test for interpret2
     const environment_block_opcodes_test = b.addTest(.{
         .name = "environment-block-opcodes-test",
@@ -992,11 +1011,11 @@ pub fn build(b: *std.Build) void {
     environment_block_opcodes_test.root_module.addImport("primitives", primitives_mod);
     environment_block_opcodes_test.root_module.addImport("crypto", crypto_mod);
     environment_block_opcodes_test.root_module.addImport("build_options", build_options_mod);
-    
+
     const run_environment_block_opcodes_test = b.addRunArtifact(environment_block_opcodes_test);
     const environment_block_opcodes_test_step = b.step("test-environment-block-opcodes", "Run environment and block opcodes tests");
     environment_block_opcodes_test_step.dependOn(&run_environment_block_opcodes_test.step);
-    
+
     // RETURN opcode test
     const return_opcode_test = b.addTest(.{
         .name = "return-opcode-test",
@@ -1008,7 +1027,7 @@ pub fn build(b: *std.Build) void {
     return_opcode_test.root_module.addImport("primitives", primitives_mod);
     return_opcode_test.root_module.addImport("crypto", crypto_mod);
     return_opcode_test.root_module.addImport("build_options", build_options_mod);
-    
+
     const run_return_opcode_test = b.addRunArtifact(return_opcode_test);
     const return_opcode_test_step = b.step("test-return-opcode", "Run RETURN opcode tests");
     return_opcode_test_step.dependOn(&run_return_opcode_test.step);
@@ -1315,7 +1334,7 @@ pub fn build(b: *std.Build) void {
     const evm_core_test_step = b.step("test-evm-core", "Run evm.zig tests");
     evm_core_test_step.dependOn(&run_evm_core_test.step);
     evm_package_test_step.dependOn(&run_evm_core_test.step);
-    
+
     // Add deployment test
     const deployment_test = b.addTest(.{
         .name = "deployment-test",
@@ -1529,7 +1548,7 @@ pub fn build(b: *std.Build) void {
     debug_10k_exe.root_module.addImport("evm", evm_mod);
     debug_10k_exe.root_module.addImport("primitives", primitives_mod);
     b.installArtifact(debug_10k_exe);
-    
+
     const run_debug_10k = b.addRunArtifact(debug_10k_exe);
     const debug_10k_step = b.step("debug-10k", "Debug 10k hashes execution");
     debug_10k_step.dependOn(&run_debug_10k.step);
@@ -1543,7 +1562,7 @@ pub fn build(b: *std.Build) void {
     debug_constructor_exe.root_module.addImport("evm", evm_mod);
     debug_constructor_exe.root_module.addImport("primitives", primitives_mod);
     b.installArtifact(debug_constructor_exe);
-    
+
     const run_debug_constructor = b.addRunArtifact(debug_constructor_exe);
     const debug_constructor_step = b.step("debug-constructor", "Debug constructor execution");
     debug_constructor_step.dependOn(&run_debug_constructor.step);
