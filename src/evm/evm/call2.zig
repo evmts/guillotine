@@ -239,7 +239,7 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     // Main execution with interpret2
     // Interpret always throws an error to end execution even on success.
     // TODO make it return a success enum instead on succcess
-    var exec_err: ExecutionError.Error = undefined;
+    var exec_err: ExecutionError.Error = ExecutionError.Error.STOP; // Default to STOP
     interpret2(&frame) catch |err| {
         Log.debug("[call] interpret2 ended with error: {any}", .{err});
         exec_err = err;

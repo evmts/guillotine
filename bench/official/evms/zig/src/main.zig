@@ -169,6 +169,10 @@ pub fn main() !void {
         const start_time = std.time.nanoTimestamp();
         const call_result = vm.call2(call_params) catch |err| {
             std.debug.print("Error calling vm.call2 for CALL: {}\n", .{err});
+            // Add more debug info
+            std.debug.print("Contract address: {any}\n", .{contract_addr});
+            std.debug.print("Calldata: {any}\n", .{std.fmt.fmtSliceHexLower(calldata)});
+            std.debug.print("Gas limit: {}\n", .{100_000_000});
             std.process.exit(1);
         };
         const end_time = std.time.nanoTimestamp();
@@ -176,6 +180,10 @@ pub fn main() !void {
 
         if (!call_result.success) {
             std.debug.print("Contract call failed\n", .{});
+            std.debug.print("Gas left: {}\n", .{call_result.gas_left});
+            if (call_result.output) |output| {
+                std.debug.print("Output: {any}\n", .{std.fmt.fmtSliceHexLower(output)});
+            }
             std.process.exit(1);
         }
         

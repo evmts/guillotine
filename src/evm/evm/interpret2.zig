@@ -12,26 +12,31 @@ pub const Error = ExecutionError.Error;
 
 // Main interpret function - gets code from frame.analysis.bytecode  
 pub fn interpret2(frame: *StackFrame) Error!noreturn {
-    const code = frame.analysis.bytecode;
-    std.debug.assert(code.len <= std.math.maxInt(u16));
+    // Check if frame already has ops prepared (by call2)
+    if (frame.ops.len == 0) {
+        // Only prepare if not already done
+        const code = frame.analysis.bytecode;
+        std.debug.assert(code.len <= std.math.maxInt(u16));
 
-    var static_buffer: [1024 * 1024]u8 = undefined; // 1MB should be enough for most code
-    var fba = std.heap.FixedBufferAllocator.init(&static_buffer);
-    const allocator = fba.allocator();
+        var static_buffer: [1024 * 1024]u8 = undefined; // 1MB should be enough for most code
+        var fba = std.heap.FixedBufferAllocator.init(&static_buffer);
+        const allocator = fba.allocator();
 
-    const prep_result = try analysis2.prepare(allocator, code);
+        const prep_result = try analysis2.prepare(allocator, code);
 
-    // Update StackFrame with prepared data
-    frame.analysis = prep_result.analysis;
-    frame.metadata = prep_result.metadata;
-    frame.ops = prep_result.ops;
+        // Update StackFrame with prepared data
+        frame.analysis = prep_result.analysis;
+        frame.metadata = prep_result.metadata;
+        frame.ops = prep_result.ops;
+    }
+    
     frame.ip = 0;
 
-    if (prep_result.ops.len == 0) {
+    if (frame.ops.len == 0) {
         unreachable;
     }
 
-    Log.debug("[interpret2] Starting execution with {} ops", .{prep_result.ops.len});
+    Log.debug("[interpret2] Starting execution with {} ops", .{frame.ops.len});
 
     // Start tailcall execution
     const first_op: *const fn(*StackFrame) Error!noreturn = @ptrCast(@alignCast(frame.ops[0]));
