@@ -919,7 +919,7 @@ pub fn create_contract_at(self: *Evm, caller: primitives_internal.Address.Addres
         new_address, // contract address being created
         empty_analysis,
         &.{}, // Empty metadata array - interpret2 will set this up
-        &[_]*const anyopaque{}, // Empty ops array - interpret2 will set this up
+        &[_]@import("evm/tailcalls.zig").TailcallFunc{}, // Empty ops array - interpret2 will set this up
         host,
         self.state.database,
         self.allocator,

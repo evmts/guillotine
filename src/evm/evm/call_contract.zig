@@ -8,6 +8,7 @@ const Vm = @import("../evm.zig");
 const ExecutionError = @import("../execution/execution_error.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
 const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
+const tailcalls = @import("tailcalls.zig");
 const Host = @import("../host.zig").Host;
 const evm_limits = @import("../constants/evm_limits.zig");
 
@@ -122,7 +123,7 @@ pub fn call_contract(self: *Vm, caller: primitives.Address.Address, to: primitiv
         to, // contract address
         analysis.analysis, // simple analysis
         analysis.metadata, // metadata array
-        &[_]*const anyopaque{}, // empty ops array - interpret2 will set this up
+        &[_]tailcalls.TailcallFunc{}, // empty ops array - interpret2 will set this up
         host, // host interface from self
         self.state.database, // database interface
         self.allocator // allocator

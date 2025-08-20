@@ -39,8 +39,7 @@ pub fn interpret2(frame: *StackFrame) Error!noreturn {
     Log.debug("[interpret2] Starting execution with {} ops", .{frame.ops.len});
 
     // Start tailcall execution
-    const first_op: *const fn(*StackFrame) Error!noreturn = @ptrCast(@alignCast(frame.ops[0]));
-    return try (@call(.always_tail, first_op, .{frame}));
+    return try (@call(.always_tail, frame.ops[0], .{frame}));
 }
 
 // Execute function for external use

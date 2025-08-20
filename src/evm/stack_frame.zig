@@ -14,6 +14,7 @@ const Host = @import("root.zig").Host;
 const DatabaseInterface = @import("state/database_interface.zig").DatabaseInterface;
 const SimpleAnalysis = @import("evm/analysis2.zig").SimpleAnalysis;
 const AllocationTier = @import("allocation_tier.zig").AllocationTier;
+const tailcalls = @import("evm/tailcalls.zig");
 
 // Maximum allowed tailcall iterations
 const TAILCALL_MAX_ITERATIONS: usize = 10_000_000;
@@ -26,24 +27,30 @@ pub const AccessError = error{OutOfMemory};
 pub const StateError = error{OutOfMemory};
 
 /// StackFrame owns all execution state for the tailcall interpreter
+/// Fields are organized by access frequency for optimal cache usage
 pub const StackFrame = struct {
-    // CACHE LINE 1
-    ip: u16,
-    // TODO we need to make gas type configurable
-    gas_remaining: u32,
-    stack: Stack,
-    ops: []*const anyopaque,
-    metadata: []u32,
-    analysis: SimpleAnalysis,
-    memory: Memory,
-    host: Host,
-    contract_address: primitives.Address.Address,
-    state: DatabaseInterface,
-    allocator: std.mem.Allocator,
+    // HOT FIELDS - Cache Line 1 (64 bytes)
+    // These fields are accessed on nearly every instruction
+    ip: u16,                                        // 2 bytes + 2 padding
+    gas_remaining: u32,                             // 4 bytes
+    ops: []tailcalls.TailcallFunc,                 // 16 bytes (ptr + len)
+    metadata: []u32,                                // 16 bytes (ptr + len)
+    stack: Stack,                                   // 24 bytes (stack struct inline)
+    // Total: ~62 bytes - fits in one cache line!
     
-    // Buffer management for pre-allocation strategy
-    static_buffer: []u8,
-    buffer_allocator: *std.heap.FixedBufferAllocator,
+    // WARM FIELDS - Cache Line 2+ (less frequently accessed)
+    memory: Memory,                                 // Memory operations
+    analysis: SimpleAnalysis,                       // Jump validation
+    
+    // COLD FIELDS - Rarely accessed during normal execution
+    host: Host,                                     // External calls only
+    contract_address: primitives.Address.Address,   // Rarely needed
+    state: DatabaseInterface,                       // Storage operations only
+    allocator: std.mem.Allocator,                   // Memory expansion only
+    
+    // VERY COLD - Never accessed during execution
+    static_buffer: []u8,                            // Setup/teardown only
+    buffer_allocator: *std.heap.FixedBufferAllocator, // Setup/teardown only
     
     /// Total up-front allocation size for StackFrame
     /// This includes all the allocations needed by the frame:
@@ -65,7 +72,7 @@ pub const StackFrame = struct {
         contract_address: primitives.Address.Address,
         analysis: SimpleAnalysis,
         metadata: []u32,
-        ops: []*const anyopaque,
+        ops: []tailcalls.TailcallFunc,
         host: Host,
         state: DatabaseInterface,
         allocator: std.mem.Allocator,
@@ -77,17 +84,21 @@ pub const StackFrame = struct {
         fba_ptr.* = std.heap.FixedBufferAllocator.init(static_buffer);
         
         return StackFrame{
+            // Hot fields first
+            .ip = 0,
             .gas_remaining = @intCast(gas_remaining),
+            .ops = ops,
+            .metadata = metadata,
             .stack = try Stack.init(allocator),
+            // Warm fields
             .memory = try Memory.init_default(allocator),
             .analysis = analysis,
-            .metadata = metadata,
-            .ops = ops,
-            .ip = 0,
+            // Cold fields
             .host = host,
             .contract_address = contract_address,
             .state = state,
             .allocator = allocator,
+            // Very cold fields
             .static_buffer = static_buffer,
             .buffer_allocator = fba_ptr,
         };
@@ -139,17 +150,21 @@ pub const StackFrame = struct {
         };
         
         return StackFrame{
+            // Hot fields first
+            .ip = 0,
             .gas_remaining = @intCast(gas_remaining),
+            .ops = &.{},
+            .metadata = &.{},
             .stack = stack,
+            // Warm fields
             .memory = memory,
             .analysis = empty_analysis,
-            .metadata = &.{},
-            .ops = &.{},
-            .ip = 0,
+            // Cold fields
             .host = host,
             .contract_address = contract_address,
             .state = state,
             .allocator = allocator,
+            // Very cold fields
             .static_buffer = static_buffer,
             .buffer_allocator = fba_ptr,
         };

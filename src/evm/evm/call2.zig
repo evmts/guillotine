@@ -16,6 +16,7 @@ const MAX_CODE_SIZE = @import("../opcodes/opcode.zig").MAX_CODE_SIZE;
 const MAX_CALL_DEPTH = @import("../constants/evm_limits.zig").MAX_CALL_DEPTH;
 const SelfDestruct = @import("../self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("../created_contracts.zig").CreatedContracts;
+const tailcalls = @import("tailcalls.zig");
 
 pub fn call(self: *Evm, params: CallParams) ExecutionError.Error!CallResult {
     return _call(self, params, true);
@@ -185,26 +186,30 @@ pub inline fn _call(self: *Evm, params: CallParams, comptime is_top_level_call: 
     // Pre-allocate buffers from frame's buffer allocator
     const buffer_allocator = frame.get_buffer_allocator();
     
-    // Allocate analysis arrays
-    const analysis_alloc = analysis2.calculate_analysis_allocation(call_code.len);
-    const metadata_alloc = analysis2.calculate_metadata_allocation(call_code.len);
-    const ops_alloc = analysis2.calculate_ops_allocation(call_code.len);
+    // Count actual instructions for exact allocation
+    const inst_count = analysis2.count_instructions(call_code);
+    
+    // Calculate exact allocation sizes
+    const analysis_alloc = analysis2.calculate_analysis_allocation_exact(inst_count, call_code.len);
+    const metadata_alloc = analysis2.calculate_metadata_allocation_exact(inst_count);
+    const ops_alloc = analysis2.calculate_ops_allocation_exact(inst_count);
     
     // Debug assertions: verify allocation info is reasonable
     std.debug.assert(analysis_alloc.size > 0);
     std.debug.assert(metadata_alloc.size > 0);
     std.debug.assert(ops_alloc.size > 0);
     
-    const inst_to_pc = try buffer_allocator.alloc(u16, call_code.len);
+    // Allocate exact sizes needed
+    const inst_to_pc = try buffer_allocator.alloc(u16, inst_count);
     const pc_to_inst = try buffer_allocator.alloc(u16, call_code.len);
-    const metadata = try buffer_allocator.alloc(u32, call_code.len);
-    const ops = try buffer_allocator.alloc(*const anyopaque, call_code.len + 1);
+    const metadata = try buffer_allocator.alloc(u32, inst_count);
+    const ops = try buffer_allocator.alloc(tailcalls.TailcallFunc, inst_count + 1);
     
     // Debug assertions: verify allocations succeeded
-    std.debug.assert(inst_to_pc.len >= call_code.len);
+    std.debug.assert(inst_to_pc.len >= inst_count);
     std.debug.assert(pc_to_inst.len >= call_code.len);
-    std.debug.assert(metadata.len >= call_code.len);
-    std.debug.assert(ops.len >= call_code.len + 1);
+    std.debug.assert(metadata.len >= inst_count);
+    std.debug.assert(ops.len >= inst_count + 1);
     
     // Prepare analysis with pre-allocated buffers
     const prep_result = analysis2.prepare_with_buffers(
