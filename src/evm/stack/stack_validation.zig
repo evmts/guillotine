@@ -250,6 +250,8 @@ test "validate_stack_requirements" {
         .constant_gas = 3,
         .min_stack = 2,
         .max_stack = Stack.CAPACITY - 1,
+        .stack_inputs = 2,
+        .stack_outputs = 1,
         .undefined = false,
     };
 
@@ -266,6 +268,8 @@ test "validate_stack_requirements" {
         .constant_gas = 3,
         .min_stack = 0,
         .max_stack = 10,
+        .stack_inputs = 0,
+        .stack_outputs = 1,
         .undefined = false,
     };
 

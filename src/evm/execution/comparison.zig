@@ -17,6 +17,7 @@
 const std = @import("std");
 const ExecutionError = @import("execution_error.zig");
 const Frame = @import("../stack_frame.zig").StackFrame;
+const InstructionMetadata = @import("../evm/analysis2.zig").InstructionMetadata;
 const primitives = @import("primitives");
 const Log = @import("../log.zig");
 
@@ -181,9 +182,9 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
             .pc_to_inst = &.{},
             .bytecode = code,
             .inst_count = 0,
-            .block_boundaries = std.DynamicBitSet.initEmpty(allocator, 0),
+            .block_boundaries = try std.bit_set.DynamicBitSet.initEmpty(allocator, 0),
         };
-        const empty_metadata: []u32 = &.{};
+        const empty_metadata: []InstructionMetadata = &.{};
         const empty_ops: []*const anyopaque = &.{};
 
         // Create mock host
@@ -195,10 +196,7 @@ pub fn fuzz_comparison_operations(allocator: std.mem.Allocator, operations: []co
 
         var context = try Frame.init(
             1000000, // gas_remaining
-            false, // static_call
             primitives.Address.ZERO_ADDRESS, // contract_address
-            primitives.Address.ZERO_ADDRESS, // caller
-            0, // value
             empty_analysis,
             empty_metadata,
             empty_ops,

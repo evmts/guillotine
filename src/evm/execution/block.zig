@@ -212,6 +212,7 @@ const Host = @import("../host.zig").Host;
 const BlockInfo = @import("../host.zig").BlockInfo;
 const StackFrame = @import("../stack_frame.zig").StackFrame;
 const SimpleAnalysis = @import("../evm/analysis2.zig").SimpleAnalysis;
+const InstructionMetadata = @import("../evm/analysis2.zig").InstructionMetadata;
 const DatabaseInterface = @import("../state/database_interface.zig").DatabaseInterface;
 const MemoryDatabase = @import("../state/memory_database.zig").MemoryDatabase;
 
@@ -248,7 +249,48 @@ const TestBlockHost = struct {
         _ = data;
     }
 
+    pub fn get_is_static(self: *TestBlockHost) bool {
+        _ = self;
+        return false;
+    }
+
+    pub fn get_caller(self: *TestBlockHost) Address {
+        _ = self;
+        return [_]u8{0} ** 20;
+    }
+
+    pub fn get_value(self: *TestBlockHost) u256 {
+        _ = self;
+        return 0;
+    }
+
+    pub fn get_input_buffer(self: *TestBlockHost) []const u8 {
+        _ = self;
+        return &[_]u8{};
+    }
+
+    pub fn get_output_buffer(self: *TestBlockHost) []const u8 {
+        _ = self;
+        return &[_]u8{};
+    }
+
+    pub fn get_depth(self: *TestBlockHost) u11 {
+        _ = self;
+        return 0;
+    }
+
+    pub fn set_output_buffer(self: *TestBlockHost, output: []const u8) anyerror!void {
+        _ = self;
+        _ = output;
+    }
+
     pub fn call(self: *TestBlockHost, params: @import("../host.zig").CallParams) anyerror!@import("../host.zig").CallResult {
+        _ = self;
+        _ = params;
+        return error.NotImplemented;
+    }
+
+    pub fn inner_call(self: *TestBlockHost, params: @import("../host.zig").CallParams) anyerror!@import("../host.zig").CallResult {
         _ = self;
         _ = params;
         return error.NotImplemented;
@@ -364,7 +406,7 @@ test "COINBASE returns block coinbase address" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -416,7 +458,7 @@ test "TIMESTAMP returns block timestamp" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -468,7 +510,7 @@ test "NUMBER returns block number" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -520,7 +562,7 @@ test "DIFFICULTY returns block difficulty/prevrandao" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -572,7 +614,7 @@ test "GASLIMIT returns block gas limit" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -624,7 +666,7 @@ test "BASEFEE returns block base fee" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -674,7 +716,7 @@ test "BLOBBASEFEE returns 0 (not yet implemented in BlockInfo)" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -724,7 +766,7 @@ test "BLOCKHASH returns 0 for future blocks" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -777,7 +819,7 @@ test "BLOCKHASH returns 0 for blocks too far in past" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
 
     var memory_db = MemoryDatabase.init(allocator);
