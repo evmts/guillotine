@@ -1508,16 +1508,21 @@ fn runSingleCryptoImplementation(self: *Orchestrator, implementation: []const u8
     defer self.allocator.free(project_root);
     
     var runner_path: []const u8 = undefined;
+    var num_runs: usize = undefined;
     if (std.mem.eql(u8, implementation, "zig")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "src", "crypto", "zig", "zig-out", "bin", "zig-crypto-bench" });
+        // Zig is slower, so use fewer internal runs for ~10 second target
+        num_runs = if (self.internal_runs == 100) 1300 else self.internal_runs * 13; // Scale proportionally
     } else if (std.mem.eql(u8, implementation, "rust")) {
         runner_path = try std.fs.path.join(self.allocator, &[_][]const u8{ project_root, "bench", "official", "src", "crypto", "rust", "target", "release", "rust-crypto-bench" });
+        // Rust is faster, so use more internal runs for ~10 second target  
+        num_runs = if (self.internal_runs == 100) 6000 else self.internal_runs * 60; // Scale proportionally
     } else {
         return error.UnsupportedImplementation;
     }
     defer self.allocator.free(runner_path);
     
-    const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{self.internal_runs});
+    const num_runs_str = try std.fmt.allocPrint(self.allocator, "{}", .{num_runs});
     defer self.allocator.free(num_runs_str);
     
     var argv = std.ArrayList([]const u8).init(self.allocator);
@@ -1536,7 +1541,9 @@ fn runSingleCryptoImplementation(self: *Orchestrator, implementation: []const u8
         return;
     }
     
-    try self.parseCryptoOutput(implementation, result.stdout);
+    // Try parsing stdout first, then stderr if stdout is empty
+    const output_to_parse = if (result.stdout.len > 0) result.stdout else result.stderr;
+    try self.parseCryptoOutput(implementation, output_to_parse);
 }
 
 fn parseCryptoOutput(self: *Orchestrator, implementation: []const u8, output: []const u8) !void {
