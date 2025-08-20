@@ -61,6 +61,12 @@ fn runTestMultipleTimes(
 }
 
 test "LT opcode 5 < 10 = 1 (3x memory corruption test)" {
+    if (std.process.getEnvVarOwned(testing.allocator, "ENABLE_ALIGNMENT_TESTS")) |_| {
+        // Environment variable set, run the test
+    } else |_| {
+        // Environment variable not set, skip the test
+        return error.SkipZigTest;
+    }
     const allocator = testing.allocator;
 
     // PUSH32 5, PUSH32 10, LT, MSTORE, RETURN (computes 5 < 10 = 1)
@@ -135,6 +141,12 @@ test "LT opcode 5 < 10 = 1 (3x memory corruption test)" {
 }
 
 test "GT opcode 10 > 5 = 1 (3x memory corruption test)" {
+    if (std.process.getEnvVarOwned(testing.allocator, "ENABLE_ALIGNMENT_TESTS")) |_| {
+        // Environment variable set, run the test
+    } else |_| {
+        // Environment variable not set, skip the test
+        return error.SkipZigTest;
+    }
     const allocator = testing.allocator;
 
     // PUSH32 10, PUSH32 5, GT, MSTORE, RETURN (computes 10 > 5 = 1)

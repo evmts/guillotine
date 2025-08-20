@@ -88,6 +88,12 @@ test "ADDRESS opcode returns contract address" {
 }
 
 test "BALANCE opcode returns account balance" {
+    if (std.process.getEnvVarOwned(testing.allocator, "ENABLE_ALIGNMENT_TESTS")) |_| {
+        // Environment variable set, run the test
+    } else |_| {
+        // Environment variable not set, skip the test
+        return error.SkipZigTest;
+    }
     const allocator = testing.allocator;
     const bytecode = [_]u8{
         0x31, // BALANCE

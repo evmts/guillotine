@@ -5,6 +5,7 @@ const primitives = @import("primitives");
 
 // Import interpret2 components
 const interpret2 = evm.interpret2;
+const InstructionMetadata = evm.analysis2.InstructionMetadata;
 
 test "interpret2: simple ADD operation" {
     const allocator = testing.allocator;
@@ -29,7 +30,7 @@ test "interpret2: simple ADD operation" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     // Create frame
@@ -79,7 +80,7 @@ test "interpret2: PUSH operations" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
@@ -131,7 +132,7 @@ test "interpret2: JUMP to valid destination" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
@@ -183,7 +184,7 @@ test "interpret2: JUMPI conditional jump taken" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
@@ -235,7 +236,7 @@ test "interpret2: JUMPI conditional jump not taken" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
@@ -284,7 +285,7 @@ test "interpret2: DUP and SWAP operations" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
@@ -334,7 +335,7 @@ test "interpret2: invalid JUMP destination" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
@@ -386,7 +387,7 @@ test "interpret2: arithmetic operations" {
         .inst_count = 0,
         .block_boundaries = std.bit_set.DynamicBitSet.initEmpty(testing.allocator, 0) catch @panic("OOM"),
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(

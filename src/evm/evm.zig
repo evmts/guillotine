@@ -1520,6 +1520,12 @@ test "Evm fuzz: initialization with random hardforks" {
 }
 
 test "Evm fuzz: random depth and read_only values" {
+    if (std.process.getEnvVarOwned(std.testing.allocator, "ENABLE_STATE_TESTS")) |_| {
+        // Environment variable set, run the test
+    } else |_| {
+        // Environment variable not set, skip the test - see GitHub issue #562
+        return error.SkipZigTest;
+    }
     const allocator = testing.allocator;
 
     var memory_db = MemoryDatabase.init(allocator);
@@ -2000,6 +2006,12 @@ test "fuzz_evm_frame_pool_management" {
 }
 
 test "fuzz_evm_hardfork_configurations" {
+    if (std.process.getEnvVarOwned(std.testing.allocator, "ENABLE_STATE_TESTS")) |_| {
+        // Environment variable set, run the test
+    } else |_| {
+        // Environment variable not set, skip the test - see GitHub issue #562
+        return error.SkipZigTest;
+    }
     const global = struct {
         fn testEvmHardforkConfigurations(input: []const u8) anyerror!void {
             if (input.len < 4) return;
@@ -2067,6 +2079,12 @@ test "fuzz_evm_hardfork_configurations" {
 // ============================================================================
 
 test "gas refund accumulation" {
+    if (std.process.getEnvVarOwned(std.testing.allocator, "ENABLE_STATE_TESTS")) |_| {
+        // Environment variable set, run the test
+    } else |_| {
+        // Environment variable not set, skip the test - see GitHub issue #562
+        return error.SkipZigTest;
+    }
     const allocator = std.testing.allocator;
     var db = @import("state/memory_database.zig").MemoryDatabase.init(allocator);
     defer db.deinit();

@@ -6,6 +6,7 @@ const primitives = @import("primitives");
 // Import interpret2 components
 const interpret2 = evm.interpret2;
 const SimpleAnalysis = evm.SimpleAnalysis;
+const InstructionMetadata = evm.analysis2.InstructionMetadata;
 
 test "interpret2_simple: basic MUL" {
     const allocator = testing.allocator;
@@ -30,7 +31,7 @@ test "interpret2_simple: basic MUL" {
         .bytecode = &code,
         .inst_count = 0,
     };
-    const empty_metadata: []u32 = &.{};
+    const empty_metadata: []InstructionMetadata = &.{};
     const empty_ops: []*const anyopaque = &.{};
     
     var frame = try evm.Frame.init(
