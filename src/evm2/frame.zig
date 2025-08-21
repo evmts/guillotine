@@ -1,5 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const NoOpTracer = @import("noop_tracer.zig").NoOpTracer;
+const memory_mod = @import("memory.zig");
 
 pub const FrameConfig = struct {
     const Self = @This();
@@ -11,7 +13,12 @@ pub const FrameConfig = struct {
     // The maximum amount of bytes allowed in contract code
     max_bytecode_size: u32 = 24576,
     // The maximum gas limit for a block
-    block_gas_limit: u64 = 30_000_000, 
+    block_gas_limit: u64 = 30_000_000,
+    // Tracer type for execution tracing. Defaults to NoOpTracer
+    TracerType: type = NoOpTracer,
+    // Memory configuration
+    memory_initial_capacity: usize = 4096,
+    memory_limit: u64 = 0xFFFFFF, 
     // gets the pc type from the bytecode zie
     fn get_pc_type(self: Self) type {
         return if (self.max_bytecode_size <= std.math.maxInt(u8))
@@ -72,6 +79,13 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
     const PcType = config.get_pc_type();
     const StackIndexType = config.get_stack_index_type();
     const GasType = config.get_gas_type();
+    const TracerType = config.TracerType;
+    
+    // Create Memory type with frame config
+    const Memory = memory_mod.createMemory(.{
+        .initial_capacity = config.memory_initial_capacity,
+        .memory_limit = config.memory_limit,
+    });
 
     const ColdFrame = struct {
         pub const frame_config = config;
@@ -84,9 +98,17 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             AllocationError,
             InvalidJump,
             InvalidOpcode,
+            OutOfBounds,
         };
 
         const Self = @This();
+
+        // Instruction struct for the interpreter
+        const Instruction = struct {
+            pc: PcType,
+            execute: *const fn (*Self, []const Instruction, usize) Error!void,
+            metadata: u64 = 0, // For PUSH values (up to PUSH6) or jump indices
+        };
 
         // Cacheline 1
         next_stack_index: StackIndexType, // 1-4 bytes depending on stack_size
@@ -94,6 +116,8 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
         bytecode: []const u8, // 16 bytes (slice)
         pc: PcType, // 1-4 bytes depending on max_bytecode_size
         gas_remaining: GasType, // 4 or 8 bytes depending on block_gas_limit
+        tracer: TracerType, // Tracer instance for execution tracing
+        memory: Memory, // EVM memory
         
         pub fn init(allocator: std.mem.Allocator, bytecode: []const u8, gas_remaining: GasType) Error!Self {
             if (bytecode.len > max_bytecode_size) return Error.BytecodeTooLarge;
@@ -103,18 +127,757 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             errdefer allocator.free(stack_memory);
             @memset(std.mem.sliceAsBytes(stack_memory), 0);
             
+            var memory = Memory.init(allocator) catch {
+                allocator.free(stack_memory);
+                return Error.AllocationError;
+            };
+            errdefer memory.deinit();
+            
             return Self{
                 .next_stack_index = 0,
                 .stack = @ptrCast(&stack_memory[0]),
                 .bytecode = bytecode,
                 .pc = 0,
                 .gas_remaining = gas_remaining,
+                .tracer = TracerType.init(),
+                .memory = memory,
             };
         }
         
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             const stack_slice = @as([*]WordType, @ptrCast(self.stack))[0..stack_size];
             allocator.free(stack_slice);
+            self.memory.deinit();
+        }
+        
+        pub fn interpret(self: *Self, allocator: std.mem.Allocator) !void {
+            // Pass 1: Analyze bytecode with bitmaps
+            var jump_dests = std.bit_set.DynamicBitSet.initEmpty(allocator, self.bytecode.len) catch return Error.AllocationError;
+            defer jump_dests.deinit();
+            
+            var push_locations = std.bit_set.DynamicBitSet.initEmpty(allocator, self.bytecode.len) catch return Error.AllocationError;
+            defer push_locations.deinit();
+            
+            var opcode_count: usize = 0;
+            var i: usize = 0;
+            
+            // First pass: mark opcodes and count them
+            while (i < self.bytecode.len) {
+                const opcode = self.bytecode[i];
+                
+                // Mark JUMPDEST locations
+                if (opcode == 0x5B) {
+                    jump_dests.set(i);
+                }
+                
+                // Handle PUSH opcodes
+                if (opcode >= 0x60 and opcode <= 0x7F) {
+                    push_locations.set(i);
+                    const push_size = opcode - 0x5F;
+                    i += push_size;
+                } else if (opcode == 0x5F) { // PUSH0
+                    push_locations.set(i);
+                }
+                
+                opcode_count += 1;
+                i += 1;
+            }
+            
+            // Allocate instruction array with extra slot for OUT_OF_BOUNDS
+            const instructions = allocator.alloc(Instruction, opcode_count + 1) catch return Error.AllocationError;
+            defer allocator.free(instructions);
+            
+            // Second pass: build instruction array
+            var inst_idx: usize = 0;
+            i = 0;
+            
+            while (i < self.bytecode.len) {
+                const opcode = self.bytecode[i];
+                const pc = @as(PcType, @intCast(i));
+                
+                instructions[inst_idx] = switch (opcode) {
+                    0x00 => .{ .pc = pc, .execute = op_stop_handler },
+                    0x01 => .{ .pc = pc, .execute = op_add_handler },
+                    0x02 => .{ .pc = pc, .execute = op_mul_handler },
+                    0x03 => .{ .pc = pc, .execute = op_sub_handler },
+                    0x04 => .{ .pc = pc, .execute = op_div_handler },
+                    0x05 => .{ .pc = pc, .execute = op_sdiv_handler },
+                    0x06 => .{ .pc = pc, .execute = op_mod_handler },
+                    0x07 => .{ .pc = pc, .execute = op_smod_handler },
+                    0x08 => .{ .pc = pc, .execute = op_addmod_handler },
+                    0x09 => .{ .pc = pc, .execute = op_mulmod_handler },
+                    0x0A => .{ .pc = pc, .execute = op_exp_handler },
+                    0x0B => .{ .pc = pc, .execute = op_signextend_handler },
+                    0x10 => .{ .pc = pc, .execute = op_lt_handler },
+                    0x11 => .{ .pc = pc, .execute = op_gt_handler },
+                    0x12 => .{ .pc = pc, .execute = op_slt_handler },
+                    0x13 => .{ .pc = pc, .execute = op_sgt_handler },
+                    0x14 => .{ .pc = pc, .execute = op_eq_handler },
+                    0x15 => .{ .pc = pc, .execute = op_iszero_handler },
+                    0x16 => .{ .pc = pc, .execute = op_and_handler },
+                    0x17 => .{ .pc = pc, .execute = op_or_handler },
+                    0x18 => .{ .pc = pc, .execute = op_xor_handler },
+                    0x19 => .{ .pc = pc, .execute = op_not_handler },
+                    0x1A => .{ .pc = pc, .execute = op_byte_handler },
+                    0x1B => .{ .pc = pc, .execute = op_shl_handler },
+                    0x1C => .{ .pc = pc, .execute = op_shr_handler },
+                    0x1D => .{ .pc = pc, .execute = op_sar_handler },
+                    0x50 => .{ .pc = pc, .execute = op_pop_handler },
+                    0x51 => .{ .pc = pc, .execute = op_mload_handler },
+                    0x52 => .{ .pc = pc, .execute = op_mstore_handler },
+                    0x53 => .{ .pc = pc, .execute = op_mstore8_handler },
+                    0x56 => .{ .pc = pc, .execute = op_jump_handler },
+                    0x57 => .{ .pc = pc, .execute = op_jumpi_handler },
+                    0x58 => .{ .pc = pc, .execute = op_pc_handler },
+                    0x59 => .{ .pc = pc, .execute = op_msize_handler },
+                    0x5A => .{ .pc = pc, .execute = op_gas_handler },
+                    0x5B => .{ .pc = pc, .execute = op_jumpdest_handler },
+                    0x5F => .{ .pc = pc, .execute = op_push0_handler },
+                    0x60 => blk: {
+                        const value = if (i + 1 < self.bytecode.len) self.bytecode[i + 1] else 0;
+                        i += 1;
+                        break :blk .{ .pc = pc, .execute = op_push1_handler, .metadata = value };
+                    },
+                    0x61 => blk: {
+                        if (i + 2 < self.bytecode.len) {
+                            const value = std.mem.readInt(u16, self.bytecode[i + 1..][0..2], .big);
+                            i += 2;
+                            break :blk .{ .pc = pc, .execute = op_push2_handler, .metadata = value };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x62 => blk: {
+                        if (i + 3 < self.bytecode.len) {
+                            var value: u64 = 0;
+                            value |= @as(u64, self.bytecode[i + 1]) << 16;
+                            value |= @as(u64, self.bytecode[i + 2]) << 8;
+                            value |= @as(u64, self.bytecode[i + 3]);
+                            i += 3;
+                            break :blk .{ .pc = pc, .execute = op_push3_handler, .metadata = value };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x63 => blk: {
+                        if (i + 4 < self.bytecode.len) {
+                            const value = std.mem.readInt(u32, self.bytecode[i + 1..][0..4], .big);
+                            i += 4;
+                            break :blk .{ .pc = pc, .execute = op_push4_handler, .metadata = value };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x64 => blk: {
+                        if (i + 5 < self.bytecode.len) {
+                            var value: u64 = 0;
+                            value |= @as(u64, self.bytecode[i + 1]) << 32;
+                            value |= @as(u64, self.bytecode[i + 2]) << 24;
+                            value |= @as(u64, self.bytecode[i + 3]) << 16;
+                            value |= @as(u64, self.bytecode[i + 4]) << 8;
+                            value |= @as(u64, self.bytecode[i + 5]);
+                            i += 5;
+                            break :blk .{ .pc = pc, .execute = op_push5_handler, .metadata = value };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x65 => blk: {
+                        if (i + 6 < self.bytecode.len) {
+                            var value: u64 = 0;
+                            value |= @as(u64, self.bytecode[i + 1]) << 40;
+                            value |= @as(u64, self.bytecode[i + 2]) << 32;
+                            value |= @as(u64, self.bytecode[i + 3]) << 24;
+                            value |= @as(u64, self.bytecode[i + 4]) << 16;
+                            value |= @as(u64, self.bytecode[i + 5]) << 8;
+                            value |= @as(u64, self.bytecode[i + 6]);
+                            i += 6;
+                            break :blk .{ .pc = pc, .execute = op_push6_handler, .metadata = value };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x66 => blk: {
+                        const push_size = 7;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push7_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x67 => blk: {
+                        const push_size = 8;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push8_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x68 => blk: {
+                        const push_size = 9;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push9_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x69 => blk: {
+                        const push_size = 10;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push10_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x6A => blk: {
+                        const push_size = 11;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push11_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x6B => blk: {
+                        const push_size = 12;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push12_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x6C => blk: {
+                        const push_size = 13;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push13_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x6D => blk: {
+                        const push_size = 14;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push14_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x6E => blk: {
+                        const push_size = 15;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push15_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x6F => blk: {
+                        const push_size = 16;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push16_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x70 => blk: {
+                        const push_size = 17;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push17_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x71 => blk: {
+                        const push_size = 18;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push18_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x72 => blk: {
+                        const push_size = 19;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push19_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x73 => blk: {
+                        const push_size = 20;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push20_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x74 => blk: {
+                        const push_size = 21;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push21_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x75 => blk: {
+                        const push_size = 22;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push22_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x76 => blk: {
+                        const push_size = 23;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push23_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x77 => blk: {
+                        const push_size = 24;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push24_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x78 => blk: {
+                        const push_size = 25;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push25_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x79 => blk: {
+                        const push_size = 26;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push26_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x7A => blk: {
+                        const push_size = 27;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push27_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x7B => blk: {
+                        const push_size = 28;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push28_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x7C => blk: {
+                        const push_size = 29;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push29_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x7D => blk: {
+                        const push_size = 30;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push30_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x7E => blk: {
+                        const push_size = 31;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_push31_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x7F => blk: {
+                        const push_size = 32;
+                        if (i + push_size < self.bytecode.len) {
+                            i += push_size;
+                            break :blk .{ .pc = pc, .execute = op_pushn_handler };
+                        } else {
+                            break :blk .{ .pc = pc, .execute = op_invalid_handler };
+                        }
+                    },
+                    0x80...0x8F => .{ .pc = pc, .execute = op_dup_handler },
+                    0x90...0x9F => .{ .pc = pc, .execute = op_swap_handler },
+                    0xFE => .{ .pc = pc, .execute = op_invalid_handler },
+                    else => .{ .pc = pc, .execute = op_invalid_handler },
+                };
+                
+                inst_idx += 1;
+                i += 1;
+            }
+            
+            // Add OUT_OF_BOUNDS instruction at the end
+            instructions[opcode_count] = .{ .pc = @intCast(self.bytecode.len), .execute = out_of_bounds_handler };
+            
+            // Start execution with first instruction
+            return self.execute_instruction(instructions, 0);
+        }
+        
+        fn execute_instruction(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            return @call(.always_tail, instructions[idx].execute, .{self, instructions, idx});
+        }
+        
+        fn op_stop_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            _ = instructions;
+            _ = idx;
+            return self.op_stop();
+        }
+        
+        fn op_add_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            // Call tracer before operation
+            self.tracer.beforeOp(Self, self);
+            
+            // Execute the operation
+            self.op_add() catch |err| {
+                // Call tracer on error
+                self.tracer.onError(Self, self, err);
+                return err;
+            };
+            
+            // Call tracer after operation
+            self.tracer.afterOp(Self, self);
+            
+            self.pc += 1;
+            
+            // Find next instruction
+            const next_idx = idx + 1;
+            if (next_idx >= instructions.len) {
+                return Error.OutOfBounds;
+            }
+            
+            return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+        }
+        
+        fn op_mul_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            // Call tracer before operation
+            self.tracer.beforeOp(Self, self);
+            
+            // Execute the operation
+            self.op_mul() catch |err| {
+                // Call tracer on error
+                self.tracer.onError(Self, self, err);
+                return err;
+            };
+            
+            // Call tracer after operation
+            self.tracer.afterOp(Self, self);
+            
+            self.pc += 1;
+            
+            // Find next instruction
+            const next_idx = idx + 1;
+            if (next_idx >= instructions.len) {
+                return Error.OutOfBounds;
+            }
+            
+            return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+        }
+        
+        // Generic handler for simple opcodes that just increment PC
+        fn makeSimpleHandler(comptime op: fn (*Self) Error!void) fn (*Self, []const Instruction, usize) Error!void {
+            return struct {
+                fn handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+                    // Call tracer before operation
+                    self.tracer.beforeOp(Self, self);
+                    
+                    // Execute the operation
+                    op(self) catch |err| {
+                        // Call tracer on error
+                        self.tracer.onError(Self, self, err);
+                        return err;
+                    };
+                    
+                    // Call tracer after operation
+                    self.tracer.afterOp(Self, self);
+                    
+                    self.pc += 1;
+                    
+                    const next_idx = idx + 1;
+                    if (next_idx >= instructions.len) {
+                        return Error.OutOfBounds;
+                    }
+                    
+                    return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+                }
+            }.handler;
+        }
+        
+        // Define all the simple handlers using the macro
+        const op_sub_handler = makeSimpleHandler(op_sub);
+        const op_div_handler = makeSimpleHandler(op_div);
+        const op_sdiv_handler = makeSimpleHandler(op_sdiv);
+        const op_mod_handler = makeSimpleHandler(op_mod);
+        const op_smod_handler = makeSimpleHandler(op_smod);
+        const op_addmod_handler = makeSimpleHandler(op_addmod);
+        const op_mulmod_handler = makeSimpleHandler(op_mulmod);
+        const op_exp_handler = makeSimpleHandler(op_exp);
+        const op_signextend_handler = makeSimpleHandler(op_signextend);
+        const op_lt_handler = makeSimpleHandler(op_lt);
+        const op_gt_handler = makeSimpleHandler(op_gt);
+        const op_slt_handler = makeSimpleHandler(op_slt);
+        const op_sgt_handler = makeSimpleHandler(op_sgt);
+        const op_eq_handler = makeSimpleHandler(op_eq);
+        const op_iszero_handler = makeSimpleHandler(op_iszero);
+        const op_and_handler = makeSimpleHandler(op_and);
+        const op_or_handler = makeSimpleHandler(op_or);
+        const op_xor_handler = makeSimpleHandler(op_xor);
+        const op_not_handler = makeSimpleHandler(op_not);
+        const op_byte_handler = makeSimpleHandler(op_byte);
+        const op_shl_handler = makeSimpleHandler(op_shl);
+        const op_shr_handler = makeSimpleHandler(op_shr);
+        const op_sar_handler = makeSimpleHandler(op_sar);
+        const op_pop_handler = makeSimpleHandler(op_pop);
+        const op_pc_handler = makeSimpleHandler(op_pc);
+        const op_gas_handler = makeSimpleHandler(op_gas);
+        const op_jumpdest_handler = makeSimpleHandler(op_jumpdest);
+        const op_push0_handler = makeSimpleHandler(op_push0);
+        const op_msize_handler = makeSimpleHandler(op_msize);
+        const op_mload_handler = makeSimpleHandler(op_mload);
+        const op_mstore_handler = makeSimpleHandler(op_mstore);
+        const op_mstore8_handler = makeSimpleHandler(op_mstore8);
+        
+        // Generic handler for PUSH opcodes that fit in metadata (PUSH1-PUSH6)
+        fn makePushHandler(comptime bytes: u8) fn (*Self, []const Instruction, usize) Error!void {
+            return struct {
+                fn handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+                    // Call tracer before operation
+                    self.tracer.beforeOp(Self, self);
+                    
+                    const value = @as(WordType, @intCast(instructions[idx].metadata));
+                    self.push(value) catch |err| {
+                        // Call tracer on error
+                        self.tracer.onError(Self, self, err);
+                        return err;
+                    };
+                    
+                    // Call tracer after operation
+                    self.tracer.afterOp(Self, self);
+                    
+                    self.pc += 1 + bytes; // opcode + N bytes
+                    
+                    // Find next instruction
+                    const next_idx = idx + 1;
+                    if (next_idx >= instructions.len) {
+                        return Error.OutOfBounds;
+                    }
+                    
+                    return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+                }
+            }.handler;
+        }
+        
+        // Generic handler for larger PUSH opcodes (PUSH7-PUSH31)
+        fn makePushNHandler(comptime n: u8) fn (*Self, []const Instruction, usize) Error!void {
+            return struct {
+                fn handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+                    // Call tracer before operation
+                    self.tracer.beforeOp(Self, self);
+                    
+                    // Use the generic push_n with comptime known size
+                    self.push_n(n) catch |err| {
+                        // Call tracer on error
+                        self.tracer.onError(Self, self, err);
+                        return err;
+                    };
+                    
+                    // Call tracer after operation
+                    self.tracer.afterOp(Self, self);
+                    
+                    // pc is already advanced by push_n
+                    
+                    // Find next instruction
+                    const next_idx = idx + 1;
+                    if (next_idx >= instructions.len) {
+                        return Error.OutOfBounds;
+                    }
+                    
+                    return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+                }
+            }.handler;
+        }
+        
+        const op_push1_handler = makePushHandler(1);
+        
+        fn op_invalid_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            _ = instructions;
+            _ = idx;
+            return self.op_invalid();
+        }
+        
+        fn out_of_bounds_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            _ = self;
+            _ = instructions;
+            _ = idx;
+            return Error.OutOfBounds;
+        }
+        
+        const op_push2_handler = makePushHandler(2);
+        const op_push3_handler = makePushHandler(3);
+        const op_push4_handler = makePushHandler(4);
+        const op_push5_handler = makePushHandler(5);
+        const op_push6_handler = makePushHandler(6);
+        const op_push7_handler = makePushNHandler(7);
+        const op_push8_handler = makePushNHandler(8);
+        const op_push9_handler = makePushNHandler(9);
+        const op_push10_handler = makePushNHandler(10);
+        const op_push11_handler = makePushNHandler(11);
+        const op_push12_handler = makePushNHandler(12);
+        const op_push13_handler = makePushNHandler(13);
+        const op_push14_handler = makePushNHandler(14);
+        const op_push15_handler = makePushNHandler(15);
+        const op_push16_handler = makePushNHandler(16);
+        const op_push17_handler = makePushNHandler(17);
+        const op_push18_handler = makePushNHandler(18);
+        const op_push19_handler = makePushNHandler(19);
+        const op_push20_handler = makePushNHandler(20);
+        const op_push21_handler = makePushNHandler(21);
+        const op_push22_handler = makePushNHandler(22);
+        const op_push23_handler = makePushNHandler(23);
+        const op_push24_handler = makePushNHandler(24);
+        const op_push25_handler = makePushNHandler(25);
+        const op_push26_handler = makePushNHandler(26);
+        const op_push27_handler = makePushNHandler(27);
+        const op_push28_handler = makePushNHandler(28);
+        const op_push29_handler = makePushNHandler(29);
+        const op_push30_handler = makePushNHandler(30);
+        const op_push31_handler = makePushNHandler(31);
+        
+        fn op_pushn_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            const opcode = self.bytecode[instructions[idx].pc];
+            const n = opcode - 0x5F;
+            try self.push_n(n);
+            // pc is already advanced by push_n
+            
+            const next_idx = idx + 1;
+            if (next_idx >= instructions.len) {
+                return Error.OutOfBounds;
+            }
+            
+            return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+        }
+        
+        fn op_dup_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            const opcode = self.bytecode[instructions[idx].pc];
+            const n = opcode - 0x7F;
+            try self.dup_n(n);
+            self.pc += 1;
+            
+            const next_idx = idx + 1;
+            if (next_idx >= instructions.len) {
+                return Error.OutOfBounds;
+            }
+            
+            return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+        }
+        
+        fn op_swap_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            const opcode = self.bytecode[instructions[idx].pc];
+            const n = opcode - 0x8F;
+            try self.swap_n(n);
+            self.pc += 1;
+            
+            const next_idx = idx + 1;
+            if (next_idx >= instructions.len) {
+                return Error.OutOfBounds;
+            }
+            
+            return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+        }
+        
+        fn op_jump_handler(self: *Self, instructions: []const Instruction, _: usize) Error!void {
+            // Call tracer before operation
+            self.tracer.beforeOp(Self, self);
+            
+            const dest = self.pop() catch |err| {
+                // Call tracer on error
+                self.tracer.onError(Self, self, err);
+                return err;
+            };
+            
+            if (dest > max_bytecode_size) {
+                const err = Error.InvalidJump;
+                self.tracer.onError(Self, self, err);
+                return err;
+            }
+            
+            // Call tracer after operation (before jump)
+            self.tracer.afterOp(Self, self);
+            
+            self.pc = @intCast(dest);
+            
+            // Find instruction with matching PC
+            for (instructions, 0..) |inst, inst_idx| {
+                if (inst.pc == self.pc) {
+                    return @call(.always_tail, inst.execute, .{self, instructions, inst_idx});
+                }
+            }
+            
+            return Error.InvalidJump;
+        }
+        
+        fn op_jumpi_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            const dest = try self.pop();
+            const condition = try self.pop();
+            
+            if (condition != 0) {
+                if (dest > max_bytecode_size) {
+                    return Error.InvalidJump;
+                }
+                self.pc = @intCast(dest);
+                
+                // Find instruction with matching PC
+                for (instructions, 0..) |inst, inst_idx| {
+                    if (inst.pc == self.pc) {
+                        return @call(.always_tail, inst.execute, .{self, instructions, inst_idx});
+                    }
+                }
+                
+                return Error.InvalidJump;
+            } else {
+                // Condition is false, continue to next instruction
+                self.pc += 1;
+                const next_idx = idx + 1;
+                if (next_idx >= instructions.len) {
+                    return Error.OutOfBounds;
+                }
+                
+                return @call(.always_tail, instructions[next_idx].execute, .{self, instructions, next_idx});
+            }
         }
         
         fn push_unsafe(self: *Self, value: WordType) void {
@@ -206,7 +969,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
         }
         
         // Generic push function for PUSH2-PUSH32
-        fn push_n(self: *Self, comptime n: u8) Error!void {
+        fn push_n(self: *Self, n: u8) Error!void {
             const start = self.pc + 1;
             var value: u256 = 0;
             
@@ -242,12 +1005,128 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             return self.push_n(2);
         }
         
+        pub fn op_push3(self: *Self) Error!void {
+            return self.push_n(3);
+        }
+        
+        pub fn op_push4(self: *Self) Error!void {
+            return self.push_n(4);
+        }
+        
+        pub fn op_push5(self: *Self) Error!void {
+            return self.push_n(5);
+        }
+        
+        pub fn op_push6(self: *Self) Error!void {
+            return self.push_n(6);
+        }
+        
+        pub fn op_push7(self: *Self) Error!void {
+            return self.push_n(7);
+        }
+        
+        pub fn op_push8(self: *Self) Error!void {
+            return self.push_n(8);
+        }
+        
+        pub fn op_push9(self: *Self) Error!void {
+            return self.push_n(9);
+        }
+        
+        pub fn op_push10(self: *Self) Error!void {
+            return self.push_n(10);
+        }
+        
+        pub fn op_push11(self: *Self) Error!void {
+            return self.push_n(11);
+        }
+        
+        pub fn op_push12(self: *Self) Error!void {
+            return self.push_n(12);
+        }
+        
+        pub fn op_push13(self: *Self) Error!void {
+            return self.push_n(13);
+        }
+        
+        pub fn op_push14(self: *Self) Error!void {
+            return self.push_n(14);
+        }
+        
+        pub fn op_push15(self: *Self) Error!void {
+            return self.push_n(15);
+        }
+        
+        pub fn op_push16(self: *Self) Error!void {
+            return self.push_n(16);
+        }
+        
+        pub fn op_push17(self: *Self) Error!void {
+            return self.push_n(17);
+        }
+        
+        pub fn op_push18(self: *Self) Error!void {
+            return self.push_n(18);
+        }
+        
+        pub fn op_push19(self: *Self) Error!void {
+            return self.push_n(19);
+        }
+        
+        pub fn op_push20(self: *Self) Error!void {
+            return self.push_n(20);
+        }
+        
+        pub fn op_push21(self: *Self) Error!void {
+            return self.push_n(21);
+        }
+        
+        pub fn op_push22(self: *Self) Error!void {
+            return self.push_n(22);
+        }
+        
+        pub fn op_push23(self: *Self) Error!void {
+            return self.push_n(23);
+        }
+        
+        pub fn op_push24(self: *Self) Error!void {
+            return self.push_n(24);
+        }
+        
+        pub fn op_push25(self: *Self) Error!void {
+            return self.push_n(25);
+        }
+        
+        pub fn op_push26(self: *Self) Error!void {
+            return self.push_n(26);
+        }
+        
+        pub fn op_push27(self: *Self) Error!void {
+            return self.push_n(27);
+        }
+        
+        pub fn op_push28(self: *Self) Error!void {
+            return self.push_n(28);
+        }
+        
+        pub fn op_push29(self: *Self) Error!void {
+            return self.push_n(29);
+        }
+        
+        pub fn op_push30(self: *Self) Error!void {
+            return self.push_n(30);
+        }
+        
+        pub fn op_push31(self: *Self) Error!void {
+            return self.push_n(31);
+        }
+        
         pub fn op_push32(self: *Self) Error!void {
             return self.push_n(32);
         }
         
         // Generic dup function for DUP1-DUP16
-        fn dup_n(self: *Self, comptime n: u8) Error!void {
+        fn dup_n(self: *Self, n: u8) Error!void {
             // Check if we have enough items on stack
             if (self.next_stack_index < n) {
                 return Error.StackUnderflow;
@@ -269,7 +1148,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
         }
         
         // Generic swap function for SWAP1-SWAP16
-        fn swap_n(self: *Self, comptime n: u8) Error!void {
+        fn swap_n(self: *Self, n: u8) Error!void {
             // Check if we have enough items on stack (need n+1 items)
             if (self.next_stack_index < n + 1) {
                 return Error.StackUnderflow;
@@ -634,6 +1513,73 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             
             try self.push(result);
         }
+        
+        // Memory operations
+        pub fn op_msize(self: *Self) Error!void {
+            // MSIZE returns the size of active memory in bytes
+            const size = @as(WordType, @intCast(self.memory.size()));
+            return self.push(size);
+        }
+        
+        pub fn op_mload(self: *Self) Error!void {
+            // MLOAD loads a 32-byte word from memory
+            const offset = try self.pop();
+            
+            // Check if offset fits in usize
+            if (offset > std.math.maxInt(usize)) {
+                return Error.OutOfBounds;
+            }
+            
+            const offset_usize = @as(usize, @intCast(offset));
+            
+            // Read 32 bytes from memory (memory handles expansion automatically)
+            const value = self.memory.get_u256(offset_usize) catch |err| switch (err) {
+                memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
+                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
+                else => return Error.AllocationError,
+            };
+            
+            try self.push(value);
+        }
+        
+        pub fn op_mstore(self: *Self) Error!void {
+            // MSTORE stores a 32-byte word to memory
+            const offset = try self.pop();
+            const value = try self.pop();
+            
+            // Check if offset fits in usize
+            if (offset > std.math.maxInt(usize)) {
+                return Error.OutOfBounds;
+            }
+            
+            const offset_usize = @as(usize, @intCast(offset));
+            
+            // Write 32 bytes to memory (memory handles expansion automatically)
+            self.memory.set_u256(offset_usize, value) catch |err| switch (err) {
+                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
+                else => return Error.AllocationError,
+            };
+        }
+        
+        pub fn op_mstore8(self: *Self) Error!void {
+            // MSTORE8 stores a single byte to memory
+            const offset = try self.pop();
+            const value = try self.pop();
+            
+            // Check if offset fits in usize
+            if (offset > std.math.maxInt(usize)) {
+                return Error.OutOfBounds;
+            }
+            
+            const offset_usize = @as(usize, @intCast(offset));
+            const byte_value = @as(u8, @truncate(value & 0xFF));
+            
+            // Write 1 byte to memory
+            self.memory.set_byte(offset_usize, byte_value) catch |err| switch (err) {
+                memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
+                else => return Error.AllocationError,
+            };
+        }
     };
     return ColdFrame;
 }
@@ -910,6 +1856,140 @@ test "ColdFrame op_push32 reads 32 bytes from bytecode" {
     try std.testing.expectEqual(@as(u256, std.math.maxInt(u256)), frame.stack[0]);
     try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     try std.testing.expectEqual(@as(u16, 33), frame.pc); // PC should advance by 33 (opcode + 32 bytes)
+}
+
+test "ColdFrame op_push3 reads 3 bytes from bytecode" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x62, 0xAB, 0xCD, 0xEF, 0x00}; // PUSH3 0xABCDEF STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Execute op_push3 - should read 0xABCDEF from bytecode[1..4] and push it
+    try frame.op_push3();
+    try std.testing.expectEqual(@as(u256, 0xABCDEF), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u16, 4), frame.pc); // PC should advance by 4 (opcode + 3 bytes)
+}
+
+test "ColdFrame op_push7 reads 7 bytes from bytecode" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // PUSH7 with specific pattern
+    const bytecode = [_]u8{0x66, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0x00}; // PUSH7 STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Execute op_push7 - should read 7 bytes and push them
+    try frame.op_push7();
+    try std.testing.expectEqual(@as(u256, 0x0123456789ABCD), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u16, 8), frame.pc); // PC should advance by 8 (opcode + 7 bytes)
+}
+
+test "ColdFrame op_push16 reads 16 bytes from bytecode" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // PUSH16 with specific pattern
+    var bytecode: [18]u8 = undefined;
+    bytecode[0] = 0x6F; // PUSH16
+    for (1..17) |i| {
+        bytecode[i] = @as(u8, @intCast(i));
+    }
+    bytecode[17] = 0x00; // STOP
+    
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Execute op_push16
+    try frame.op_push16();
+    
+    // Verify value is correct
+    var expected: u256 = 0;
+    for (1..17) |i| {
+        expected = (expected << 8) | @as(u256, i);
+    }
+    try std.testing.expectEqual(expected, frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u16, 17), frame.pc); // PC should advance by 17 (opcode + 16 bytes)
+}
+
+test "ColdFrame op_push31 reads 31 bytes from bytecode" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // PUSH31 with specific pattern
+    var bytecode: [33]u8 = undefined;
+    bytecode[0] = 0x7E; // PUSH31
+    for (1..32) |i| {
+        bytecode[i] = @as(u8, @intCast(i % 256));
+    }
+    bytecode[32] = 0x00; // STOP
+    
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Execute op_push31
+    try frame.op_push31();
+    
+    // Verify PC advanced correctly
+    try std.testing.expectEqual(@as(u16, 32), frame.pc); // PC should advance by 32 (opcode + 31 bytes)
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+}
+
+test "ColdFrame interpret handles all PUSH opcodes correctly" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // Test PUSH3 through interpreter
+    {
+        const bytecode = [_]u8{0x62, 0x12, 0x34, 0x56, 0x00}; // PUSH3 0x123456 STOP
+        var frame = try Frame.init(allocator, &bytecode, 1000000);
+        defer frame.deinit(allocator);
+        
+        try std.testing.expectError(error.STOP, frame.interpret(allocator));
+        try std.testing.expectEqual(@as(u256, 0x123456), frame.stack[0]);
+    }
+    
+    // Test PUSH10 through interpreter
+    {
+        var bytecode: [12]u8 = undefined;
+        bytecode[0] = 0x69; // PUSH10
+        for (1..11) |i| {
+            bytecode[i] = @as(u8, @intCast(i));
+        }
+        bytecode[11] = 0x00; // STOP
+        
+        var frame = try Frame.init(allocator, &bytecode, 1000000);
+        defer frame.deinit(allocator);
+        
+        try std.testing.expectError(error.STOP, frame.interpret(allocator));
+        
+        var expected: u256 = 0;
+        for (1..11) |i| {
+            expected = (expected << 8) | @as(u256, i);
+        }
+        try std.testing.expectEqual(expected, frame.stack[0]);
+    }
+    
+    // Test PUSH20 through interpreter
+    {
+        var bytecode: [22]u8 = undefined;
+        bytecode[0] = 0x73; // PUSH20
+        for (1..21) |i| {
+            bytecode[i] = @as(u8, @intCast(255 - i));
+        }
+        bytecode[21] = 0x00; // STOP
+        
+        var frame = try Frame.init(allocator, &bytecode, 1000000);
+        defer frame.deinit(allocator);
+        
+        try std.testing.expectError(error.STOP, frame.interpret(allocator));
+        try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    }
 }
 
 test "ColdFrame op_dup1 duplicates top stack item" {
@@ -2088,5 +3168,329 @@ test "ColdFrame op_keccak256 hash computation" {
     // keccak256("Hello") = 0x06b3dfaec148fb1bb2b066f10ec285e7c9bf402ab32aa78a5d38e34566810cd2
     const expected_hello = @as(u256, 0x06b3dfaec148fb1bb2b066f10ec285e7c9bf402ab32aa78a5d38e34566810cd2);
     try std.testing.expectEqual(expected_hello, hello_hash);
+}
+
+test "ColdFrame interpret basic execution" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // Simple bytecode: PUSH1 42, PUSH1 10, ADD, STOP
+    const bytecode = [_]u8{0x60, 0x2A, 0x60, 0x0A, 0x01, 0x00};
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // interpret should execute until STOP
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.STOP, result);
+    
+    // Check final stack state
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 52), frame.stack[0]); // 42 + 10 = 52
+}
+
+test "ColdFrame interpret OUT_OF_BOUNDS error" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // Bytecode without STOP: PUSH1 5
+    const bytecode = [_]u8{0x60, 0x05};
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Should hit OUT_OF_BOUNDS after executing PUSH1
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.OutOfBounds, result);
+}
+
+test "ColdFrame interpret invalid opcode" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // Bytecode with invalid opcode: 0xFE (INVALID)
+    const bytecode = [_]u8{0xFE};
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Should return InvalidOpcode error
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.InvalidOpcode, result);
+}
+
+test "ColdFrame interpret PUSH values metadata" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // Test PUSH1 with value stored in metadata
+    const bytecode = [_]u8{0x60, 0xFF, 0x00}; // PUSH1 255, STOP
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.STOP, result);
+    
+    // Check that 255 was pushed
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 255), frame.stack[0]);
+}
+
+test "ColdFrame interpret complex bytecode sequence" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // PUSH1 5, PUSH1 3, ADD, PUSH1 2, MUL, STOP
+    // Should compute (5 + 3) * 2 = 16
+    const bytecode = [_]u8{0x60, 0x05, 0x60, 0x03, 0x01, 0x60, 0x02, 0x02, 0x00};
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.STOP, result);
+    
+    // Check final result
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 16), frame.stack[0]);
+}
+
+test "ColdFrame interpret JUMP to JUMPDEST" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // PUSH1 4, JUMP, INVALID, JUMPDEST, PUSH1 42, STOP
+    const bytecode = [_]u8{0x60, 0x04, 0x56, 0xFE, 0x5B, 0x60, 0x2A, 0x00};
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.STOP, result);
+    
+    // Should have 42 on stack (skipped INVALID)
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 42), frame.stack[0]);
+}
+
+test "ColdFrame interpret JUMPI conditional" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    // PUSH1 0, PUSH1 8, JUMPI, PUSH1 1, STOP, JUMPDEST, PUSH1 2, STOP
+    const bytecode = [_]u8{0x60, 0x00, 0x60, 0x08, 0x57, 0x60, 0x01, 0x00, 0x5B, 0x60, 0x02, 0x00};
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    const result = frame.interpret(allocator);
+    try std.testing.expectError(error.STOP, result);
+    
+    // Should have 1 on stack (condition was 0, so didn't jump)
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 1), frame.stack[0]);
+}
+
+test "ColdFrame with NoOpTracer executes correctly" {
+    const allocator = std.testing.allocator;
+    
+    // Create frame with default NoOpTracer
+    const Frame = createColdFrame(.{});
+    
+    // Simple bytecode: PUSH1 0x05, PUSH1 0x03, ADD
+    const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 };
+    
+    var frame = try Frame.init(allocator, &bytecode, 1000);
+    defer frame.deinit(allocator);
+    
+    // Execute by pushing values and calling add
+    try frame.push(5);
+    try frame.push(3); 
+    try frame.op_add();
+    
+    // Check that we have the expected result (5 + 3 = 8)
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 8), frame.stack[0]);
+}
+
+test "ColdFrame tracer type can be changed at compile time" {
+    const allocator = std.testing.allocator;
+    
+    // Custom tracer for testing
+    const TestTracer = struct {
+        call_count: usize,
+        
+        pub fn init() @This() {
+            return .{ .call_count = 0 };
+        }
+        
+        pub fn beforeOp(self: *@This(), comptime FrameType: type, frame: *const FrameType) void {
+            _ = frame;
+            self.call_count += 1;
+        }
+        
+        pub fn afterOp(self: *@This(), comptime FrameType: type, frame: *const FrameType) void {
+            _ = frame;
+            self.call_count += 1;
+        }
+        
+        pub fn onError(self: *@This(), comptime FrameType: type, frame: *const FrameType, err: anyerror) void {
+            _ = frame;
+            if (false) {
+                std.debug.print("Error: {}\n", .{err});
+            }
+            self.call_count += 1;
+        }
+    };
+    
+    // Create frame with custom tracer
+    const config = FrameConfig{
+        .TracerType = TestTracer,
+    };
+    
+    const Frame = createColdFrame(config);
+    
+    // Simple bytecode: PUSH1 0x05
+    const bytecode = [_]u8{ 0x60, 0x05 };
+    
+    var frame = try Frame.init(allocator, &bytecode, 1000);
+    defer frame.deinit(allocator);
+    
+    // Check that our test tracer was initialized
+    try std.testing.expectEqual(@as(usize, 0), frame.tracer.call_count);
+    
+    // Execute a simple operation to trigger tracer
+    try frame.push(10);
+    
+    // Since we're calling op functions directly, tracer won't be triggered
+    // unless we go through the interpret function
+}
+
+test "ColdFrame op_msize memory size tracking" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x59, 0x00}; // MSIZE STOP
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Initially memory size should be 0
+    try frame.op_msize();
+    const initial_size = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), initial_size);
+    
+    // Store something to expand memory
+    try frame.push(0x42); // value
+    try frame.push(0); // offset
+    try frame.op_mstore();
+    
+    // Memory should now be 32 bytes
+    try frame.op_msize();
+    const size_after_store = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 32), size_after_store);
+    
+    // Store at offset 32
+    try frame.push(0x55); // value
+    try frame.push(32); // offset
+    try frame.op_mstore();
+    
+    // Memory should now be 64 bytes
+    try frame.op_msize();
+    const size_after_second_store = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 64), size_after_second_store);
+}
+
+test "ColdFrame op_mload memory load operations" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x51, 0x00}; // MLOAD STOP
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Store a value first
+    const test_value: u256 = 0x123456789ABCDEF0;
+    try frame.push(test_value);
+    try frame.push(0); // offset
+    try frame.op_mstore();
+    
+    // Load it back
+    try frame.push(0); // offset
+    try frame.op_mload();
+    const loaded_value = try frame.pop();
+    try std.testing.expectEqual(test_value, loaded_value);
+    
+    // Load from uninitialized memory (should be zero)
+    // First store at offset 64 to ensure memory is expanded
+    try frame.push(0); // value 0
+    try frame.push(64); // offset
+    try frame.op_mstore();
+    
+    // Now load from offset 64 (should be zero)
+    try frame.push(64); // offset
+    try frame.op_mload();
+    const zero_value = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), zero_value);
+}
+
+test "ColdFrame op_mstore memory store operations" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x52, 0x00}; // MSTORE STOP
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Store multiple values at different offsets
+    const value1: u256 = 0xDEADBEEF;
+    const value2: u256 = 0xCAFEBABE;
+    
+    try frame.push(value1);
+    try frame.push(0); // offset
+    try frame.op_mstore();
+    
+    try frame.push(value2);
+    try frame.push(32); // offset
+    try frame.op_mstore();
+    
+    // Read them back
+    try frame.push(0);
+    try frame.op_mload();
+    const read1 = try frame.pop();
+    try std.testing.expectEqual(value1, read1);
+    
+    try frame.push(32);
+    try frame.op_mload();
+    const read2 = try frame.pop();
+    try std.testing.expectEqual(value2, read2);
+}
+
+test "ColdFrame op_mstore8 byte store operations" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x53, 0x00}; // MSTORE8 STOP
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Store a single byte
+    try frame.push(0xFF); // value (only low byte will be stored)
+    try frame.push(5); // offset
+    try frame.op_mstore8();
+    
+    // Load the 32-byte word containing our byte
+    try frame.push(0); // offset 0
+    try frame.op_mload();
+    const word = try frame.pop();
+    
+    // The byte at offset 5 should be 0xFF
+    // In a 32-byte word, byte 5 is at bit position 216-223 (from the right)
+    const byte_5 = @as(u8, @truncate((word >> (26 * 8)) & 0xFF));
+    try std.testing.expectEqual(@as(u8, 0xFF), byte_5);
+    
+    // Store another byte and check
+    try frame.push(0x1234ABCD); // value (only 0xCD will be stored)
+    try frame.push(10); // offset
+    try frame.op_mstore8();
+    
+    try frame.push(0);
+    try frame.op_mload();
+    const word2 = try frame.pop();
+    const byte_10 = @as(u8, @truncate((word2 >> (21 * 8)) & 0xFF));
+    try std.testing.expectEqual(@as(u8, 0xCD), byte_10);
 }
 
