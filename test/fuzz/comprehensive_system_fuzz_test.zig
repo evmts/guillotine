@@ -11,7 +11,7 @@ fn create_evm_context_with_code(allocator: std.mem.Allocator, code: []const u8) 
     frame: evm.Frame,
 } {
     var db = evm.MemoryDatabase.init(allocator);
-    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null);
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
 
     var contract = evm.Contract.init(primitives.Address.ZERO, primitives.Address.ZERO, 0, 1000000, code, [_]u8{0} ** 32, &.{}, false);
 

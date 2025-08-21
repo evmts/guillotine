@@ -9,7 +9,7 @@ test "fuzz_storage_sload_operations" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -52,7 +52,7 @@ test "fuzz_storage_sstore_sload_roundtrip" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -101,7 +101,7 @@ test "fuzz_storage_tload_operations" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -144,7 +144,7 @@ test "fuzz_storage_tstore_tload_roundtrip" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};

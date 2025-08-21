@@ -16,7 +16,7 @@ test "tracer propagates to nested CREATE2 calls" {
     defer trace_buf.deinit();
     const trace_writer = trace_buf.writer().any();
     
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, trace_writer);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, trace_writer, null);
     defer vm.deinit();
     
     // Verify tracer is set

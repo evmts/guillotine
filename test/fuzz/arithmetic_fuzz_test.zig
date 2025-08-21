@@ -9,7 +9,7 @@ test "fuzz_arithmetic_basic_operations" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -52,7 +52,7 @@ test "fuzz_arithmetic_overflow_cases" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -95,7 +95,7 @@ test "fuzz_arithmetic_division_by_zero" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};
@@ -138,7 +138,7 @@ test "fuzz_arithmetic_modulo_operations" {
     var db = evm.MemoryDatabase.init(allocator);
     defer db.deinit();
     
-    var vm = try evm.Evm.init(allocator, db.to_database_interface());
+    var vm = try evm.Evm.init(allocator, db.to_database_interface(), null, null, null, null, null);
     defer vm.deinit();
     
     const test_code = [_]u8{0x01};

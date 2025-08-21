@@ -15,7 +15,7 @@ test "RETURN sets output correctly" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null, null);
 
     // Bytecode that stores 0xDEADBEEF and returns it
     const bytecode = &[_]u8{
@@ -108,7 +108,7 @@ test "Top-level call returns 32-byte value via RETURN" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, null);
+    var vm = try Evm.Evm.init(allocator, db_interface, null, null, null, null, null);
     defer vm.deinit();
 
     // runtime: returns 32-byte 0x01
@@ -150,7 +150,7 @@ test "constructor returns runtime code" {
     defer memory_db.deinit();
 
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, null, null);
 
     // Simple constructor that returns "HELLO"
     const init_code = &[_]u8{

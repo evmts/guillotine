@@ -22,6 +22,7 @@ test "deploy ERC20 contract using CREATE" {
         null, // chain_rules
         null, // context
         null, // tracer
+        null, // precompile_table
     );
     defer vm.deinit();
     
@@ -102,6 +103,7 @@ test "deploy and call simple storage contract" {
         null, // chain_rules
         null, // context
         null, // tracer
+        null, // precompile_table
     );
     defer vm.deinit();
     

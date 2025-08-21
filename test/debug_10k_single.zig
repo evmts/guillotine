@@ -47,6 +47,7 @@ pub fn main() !void {
         null, // chain_rules
         null, // context
         stderr.any(), // tracer - this enables debug output
+        null, // precompile_table
     );
     defer vm.deinit();
 

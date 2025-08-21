@@ -49,7 +49,7 @@ test "debug ten-thousand-hashes execution" {
 
     // Create a tracer that outputs to stderr
     const stderr = std.io.getStdErr().writer();
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, stderr.any());
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, 0, false, stderr.any(, null));
     defer vm.deinit();
 
     // Caller and funding
