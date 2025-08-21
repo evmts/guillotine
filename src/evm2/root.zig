@@ -7,6 +7,13 @@ pub const Analysis = @import("analysis.zig").Analysis;
 pub const Interpreter = @import("interpreter.zig").Interpreter;
 pub const Dispatcher = @import("dispatcher.zig").Dispatcher;
 pub const Evm = @import("evm.zig").Evm;
+pub const Tracer = @import("tracer.zig").Tracer;
+pub const DetailedStructLog = @import("tracer.zig").DetailedStructLog;
+pub const TracerConfig = @import("tracer.zig").TracerConfig;
+pub const MemoryCaptureMode = @import("tracer.zig").MemoryCaptureMode;
+pub const LoggingTracer = @import("tracer.zig").LoggingTracer;
+pub const FileTracer = @import("tracer.zig").FileTracer;
+pub const NoOpTracer = @import("noop_tracer.zig").NoOpTracer;
 
 // Opcode namespace
 pub const opcodes = struct {
@@ -216,6 +223,8 @@ test {
     _ = Interpreter;
     _ = Dispatcher;
     _ = Evm;
+    _ = Tracer;
+    _ = DetailedStructLog;
     
     // Test opcodes
     _ = opcodes.Opcode;
