@@ -1,146 +1,176 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const FrameOptions = struct {
+pub const FrameConfig = struct {
+    const Self = @This();
+
+    // The maximum stack size for the evm. Defaults to 1024
     stack_size: usize = 1024,
-    word_type: type = u256,
-    max_bytecode_size: usize = 65535,
+    // The size of a single word in the EVM - Defaults to u256
+    WordType: type = u256,
+    // The maximum amount of bytes allowed in contract code
+    max_bytecode_size: u32 = 24576, 
+    // gets the pc type from the bytecode zie
+    fn get_pc_type(self: Self) type {
+        return if (self.max_bytecode_size <= std.math.maxInt(u8))
+                u8
+            else if (self.max_bytecode_size <= std.math.maxInt(u12))
+                u12
+            else if (self.max_bytecode_size <= std.math.maxInt(u16))
+                u16
+            else if (self.max_bytecode_size <= std.math.maxInt(u32))
+                u32
+            else
+                @compileError("Bytecode size too large! It must have under u32 bytes");
+    }
+
+    fn get_stack_index_type(self: Self) type {
+        return if (self.stack_size <= std.math.maxInt(u4))
+            u4
+            else if (self.stack_size <= std.math.maxInt(u8))
+            u8
+            else if (self.stack_size <= std.math.maxInt(u12))
+            u12
+            else
+              @compileError("FrameConfig stack_size is too large! It must fit in a u12 bytes");
+    }
+
+    // The amount of data the frame plans on allocating based on config
+    fn get_requested_alloc(self: Self) u32  {
+      return  @as(u32, @intCast(self.stack_size * @sizeOf(self.WordType)));
+    }
+
+    // Limits placed on the Frame
+    fn validate(self: Self) void {
+        if (self.stack_size > 4095) @compileError("stack_size cannot exceed 4095");
+        if (@bitSizeOf(self.WordType) > 256) @compileError("WordType cannot exceed u256");
+        if (self.max_bytecode_size > 65535) @compileError("max_bytecodeSize must be at most 65535 to fit within a u16");
+    }
 };
 
-pub fn ColdFrame(comptime options: FrameOptions) type {
-    if (options.stack_size > 4095) {
-        @compileError("Stack size cannot exceed 4095");
-    }
-    
-    if (@bitSizeOf(options.word_type) > 256) {
-        @compileError("Word size cannot exceed 256 bits");
-    }
-    
-    const PcType = if (options.max_bytecode_size <= std.math.maxInt(u8))
-        u8
-    else if (options.max_bytecode_size <= std.math.maxInt(u12))
-        u12
-    else if (options.max_bytecode_size <= std.math.maxInt(u16))
-        u16
-    else if (options.max_bytecode_size <= std.math.maxInt(u32))
-        u32
-    else
-        @compileError("Bytecode size too large! It must have under u32 bytes");
+// A ColdFrame is the StackFrame data struct for the ColdInterpreter which is the simplist interpreter
+// Cold in this context means the code is new unanalyzed code that we are interpreting.
+// The cold frame and interpreter are appropriate for the following situations:
+// 1. Very small contracts
+// 2. Unanalyzed contracts
+// 3. Debuggers tracers or anything that needs to step through the evm code
+pub fn createColdFrame(comptime config: FrameConfig) type {
+    config.validate();
 
-    return struct {
-        const Self = @This();
+    const stack_size = config.stack_size;
+    const WordType = config.WordType;
+    const max_bytecode_size = config.max_bytecode_size;
+    const PcType = config.get_pc_type();
+    const StackIndexType = config.get_stack_index_type();
+
+    const ColdFrame = struct {
+        pub const frame_config = config;
         
         pub const Error = error{
             StackOverflow,
             StackUnderflow,
             STOP,
             BytecodeTooLarge,
-            OutOfMemory,
+            AllocationError,
         };
-        
-        // Calculate total memory needed for pre-allocation
-        pub const REQUESTED_PREALLOCATION = blk: {
-            const stack_bytes = options.stack_size * @sizeOf(options.word_type);
-            break :blk stack_bytes;
-        };
-        
+
+        const Self = @This();
+
         // Cacheline 1
-        // 8 bytes
-        next_stack_pointer: *options.word_type,
-        // 8 bytes
-        stack: *[options.stack_size]options.word_type,
-        // 8 bytes
-        bytecode: []const u8,
-        // 1-4 bytes depending on max_bytecode_size
-        pc: PcType,
+        next_stack_index: StackIndexType, // 1-4 bytes depending on stack_size
+        stack: *[stack_size]WordType, // 8 bytes (pointer)
+        bytecode: []const u8, // 16 bytes (slice)
+        pc: PcType, // 1-4 bytes depending on max_bytecode_size
         
-        pub fn push_unsafe(self: *Self, value: options.word_type) void {
-            @branchHint(.likely);
-            const stack_end = @intFromPtr(self.stack) + @sizeOf(options.word_type) * options.stack_size;
-            if (@intFromPtr(self.next_stack_pointer) >= stack_end) unreachable;
+        pub fn init(allocator: std.mem.Allocator, bytecode: []const u8) Error!Self {
+            if (bytecode.len > max_bytecode_size) return Error.BytecodeTooLarge;
+            const stack_memory = allocator.alloc(WordType, stack_size) catch {
+                return Error.AllocationError;
+            };
+            errdefer allocator.free(stack_memory);
+            @memset(std.mem.sliceAsBytes(stack_memory), 0);
             
-            self.next_stack_pointer.* = value;
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
+            return Self{
+                .next_stack_index = 0,
+                .stack = @ptrCast(&stack_memory[0]),
+                .bytecode = bytecode,
+                .pc = 0,
+            };
         }
         
-        pub fn push(self: *Self, value: options.word_type) Error!void {
-            self.next_stack_pointer.* = value;
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
-            
-            const stack_end = @intFromPtr(self.stack) + @sizeOf(options.word_type) * options.stack_size;
-            if (@intFromPtr(self.next_stack_pointer) > stack_end) {
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            const stack_slice = @as([*]WordType, @ptrCast(self.stack))[0..stack_size];
+            allocator.free(stack_slice);
+        }
+        
+        pub fn push_unsafe(self: *Self, value: WordType) void {
+            @branchHint(.likely);
+            if (self.next_stack_index >= stack_size) unreachable;
+            self.stack[self.next_stack_index] = value;
+            self.next_stack_index += 1;
+        }
+        
+        pub fn push(self: *Self, value: WordType) Error!void {
+            if (self.next_stack_index >= stack_size) {
                 @branchHint(.cold);
-                // Rollback the pointer
-                self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
                 return Error.StackOverflow;
             }
+            self.stack[self.next_stack_index] = value;
+            self.next_stack_index += 1;
         }
         
-        pub fn pop_unsafe(self: *Self) options.word_type {
+        pub fn pop_unsafe(self: *Self) WordType {
             @branchHint(.likely);
-            const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) <= stack_start) unreachable;
+            if (self.next_stack_index == 0) unreachable;
             
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
-            return self.next_stack_pointer.*;
+            self.next_stack_index -= 1;
+            return self.stack[self.next_stack_index];
         }
         
-        pub fn pop(self: *Self) Error!options.word_type {
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
-            
-            const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) < stack_start) {
-                @branchHint(.cold);
-                // Rollback the pointer
-                self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
-                return Error.StackUnderflow;
-            }
-            
-            return self.next_stack_pointer.*;
-        }
-        
-        pub fn set_top_unsafe(self: *Self, value: options.word_type) void {
-            @branchHint(.likely);
-            const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) <= stack_start) unreachable;
-            
-            const top_ptr = @as(*options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
-            top_ptr.* = value;
-        }
-        
-        pub fn set_top(self: *Self, value: options.word_type) Error!void {
-            const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) <= stack_start) {
+        pub fn pop(self: *Self) Error!WordType {
+            if (self.next_stack_index == 0) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
             }
             
-            const top_ptr = @as(*options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
-            top_ptr.* = value;
+            self.next_stack_index -= 1;
+            return self.stack[self.next_stack_index];
         }
         
-        pub fn peek_unsafe(self: *const Self) options.word_type {
+        pub fn set_top_unsafe(self: *Self, value: WordType) void {
             @branchHint(.likely);
-            const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) <= stack_start) unreachable;
+            if (self.next_stack_index == 0) unreachable;
             
-            const top_ptr = @as(*const options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
-            return top_ptr.*;
+            self.stack[self.next_stack_index - 1] = value;
         }
         
-        pub fn peek(self: *const Self) Error!options.word_type {
-            const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) <= stack_start) {
+        pub fn set_top(self: *Self, value: WordType) Error!void {
+            if (self.next_stack_index == 0) {
                 @branchHint(.cold);
                 return Error.StackUnderflow;
             }
             
-            const top_ptr = @as(*const options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
-            return top_ptr.*;
+            self.stack[self.next_stack_index - 1] = value;
+        }
+        
+        pub fn peek_unsafe(self: *const Self) WordType {
+            @branchHint(.likely);
+            if (self.next_stack_index == 0) unreachable;
+            
+            return self.stack[self.next_stack_index - 1];
+        }
+        
+        pub fn peek(self: *const Self) Error!WordType {
+            if (self.next_stack_index == 0) {
+                @branchHint(.cold);
+                return Error.StackUnderflow;
+            }
+            
+            return self.stack[self.next_stack_index - 1];
         }
         
         pub fn op_pc(self: *Self) Error!void {
-            return self.push(@as(options.word_type, self.pc));
+            return self.push(@as(WordType, self.pc));
         }
         
         pub fn op_stop(self: *Self) Error!void {
@@ -207,15 +237,12 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         // Generic dup function for DUP1-DUP16
         fn dup_n(self: *Self, comptime n: u8) Error!void {
             // Check if we have enough items on stack
-            const stack_size = (@intFromPtr(self.next_stack_pointer) - @intFromPtr(&self.stack[0])) / @sizeOf(options.word_type);
-            if (stack_size < n) {
+            if (self.next_stack_index < n) {
                 return Error.StackUnderflow;
             }
             
             // Get the value n positions from the top
-            const offset = @as(usize, @sizeOf(options.word_type)) * @as(usize, n);
-            const value_ptr = @as(*const options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - offset));
-            const value = value_ptr.*;
+            const value = self.stack[self.next_stack_index - n];
             
             // Push the duplicate
             return self.push(value);
@@ -232,18 +259,16 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         // Generic swap function for SWAP1-SWAP16
         fn swap_n(self: *Self, comptime n: u8) Error!void {
             // Check if we have enough items on stack (need n+1 items)
-            const stack_size = (@intFromPtr(self.next_stack_pointer) - @intFromPtr(&self.stack[0])) / @sizeOf(options.word_type);
-            if (stack_size < n + 1) {
+            if (self.next_stack_index < n + 1) {
                 return Error.StackUnderflow;
             }
             
-            // Get pointers to the two items to swap
-            const top_ptr = @as(*options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
-            const offset = @as(usize, @sizeOf(options.word_type)) * @as(usize, n + 1);
-            const other_ptr = @as(*options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - offset));
+            // Get indices of the two items to swap
+            const top_index = self.next_stack_index - 1;
+            const other_index = self.next_stack_index - n - 1;
             
             // Swap them
-            std.mem.swap(options.word_type, top_ptr, other_ptr);
+            std.mem.swap(WordType, &self.stack[top_index], &self.stack[other_index]);
         }
         
         pub fn op_swap1(self: *Self) Error!void {
@@ -315,12 +340,12 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             
             const result = if (shift >= 256) blk: {
                 const sign_bit = value >> 255;
-                break :blk if (sign_bit == 1) @as(options.word_type, std.math.maxInt(options.word_type)) else @as(options.word_type, 0);
+                break :blk if (sign_bit == 1) @as(WordType, std.math.maxInt(WordType)) else @as(WordType, 0);
             } else blk: {
                 const shift_amount = @as(u8, @intCast(shift));
-                const value_signed = @as(std.meta.Int(.signed, @bitSizeOf(options.word_type)), @bitCast(value));
+                const value_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(value));
                 const result_signed = value_signed >> shift_amount;
-                break :blk @as(options.word_type, @bitCast(result_signed));
+                break :blk @as(WordType, @bitCast(result_signed));
             };
             
             try self.set_top(result);
@@ -356,20 +381,20 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const b = try self.pop();
             const a = try self.peek();
             
-            var result: options.word_type = undefined;
+            var result: WordType = undefined;
             if (b == 0) {
                 result = 0;
             } else {
-                const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(options.word_type)), @bitCast(a));
-                const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(options.word_type)), @bitCast(b));
-                const min_signed = std.math.minInt(std.meta.Int(.signed, @bitSizeOf(options.word_type)));
+                const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
+                const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(b));
+                const min_signed = std.math.minInt(std.meta.Int(.signed, @bitSizeOf(WordType)));
                 
                 if (a_signed == min_signed and b_signed == -1) {
                     // MIN / -1 overflow case
                     result = a;
                 } else {
                     const result_signed = @divTrunc(a_signed, b_signed);
-                    result = @as(options.word_type, @bitCast(result_signed));
+                    result = @as(WordType, @bitCast(result_signed));
                 }
             }
             
@@ -387,14 +412,14 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const b = try self.pop();
             const a = try self.peek();
             
-            var result: options.word_type = undefined;
+            var result: WordType = undefined;
             if (b == 0) {
                 result = 0;
             } else {
-                const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(options.word_type)), @bitCast(a));
-                const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(options.word_type)), @bitCast(b));
+                const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(a));
+                const b_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(b));
                 const result_signed = @rem(a_signed, b_signed);
-                result = @as(options.word_type, @bitCast(result_signed));
+                result = @as(WordType, @bitCast(result_signed));
             }
             
             try self.set_top(result);
@@ -405,7 +430,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const b = try self.pop();
             const a = try self.peek();
             
-            var result: options.word_type = undefined;
+            var result: WordType = undefined;
             if (n == 0) {
                 result = 0;
             } else {
@@ -433,7 +458,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const b = try self.pop();
             const a = try self.peek();
             
-            var result: options.word_type = undefined;
+            var result: WordType = undefined;
             if (n == 0) {
                 result = 0;
             } else {
@@ -454,7 +479,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const exp = try self.pop();
             const base = try self.peek();
             
-            var result: options.word_type = 1;
+            var result: WordType = 1;
             var b = base;
             var e = exp;
             
@@ -473,7 +498,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const ext = try self.pop();
             const value = try self.peek();
             
-            var result: options.word_type = undefined;
+            var result: WordType = undefined;
             
             if (ext >= 31) {
                 // No extension needed
@@ -481,7 +506,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             } else {
                 const ext_usize = @as(usize, @intCast(ext));
                 const bit_index = ext_usize * 8 + 7;
-                const mask = (@as(options.word_type, 1) << @intCast(bit_index)) - 1;
+                const mask = (@as(WordType, 1) << @intCast(bit_index)) - 1;
                 const sign_bit = (value >> @intCast(bit_index)) & 1;
                 
                 if (sign_bit == 1) {
@@ -495,76 +520,32 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             
             try self.set_top(result);
         }
-        
-        pub fn init(allocator: std.mem.Allocator, bytecode: []const u8) Error!*Self {
-            // Validate bytecode size
-            if (bytecode.len > options.max_bytecode_size) {
-                return Error.BytecodeTooLarge;
-            }
-            
-            // Allocate frame
-            const self = allocator.create(Self) catch return Error.OutOfMemory;
-            errdefer allocator.destroy(self);
-            
-            // Allocate stack on heap
-            const stack_memory = allocator.alloc(options.word_type, options.stack_size) catch {
-                allocator.destroy(self);
-                return Error.OutOfMemory;
-            };
-            errdefer allocator.free(stack_memory);
-            
-            // Initialize all stack slots to 0
-            @memset(std.mem.sliceAsBytes(stack_memory), 0);
-            
-            // Initialize frame
-            self.* = Self{
-                .next_stack_pointer = &stack_memory[0],
-                .stack = @ptrCast(&stack_memory[0]),
-                .bytecode = bytecode,
-                .pc = 0,
-            };
-            
-            return self;
-        }
-        
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            const stack_slice = @as([*]options.word_type, @ptrCast(self.stack))[0..options.stack_size];
-            allocator.free(stack_slice);
-            allocator.destroy(self);
-        }
     };
+    return ColdFrame;
 }
 
 test "ColdFrame push and push_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
-    
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    @memset(std.mem.sliceAsBytes(stack_memory), 0);
+    const DefaultFrame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &dummy_bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    defer frame.deinit(allocator);
     
     // Test push_unsafe
     frame.push_unsafe(42);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
-    try std.testing.expectEqual(@as(u256, 42), stack_memory[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 42), frame.stack[0]);
     
     frame.push_unsafe(100);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
-    try std.testing.expectEqual(@as(u256, 100), stack_memory[1]);
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
+    try std.testing.expectEqual(@as(u256, 100), frame.stack[1]);
     
     // Test push with overflow check
     // Fill stack to near capacity
-    frame.next_stack_pointer = &stack_memory[1023];
+    frame.next_stack_index = 1023;
     try frame.push(200);
-    try std.testing.expectEqual(@as(u256, 200), stack_memory[1023]);
+    try std.testing.expectEqual(@as(u256, 200), frame.stack[1023]);
     
     // This should error - stack is full
     try std.testing.expectError(error.StackOverflow, frame.push(300));
@@ -572,32 +553,26 @@ test "ColdFrame push and push_unsafe" {
 
 test "ColdFrame pop and pop_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
-    
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    // Setup stack with some values
-    stack_memory[0] = 10;
-    stack_memory[1] = 20;
-    stack_memory[2] = 30;
+    const DefaultFrame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[3], // Points to next empty slot
-        .stack = stack_memory,
-        .bytecode = &dummy_bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    defer frame.deinit(allocator);
+    
+    // Setup stack with some values
+    frame.stack[0] = 10;
+    frame.stack[1] = 20;
+    frame.stack[2] = 30;
+    frame.next_stack_index = 3; // Points to next empty slot
     
     // Test pop_unsafe
     const val1 = frame.pop_unsafe();
     try std.testing.expectEqual(@as(u256, 30), val1);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
     
     const val2 = frame.pop_unsafe();
     try std.testing.expectEqual(@as(u256, 20), val2);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     
     // Test pop with underflow check
     const val3 = try frame.pop();
@@ -609,71 +584,59 @@ test "ColdFrame pop and pop_unsafe" {
 
 test "ColdFrame set_top and set_top_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
-    
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    // Setup stack with some values
-    stack_memory[0] = 10;
-    stack_memory[1] = 20;
-    stack_memory[2] = 30;
+    const DefaultFrame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[3], // Points to next empty slot after 30
-        .stack = stack_memory,
-        .bytecode = &dummy_bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    defer frame.deinit(allocator);
+    
+    // Setup stack with some values
+    frame.stack[0] = 10;
+    frame.stack[1] = 20;
+    frame.stack[2] = 30;
+    frame.next_stack_index = 3; // Points to next empty slot after 30
     
     // Test set_top_unsafe - should modify the top value (30 -> 99)
     frame.set_top_unsafe(99);
-    try std.testing.expectEqual(@as(u256, 99), stack_memory[2]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer)); // Pointer unchanged
+    try std.testing.expectEqual(@as(u256, 99), frame.stack[2]);
+    try std.testing.expectEqual(@as(u12, 3), frame.next_stack_index); // Index unchanged
     
     // Test set_top with error check on empty stack
-    frame.next_stack_pointer = &stack_memory[0]; // Empty stack
+    frame.next_stack_index = 0; // Empty stack
     try std.testing.expectError(error.StackUnderflow, frame.set_top(42));
     
     // Test set_top on non-empty stack
-    frame.next_stack_pointer = &stack_memory[2]; // Stack has 2 items
+    frame.next_stack_index = 2; // Stack has 2 items
     try frame.set_top(55);
-    try std.testing.expectEqual(@as(u256, 55), stack_memory[1]);
+    try std.testing.expectEqual(@as(u256, 55), frame.stack[1]);
 }
 
 test "ColdFrame peek and peek_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
-    
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    // Setup stack with values
-    stack_memory[0] = 100;
-    stack_memory[1] = 200;
-    stack_memory[2] = 300;
+    const DefaultFrame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[3], // Points to next empty slot
-        .stack = stack_memory,
-        .bytecode = &dummy_bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    defer frame.deinit(allocator);
     
-    // Test peek_unsafe - should return top value without modifying pointer
+    // Setup stack with values
+    frame.stack[0] = 100;
+    frame.stack[1] = 200;
+    frame.stack[2] = 300;
+    frame.next_stack_index = 3; // Points to next empty slot
+    
+    // Test peek_unsafe - should return top value without modifying index
     const top_unsafe = frame.peek_unsafe();
     try std.testing.expectEqual(@as(u256, 300), top_unsafe);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 3), frame.next_stack_index);
     
     // Test peek on non-empty stack
     const top = try frame.peek();
     try std.testing.expectEqual(@as(u256, 300), top);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 3), frame.next_stack_index);
     
     // Test peek on empty stack
-    frame.next_stack_pointer = &stack_memory[0];
+    frame.next_stack_index = 0;
     try std.testing.expectError(error.StackUnderflow, frame.peek());
 }
 
@@ -681,80 +644,53 @@ test "ColdFrame with bytecode and pc" {
     const allocator = std.testing.allocator;
     
     // Test with small bytecode (fits in u8)
-    const SmallFrame = ColdFrame(.{ .max_bytecode_size = 255 });
+    const SmallFrame = createColdFrame(.{ .max_bytecode_size = 255 });
     const small_bytecode = [_]u8{0x60, 0x01, 0x60, 0x02, 0x00}; // PUSH1 1 PUSH1 2 STOP
     
-    const small_stack = try allocator.create([1024]u256);
-    defer allocator.destroy(small_stack);
-    
-    const small_frame = SmallFrame{
-        .next_stack_pointer = &small_stack[0],
-        .stack = small_stack,
-        .bytecode = &small_bytecode,
-        .pc = 0,
-    };
+    var small_frame = try SmallFrame.init(allocator, &small_bytecode);
+    defer small_frame.deinit(allocator);
     
     try std.testing.expectEqual(@as(u8, 0), small_frame.pc);
     try std.testing.expectEqual(@as(u8, 0x60), small_frame.bytecode[0]);
     
     // Test with medium bytecode (fits in u16)
-    const MediumFrame = ColdFrame(.{ .max_bytecode_size = 65535 });
+    const MediumFrame = createColdFrame(.{ .max_bytecode_size = 65535 });
     const medium_bytecode = [_]u8{0x58, 0x00}; // PC STOP
     
-    const medium_stack = try allocator.create([1024]u256);
-    defer allocator.destroy(medium_stack);
-    
-    const medium_frame = MediumFrame{
-        .next_stack_pointer = &medium_stack[0],
-        .stack = medium_stack,
-        .bytecode = &medium_bytecode,
-        .pc = 300,
-    };
+    var medium_frame = try MediumFrame.init(allocator, &medium_bytecode);
+    defer medium_frame.deinit(allocator);
+    medium_frame.pc = 300;
     
     try std.testing.expectEqual(@as(u16, 300), medium_frame.pc);
 }
 
 test "ColdFrame op_pc pushes pc to stack" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x58, 0x00}; // PC STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Execute op_pc - should push current pc (0) to stack
     try frame.op_pc();
-    try std.testing.expectEqual(@as(u256, 0), stack_memory[0]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 0), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     
     // Set pc to 42 and test again
     frame.pc = 42;
     try frame.op_pc();
-    try std.testing.expectEqual(@as(u256, 42), stack_memory[1]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 42), frame.stack[1]);
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
 }
 
 test "ColdFrame op_stop returns stop error" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x00}; // STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Execute op_stop - should return STOP error
     try std.testing.expectError(error.STOP, frame.op_stop());
@@ -762,35 +698,29 @@ test "ColdFrame op_stop returns stop error" {
 
 test "ColdFrame op_pop removes top stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x50, 0x00}; // POP STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Setup stack with some values
-    stack_memory[0] = 100;
-    stack_memory[1] = 200;
-    stack_memory[2] = 300;
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[3],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    frame.stack[0] = 100;
+    frame.stack[1] = 200;
+    frame.stack[2] = 300;
+    frame.next_stack_index = 3;
     
     // Execute op_pop - should remove top item (300) and do nothing with it
     try frame.op_pop();
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
     
     // Execute again - should remove 200
     try frame.op_pop();
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     
     // Execute again - should remove 100
     try frame.op_pop();
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[0]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u12, 0), frame.next_stack_index);
     
     // Pop on empty stack should error
     try std.testing.expectError(error.StackUnderflow, frame.op_pop());
@@ -798,78 +728,57 @@ test "ColdFrame op_pop removes top stack item" {
 
 test "ColdFrame op_push0 pushes zero to stack" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x5f, 0x00}; // PUSH0 STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Execute op_push0 - should push 0 to stack
     try frame.op_push0();
-    try std.testing.expectEqual(@as(u256, 0), stack_memory[0]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 0), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
 }
 
 test "ColdFrame op_push1 reads byte from bytecode and pushes to stack" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x60, 0x42, 0x60, 0xFF, 0x00}; // PUSH1 0x42 PUSH1 0xFF STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Execute op_push1 at pc=0 - should read 0x42 from bytecode[1] and push it
     try frame.op_push1();
-    try std.testing.expectEqual(@as(u256, 0x42), stack_memory[0]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 0x42), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     try std.testing.expectEqual(@as(u16, 2), frame.pc); // PC should advance by 2 (opcode + 1 byte)
     
     // Execute op_push1 at pc=2 - should read 0xFF from bytecode[3] and push it
     try frame.op_push1();
-    try std.testing.expectEqual(@as(u256, 0xFF), stack_memory[1]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 0xFF), frame.stack[1]);
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
     try std.testing.expectEqual(@as(u16, 4), frame.pc); // PC should advance by 2 more
 }
 
 test "ColdFrame op_push2 reads 2 bytes from bytecode" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x61, 0x12, 0x34, 0x00}; // PUSH2 0x1234 STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Execute op_push2 - should read 0x1234 from bytecode[1..3] and push it
     try frame.op_push2();
-    try std.testing.expectEqual(@as(u256, 0x1234), stack_memory[0]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 0x1234), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     try std.testing.expectEqual(@as(u16, 3), frame.pc); // PC should advance by 3 (opcode + 2 bytes)
 }
 
 test "ColdFrame op_push32 reads 32 bytes from bytecode" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     // PUSH32 with max value (32 bytes of 0xFF)
     var bytecode: [34]u8 = undefined;
@@ -879,140 +788,109 @@ test "ColdFrame op_push32 reads 32 bytes from bytecode" {
     }
     bytecode[33] = 0x00; // STOP
     
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[0],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Execute op_push32 - should read all 32 bytes and push max u256
     try frame.op_push32();
-    try std.testing.expectEqual(@as(u256, std.math.maxInt(u256)), stack_memory[0]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[1]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, std.math.maxInt(u256)), frame.stack[0]);
+    try std.testing.expectEqual(@as(u12, 1), frame.next_stack_index);
     try std.testing.expectEqual(@as(u16, 33), frame.pc); // PC should advance by 33 (opcode + 32 bytes)
 }
 
 test "ColdFrame op_dup1 duplicates top stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x80, 0x00}; // DUP1 STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Setup stack with value
-    stack_memory[0] = 42;
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[1],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    frame.stack[0] = 42;
+    frame.next_stack_index = 1;
     
     // Execute op_dup1 - should duplicate top item (42)
     try frame.op_dup1();
-    try std.testing.expectEqual(@as(u256, 42), stack_memory[0]); // Original
-    try std.testing.expectEqual(@as(u256, 42), stack_memory[1]); // Duplicate
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 42), frame.stack[0]); // Original
+    try std.testing.expectEqual(@as(u256, 42), frame.stack[1]); // Duplicate
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
     
     // Test dup1 on empty stack
-    frame.next_stack_pointer = &stack_memory[0];
+    frame.next_stack_index = 0;
     try std.testing.expectError(error.StackUnderflow, frame.op_dup1());
 }
 
 test "ColdFrame op_dup16 duplicates 16th stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x8f, 0x00}; // DUP16 STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Setup stack with values 1-16
     for (0..16) |i| {
-        stack_memory[i] = @as(u256, i + 1);
+        frame.stack[i] = @as(u256, i + 1);
     }
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[16],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    frame.next_stack_index = 16;
     
     // Execute op_dup16 - should duplicate 16th from top (value 1)
     try frame.op_dup16();
-    try std.testing.expectEqual(@as(u256, 1), stack_memory[16]); // Duplicate of bottom
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[17]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 1), frame.stack[16]); // Duplicate of bottom
+    try std.testing.expectEqual(@as(u12, 17), frame.next_stack_index);
     
     // Test dup16 with insufficient stack
-    frame.next_stack_pointer = &stack_memory[15]; // Only 15 items
+    frame.next_stack_index = 15; // Only 15 items
     try std.testing.expectError(error.StackUnderflow, frame.op_dup16());
 }
 
 test "ColdFrame op_swap1 swaps top two stack items" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x90, 0x00}; // SWAP1 STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Setup stack with values
-    stack_memory[0] = 100;
-    stack_memory[1] = 200;
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[2],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    frame.stack[0] = 100;
+    frame.stack[1] = 200;
+    frame.next_stack_index = 2;
     
     // Execute op_swap1 - should swap top two items
     try frame.op_swap1();
-    try std.testing.expectEqual(@as(u256, 200), stack_memory[0]);
-    try std.testing.expectEqual(@as(u256, 100), stack_memory[1]);
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[2]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 200), frame.stack[0]);
+    try std.testing.expectEqual(@as(u256, 100), frame.stack[1]);
+    try std.testing.expectEqual(@as(u12, 2), frame.next_stack_index);
     
     // Test swap1 with insufficient stack
-    frame.next_stack_pointer = &stack_memory[1]; // Only 1 item
+    frame.next_stack_index = 1; // Only 1 item
     try std.testing.expectError(error.StackUnderflow, frame.op_swap1());
 }
 
 test "ColdFrame op_swap16 swaps top with 17th stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x9f, 0x00}; // SWAP16 STOP
-    const stack_memory = try allocator.create([1024]u256);
-    defer allocator.destroy(stack_memory);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
+    defer frame.deinit(allocator);
     
     // Setup stack with values 1-17
     for (0..17) |i| {
-        stack_memory[i] = @as(u256, i + 1);
+        frame.stack[i] = @as(u256, i + 1);
     }
-    
-    var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[17],
-        .stack = stack_memory,
-        .bytecode = &bytecode,
-        .pc = 0,
-    };
+    frame.next_stack_index = 17;
     
     // Execute op_swap16 - should swap top (17) with 17th from top (1)
     try frame.op_swap16();
-    try std.testing.expectEqual(@as(u256, 17), stack_memory[0]); // Was 1
-    try std.testing.expectEqual(@as(u256, 1), stack_memory[16]); // Was 17
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[17]), @intFromPtr(frame.next_stack_pointer));
+    try std.testing.expectEqual(@as(u256, 17), frame.stack[0]); // Was 1
+    try std.testing.expectEqual(@as(u256, 1), frame.stack[16]); // Was 17
+    try std.testing.expectEqual(@as(u12, 17), frame.next_stack_index);
     
     // Test swap16 with insufficient stack
-    frame.next_stack_pointer = &stack_memory[16]; // Only 16 items
+    frame.next_stack_index = 16; // Only 16 items
     try std.testing.expectError(error.StackUnderflow, frame.op_swap16());
 }
 
@@ -1020,13 +898,13 @@ test "ColdFrame init validates bytecode size" {
     const allocator = std.testing.allocator;
     
     // Test with valid bytecode size
-    const SmallFrame = ColdFrame(.{ .max_bytecode_size = 100 });
+    const SmallFrame = createColdFrame(.{ .max_bytecode_size = 100 });
     const small_bytecode = [_]u8{0x60, 0x01, 0x00}; // PUSH1 1 STOP
     
     const stack_memory = try allocator.create([1024]u256);
     defer allocator.destroy(stack_memory);
     
-    const frame = try SmallFrame.init(allocator, &small_bytecode);
+    var frame = try SmallFrame.init(allocator, &small_bytecode);
     defer frame.deinit(allocator);
     
     try std.testing.expectEqual(@as(u8, 0), frame.pc);
@@ -1042,42 +920,42 @@ test "ColdFrame init validates bytecode size" {
     
     // Test with empty bytecode
     const empty_bytecode = [_]u8{};
-    const empty_frame = try SmallFrame.init(allocator, &empty_bytecode);
+    var empty_frame = try SmallFrame.init(allocator, &empty_bytecode);
     defer empty_frame.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 0), empty_frame.bytecode.len);
 }
 
-test "ColdFrame REQUESTED_PREALLOCATION calculates correctly" {
+test "ColdFrame get_requested_alloc calculates correctly" {
     // Test with default options
-    const DefaultFrame = ColdFrame(.{});
-    const expected_default = 1024 * @sizeOf(u256);
-    try std.testing.expectEqual(expected_default, DefaultFrame.REQUESTED_PREALLOCATION);
+    const default_config = FrameConfig{};
+    const expected_default = @as(u32, @intCast(1024 * @sizeOf(u256)));
+    try std.testing.expectEqual(expected_default, default_config.get_requested_alloc());
     
     // Test with custom options
-    const CustomFrame = ColdFrame(.{
+    const custom_config = FrameConfig{
         .stack_size = 512,
-        .word_type = u128,
+        .WordType = u128,
         .max_bytecode_size = 1000,
-    });
-    const expected_custom = 512 * @sizeOf(u128);
-    try std.testing.expectEqual(expected_custom, CustomFrame.REQUESTED_PREALLOCATION);
+    };
+    const expected_custom = @as(u32, @intCast(512 * @sizeOf(u128)));
+    try std.testing.expectEqual(expected_custom, custom_config.get_requested_alloc());
     
     // Test with small frame
-    const SmallFrame = ColdFrame(.{
+    const small_config = FrameConfig{
         .stack_size = 256,
-        .word_type = u64,
+        .WordType = u64,
         .max_bytecode_size = 255,
-    });
-    const expected_small = 256 * @sizeOf(u64);
-    try std.testing.expectEqual(expected_small, SmallFrame.REQUESTED_PREALLOCATION);
+    };
+    const expected_small = @as(u32, @intCast(256 * @sizeOf(u64)));
+    try std.testing.expectEqual(expected_small, small_config.get_requested_alloc());
 }
 
 test "ColdFrame op_and bitwise AND operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x16, 0x00}; // AND STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 0xFF & 0x0F = 0x0F
@@ -1104,10 +982,10 @@ test "ColdFrame op_and bitwise AND operation" {
 
 test "ColdFrame op_or bitwise OR operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x17, 0x00}; // OR STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 0xF0 | 0x0F = 0xFF
@@ -1134,10 +1012,10 @@ test "ColdFrame op_or bitwise OR operation" {
 
 test "ColdFrame op_xor bitwise XOR operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x18, 0x00}; // XOR STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 0xFF ^ 0xFF = 0
@@ -1164,10 +1042,10 @@ test "ColdFrame op_xor bitwise XOR operation" {
 
 test "ColdFrame op_not bitwise NOT operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x19, 0x00}; // NOT STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test ~0 = max value
@@ -1191,10 +1069,10 @@ test "ColdFrame op_not bitwise NOT operation" {
 
 test "ColdFrame op_byte extracts single byte from word" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1A, 0x00}; // BYTE STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test extracting byte 31 (rightmost) from 0x...FF
@@ -1229,10 +1107,10 @@ test "ColdFrame op_byte extracts single byte from word" {
 
 test "ColdFrame op_shl shift left operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1B, 0x00}; // SHL STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 1 << 4 = 16
@@ -1259,10 +1137,10 @@ test "ColdFrame op_shl shift left operation" {
 
 test "ColdFrame op_shr logical shift right operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1C, 0x00}; // SHR STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 16 >> 4 = 1
@@ -1289,10 +1167,10 @@ test "ColdFrame op_shr logical shift right operation" {
 
 test "ColdFrame op_sar arithmetic shift right operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1D, 0x00}; // SAR STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test positive number: 16 >> 4 = 1
@@ -1329,10 +1207,10 @@ test "ColdFrame op_sar arithmetic shift right operation" {
 
 test "ColdFrame op_add addition with wrapping overflow" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x01, 0x00}; // ADD STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 10 + 20 = 30
@@ -1359,10 +1237,10 @@ test "ColdFrame op_add addition with wrapping overflow" {
 
 test "ColdFrame op_mul multiplication with wrapping overflow" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x02, 0x00}; // MUL STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 5 * 6 = 30
@@ -1390,10 +1268,10 @@ test "ColdFrame op_mul multiplication with wrapping overflow" {
 
 test "ColdFrame op_sub subtraction with wrapping underflow" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x03, 0x00}; // SUB STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 30 - 10 = 20
@@ -1420,10 +1298,10 @@ test "ColdFrame op_sub subtraction with wrapping underflow" {
 
 test "ColdFrame op_div unsigned integer division" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x04, 0x00}; // DIV STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 20 / 5 = 4
@@ -1450,10 +1328,10 @@ test "ColdFrame op_div unsigned integer division" {
 
 test "ColdFrame op_sdiv signed integer division" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x05, 0x00}; // SDIV STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 20 / 5 = 4 (positive / positive)
@@ -1491,10 +1369,10 @@ test "ColdFrame op_sdiv signed integer division" {
 
 test "ColdFrame op_mod modulo remainder operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x06, 0x00}; // MOD STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 17 % 5 = 2
@@ -1521,10 +1399,10 @@ test "ColdFrame op_mod modulo remainder operation" {
 
 test "ColdFrame op_smod signed modulo remainder operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x07, 0x00}; // SMOD STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 17 % 5 = 2 (positive % positive)
@@ -1561,10 +1439,10 @@ test "ColdFrame op_smod signed modulo remainder operation" {
 
 test "ColdFrame op_addmod addition modulo n" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x08, 0x00}; // ADDMOD STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test (10 + 20) % 7 = 2
@@ -1597,10 +1475,10 @@ test "ColdFrame op_addmod addition modulo n" {
 
 test "ColdFrame op_mulmod multiplication modulo n" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x09, 0x00}; // MULMOD STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test (10 * 20) % 7 = 200 % 7 = 4
@@ -1645,10 +1523,10 @@ test "ColdFrame op_mulmod multiplication modulo n" {
 
 test "ColdFrame op_exp exponentiation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x0A, 0x00}; // EXP STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test 2^10 = 1024
@@ -1689,10 +1567,10 @@ test "ColdFrame op_exp exponentiation" {
 
 test "ColdFrame op_signextend sign extension" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = ColdFrame(.{});
+    const DefaultFrame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x0B, 0x00}; // SIGNEXTEND STOP
-    const frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try DefaultFrame.init(allocator, &bytecode);
     defer frame.deinit(allocator);
     
     // Test extending positive 8-bit value (0x7F)
