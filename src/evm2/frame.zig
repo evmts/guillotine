@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const FrameOptions = struct {
     stack_size: usize = 1024,
@@ -33,49 +34,82 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             @branchHint(.likely);
             self.next_stack_pointer.* = value;
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
+            
+            if (comptime builtin.mode == .Debug) {
+                const stack_end = @intFromPtr(self.stack) + @sizeOf(options.word_type) * options.stack_size;
+                if (@intFromPtr(self.next_stack_pointer) > stack_end) unreachable;
+            }
         }
         
         pub fn push(self: *Self, value: options.word_type) Error!void {
+            self.next_stack_pointer.* = value;
+            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
+            
             const stack_end = @intFromPtr(self.stack) + @sizeOf(options.word_type) * options.stack_size;
-            if (@intFromPtr(self.next_stack_pointer) >= stack_end) {
+            if (@intFromPtr(self.next_stack_pointer) > stack_end) {
                 @branchHint(.cold);
+                // Rollback the pointer
+                self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
                 return Error.StackOverflow;
             }
-            self.push_unsafe(value);
         }
         
         pub fn pop_unsafe(self: *Self) options.word_type {
             @branchHint(.likely);
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
+            
+            if (comptime builtin.mode == .Debug) {
+                const stack_start = @intFromPtr(&self.stack[0]);
+                if (@intFromPtr(self.next_stack_pointer) < stack_start) unreachable;
+            }
+            
             return self.next_stack_pointer.*;
         }
         
         pub fn pop(self: *Self) Error!options.word_type {
+            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
+            
             const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) <= stack_start) {
+            if (@intFromPtr(self.next_stack_pointer) < stack_start) {
                 @branchHint(.cold);
+                // Rollback the pointer
+                self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
                 return Error.StackUnderflow;
             }
-            return self.pop_unsafe();
+            
+            return self.next_stack_pointer.*;
         }
         
         pub fn pop_2_push_1_unsafe(self: *Self, value: options.word_type) void {
             @branchHint(.likely);
             // Pop 2 items by moving pointer back
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type) * 2);
+            
+            if (comptime builtin.mode == .Debug) {
+                const stack_start = @intFromPtr(&self.stack[0]);
+                if (@intFromPtr(self.next_stack_pointer) < stack_start) unreachable;
+            }
+            
             // Push 1 item
             self.next_stack_pointer.* = value;
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
         }
         
         pub fn pop_2_push_1(self: *Self, value: options.word_type) Error!void {
+            // Pop 2 items by moving pointer back
+            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type) * 2);
+            
             const stack_start = @intFromPtr(&self.stack[0]);
-            // Need at least 2 items on stack
-            if (@intFromPtr(self.next_stack_pointer) < stack_start + @sizeOf(options.word_type) * 2) {
+            if (@intFromPtr(self.next_stack_pointer) < stack_start) {
                 @branchHint(.cold);
+                // Rollback the pointer
+                self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type) * 2);
                 return Error.StackUnderflow;
             }
-            self.pop_2_push_1_unsafe(value);
+            
+            // Push 1 item
+            self.next_stack_pointer.* = value;
+            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
         }
     };
 }
