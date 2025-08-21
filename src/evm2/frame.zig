@@ -41,8 +41,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         // Calculate total memory needed for pre-allocation
         pub const REQUESTED_PREALLOCATION = blk: {
             const stack_bytes = options.stack_size * @sizeOf(options.word_type);
-            const frame_bytes = @sizeOf(Self);
-            break :blk stack_bytes + frame_bytes;
+            break :blk stack_bytes;
         };
         
         // Cacheline 1
@@ -1051,7 +1050,7 @@ test "ColdFrame init validates bytecode size" {
 test "ColdFrame REQUESTED_PREALLOCATION calculates correctly" {
     // Test with default options
     const DefaultFrame = ColdFrame(.{});
-    const expected_default = 1024 * @sizeOf(u256) + @sizeOf(DefaultFrame);
+    const expected_default = 1024 * @sizeOf(u256);
     try std.testing.expectEqual(expected_default, DefaultFrame.REQUESTED_PREALLOCATION);
     
     // Test with custom options
@@ -1060,7 +1059,7 @@ test "ColdFrame REQUESTED_PREALLOCATION calculates correctly" {
         .word_type = u128,
         .max_bytecode_size = 1000,
     });
-    const expected_custom = 512 * @sizeOf(u128) + @sizeOf(CustomFrame);
+    const expected_custom = 512 * @sizeOf(u128);
     try std.testing.expectEqual(expected_custom, CustomFrame.REQUESTED_PREALLOCATION);
     
     // Test with small frame
@@ -1069,7 +1068,7 @@ test "ColdFrame REQUESTED_PREALLOCATION calculates correctly" {
         .word_type = u64,
         .max_bytecode_size = 255,
     });
-    const expected_small = 256 * @sizeOf(u64) + @sizeOf(SmallFrame);
+    const expected_small = 256 * @sizeOf(u64);
     try std.testing.expectEqual(expected_small, SmallFrame.REQUESTED_PREALLOCATION);
 }
 
