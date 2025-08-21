@@ -25,7 +25,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
     else if (options.max_bytecode_size <= std.math.maxInt(u32))
         u32
     else
-        @compileError("Bytecode size too large");
+        @compileError("Bytecode size too large! It must have under u32 bytes");
 
     return struct {
         const Self = @This();
@@ -34,6 +34,15 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             StackOverflow,
             StackUnderflow,
             STOP,
+            BytecodeTooLarge,
+            OutOfMemory,
+        };
+        
+        // Calculate total memory needed for pre-allocation
+        pub const REQUESTED_PREALLOCATION = blk: {
+            const stack_bytes = options.stack_size * @sizeOf(options.word_type);
+            const frame_bytes = @sizeOf(Self);
+            break :blk stack_bytes + frame_bytes;
         };
         
         // Cacheline 1
@@ -244,6 +253,43 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         
         pub fn op_swap16(self: *Self) Error!void {
             return self.swap_n(16);
+        }
+        
+        pub fn init(allocator: std.mem.Allocator, bytecode: []const u8) Error!*Self {
+            // Validate bytecode size
+            if (bytecode.len > options.max_bytecode_size) {
+                return Error.BytecodeTooLarge;
+            }
+            
+            // Allocate frame
+            const self = allocator.create(Self) catch return Error.OutOfMemory;
+            errdefer allocator.destroy(self);
+            
+            // Allocate stack on heap
+            const stack_memory = allocator.alloc(options.word_type, options.stack_size) catch {
+                allocator.destroy(self);
+                return Error.OutOfMemory;
+            };
+            errdefer allocator.free(stack_memory);
+            
+            // Initialize all stack slots to 0
+            @memset(std.mem.sliceAsBytes(stack_memory), 0);
+            
+            // Initialize frame
+            self.* = Self{
+                .next_stack_pointer = &stack_memory[0],
+                .stack = @ptrCast(&stack_memory[0]),
+                .bytecode = bytecode,
+                .pc = 0,
+            };
+            
+            return self;
+        }
+        
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            const stack_slice = @as([*]options.word_type, @ptrCast(self.stack))[0..options.stack_size];
+            allocator.free(stack_slice);
+            allocator.destroy(self);
         }
     };
 }
@@ -727,5 +773,61 @@ test "ColdFrame op_swap16 swaps top with 17th stack item" {
     // Test swap16 with insufficient stack
     frame.next_stack_pointer = &stack_memory[16]; // Only 16 items
     try std.testing.expectError(error.StackUnderflow, frame.op_swap16());
+}
+
+test "ColdFrame init validates bytecode size" {
+    const allocator = std.testing.allocator;
+    
+    // Test with valid bytecode size
+    const SmallFrame = ColdFrame(.{ .max_bytecode_size = 100 });
+    const small_bytecode = [_]u8{0x60, 0x01, 0x00}; // PUSH1 1 STOP
+    
+    const stack_memory = try allocator.create([1024]u256);
+    defer allocator.destroy(stack_memory);
+    
+    const frame = try SmallFrame.init(allocator, &small_bytecode);
+    defer frame.deinit(allocator);
+    
+    try std.testing.expectEqual(@as(u8, 0), frame.pc);
+    try std.testing.expectEqual(&small_bytecode, frame.bytecode.ptr);
+    try std.testing.expectEqual(@as(usize, 3), frame.bytecode.len);
+    
+    // Test with bytecode too large
+    const large_bytecode = try allocator.alloc(u8, 101);
+    defer allocator.free(large_bytecode);
+    @memset(large_bytecode, 0x00);
+    
+    try std.testing.expectError(error.BytecodeTooLarge, SmallFrame.init(allocator, large_bytecode));
+    
+    // Test with empty bytecode
+    const empty_bytecode = [_]u8{};
+    const empty_frame = try SmallFrame.init(allocator, &empty_bytecode);
+    defer empty_frame.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 0), empty_frame.bytecode.len);
+}
+
+test "ColdFrame REQUESTED_PREALLOCATION calculates correctly" {
+    // Test with default options
+    const DefaultFrame = ColdFrame(.{});
+    const expected_default = 1024 * @sizeOf(u256) + @sizeOf(DefaultFrame);
+    try std.testing.expectEqual(expected_default, DefaultFrame.REQUESTED_PREALLOCATION);
+    
+    // Test with custom options
+    const CustomFrame = ColdFrame(.{
+        .stack_size = 512,
+        .word_type = u128,
+        .max_bytecode_size = 1000,
+    });
+    const expected_custom = 512 * @sizeOf(u128) + @sizeOf(CustomFrame);
+    try std.testing.expectEqual(expected_custom, CustomFrame.REQUESTED_PREALLOCATION);
+    
+    // Test with small frame
+    const SmallFrame = ColdFrame(.{
+        .stack_size = 256,
+        .word_type = u64,
+        .max_bytecode_size = 255,
+    });
+    const expected_small = 256 * @sizeOf(u64) + @sizeOf(SmallFrame);
+    try std.testing.expectEqual(expected_small, SmallFrame.REQUESTED_PREALLOCATION);
 }
 
