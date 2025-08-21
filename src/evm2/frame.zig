@@ -99,6 +99,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             InvalidJump,
             InvalidOpcode,
             OutOfBounds,
+            OutOfGas,
         };
 
         const Self = @This();
@@ -150,7 +151,55 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             self.memory.deinit();
         }
         
+        pub fn analyzeBasicBlocks(self: *Self) Error!void {
+            const Op5B = @import("opcodes/5b-jumpdest.zig").Op5B;
+            
+            // Pre-analysis: validate all basic blocks starting from JUMPDESTs and PC=0
+            var total_static_gas: i64 = 0;
+            
+            // Analyze from PC=0 (entry point)
+            const entry_result = Op5B.analyzeBasicBlock(self.bytecode, 0) catch |err| switch (err) {
+                error.InvalidOpcode => return Error.InvalidOpcode,
+                error.StackUnderflow => return Error.StackUnderflow,
+                error.StackOverflow => return Error.StackOverflow,
+                else => return Error.InvalidOpcode,
+            };
+            total_static_gas += entry_result.gas_cost;
+            
+            // Find and analyze all JUMPDEST locations
+            var i: usize = 0;
+            while (i < self.bytecode.len) {
+                const opcode = self.bytecode[i];
+                
+                if (opcode == 0x5B) { // JUMPDEST
+                    const result = Op5B.analyzeBasicBlock(self.bytecode, i) catch |err| switch (err) {
+                        error.InvalidOpcode => return Error.InvalidOpcode,
+                        error.StackUnderflow => return Error.StackUnderflow,
+                        error.StackOverflow => return Error.StackOverflow,
+                        else => return Error.InvalidOpcode,
+                    };
+                    total_static_gas += result.gas_cost;
+                }
+                
+                // Skip PUSH immediate data
+                if (opcode >= 0x60 and opcode <= 0x7F) {
+                    const push_size = opcode - 0x5F;
+                    i += push_size;
+                }
+                
+                i += 1;
+            }
+            
+            // Check if we have enough gas for static costs
+            if (total_static_gas > self.gas_remaining) {
+                return Error.OutOfGas;
+            }
+        }
+        
         pub fn interpret(self: *Self, allocator: std.mem.Allocator) !void {
+            // Pre-analysis phase
+            try self.analyzeBasicBlocks();
+            
             // Pass 1: Analyze bytecode with bitmaps
             var jump_dests = std.bit_set.DynamicBitSet.initEmpty(allocator, self.bytecode.len) catch return Error.AllocationError;
             defer jump_dests.deinit();
@@ -555,10 +604,20 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
         fn op_stop_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
             _ = instructions;
             _ = idx;
+            
+            // Check final gas before stopping
+            try self.checkGas();
+            
             return self.op_stop();
         }
         
         fn op_add_handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+            // Get opcode info for gas consumption
+            const opcode_info = @import("opcode_data.zig").OPCODE_INFO[0x01]; // ADD
+            
+            // Consume gas (unchecked since we validated in pre-analysis)
+            self.consumeGasUnchecked(opcode_info.gas_cost);
+            
             // Call tracer before operation
             self.tracer.beforeOp(Self, self);
             
@@ -612,6 +671,13 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
         fn makeSimpleHandler(comptime op: fn (*Self) Error!void) fn (*Self, []const Instruction, usize) Error!void {
             return struct {
                 fn handler(self: *Self, instructions: []const Instruction, idx: usize) Error!void {
+                    // Get opcode info for gas consumption
+                    const opcode = self.bytecode[self.pc];
+                    const opcode_info = @import("opcode_data.zig").OPCODE_INFO[opcode];
+                    
+                    // Consume gas (unchecked since we validated in pre-analysis)
+                    self.consumeGasUnchecked(opcode_info.gas_cost);
+                    
                     // Call tracer before operation
                     self.tracer.beforeOp(Self, self);
                     
@@ -1410,6 +1476,18 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             }
             
             try self.set_top(result);
+        }
+        
+        /// Consume gas without checking (for use after static analysis)
+        pub fn consumeGasUnchecked(self: *Self, amount: u64) void {
+            self.gas_remaining -= @as(GasType, @intCast(amount));
+        }
+        
+        /// Check if we're out of gas at end of execution
+        pub fn checkGas(self: *Self) Error!void {
+            if (@as(std.builtin.BranchHint, .cold) == .cold and self.gas_remaining < 0) {
+                return Error.OutOfGas;
+            }
         }
         
         pub fn op_gas(self: *Self) Error!void {
