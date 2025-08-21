@@ -40,6 +40,22 @@ Key features:
 - Index-based stack management for safety
 - Gas tracking with smart type selection
 
+### Module Dependencies
+
+When adding new features that require external modules, you must update `build.zig`:
+
+```zig
+// In build.zig, add imports to both evm2_mod and test_evm2:
+evm2_mod.addImport("crypto", crypto_mod);
+test_evm2.root_module.addImport("crypto", crypto_mod);
+```
+
+Currently imported modules:
+- `primitives` - Basic types and utilities
+- `evm` - EVM implementation reference
+- `build_options` - Build configuration
+- `crypto` - Cryptographic functions (for KECCAK256, etc.)
+
 ### Creating a ColdFrame
 
 ```zig

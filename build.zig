@@ -1911,6 +1911,7 @@ pub fn build(b: *std.Build) void {
     evm2_mod.addImport("primitives", primitives_mod);
     evm2_mod.addImport("evm", evm_mod);
     evm2_mod.addImport("build_options", build_options_mod);
+    evm2_mod.addImport("crypto", crypto_mod);
 
     // Build EVM2 library
     const evm2_lib = b.addLibrary(.{
@@ -1934,6 +1935,7 @@ pub fn build(b: *std.Build) void {
     test_evm2.root_module.addImport("primitives", primitives_mod);
     test_evm2.root_module.addImport("evm", evm_mod);
     test_evm2.root_module.addImport("build_options", build_options_mod);
+    test_evm2.root_module.addImport("crypto", crypto_mod);
     const run_test_evm2 = b.addRunArtifact(test_evm2);
     const test_evm2_step = b.step("test-evm2", "Run EVM2 tests");
     test_evm2_step.dependOn(&run_test_evm2.step);

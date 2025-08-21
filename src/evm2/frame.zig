@@ -82,6 +82,8 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             STOP,
             BytecodeTooLarge,
             AllocationError,
+            InvalidJump,
+            InvalidOpcode,
         };
 
         const Self = @This();
@@ -584,6 +586,53 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             const value = try self.peek();
             const result: WordType = if (value == 0) 1 else 0;
             try self.set_top(result);
+        }
+        
+        // Control flow operations
+        pub fn op_jump(self: *Self) Error!void {
+            const dest = try self.pop();
+            if (dest > max_bytecode_size) {
+                return Error.InvalidJump;
+            }
+            self.pc = @intCast(dest);
+        }
+        
+        pub fn op_jumpi(self: *Self) Error!void {
+            const dest = try self.pop();
+            const condition = try self.pop();
+            if (condition != 0) {
+                if (dest > max_bytecode_size) {
+                    return Error.InvalidJump;
+                }
+                self.pc = @intCast(dest);
+            }
+        }
+        
+        pub fn op_jumpdest(self: *Self) Error!void {
+            // JUMPDEST is a no-op, it just marks a valid jump destination
+            _ = self;
+        }
+        
+        pub fn op_invalid(self: *Self) Error!void {
+            _ = self;
+            return Error.InvalidOpcode;
+        }
+        
+        // Cryptographic operations
+        pub fn op_keccak256(self: *Self, data: []const u8) Error!void {
+            // For now, we'll take data as a parameter
+            // In a real implementation, this would read from memory
+            var hash: [32]u8 = undefined;
+            std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
+            
+            // Convert hash to WordType
+            var result: WordType = 0;
+            var i: usize = 0;
+            while (i < 32) : (i += 1) {
+                result = (result << 8) | hash[i];
+            }
+            
+            try self.push(result);
         }
     };
     return ColdFrame;
@@ -1930,5 +1979,114 @@ test "ColdFrame op_iszero zero check" {
     try frame.op_iszero();
     const result4 = try frame.pop();
     try std.testing.expectEqual(@as(u256, 0), result4);
+}
+
+test "ColdFrame op_jump unconditional jump" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x56, 0x00}; // JUMP STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test valid jump to position 10
+    try frame.push(10);
+    try frame.op_jump();
+    try std.testing.expectEqual(@as(u16, 10), frame.pc);
+    
+    // Test jump to position 0
+    try frame.push(0);
+    try frame.op_jump();
+    try std.testing.expectEqual(@as(u16, 0), frame.pc);
+    
+    // Test invalid jump beyond bytecode size
+    try frame.push(30000); // Beyond max_bytecode_size
+    try std.testing.expectError(error.InvalidJump, frame.op_jump());
+}
+
+test "ColdFrame op_jumpi conditional jump" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x57, 0x00}; // JUMPI STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test jump with non-zero condition (should jump)
+    frame.pc = 0;
+    try frame.push(1); // condition (non-zero)
+    try frame.push(20); // destination
+    try frame.op_jumpi();
+    try std.testing.expectEqual(@as(u16, 20), frame.pc);
+    
+    // Test jump with zero condition (should not jump)
+    frame.pc = 5;
+    try frame.push(0); // condition (zero)
+    try frame.push(30); // destination
+    try frame.op_jumpi();
+    try std.testing.expectEqual(@as(u16, 5), frame.pc); // PC unchanged
+    
+    // Test invalid jump with non-zero condition
+    try frame.push(1); // condition (non-zero)
+    try frame.push(30000); // Invalid destination
+    try std.testing.expectError(error.InvalidJump, frame.op_jumpi());
+    
+    // Test invalid destination with zero condition (should not error)
+    frame.pc = 10;
+    try frame.push(0); // condition (zero)
+    try frame.push(30000); // Invalid destination (but won't be used)
+    try frame.op_jumpi();
+    try std.testing.expectEqual(@as(u16, 10), frame.pc); // PC unchanged
+}
+
+test "ColdFrame op_jumpdest no-op" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x5B, 0x00}; // JUMPDEST STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // JUMPDEST should do nothing
+    const initial_pc = frame.pc;
+    const initial_stack_size = frame.next_stack_index;
+    try frame.op_jumpdest();
+    try std.testing.expectEqual(initial_pc, frame.pc);
+    try std.testing.expectEqual(initial_stack_size, frame.next_stack_index);
+}
+
+test "ColdFrame op_invalid causes error" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0xFE, 0x00}; // INVALID STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // INVALID should always return error
+    try std.testing.expectError(error.InvalidOpcode, frame.op_invalid());
+}
+
+test "ColdFrame op_keccak256 hash computation" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x20, 0x00}; // KECCAK256 STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test keccak256 of empty data
+    try frame.op_keccak256(&[_]u8{});
+    const empty_hash = try frame.pop();
+    // keccak256("") = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+    const expected_empty = @as(u256, 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470);
+    try std.testing.expectEqual(expected_empty, empty_hash);
+    
+    // Test keccak256 of "Hello"
+    try frame.op_keccak256("Hello");
+    const hello_hash = try frame.pop();
+    // keccak256("Hello") = 0x06b3dfaec148fb1bb2b066f10ec285e7c9bf402ab32aa78a5d38e34566810cd2
+    const expected_hello = @as(u256, 0x06b3dfaec148fb1bb2b066f10ec285e7c9bf402ab32aa78a5d38e34566810cd2);
+    try std.testing.expectEqual(expected_hello, hello_hash);
 }
 
