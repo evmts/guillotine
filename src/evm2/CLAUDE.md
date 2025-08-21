@@ -56,6 +56,20 @@ Currently imported modules:
 - `build_options` - Build configuration
 - `crypto` - Cryptographic functions (for KECCAK256, etc.)
 
+### Importing Common Types
+
+When importing types from the primitives module, use the full path:
+
+```zig
+// Importing Address type
+const Address = @import("primitives").Address.Address;
+
+// Importing multiple types
+const primitives = @import("primitives");
+const Address = primitives.Address.Address;
+const Bytes32 = primitives.Bytes32;
+```
+
 ### Creating a ColdFrame
 
 ```zig
