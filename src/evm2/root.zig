@@ -15,6 +15,9 @@ pub const LoggingTracer = @import("tracer.zig").LoggingTracer;
 pub const FileTracer = @import("tracer.zig").FileTracer;
 pub const NoOpTracer = @import("noop_tracer.zig").NoOpTracer;
 
+// Export opcode data
+pub const opcode_data = @import("opcode_data.zig");
+
 // Opcode namespace
 pub const opcodes = struct {
     pub const Opcode = @import("opcodes/opcode.zig").Opcode;
