@@ -80,36 +80,49 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             return self.next_stack_pointer.*;
         }
         
-        pub fn pop_2_push_1_unsafe(self: *Self, value: options.word_type) void {
+        pub fn set_top_unsafe(self: *Self, value: options.word_type) void {
             @branchHint(.likely);
-            // Pop 2 items by moving pointer back
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type) * 2);
+            const top_ptr = @as(*options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
+            top_ptr.* = value;
             
             if (comptime builtin.mode == .Debug) {
                 const stack_start = @intFromPtr(&self.stack[0]);
-                if (@intFromPtr(self.next_stack_pointer) < stack_start) unreachable;
+                if (@intFromPtr(top_ptr) < stack_start) unreachable;
             }
-            
-            // Push 1 item
-            self.next_stack_pointer.* = value;
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
         }
         
-        pub fn pop_2_push_1(self: *Self, value: options.word_type) Error!void {
-            // Pop 2 items by moving pointer back
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type) * 2);
-            
+        pub fn set_top(self: *Self, value: options.word_type) Error!void {
             const stack_start = @intFromPtr(&self.stack[0]);
-            if (@intFromPtr(self.next_stack_pointer) < stack_start) {
+            if (@intFromPtr(self.next_stack_pointer) <= stack_start) {
                 @branchHint(.cold);
-                // Rollback the pointer
-                self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type) * 2);
                 return Error.StackUnderflow;
             }
             
-            // Push 1 item
-            self.next_stack_pointer.* = value;
-            self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
+            const top_ptr = @as(*options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
+            top_ptr.* = value;
+        }
+        
+        pub fn peek_unsafe(self: *const Self) options.word_type {
+            @branchHint(.likely);
+            const top_ptr = @as(*const options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
+            
+            if (comptime builtin.mode == .Debug) {
+                const stack_start = @intFromPtr(&self.stack[0]);
+                if (@intFromPtr(top_ptr) < stack_start) unreachable;
+            }
+            
+            return top_ptr.*;
+        }
+        
+        pub fn peek(self: *const Self) Error!options.word_type {
+            const stack_start = @intFromPtr(&self.stack[0]);
+            if (@intFromPtr(self.next_stack_pointer) <= stack_start) {
+                @branchHint(.cold);
+                return Error.StackUnderflow;
+            }
+            
+            const top_ptr = @as(*const options.word_type, @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type)));
+            return top_ptr.*;
         }
     };
 }
@@ -180,31 +193,67 @@ test "ColdFrame pop and pop_unsafe" {
     try std.testing.expectError(error.StackUnderflow, frame.pop());
 }
 
-test "ColdFrame pop_2_push_1 and pop_2_push_1_unsafe" {
+test "ColdFrame set_top and set_top_unsafe" {
     const allocator = std.testing.allocator;
     const DefaultFrame = ColdFrame(.{});
     
     const stack_memory = try allocator.create([1024]u256);
     defer allocator.destroy(stack_memory);
     
-    // Setup stack: [10, 20, 30, 40]
+    // Setup stack with some values
     stack_memory[0] = 10;
     stack_memory[1] = 20;
     stack_memory[2] = 30;
-    stack_memory[3] = 40;
     
     var frame = DefaultFrame{
-        .next_stack_pointer = &stack_memory[4],
+        .next_stack_pointer = &stack_memory[3], // Points to next empty slot after 30
         .stack = stack_memory,
     };
     
-    // Test pop_2_push_1_unsafe - should pop 40 and 30, push their sum
-    frame.pop_2_push_1_unsafe(70); // 30 + 40 = 70
-    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer));
-    try std.testing.expectEqual(@as(u256, 70), stack_memory[2]);
+    // Test set_top_unsafe - should modify the top value (30 -> 99)
+    frame.set_top_unsafe(99);
+    try std.testing.expectEqual(@as(u256, 99), stack_memory[2]);
+    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer)); // Pointer unchanged
     
-    // Test pop_2_push_1 with underflow check
-    // Reset to have only one item
-    frame.next_stack_pointer = &stack_memory[1];
-    try std.testing.expectError(error.StackUnderflow, frame.pop_2_push_1(100));
+    // Test set_top with error check on empty stack
+    frame.next_stack_pointer = &stack_memory[0]; // Empty stack
+    try std.testing.expectError(error.StackUnderflow, frame.set_top(42));
+    
+    // Test set_top on non-empty stack
+    frame.next_stack_pointer = &stack_memory[2]; // Stack has 2 items
+    try frame.set_top(55);
+    try std.testing.expectEqual(@as(u256, 55), stack_memory[1]);
 }
+
+test "ColdFrame peek and peek_unsafe" {
+    const allocator = std.testing.allocator;
+    const DefaultFrame = ColdFrame(.{});
+    
+    const stack_memory = try allocator.create([1024]u256);
+    defer allocator.destroy(stack_memory);
+    
+    // Setup stack with values
+    stack_memory[0] = 100;
+    stack_memory[1] = 200;
+    stack_memory[2] = 300;
+    
+    var frame = DefaultFrame{
+        .next_stack_pointer = &stack_memory[3], // Points to next empty slot
+        .stack = stack_memory,
+    };
+    
+    // Test peek_unsafe - should return top value without modifying pointer
+    const top_unsafe = frame.peek_unsafe();
+    try std.testing.expectEqual(@as(u256, 300), top_unsafe);
+    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer));
+    
+    // Test peek on non-empty stack
+    const top = try frame.peek();
+    try std.testing.expectEqual(@as(u256, 300), top);
+    try std.testing.expectEqual(@intFromPtr(&stack_memory[3]), @intFromPtr(frame.next_stack_pointer));
+    
+    // Test peek on empty stack
+    frame.next_stack_pointer = &stack_memory[0];
+    try std.testing.expectError(error.StackUnderflow, frame.peek());
+}
+
