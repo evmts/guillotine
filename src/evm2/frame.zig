@@ -9,7 +9,9 @@ pub const FrameConfig = struct {
     // The size of a single word in the EVM - Defaults to u256
     WordType: type = u256,
     // The maximum amount of bytes allowed in contract code
-    max_bytecode_size: u32 = 24576, 
+    max_bytecode_size: u32 = 24576,
+    // The maximum gas limit for a block
+    block_gas_limit: u64 = 30_000_000, 
     // gets the pc type from the bytecode zie
     fn get_pc_type(self: Self) type {
         return if (self.max_bytecode_size <= std.math.maxInt(u8))
@@ -33,6 +35,13 @@ pub const FrameConfig = struct {
             u12
             else
               @compileError("FrameConfig stack_size is too large! It must fit in a u12 bytes");
+    }
+    
+    fn get_gas_type(self: Self) type {
+        return if (self.block_gas_limit <= std.math.maxInt(i32))
+            i32
+            else
+            i64;
     }
 
     // The amount of data the frame plans on allocating based on config
@@ -62,6 +71,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
     const max_bytecode_size = config.max_bytecode_size;
     const PcType = config.get_pc_type();
     const StackIndexType = config.get_stack_index_type();
+    const GasType = config.get_gas_type();
 
     const ColdFrame = struct {
         pub const frame_config = config;
@@ -81,8 +91,9 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
         stack: *[stack_size]WordType, // 8 bytes (pointer)
         bytecode: []const u8, // 16 bytes (slice)
         pc: PcType, // 1-4 bytes depending on max_bytecode_size
+        gas_remaining: GasType, // 4 or 8 bytes depending on block_gas_limit
         
-        pub fn init(allocator: std.mem.Allocator, bytecode: []const u8) Error!Self {
+        pub fn init(allocator: std.mem.Allocator, bytecode: []const u8, gas_remaining: GasType) Error!Self {
             if (bytecode.len > max_bytecode_size) return Error.BytecodeTooLarge;
             const stack_memory = allocator.alloc(WordType, stack_size) catch {
                 return Error.AllocationError;
@@ -95,6 +106,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
                 .stack = @ptrCast(&stack_memory[0]),
                 .bytecode = bytecode,
                 .pc = 0,
+                .gas_remaining = gas_remaining,
             };
         }
         
@@ -520,16 +532,71 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             
             try self.set_top(result);
         }
+        
+        pub fn op_gas(self: *Self) Error!void {
+            // Push the current gas remaining to the stack
+            // Since gas_remaining can be negative, we need to handle that case
+            const gas_value = if (self.gas_remaining < 0) 0 else @as(WordType, @intCast(self.gas_remaining));
+            return self.push(gas_value);
+        }
+        
+        // Comparison operations
+        pub fn op_lt(self: *Self) Error!void {
+            const b = try self.pop();
+            const a = try self.peek();
+            const result: WordType = if (a < b) 1 else 0;
+            try self.set_top(result);
+        }
+        
+        pub fn op_gt(self: *Self) Error!void {
+            const b = try self.pop();
+            const a = try self.peek();
+            const result: WordType = if (a > b) 1 else 0;
+            try self.set_top(result);
+        }
+        
+        pub fn op_slt(self: *Self) Error!void {
+            const b = try self.pop();
+            const a = try self.peek();
+            const SignedType = std.meta.Int(.signed, @bitSizeOf(WordType));
+            const a_signed = @as(SignedType, @bitCast(a));
+            const b_signed = @as(SignedType, @bitCast(b));
+            const result: WordType = if (a_signed < b_signed) 1 else 0;
+            try self.set_top(result);
+        }
+        
+        pub fn op_sgt(self: *Self) Error!void {
+            const b = try self.pop();
+            const a = try self.peek();
+            const SignedType = std.meta.Int(.signed, @bitSizeOf(WordType));
+            const a_signed = @as(SignedType, @bitCast(a));
+            const b_signed = @as(SignedType, @bitCast(b));
+            const result: WordType = if (a_signed > b_signed) 1 else 0;
+            try self.set_top(result);
+        }
+        
+        pub fn op_eq(self: *Self) Error!void {
+            const b = try self.pop();
+            const a = try self.peek();
+            const result: WordType = if (a == b) 1 else 0;
+            try self.set_top(result);
+        }
+        
+        pub fn op_iszero(self: *Self) Error!void {
+            const value = try self.peek();
+            const result: WordType = if (value == 0) 1 else 0;
+            try self.set_top(result);
+        }
     };
     return ColdFrame;
 }
 
 test "ColdFrame push and push_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    var frame = try Frame.init(allocator, &dummy_bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test push_unsafe
@@ -553,10 +620,10 @@ test "ColdFrame push and push_unsafe" {
 
 test "ColdFrame pop and pop_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    var frame = try Frame.init(allocator, &dummy_bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with some values
@@ -584,10 +651,10 @@ test "ColdFrame pop and pop_unsafe" {
 
 test "ColdFrame set_top and set_top_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    var frame = try Frame.init(allocator, &dummy_bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with some values
@@ -613,10 +680,10 @@ test "ColdFrame set_top and set_top_unsafe" {
 
 test "ColdFrame peek and peek_unsafe" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const dummy_bytecode = [_]u8{0x00}; // STOP
-    var frame = try DefaultFrame.init(allocator, &dummy_bytecode);
+    var frame = try Frame.init(allocator, &dummy_bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with values
@@ -647,7 +714,7 @@ test "ColdFrame with bytecode and pc" {
     const SmallFrame = createColdFrame(.{ .max_bytecode_size = 255 });
     const small_bytecode = [_]u8{0x60, 0x01, 0x60, 0x02, 0x00}; // PUSH1 1 PUSH1 2 STOP
     
-    var small_frame = try SmallFrame.init(allocator, &small_bytecode);
+    var small_frame = try SmallFrame.init(allocator, &small_bytecode, 1000000);
     defer small_frame.deinit(allocator);
     
     try std.testing.expectEqual(@as(u8, 0), small_frame.pc);
@@ -657,7 +724,7 @@ test "ColdFrame with bytecode and pc" {
     const MediumFrame = createColdFrame(.{ .max_bytecode_size = 65535 });
     const medium_bytecode = [_]u8{0x58, 0x00}; // PC STOP
     
-    var medium_frame = try MediumFrame.init(allocator, &medium_bytecode);
+    var medium_frame = try MediumFrame.init(allocator, &medium_bytecode, 1000000);
     defer medium_frame.deinit(allocator);
     medium_frame.pc = 300;
     
@@ -666,10 +733,10 @@ test "ColdFrame with bytecode and pc" {
 
 test "ColdFrame op_pc pushes pc to stack" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x58, 0x00}; // PC STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Execute op_pc - should push current pc (0) to stack
@@ -686,10 +753,10 @@ test "ColdFrame op_pc pushes pc to stack" {
 
 test "ColdFrame op_stop returns stop error" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x00}; // STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Execute op_stop - should return STOP error
@@ -698,10 +765,10 @@ test "ColdFrame op_stop returns stop error" {
 
 test "ColdFrame op_pop removes top stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x50, 0x00}; // POP STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with some values
@@ -728,10 +795,10 @@ test "ColdFrame op_pop removes top stack item" {
 
 test "ColdFrame op_push0 pushes zero to stack" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x5f, 0x00}; // PUSH0 STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Execute op_push0 - should push 0 to stack
@@ -742,10 +809,10 @@ test "ColdFrame op_push0 pushes zero to stack" {
 
 test "ColdFrame op_push1 reads byte from bytecode and pushes to stack" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x60, 0x42, 0x60, 0xFF, 0x00}; // PUSH1 0x42 PUSH1 0xFF STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Execute op_push1 at pc=0 - should read 0x42 from bytecode[1] and push it
@@ -763,10 +830,10 @@ test "ColdFrame op_push1 reads byte from bytecode and pushes to stack" {
 
 test "ColdFrame op_push2 reads 2 bytes from bytecode" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x61, 0x12, 0x34, 0x00}; // PUSH2 0x1234 STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Execute op_push2 - should read 0x1234 from bytecode[1..3] and push it
@@ -778,7 +845,7 @@ test "ColdFrame op_push2 reads 2 bytes from bytecode" {
 
 test "ColdFrame op_push32 reads 32 bytes from bytecode" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     // PUSH32 with max value (32 bytes of 0xFF)
     var bytecode: [34]u8 = undefined;
@@ -788,7 +855,7 @@ test "ColdFrame op_push32 reads 32 bytes from bytecode" {
     }
     bytecode[33] = 0x00; // STOP
     
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Execute op_push32 - should read all 32 bytes and push max u256
@@ -800,10 +867,10 @@ test "ColdFrame op_push32 reads 32 bytes from bytecode" {
 
 test "ColdFrame op_dup1 duplicates top stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x80, 0x00}; // DUP1 STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with value
@@ -823,10 +890,10 @@ test "ColdFrame op_dup1 duplicates top stack item" {
 
 test "ColdFrame op_dup16 duplicates 16th stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x8f, 0x00}; // DUP16 STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with values 1-16
@@ -847,10 +914,10 @@ test "ColdFrame op_dup16 duplicates 16th stack item" {
 
 test "ColdFrame op_swap1 swaps top two stack items" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x90, 0x00}; // SWAP1 STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with values
@@ -871,10 +938,10 @@ test "ColdFrame op_swap1 swaps top two stack items" {
 
 test "ColdFrame op_swap16 swaps top with 17th stack item" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x9f, 0x00}; // SWAP16 STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Setup stack with values 1-17
@@ -904,7 +971,7 @@ test "ColdFrame init validates bytecode size" {
     const stack_memory = try allocator.create([1024]u256);
     defer allocator.destroy(stack_memory);
     
-    var frame = try SmallFrame.init(allocator, &small_bytecode);
+    var frame = try SmallFrame.init(allocator, &small_bytecode, 1000000);
     defer frame.deinit(allocator);
     
     try std.testing.expectEqual(@as(u8, 0), frame.pc);
@@ -916,11 +983,11 @@ test "ColdFrame init validates bytecode size" {
     defer allocator.free(large_bytecode);
     @memset(large_bytecode, 0x00);
     
-    try std.testing.expectError(error.BytecodeTooLarge, SmallFrame.init(allocator, large_bytecode));
+    try std.testing.expectError(error.BytecodeTooLarge, SmallFrame.init(allocator, large_bytecode, 0));
     
     // Test with empty bytecode
     const empty_bytecode = [_]u8{};
-    var empty_frame = try SmallFrame.init(allocator, &empty_bytecode);
+    var empty_frame = try SmallFrame.init(allocator, &empty_bytecode, 1000000);
     defer empty_frame.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 0), empty_frame.bytecode.len);
 }
@@ -952,10 +1019,10 @@ test "ColdFrame get_requested_alloc calculates correctly" {
 
 test "ColdFrame op_and bitwise AND operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x16, 0x00}; // AND STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 0xFF & 0x0F = 0x0F
@@ -982,10 +1049,10 @@ test "ColdFrame op_and bitwise AND operation" {
 
 test "ColdFrame op_or bitwise OR operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x17, 0x00}; // OR STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 0xF0 | 0x0F = 0xFF
@@ -1012,10 +1079,10 @@ test "ColdFrame op_or bitwise OR operation" {
 
 test "ColdFrame op_xor bitwise XOR operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x18, 0x00}; // XOR STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 0xFF ^ 0xFF = 0
@@ -1042,10 +1109,10 @@ test "ColdFrame op_xor bitwise XOR operation" {
 
 test "ColdFrame op_not bitwise NOT operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x19, 0x00}; // NOT STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test ~0 = max value
@@ -1069,10 +1136,10 @@ test "ColdFrame op_not bitwise NOT operation" {
 
 test "ColdFrame op_byte extracts single byte from word" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1A, 0x00}; // BYTE STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test extracting byte 31 (rightmost) from 0x...FF
@@ -1107,10 +1174,10 @@ test "ColdFrame op_byte extracts single byte from word" {
 
 test "ColdFrame op_shl shift left operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1B, 0x00}; // SHL STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 1 << 4 = 16
@@ -1137,10 +1204,10 @@ test "ColdFrame op_shl shift left operation" {
 
 test "ColdFrame op_shr logical shift right operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1C, 0x00}; // SHR STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 16 >> 4 = 1
@@ -1167,10 +1234,10 @@ test "ColdFrame op_shr logical shift right operation" {
 
 test "ColdFrame op_sar arithmetic shift right operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x1D, 0x00}; // SAR STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test positive number: 16 >> 4 = 1
@@ -1207,10 +1274,10 @@ test "ColdFrame op_sar arithmetic shift right operation" {
 
 test "ColdFrame op_add addition with wrapping overflow" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x01, 0x00}; // ADD STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 10 + 20 = 30
@@ -1237,10 +1304,10 @@ test "ColdFrame op_add addition with wrapping overflow" {
 
 test "ColdFrame op_mul multiplication with wrapping overflow" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x02, 0x00}; // MUL STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 5 * 6 = 30
@@ -1268,10 +1335,10 @@ test "ColdFrame op_mul multiplication with wrapping overflow" {
 
 test "ColdFrame op_sub subtraction with wrapping underflow" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x03, 0x00}; // SUB STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 30 - 10 = 20
@@ -1298,10 +1365,10 @@ test "ColdFrame op_sub subtraction with wrapping underflow" {
 
 test "ColdFrame op_div unsigned integer division" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x04, 0x00}; // DIV STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 20 / 5 = 4
@@ -1328,10 +1395,10 @@ test "ColdFrame op_div unsigned integer division" {
 
 test "ColdFrame op_sdiv signed integer division" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x05, 0x00}; // SDIV STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 20 / 5 = 4 (positive / positive)
@@ -1369,10 +1436,10 @@ test "ColdFrame op_sdiv signed integer division" {
 
 test "ColdFrame op_mod modulo remainder operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x06, 0x00}; // MOD STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 17 % 5 = 2
@@ -1399,10 +1466,10 @@ test "ColdFrame op_mod modulo remainder operation" {
 
 test "ColdFrame op_smod signed modulo remainder operation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x07, 0x00}; // SMOD STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 17 % 5 = 2 (positive % positive)
@@ -1439,10 +1506,10 @@ test "ColdFrame op_smod signed modulo remainder operation" {
 
 test "ColdFrame op_addmod addition modulo n" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x08, 0x00}; // ADDMOD STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test (10 + 20) % 7 = 2
@@ -1475,10 +1542,10 @@ test "ColdFrame op_addmod addition modulo n" {
 
 test "ColdFrame op_mulmod multiplication modulo n" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x09, 0x00}; // MULMOD STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test (10 * 20) % 7 = 200 % 7 = 4
@@ -1523,10 +1590,10 @@ test "ColdFrame op_mulmod multiplication modulo n" {
 
 test "ColdFrame op_exp exponentiation" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x0A, 0x00}; // EXP STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test 2^10 = 1024
@@ -1567,10 +1634,10 @@ test "ColdFrame op_exp exponentiation" {
 
 test "ColdFrame op_signextend sign extension" {
     const allocator = std.testing.allocator;
-    const DefaultFrame = createColdFrame(.{});
+    const Frame = createColdFrame(.{});
     
     const bytecode = [_]u8{0x0B, 0x00}; // SIGNEXTEND STOP
-    var frame = try DefaultFrame.init(allocator, &bytecode);
+    var frame = try Frame.init(allocator, &bytecode, 0);
     defer frame.deinit(allocator);
     
     // Test extending positive 8-bit value (0x7F)
@@ -1609,5 +1676,261 @@ test "ColdFrame op_signextend sign extension" {
     try frame.op_signextend();
     const result5 = try frame.pop();
     try std.testing.expectEqual(@as(u256, 0x12345678), result5);
+}
+
+test "ColdFrame op_gas returns gas remaining" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x5A, 0x00}; // GAS STOP
+    var frame = try Frame.init(allocator, &bytecode, 1000000);
+    defer frame.deinit(allocator);
+    
+    // Test op_gas pushes gas_remaining to stack
+    try frame.op_gas();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1000000), result1);
+    
+    // Test op_gas with modified gas_remaining
+    frame.gas_remaining = 12345;
+    try frame.op_gas();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 12345), result2);
+    
+    // Test op_gas with zero gas
+    frame.gas_remaining = 0;
+    try frame.op_gas();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result3);
+    
+    // Test op_gas with negative gas (should push 0)
+    frame.gas_remaining = -100;
+    try frame.op_gas();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result4);
+}
+
+test "ColdFrame op_lt less than comparison" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x10, 0x00}; // LT STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test 10 < 20 = 1
+    try frame.push(10);
+    try frame.push(20);
+    try frame.op_lt();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result1);
+    
+    // Test 20 < 10 = 0
+    try frame.push(20);
+    try frame.push(10);
+    try frame.op_lt();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result2);
+    
+    // Test 10 < 10 = 0
+    try frame.push(10);
+    try frame.push(10);
+    try frame.op_lt();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result3);
+    
+    // Test with max value
+    try frame.push(std.math.maxInt(u256));
+    try frame.push(0);
+    try frame.op_lt();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result4);
+}
+
+test "ColdFrame op_gt greater than comparison" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x11, 0x00}; // GT STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test 20 > 10 = 1
+    try frame.push(20);
+    try frame.push(10);
+    try frame.op_gt();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result1);
+    
+    // Test 10 > 20 = 0
+    try frame.push(10);
+    try frame.push(20);
+    try frame.op_gt();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result2);
+    
+    // Test 10 > 10 = 0
+    try frame.push(10);
+    try frame.push(10);
+    try frame.op_gt();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result3);
+    
+    // Test with max value
+    try frame.push(0);
+    try frame.push(std.math.maxInt(u256));
+    try frame.op_gt();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result4);
+}
+
+test "ColdFrame op_slt signed less than comparison" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x12, 0x00}; // SLT STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test 10 < 20 = 1 (positive comparison)
+    try frame.push(10);
+    try frame.push(20);
+    try frame.op_slt();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result1);
+    
+    // Test -10 < 10 = 1 (negative < positive)
+    const neg_10 = @as(u256, @bitCast(@as(i256, -10)));
+    try frame.push(neg_10);
+    try frame.push(10);
+    try frame.op_slt();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result2);
+    
+    // Test 10 < -10 = 0 (positive < negative)
+    try frame.push(10);
+    try frame.push(neg_10);
+    try frame.op_slt();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result3);
+    
+    // Test MIN_INT < MAX_INT = 1
+    const min_int = @as(u256, 1) << 255; // Sign bit set
+    const max_int = (@as(u256, 1) << 255) - 1; // All bits except sign bit
+    try frame.push(min_int);
+    try frame.push(max_int);
+    try frame.op_slt();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result4);
+}
+
+test "ColdFrame op_sgt signed greater than comparison" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x13, 0x00}; // SGT STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test 20 > 10 = 1 (positive comparison)
+    try frame.push(20);
+    try frame.push(10);
+    try frame.op_sgt();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result1);
+    
+    // Test 10 > -10 = 1 (positive > negative)
+    const neg_10 = @as(u256, @bitCast(@as(i256, -10)));
+    try frame.push(10);
+    try frame.push(neg_10);
+    try frame.op_sgt();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result2);
+    
+    // Test -10 > 10 = 0 (negative > positive)
+    try frame.push(neg_10);
+    try frame.push(10);
+    try frame.op_sgt();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result3);
+    
+    // Test MAX_INT > MIN_INT = 1
+    const min_int = @as(u256, 1) << 255; // Sign bit set
+    const max_int = (@as(u256, 1) << 255) - 1; // All bits except sign bit
+    try frame.push(max_int);
+    try frame.push(min_int);
+    try frame.op_sgt();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result4);
+}
+
+test "ColdFrame op_eq equality comparison" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x14, 0x00}; // EQ STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test 10 == 10 = 1
+    try frame.push(10);
+    try frame.push(10);
+    try frame.op_eq();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result1);
+    
+    // Test 10 == 20 = 0
+    try frame.push(10);
+    try frame.push(20);
+    try frame.op_eq();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result2);
+    
+    // Test 0 == 0 = 1
+    try frame.push(0);
+    try frame.push(0);
+    try frame.op_eq();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result3);
+    
+    // Test max == max = 1
+    try frame.push(std.math.maxInt(u256));
+    try frame.push(std.math.maxInt(u256));
+    try frame.op_eq();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result4);
+}
+
+test "ColdFrame op_iszero zero check" {
+    const allocator = std.testing.allocator;
+    const Frame = createColdFrame(.{});
+    
+    const bytecode = [_]u8{0x15, 0x00}; // ISZERO STOP
+    var frame = try Frame.init(allocator, &bytecode, 0);
+    defer frame.deinit(allocator);
+    
+    // Test iszero(0) = 1
+    try frame.push(0);
+    try frame.op_iszero();
+    const result1 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 1), result1);
+    
+    // Test iszero(1) = 0
+    try frame.push(1);
+    try frame.op_iszero();
+    const result2 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result2);
+    
+    // Test iszero(100) = 0
+    try frame.push(100);
+    try frame.op_iszero();
+    const result3 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result3);
+    
+    // Test iszero(max) = 0
+    try frame.push(std.math.maxInt(u256));
+    try frame.op_iszero();
+    const result4 = try frame.pop();
+    try std.testing.expectEqual(@as(u256, 0), result4);
 }
 
