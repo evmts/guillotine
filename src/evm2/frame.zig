@@ -115,7 +115,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
             allocator.free(stack_slice);
         }
         
-        pub fn push_unsafe(self: *Self, value: WordType) void {
+        fn push_unsafe(self: *Self, value: WordType) void {
             @branchHint(.likely);
             if (self.next_stack_index >= stack_size) unreachable;
             self.stack[self.next_stack_index] = value;
@@ -127,11 +127,10 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
                 @branchHint(.cold);
                 return Error.StackOverflow;
             }
-            self.stack[self.next_stack_index] = value;
-            self.next_stack_index += 1;
+            self.push_unsafe(value);
         }
         
-        pub fn pop_unsafe(self: *Self) WordType {
+        fn pop_unsafe(self: *Self) WordType {
             @branchHint(.likely);
             if (self.next_stack_index == 0) unreachable;
             
@@ -145,11 +144,10 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
                 return Error.StackUnderflow;
             }
             
-            self.next_stack_index -= 1;
-            return self.stack[self.next_stack_index];
+            return self.pop_unsafe();
         }
         
-        pub fn set_top_unsafe(self: *Self, value: WordType) void {
+        fn set_top_unsafe(self: *Self, value: WordType) void {
             @branchHint(.likely);
             if (self.next_stack_index == 0) unreachable;
             
@@ -162,10 +160,10 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
                 return Error.StackUnderflow;
             }
             
-            self.stack[self.next_stack_index - 1] = value;
+            self.set_top_unsafe(value);
         }
         
-        pub fn peek_unsafe(self: *const Self) WordType {
+        fn peek_unsafe(self: *const Self) WordType {
             @branchHint(.likely);
             if (self.next_stack_index == 0) unreachable;
             
@@ -178,7 +176,7 @@ pub fn createColdFrame(comptime config: FrameConfig) type {
                 return Error.StackUnderflow;
             }
             
-            return self.stack[self.next_stack_index - 1];
+            return self.peek_unsafe();
         }
         
         pub fn op_pc(self: *Self) Error!void {
