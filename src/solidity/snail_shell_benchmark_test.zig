@@ -32,9 +32,8 @@ test "SnailShellBenchmark EVM execution" {
         null, // table
         null, // chain_rules
         null, // context
-        0, // depth
-        false, // read_only
         null, // tracer
+        null, // precompile_table
     );
     defer vm.deinit();
     const simple_benchmark_bytecode = "608060405234801561001057600080fd5b50610100565b6101008061001f6000396000f3fe";

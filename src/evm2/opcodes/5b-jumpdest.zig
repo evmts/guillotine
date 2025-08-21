@@ -6,10 +6,16 @@ pub const Op5B = struct {
     /// Returns total static gas cost and validates stack requirements
     pub fn analyzeBasicBlock(bytecode: []const u8, start_pc: usize) !struct { gas_cost: i64, max_stack_height: u16 } {
         const opcode_info = opcode_data.OPCODE_INFO;
-        var pc = start_pc + 1; // Skip JUMPDEST itself
-        var total_gas: i64 = 1; // JUMPDEST costs 1 gas
+        var pc = start_pc;
+        var total_gas: i64 = 0;
         var stack_height: i32 = 0;
         var max_stack_height: u16 = 0;
+        
+        // If starting at JUMPDEST, consume its gas and skip it
+        if (pc < bytecode.len and bytecode[pc] == 0x5B) {
+            total_gas -= 1; // JUMPDEST costs 1 gas
+            pc += 1;
+        }
         
         while (pc < bytecode.len) {
             const opcode = bytecode[pc];

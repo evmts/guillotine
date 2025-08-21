@@ -22,16 +22,16 @@ pub const OPCODE_INFO = blk: {
     // 0x00s: Stop and Arithmetic Operations
     info[0x00] = .{ .gas_cost = 0, .stack_inputs = 0, .stack_outputs = 0, .is_undefined = false }; // STOP
     info[0x01] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // ADD
-    info[0x02] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // MUL
+    info[0x02] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // MUL
     info[0x03] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SUB
-    info[0x04] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // DIV
-    info[0x05] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SDIV
-    info[0x06] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // MOD
-    info[0x07] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SMOD
+    info[0x04] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // DIV
+    info[0x05] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SDIV
+    info[0x06] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // MOD
+    info[0x07] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SMOD
     info[0x08] = .{ .gas_cost = GasConstants.GasMidStep, .stack_inputs = 3, .stack_outputs = 1, .is_undefined = false }; // ADDMOD
     info[0x09] = .{ .gas_cost = GasConstants.GasMidStep, .stack_inputs = 3, .stack_outputs = 1, .is_undefined = false }; // MULMOD
     info[0x0a] = .{ .gas_cost = 10, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // EXP (dynamic, base cost)
-    info[0x0b] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SIGNEXTEND
+    info[0x0b] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // SIGNEXTEND
     
     // 0x10s: Comparison & Bitwise Logic Operations
     info[0x10] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 2, .stack_outputs = 1, .is_undefined = false }; // LT
@@ -78,7 +78,7 @@ pub const OPCODE_INFO = blk: {
     info[0x44] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // DIFFICULTY/PREVRANDAO
     info[0x45] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // GASLIMIT
     info[0x46] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // CHAINID
-    info[0x47] = .{ .gas_cost = GasConstants.GasLowStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // SELFBALANCE
+    info[0x47] = .{ .gas_cost = GasConstants.GasFastStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // SELFBALANCE
     info[0x48] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // BASEFEE
     info[0x49] = .{ .gas_cost = GasConstants.GasFastestStep, .stack_inputs = 1, .stack_outputs = 1, .is_undefined = false }; // BLOBHASH
     info[0x4a] = .{ .gas_cost = GasConstants.GasQuickStep, .stack_inputs = 0, .stack_outputs = 1, .is_undefined = false }; // BLOBBASEFEE
