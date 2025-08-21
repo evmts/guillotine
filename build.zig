@@ -1888,6 +1888,56 @@ pub fn build(b: *std.Build) void {
     const delegatecall_test_step = b.step("test-delegatecall", "Run DELEGATECALL tests");
     delegatecall_test_step.dependOn(&run_delegatecall_test.step);
 
+    // Add register-based EVM test (analysis3, interpret3, etc.)
+    const test3 = b.addTest(.{
+        .name = "test3",
+        .root_source_file = b.path("src/evm/evm/analysis3.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test3.root_module.addImport("evm", evm_mod);
+    test3.root_module.addImport("primitives", primitives_mod);
+    test3.root_module.addImport("build_options", build_options_mod);
+    const run_test3 = b.addRunArtifact(test3);
+    const test3_step = b.step("test3", "Run register-based EVM tests");
+    test3_step.dependOn(&run_test3.step);
+
+    // Add EVM2 module
+    const evm2_mod = b.createModule(.{
+        .root_source_file = b.path("src/evm2/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    evm2_mod.addImport("primitives", primitives_mod);
+    evm2_mod.addImport("evm", evm_mod);
+    evm2_mod.addImport("build_options", build_options_mod);
+
+    // Build EVM2 library
+    const evm2_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "evm2",
+        .root_module = evm2_mod,
+    });
+    b.installArtifact(evm2_lib);
+
+    // Build EVM2 step
+    const evm2_build_step = b.step("evm2", "Build EVM2 library");
+    evm2_build_step.dependOn(&evm2_lib.step);
+
+    // Test EVM2
+    const test_evm2 = b.addTest(.{
+        .name = "test-evm2",
+        .root_source_file = b.path("src/evm2/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    test_evm2.root_module.addImport("primitives", primitives_mod);
+    test_evm2.root_module.addImport("evm", evm_mod);
+    test_evm2.root_module.addImport("build_options", build_options_mod);
+    const run_test_evm2 = b.addRunArtifact(test_evm2);
+    const test_evm2_step = b.step("test-evm2", "Run EVM2 tests");
+    test_evm2_step.dependOn(&run_test_evm2.step);
+
     // Add BN254 individual test targets
     const bn254_fp_test = b.addTest(.{
         .name = "bn254-fp-test",
