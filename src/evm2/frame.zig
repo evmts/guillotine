@@ -30,6 +30,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         stack: *[options.stack_size]options.word_type,
         
         pub fn push_unsafe(self: *Self, value: options.word_type) void {
+            @branchHint(.likely);
             self.next_stack_pointer.* = value;
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) + @sizeOf(options.word_type));
         }
@@ -37,12 +38,14 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         pub fn push(self: *Self, value: options.word_type) Error!void {
             const stack_end = @intFromPtr(self.stack) + @sizeOf(options.word_type) * options.stack_size;
             if (@intFromPtr(self.next_stack_pointer) >= stack_end) {
+                @branchHint(.cold);
                 return Error.StackOverflow;
             }
             self.push_unsafe(value);
         }
         
         pub fn pop_unsafe(self: *Self) options.word_type {
+            @branchHint(.likely);
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type));
             return self.next_stack_pointer.*;
         }
@@ -50,12 +53,14 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
         pub fn pop(self: *Self) Error!options.word_type {
             const stack_start = @intFromPtr(&self.stack[0]);
             if (@intFromPtr(self.next_stack_pointer) <= stack_start) {
+                @branchHint(.cold);
                 return Error.StackUnderflow;
             }
             return self.pop_unsafe();
         }
         
         pub fn pop_2_push_1_unsafe(self: *Self, value: options.word_type) void {
+            @branchHint(.likely);
             // Pop 2 items by moving pointer back
             self.next_stack_pointer = @ptrFromInt(@intFromPtr(self.next_stack_pointer) - @sizeOf(options.word_type) * 2);
             // Push 1 item
@@ -67,6 +72,7 @@ pub fn ColdFrame(comptime options: FrameOptions) type {
             const stack_start = @intFromPtr(&self.stack[0]);
             // Need at least 2 items on stack
             if (@intFromPtr(self.next_stack_pointer) < stack_start + @sizeOf(options.word_type) * 2) {
+                @branchHint(.cold);
                 return Error.StackUnderflow;
             }
             self.pop_2_push_1_unsafe(value);
