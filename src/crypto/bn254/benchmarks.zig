@@ -256,7 +256,23 @@ pub const BenchmarkStats = struct {
         else
             std.fmt.bufPrint(&max_buf, "{d:.2} {s}", .{ max_time.value, max_time.unit }) catch "err";
 
-        std.debug.print("│ {s:<28} │ {s:>6} │ {s:>6} │ {s:>6} │ {s:>6} │ {s:>9} │ {:>6} │\n", .{ self.name, mean_str, std_str, p99_str, max_str, ops_display, self.samples });
+        // Color-code operation names by type
+        const name_colored = if (std.mem.startsWith(u8, self.name, "Fp "))
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[92m{s}\x1b[0m", .{self.name}) catch self.name
+        else if (std.mem.startsWith(u8, self.name, "Fp2 "))
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[94m{s}\x1b[0m", .{self.name}) catch self.name
+        else if (std.mem.startsWith(u8, self.name, "Fp6 "))
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[96m{s}\x1b[0m", .{self.name}) catch self.name
+        else if (std.mem.startsWith(u8, self.name, "Fp12 "))
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[95m{s}\x1b[0m", .{self.name}) catch self.name
+        else if (std.mem.startsWith(u8, self.name, "G1 "))
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[93m{s}\x1b[0m", .{self.name}) catch self.name
+        else if (std.mem.startsWith(u8, self.name, "G2 "))
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[91m{s}\x1b[0m", .{self.name}) catch self.name
+        else
+            std.fmt.allocPrint(std.heap.page_allocator, "\x1b[1;97m{s}\x1b[0m", .{self.name}) catch self.name;
+
+        std.debug.print("\x1b[90m│\x1b[0m {s:<47} \x1b[90m│\x1b[0m \x1b[97m{s:>8}\x1b[0m \x1b[90m│\x1b[0m \x1b[90m{s:>8}\x1b[0m \x1b[90m│\x1b[0m \x1b[93m{s:>8}\x1b[0m \x1b[90m│\x1b[0m \x1b[91m{s:>8}\x1b[0m \x1b[90m│\x1b[0m \x1b[92m{s:>9}\x1b[0m \x1b[90m│\x1b[0m \x1b[96m{d:>6}\x1b[0m \x1b[90m│\x1b[0m\n", .{ name_colored, mean_str, std_str, p99_str, max_str, ops_display, self.samples });
     }
 };
 
@@ -838,9 +854,9 @@ pub fn runComprehensiveBenchmarks(allocator: std.mem.Allocator) !void {
     _ = getInputs();
 
     std.debug.print("\n", .{});
-    std.debug.print("╔══════════════════════════════════════════════════════════════════════════════╗\n", .{});
-    std.debug.print("║                   BN254 Pairing Library Performance Benchmarks              ║\n", .{});
-    std.debug.print("╚══════════════════════════════════════════════════════════════════════════════╝\n", .{});
+    std.debug.print("\x1b[36m╔══════════════════════════════════════════════════════════════════════════════╗\x1b[0m\n", .{});
+    std.debug.print("\x1b[36m║\x1b[0m\x1b[1;97m                   BN254 Pairing Library Performance Benchmarks              \x1b[0m\x1b[36m║\x1b[0m\n", .{});
+    std.debug.print("\x1b[36m╚══════════════════════════════════════════════════════════════════════════════╝\x1b[0m\n", .{});
     std.debug.print("\n", .{});
 
     std.debug.print("Configuration:\n", .{});
@@ -891,9 +907,9 @@ pub fn runComprehensiveBenchmarks(allocator: std.mem.Allocator) !void {
         .{ .name = "Final Exponentiation", .func = benchFinalExponentiation, .sample_size = operation_sample_sizes.final_exp, .is_slow = true },
     };
 
-    std.debug.print("┌──────────────────────────────┬────────┬────────┬────────┬────────┬───────────┬────────┐\n", .{});
-    std.debug.print("│ Operation                    │  Mean  │ StdDev │   P99  │   Max  │   Ops/s   │ Samples│\n", .{});
-    std.debug.print("├──────────────────────────────┼────────┼────────┼────────┼────────┼───────────┼────────┤\n", .{});
+    std.debug.print("\x1b[90m┌────────────────────────────────────────┬──────────┬──────────┬──────────┬──────────┬───────────┬────────┐\x1b[0m\n", .{});
+    std.debug.print("\x1b[90m│\x1b[0m \x1b[1;17mOperation\x1b[0m                              \x1b[90m│\x1b[0m   \x1b[1;33mMean\x1b[0m   \x1b[90m│\x1b[0m  \x1b[1;33mStdDev\x1b[0m  \x1b[90m│\x1b[0m    \x1b[1;33mP99\x1b[0m   \x1b[90m│\x1b[0m    \x1b[1;33mMax\x1b[0m   \x1b[90m│\x1b[0m   \x1b[1;33mOps/s\x1b[0m   \x1b[90m│\x1b[0m \x1b[1;33mSamples\x1b[0m\x1b[90m│\x1b[0m\n", .{});
+    std.debug.print("\x1b[90m├────────────────────────────────────────┼──────────┼──────────┼──────────┼──────────┼───────────┼────────┤\x1b[0m\n", .{});
 
     var all_stats = std.ArrayList(BenchmarkStats).init(allocator);
     defer all_stats.deinit();
@@ -905,25 +921,25 @@ pub fn runComprehensiveBenchmarks(allocator: std.mem.Allocator) !void {
         stats.format();
     }
 
-    std.debug.print("└──────────────────────────────┴────────┴────────┴────────┴────────┴───────────┴────────┘\n", .{});
+    std.debug.print("\x1b[90m├────────────────────────────────────────┼──────────┴──────────┴──────────┴──────────┴───────────┴────────┘\x1b[0m\n", .{});
 
     // Performance summary
     std.debug.print("\n", .{});
-    std.debug.print("Performance Summary:\n", .{});
-    std.debug.print("==================================================\n", .{});
+    std.debug.print("\x1b[1;36mPerformance Summary:\x1b[0m\n", .{});
+    std.debug.print("\x1b[36m==================================================\x1b[0m\n", .{});
 
     // Find key benchmarks for summary
     for (all_stats.items) |stats| {
         if (std.mem.eql(u8, stats.name, "Fp Multiplication")) {
-            std.debug.print("• Base field multiplication: {d:.1} ns/op\n", .{stats.mean_ns});
+            std.debug.print("\x1b[92m•\x1b[0m Base field multiplication: \x1b[97m{d:.1} ns/op\x1b[0m\n", .{stats.mean_ns});
         } else if (std.mem.eql(u8, stats.name, "Fp12 Multiplication")) {
-            std.debug.print("• Extension field (Fp12) mult: {d:.1} μs/op\n", .{stats.mean_ns / 1000.0});
+            std.debug.print("\x1b[95m•\x1b[0m Extension field (Fp12) mult: \x1b[97m{d:.1} μs/op\x1b[0m\n", .{stats.mean_ns / 1000.0});
         } else if (std.mem.eql(u8, stats.name, "G1 Scalar Multiplication")) {
-            std.debug.print("• G1 scalar multiplication: {d:.1} μs/op\n", .{stats.mean_ns / 1000.0});
+            std.debug.print("\x1b[93m•\x1b[0m G1 scalar multiplication: \x1b[97m{d:.1} μs/op\x1b[0m\n", .{stats.mean_ns / 1000.0});
         } else if (std.mem.eql(u8, stats.name, "G2 Scalar Multiplication")) {
-            std.debug.print("• G2 scalar multiplication: {d:.1} ms/op\n", .{stats.mean_ns / 1_000_000.0});
+            std.debug.print("\x1b[91m•\x1b[0m G2 scalar multiplication: \x1b[97m{d:.1} ms/op\x1b[0m\n", .{stats.mean_ns / 1_000_000.0});
         } else if (std.mem.eql(u8, stats.name, "Full Pairing")) {
-            std.debug.print("• Complete pairing operation: {d:.1} ms/op\n", .{stats.mean_ns / 1_000_000.0});
+            std.debug.print("\x1b[1;97m•\x1b[0m Complete pairing operation: \x1b[1;97m{d:.1} ms/op\x1b[0m\n", .{stats.mean_ns / 1_000_000.0});
         }
     }
 
