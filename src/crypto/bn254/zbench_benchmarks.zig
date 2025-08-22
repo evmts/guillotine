@@ -12,14 +12,6 @@ const G2 = @import("G2.zig");
 const pairing_mod = @import("pairing.zig");
 const curve_parameters = @import("curve_parameters.zig");
 
-// zbench Configuration
-const Config = zbench.Config{
-    //.max_iterations = 16384,
-    .time_budget_ns = 2e9, // 2 seconds per benchmark
-    //.track_allocations = true,
-    //.use_shuffling_allocator = false, // Avoid performance overhead for crypto benchmarks
-};
-
 // =============================================================================
 // SECURE RANDOM INPUT GENERATION UTILITIES
 // =============================================================================
@@ -226,49 +218,52 @@ fn nextInputIndex() usize {
 
 test "field benchmarks" {
     const allocator = std.testing.allocator;
-    var bench = zbench.Benchmark.init(allocator, Config);
+    // 500ms time budget for field benchmarks
+    var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 5e8 });
     defer bench.deinit();
 
+    //we need to run the benchmarks 1000 times otherwise the clock resolution is too low to measure the time accurately
+
     // Base field operations
-    try bench.add("Fp Addition", benchmarkFpMontAdd, .{});
-    try bench.add("Fp Subtraction", benchmarkFpMontSub, .{});
-    try bench.add("Fp Multiplication", benchmarkFpMontMul, .{});
-    try bench.add("Fp Squaring", benchmarkFpMontSquare, .{});
-    try bench.add("Fp Inversion", benchmarkFpMontInv, .{});
+    try bench.add("Fp Addition (1000)", benchmarkFpMontAdd, .{});
+    try bench.add("Fp Subtraction (1000)", benchmarkFpMontSub, .{});
+    try bench.add("Fp Multiplication (1000)", benchmarkFpMontMul, .{});
+    try bench.add("Fp Squaring (1000)", benchmarkFpMontSquare, .{});
+    try bench.add("Fp Inversion (1000)", benchmarkFpMontInv, .{});
 
     // Extension field operations
-    try bench.add("Fp2 Addition", benchmarkFp2MontAdd, .{});
-    try bench.add("Fp2 Subtraction", benchmarkFp2MontSub, .{});
-    try bench.add("Fp2 Multiplication", benchmarkFp2MontMul, .{});
-    try bench.add("Fp2 Squaring", benchmarkFp2MontSquare, .{});
-    try bench.add("Fp2 Inversion", benchmarkFp2MontInv, .{});
+    try bench.add("Fp2 Addition (1000)", benchmarkFp2MontAdd, .{});
+    try bench.add("Fp2 Subtraction (1000)", benchmarkFp2MontSub, .{});
+    try bench.add("Fp2 Multiplication (1000)", benchmarkFp2MontMul, .{});
+    try bench.add("Fp2 Squaring (1000)", benchmarkFp2MontSquare, .{});
+    try bench.add("Fp2 Inversion (1000)", benchmarkFp2MontInv, .{});
 
-    try bench.add("Fp6 Addition", benchmarkFp6MontAdd, .{});
-    try bench.add("Fp6 Subtraction", benchmarkFp6MontSub, .{});
-    try bench.add("Fp6 Multiplication", benchmarkFp6MontMul, .{});
-    try bench.add("Fp6 Squaring", benchmarkFp6MontSquare, .{});
-    try bench.add("Fp6 Inversion", benchmarkFp6MontInv, .{});
+    try bench.add("Fp6 Addition (1000)", benchmarkFp6MontAdd, .{});
+    try bench.add("Fp6 Subtraction (1000)", benchmarkFp6MontSub, .{});
+    try bench.add("Fp6 Multiplication (1000)", benchmarkFp6MontMul, .{});
+    try bench.add("Fp6 Squaring (1000)", benchmarkFp6MontSquare, .{});
+    try bench.add("Fp6 Inversion (1000)", benchmarkFp6MontInv, .{});
 
-    try bench.add("Fp12 Addition", benchmarkFp12MontAdd, .{});
-    try bench.add("Fp12 Subtraction", benchmarkFp12MontSub, .{});
-    try bench.add("Fp12 Multiplication", benchmarkFp12MontMul, .{});
-    try bench.add("Fp12 Squaring", benchmarkFp12MontSquare, .{});
-    try bench.add("Fp12 Inversion", benchmarkFp12MontInv, .{});
+    try bench.add("Fp12 Addition (1000)", benchmarkFp12MontAdd, .{});
+    try bench.add("Fp12 Subtraction (1000)", benchmarkFp12MontSub, .{});
+    try bench.add("Fp12 Multiplication (1000)", benchmarkFp12MontMul, .{});
+    try bench.add("Fp12 Squaring (1000)", benchmarkFp12MontSquare, .{});
+    try bench.add("Fp12 Inversion (1000)", benchmarkFp12MontInv, .{});
 
-    try bench.add("Fr Addition", benchmarkFrAdd, .{});
-    try bench.add("Fr Subtraction", benchmarkFrSub, .{});
-    try bench.add("Fr Multiplication", benchmarkFrMul, .{});
-    try bench.add("Fr Inversion", benchmarkFrInv, .{});
-
-    //try bench.run(std.io.getStdOut().writer());
+    try bench.add("Fr Addition (1000)", benchmarkFrAdd, .{});
+    try bench.add("Fr Subtraction (1000)", benchmarkFrSub, .{});
+    try bench.add("Fr Multiplication (1000)", benchmarkFrMul, .{});
+    try bench.add("Fr Inversion (1000)", benchmarkFrInv, .{});
 
     const stderr = std.io.getStdErr().writer();
     try stderr.writeAll("\n");
     try bench.run(stderr);
 }
 
-pub fn runCurveBenchmarks(allocator: std.mem.Allocator) !void {
-    var bench = zbench.Benchmark.init(allocator, Config);
+test "curve benchmarks" {
+    const allocator = std.testing.allocator;
+    // 1 second time budget for curve benchmarks
+    var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 1e9 });
     defer bench.deinit();
 
     try bench.add("G1 Addition", benchmarkG1Add, .{});
@@ -285,11 +280,15 @@ pub fn runCurveBenchmarks(allocator: std.mem.Allocator) !void {
     try bench.add("G2 Affine Conversion", benchmarkG2ToAffine, .{});
     try bench.add("G2 Curve Validation", benchmarkG2IsOnCurve, .{});
 
-    try bench.run(std.io.getStdOut().writer());
+    const stderr = std.io.getStdErr().writer();
+    try stderr.writeAll("\n");
+    try bench.run(stderr);
 }
 
-pub fn runPairingBenchmarks(allocator: std.mem.Allocator) !void {
-    var bench = zbench.Benchmark.init(allocator, Config);
+test "pairing benchmarks" {
+    const allocator = std.testing.allocator;
+    // 2 seconds time budget for pairing benchmarks
+    var bench = zbench.Benchmark.init(allocator, .{ .time_budget_ns = 2e9 });
     defer bench.deinit();
 
     try bench.add("Full Pairing", benchmarkPairing, .{});
@@ -298,7 +297,9 @@ pub fn runPairingBenchmarks(allocator: std.mem.Allocator) !void {
     try bench.add("Final Exponentiation (Easy)", benchmarkFinalExponentiationEasy, .{});
     try bench.add("Final Exponentiation (Hard)", benchmarkFinalExponentiationHard, .{});
 
-    try bench.run(std.io.getStdOut().writer());
+    const stderr = std.io.getStdErr().writer();
+    try stderr.writeAll("\n");
+    try bench.run(stderr);
 }
 
 // pub fn runAllBenchmarks(allocator: std.mem.Allocator) !void {
@@ -319,8 +320,10 @@ pub fn runPairingBenchmarks(allocator: std.mem.Allocator) !void {
 fn benchmarkFpMontAdd(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp_a[i].add(&test_inputs.fp_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp_a[(i + j) % 1000].add(&test_inputs.fp_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -328,8 +331,10 @@ fn benchmarkFpMontAdd(allocator: std.mem.Allocator) void {
 fn benchmarkFpMontSub(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp_a[i].sub(&test_inputs.fp_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp_a[(i + j) % 1000].sub(&test_inputs.fp_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -337,8 +342,10 @@ fn benchmarkFpMontSub(allocator: std.mem.Allocator) void {
 fn benchmarkFpMontMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp_a[i].mul(&test_inputs.fp_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp_a[(i + j) % 1000].mul(&test_inputs.fp_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -346,8 +353,10 @@ fn benchmarkFpMontMul(allocator: std.mem.Allocator) void {
 fn benchmarkFpMontSquare(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp_a[i].square();
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp_a[(i + j) % 1000].square();
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -355,8 +364,10 @@ fn benchmarkFpMontSquare(allocator: std.mem.Allocator) void {
 fn benchmarkFpMontInv(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp_nonzero[i].inv() catch unreachable;
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp_nonzero[(i + j) % 1000].inv() catch unreachable;
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -364,8 +375,10 @@ fn benchmarkFpMontInv(allocator: std.mem.Allocator) void {
 fn benchmarkFp2MontAdd(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp2_a[i].add(&test_inputs.fp2_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp2_a[(i + j) % 1000].add(&test_inputs.fp2_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -373,8 +386,10 @@ fn benchmarkFp2MontAdd(allocator: std.mem.Allocator) void {
 fn benchmarkFp2MontSub(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp2_a[i].sub(&test_inputs.fp2_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp2_a[(i + j) % 1000].sub(&test_inputs.fp2_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -382,8 +397,10 @@ fn benchmarkFp2MontSub(allocator: std.mem.Allocator) void {
 fn benchmarkFp2MontMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp2_a[i].mul(&test_inputs.fp2_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp2_a[(i + j) % 1000].mul(&test_inputs.fp2_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -391,8 +408,10 @@ fn benchmarkFp2MontMul(allocator: std.mem.Allocator) void {
 fn benchmarkFp2MontSquare(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp2_a[i].square();
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp2_a[(i + j) % 1000].square();
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -400,8 +419,10 @@ fn benchmarkFp2MontSquare(allocator: std.mem.Allocator) void {
 fn benchmarkFp2MontInv(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp2_nonzero[i].inv() catch unreachable;
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp2_nonzero[(i + j) % 1000].inv() catch unreachable;
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -409,8 +430,10 @@ fn benchmarkFp2MontInv(allocator: std.mem.Allocator) void {
 fn benchmarkFp6MontAdd(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp6_a[i].add(&test_inputs.fp6_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp6_a[(i + j) % 1000].add(&test_inputs.fp6_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -418,8 +441,10 @@ fn benchmarkFp6MontAdd(allocator: std.mem.Allocator) void {
 fn benchmarkFp6MontSub(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp6_a[i].sub(&test_inputs.fp6_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp6_a[(i + j) % 1000].sub(&test_inputs.fp6_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -427,8 +452,10 @@ fn benchmarkFp6MontSub(allocator: std.mem.Allocator) void {
 fn benchmarkFp6MontMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp6_a[i].mul(&test_inputs.fp6_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp6_a[(i + j) % 1000].mul(&test_inputs.fp6_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -436,8 +463,10 @@ fn benchmarkFp6MontMul(allocator: std.mem.Allocator) void {
 fn benchmarkFp6MontSquare(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp6_a[i].square();
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp6_a[(i + j) % 1000].square();
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -445,8 +474,10 @@ fn benchmarkFp6MontSquare(allocator: std.mem.Allocator) void {
 fn benchmarkFp6MontInv(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp6_nonzero[i].inv() catch unreachable;
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp6_nonzero[(i + j) % 1000].inv() catch unreachable;
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -454,8 +485,10 @@ fn benchmarkFp6MontInv(allocator: std.mem.Allocator) void {
 fn benchmarkFp12MontAdd(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp12_a[i].add(&test_inputs.fp12_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp12_a[(i + j) % 1000].add(&test_inputs.fp12_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -463,8 +496,10 @@ fn benchmarkFp12MontAdd(allocator: std.mem.Allocator) void {
 fn benchmarkFp12MontSub(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp12_a[i].sub(&test_inputs.fp12_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp12_a[(i + j) % 1000].sub(&test_inputs.fp12_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -472,8 +507,10 @@ fn benchmarkFp12MontSub(allocator: std.mem.Allocator) void {
 fn benchmarkFp12MontMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp12_a[i].mul(&test_inputs.fp12_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp12_a[(i + j) % 1000].mul(&test_inputs.fp12_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -481,8 +518,10 @@ fn benchmarkFp12MontMul(allocator: std.mem.Allocator) void {
 fn benchmarkFp12MontSquare(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp12_a[i].square();
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp12_a[(i + j) % 1000].square();
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -490,8 +529,10 @@ fn benchmarkFp12MontSquare(allocator: std.mem.Allocator) void {
 fn benchmarkFp12MontInv(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fp12_nonzero[i].inv() catch unreachable;
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fp12_nonzero[(i + j) % 1000].inv() catch unreachable;
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -499,8 +540,10 @@ fn benchmarkFp12MontInv(allocator: std.mem.Allocator) void {
 fn benchmarkFrAdd(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fr_a[i].add(&test_inputs.fr_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fr_a[(i + j) % 1000].add(&test_inputs.fr_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -508,8 +551,10 @@ fn benchmarkFrAdd(allocator: std.mem.Allocator) void {
 fn benchmarkFrSub(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fr_a[i].sub(&test_inputs.fr_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fr_a[(i + j) % 1000].sub(&test_inputs.fr_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -517,8 +562,10 @@ fn benchmarkFrSub(allocator: std.mem.Allocator) void {
 fn benchmarkFrMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fr_a[i].mul(&test_inputs.fr_b[i]);
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fr_a[(i + j) % 1000].mul(&test_inputs.fr_b[(i + j) % 1000]);
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -526,8 +573,10 @@ fn benchmarkFrMul(allocator: std.mem.Allocator) void {
 fn benchmarkFrInv(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.fr_nonzero[i].inv() catch unreachable;
-    std.mem.doNotOptimizeAway(result);
+    for (0..1000) |j| {
+        const result = test_inputs.fr_nonzero[(i + j) % 1000].inv() catch unreachable;
+        std.mem.doNotOptimizeAway(result);
+    }
 
     _ = allocator;
 }
@@ -553,7 +602,7 @@ fn benchmarkG1Double(allocator: std.mem.Allocator) void {
 fn benchmarkG1ScalarMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.g1_points[i].mul(&test_inputs.fr_points[i]);
+    const result = test_inputs.g1_points[i].mul(&test_inputs.fr_nonzero[i]);
     std.mem.doNotOptimizeAway(result);
 
     _ = allocator;
@@ -607,7 +656,7 @@ fn benchmarkG2Double(allocator: std.mem.Allocator) void {
 fn benchmarkG2ScalarMul(allocator: std.mem.Allocator) void {
     const test_inputs = getInputs();
     const i = nextInputIndex();
-    const result = test_inputs.g2_points[i].mul(&test_inputs.fr_points[i]);
+    const result = test_inputs.g2_points[i].mul(&test_inputs.fr_nonzero[i]);
     std.mem.doNotOptimizeAway(result);
 
     _ = allocator;
