@@ -142,8 +142,9 @@ export fn guillotine_init() c_int {
     vm.* = evm_root.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        0, // depth
+        false, // read_only
+        null // tracer
     ) catch |err| {
         log(.err, .guillotine_c, "Failed to initialize VM: {}", .{err});
         allocator.destroy(vm);
@@ -295,8 +296,9 @@ export fn guillotine_vm_create() ?*GuillotineVm {
     state.vm.* = evm_root.Evm.init(alloc, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        0, // depth
+        false, // read_only
+        null // tracer
     ) catch {
         state.memory_db.deinit();
         alloc.destroy(state.memory_db);

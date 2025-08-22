@@ -14,20 +14,20 @@ const ChainRules = @import("../hardforks/chain_rules.zig").ChainRules;
 const no_precompiles = if (@hasDecl(build_options, "no_precompiles")) build_options.no_precompiles else false;
 
 /// Function type for precompiles that don't require chain rules
-pub const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput;
+const PrecompileFn = *const fn (input: []const u8, output: []u8, gas_limit: u64) PrecompileOutput;
 
 /// Function type for precompiles that require chain rules (EC operations)
-pub const PrecompileFnWithChainRules = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
+const PrecompileFnWithChainRules = *const fn (input: []const u8, output: []u8, gas_limit: u64, chain_rules: ChainRules) PrecompileOutput;
 
 /// Unified precompile handler that wraps both function types
-pub const PrecompileHandler = union(enum) {
+const PrecompileHandler = union(enum) {
     standard: PrecompileFn,
     with_chain_rules: PrecompileFnWithChainRules,
 };
 
 /// Compile-time function table for O(1) precompile dispatch
 /// Index is (precompile_id - 1) since precompile IDs start at 1
-pub const PRECOMPILE_TABLE = blk: {
+const PRECOMPILE_TABLE = blk: {
     var table: [10]?PrecompileHandler = .{null} ** 10;
 
     if (!no_precompiles) {

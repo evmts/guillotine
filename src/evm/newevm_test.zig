@@ -22,8 +22,7 @@ test "EVM can be initialized successfully" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -48,8 +47,7 @@ test "EVM state can read and write balances" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -89,8 +87,7 @@ test "EVM state can read and write storage" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -129,8 +126,7 @@ test "EVM state can read and write code" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -169,8 +165,7 @@ test "EVM state can read and write nonces" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -208,8 +203,7 @@ test "EVM state can handle transient storage" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -253,8 +247,7 @@ test "EVM state can emit and track logs" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -301,8 +294,7 @@ test "EVM state persistence across operations" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -366,8 +358,7 @@ test "Simple contract execution with PUSH and POP operations" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -422,8 +413,7 @@ test "Contract with basic stack operations" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 
@@ -483,8 +473,7 @@ test "Contract execution with PUSH0 operation" {
     var vm = try evm.Evm.init(allocator, db_interface, null, // table
         null, // chain_rules
         null, // context
-        null, // tracer
-        null  // precompile_table
+        null // tracer
     );
     defer vm.deinit();
 

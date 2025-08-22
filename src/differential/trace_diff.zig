@@ -180,7 +180,7 @@ pub fn run_diff_erc20_transfer(allocator: std.mem.Allocator) !?Divergence {
     var memory_db = @import("../state/memory_database.zig").MemoryDatabase.init(allocator);
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
-    var evm = try Evm.init(allocator, db_interface, null, null, null, null, null);
+    var evm = try Evm.init(allocator, db_interface, null, null, null, 0, false, null);
     defer evm.deinit();
 
     const deployer = Address.ZERO_ADDRESS;

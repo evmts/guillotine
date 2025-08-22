@@ -68,7 +68,6 @@ pub fn main() !void {
         null, // chain_rules
         null, // context
         null, // tracer
-        null, // precompile_table
     );
     defer vm.deinit();
 
