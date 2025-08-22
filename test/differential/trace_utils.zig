@@ -125,9 +125,10 @@ pub fn createTracedEvm(
         db_interface,
         null, // jump_table
         null, // chain_rules
-        null, // context
+        null, // analysis_cache
+        0,    // depth
+        false, // is_static
         tracer,
-        null, // precompile_table
     );
 }
 

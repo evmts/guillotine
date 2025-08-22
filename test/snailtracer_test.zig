@@ -57,7 +57,7 @@ test "snailtracer benchmark executes successfully" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     // Caller and funding
@@ -109,7 +109,7 @@ test "snailtracer benchmark high gas consumption" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -166,7 +166,7 @@ test "snailtracer produces expected output format" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -230,7 +230,7 @@ test "snailtracer deployment gas requirements" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null, null);
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null);
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
@@ -269,7 +269,7 @@ test "snailtracer using call_mini" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null, null); // Regular mode for deployment
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null); // Regular mode for deployment
     defer vm.deinit();
 
     // Caller and funding
@@ -330,7 +330,7 @@ test "snailtracer high gas consumption with call_mini" {
     defer memory_db.deinit();
     const db_interface = memory_db.to_database_interface();
 
-    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null, null); // Regular mode for deployment
+    var vm = try evm.Evm.init(allocator, db_interface, null, null, null, null); // Regular mode for deployment
     defer vm.deinit();
 
     const caller = primitives.Address.from_u256(0x1000000000000000000000000000000000000001);
