@@ -80,6 +80,8 @@ _
 **/*.rs.bk
 ./debug/
 **/*.pdb
+**/target/
+**/Cargo.lock
 *.o
 *.a
 *.a.o

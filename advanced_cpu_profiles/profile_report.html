@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Guillotine EVM Profile Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 40px; line-height: 1.6; }
+        .header { background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 30px; }
+        .case { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { border-left: 4px solid #28a745; background: #f8fff9; }
+        .failed { border-left: 4px solid #dc3545; background: #fff8f8; }
+        .stats { display: flex; gap: 20px; margin: 20px 0; flex-wrap: wrap; }
+        .stat { background: #e9ecef; padding: 10px 15px; border-radius: 5px; font-weight: bold; }
+        .key-metrics { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        .action-btn { 
+            display: inline-block; 
+            padding: 8px 16px; 
+            margin: 5px 5px 5px 0; 
+            background: #007bff; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 4px; 
+            font-size: 14px;
+        }
+        .action-btn:hover { background: #0056b3; }
+        .trace-file { background: #f8f9fa; padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .timing { color: #28a745; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Guillotine EVM Advanced CPU Profiling Report</h1>
+        <p><strong>Generated:</strong> August 19, 2025 at 22:41:44</p>
+        <p><strong>Template:</strong> CPU Counters (Hardware Performance Analysis)</p>
+        <p><strong>Platform:</strong> Apple Silicon macOS with native performance monitoring</p>
+    </div>
+    
+    <div class="stats">
+        <div class="stat">✅ Successful Profiles: 25+</div>
+        <div class="stat">🔧 Advanced Metrics: Branch Prediction + Cache Analysis</div>
+        <div class="stat">📊 Total Benchmark Cases: 32</div>
+        <div class="stat">⚡ Hardware Counters: Enabled</div>
+    </div>
+
+    <div class="key-metrics">
+        <h3>🎯 Key Performance Metrics Available</h3>
+        <ul>
+            <li><strong>Branch Prediction Analysis:</strong> Misprediction rates and patterns</li>
+            <li><strong>CPU Cache Performance:</strong> L1/L2/L3 hit/miss ratios</li>
+            <li><strong>Memory Subsystem:</strong> Bandwidth utilization and latency</li>
+            <li><strong>Instruction Pipeline:</strong> IPC and stall analysis</li>
+            <li><strong>System Overhead:</strong> Context switches and kernel time</li>
+        </ul>
+    </div>
+    
+    <h2>🚀 Quick Start - Open Key Profiles</h2>
+    
+    <div class="case success">
+        <h3>🔥 High-Performance Hash Operations</h3>
+        <div class="trace-file">
+            <strong>File:</strong> ten_thousand_hashes_detailed.trace<br>
+            <strong>Analysis:</strong> CPU-intensive hash operations with detailed hardware counters
+        </div>
+        <a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/ten_thousand_hashes_detailed.trace" class="action-btn">Open in Instruments</a>
+        <button onclick="copyToClipboard('open /Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/ten_thousand_hashes_detailed.trace')" class="action-btn">Copy Command</button>
+    </div>
+
+    <div class="case success">
+        <h3>🧠 Complex Computation Analysis</h3>
+        <div class="trace-file">
+            <strong>File:</strong> snailtracer_system_trace.trace<br>
+            <strong>Analysis:</strong> Complete system-level trace with memory and CPU analysis
+        </div>
+        <a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/snailtracer_system_trace.trace" class="action-btn">Open in Instruments</a>
+        <button onclick="copyToClipboard('open /Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/snailtracer_system_trace.trace')" class="action-btn">Copy Command</button>
+    </div>
+
+    <h2>💰 ERC20 Transaction Profiles</h2>
+    
+    <div class="case success">
+        <h3>💸 ERC20 Transfer</h3>
+        <p><span class="timing">Baseline: 8.11ms</span> | Full transaction simulation with storage access patterns</p>
+        <a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/erc20-transfer_profile.trace" class="action-btn">Open Profile</a>
+        <button onclick="copyToClipboard('open /Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/erc20-transfer_profile.trace')" class="action-btn">Copy Command</button>
+    </div>
+
+    <div class="case success">
+        <h3>🏭 ERC20 Mint</h3>
+        <p><span class="timing">Baseline: 5.61ms</span> | Token creation with balance updates</p>
+        <a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/erc20-mint_profile.trace" class="action-btn">Open Profile</a>
+        <button onclick="copyToClipboard('open /Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/erc20-mint_profile.trace')" class="action-btn">Copy Command</button>
+    </div>
+
+    <div class="case success">
+        <h3>✅ ERC20 Approval + Transfer</h3>
+        <p><span class="timing">Baseline: 8.13ms</span> | Two-step approval pattern analysis</p>
+        <a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/erc20-approval-transfer_profile.trace" class="action-btn">Open Profile</a>
+        <button onclick="copyToClipboard('open /Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/erc20-approval-transfer_profile.trace')" class="action-btn">Copy Command</button>
+    </div>
+
+    <h2>🔐 Precompiled Contracts</h2>
+    
+    <div class="case success">
+        <h3>🔑 Cryptographic Operations</h3>
+        <ul>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/precompile-ecrecover_profile.trace">ECRECOVER - Signature Recovery</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/precompile-bn256add_profile.trace">BN256ADD - Elliptic Curve Addition</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/precompile-bn256pairing_profile.trace">BN256PAIRING - Bilinear Pairing</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/precompile-modexp_profile.trace">MODEXP - Modular Exponentiation</a></li>
+        </ul>
+    </div>
+
+    <h2>⚙️ Opcode Performance Analysis</h2>
+    
+    <div class="case success">
+        <h3>🧮 Core EVM Operations</h3>
+        <ul>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/opcodes-crypto_profile.trace">Crypto Opcodes (KECCAK256)</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/opcodes-jump-basic_profile.trace">Jump Operations (JUMP, JUMPI)</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/opcodes-memory_profile.trace">Memory Operations (MLOAD, MSTORE)</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/opcodes-storage-cold_profile.trace">Cold Storage Access</a></li>
+            <li><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/opcodes-storage-warm_profile.trace">Warm Storage Access</a></li>
+        </ul>
+    </div>
+
+    <h2>📊 How to Analyze in Instruments</h2>
+    
+    <div class="key-metrics">
+        <h3>🎯 Focus Areas for Optimization</h3>
+        <ol>
+            <li><strong>CPU Counters Track:</strong> Look for high cache miss rates (>5% L1 misses)</li>
+            <li><strong>Branch Prediction:</strong> Target <5% misprediction rate for optimal performance</li>
+            <li><strong>Time Profiler:</strong> Identify hot functions consuming most CPU time</li>
+            <li><strong>Memory Access Patterns:</strong> Look for inefficient memory layouts</li>
+            <li><strong>System Activity:</strong> Monitor context switches and kernel overhead</li>
+        </ol>
+        
+        <h3>🔍 Key Metrics to Monitor</h3>
+        <ul>
+            <li><strong>Instructions Per Cycle (IPC):</strong> Target >1.5 for good efficiency</li>
+            <li><strong>L1 Cache Hit Rate:</strong> Should be >95% for optimal performance</li>
+            <li><strong>Branch Misprediction Rate:</strong> Keep below 5% for hot paths</li>
+            <li><strong>Memory Bandwidth:</strong> Check if memory-bound vs CPU-bound</li>
+        </ul>
+    </div>
+
+    <h2>🛠️ Terminal Commands</h2>
+    
+    <div class="trace-file">
+        <h4>Open all profiles:</h4>
+        <code>./open_profiles.sh</code><br><br>
+        
+        <h4>Open specific profiles:</h4>
+        <code>open advanced_cpu_profiles/ten_thousand_hashes_detailed.trace</code><br>
+        <code>open advanced_cpu_profiles/snailtracer_system_trace.trace</code><br>
+        <code>open advanced_cpu_profiles/erc20-transfer_profile.trace</code><br><br>
+        
+        <h4>Re-run profiling:</h4>
+        <code>python3 bench/official/profile_benchmarks.py --template "CPU Counters"</code>
+    </div>
+
+    <h2>📚 Analysis Documentation</h2>
+    <p><a href="file:///Users/williamcory/Guillotine/worktrees/0tree/advanced_cpu_profiles/ANALYSIS_REPORT.md" class="action-btn">Open Analysis Guide</a></p>
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                alert('Command copied to clipboard!');
+            });
+        }
+    </script>
+</body>
+</html>

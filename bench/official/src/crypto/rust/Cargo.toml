@@ -1,0 +1,17 @@
+[package]
+name = "rust-crypto-bench"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "rust-crypto-bench"
+path = "src/main.rs"
+
+[dependencies]
+ark-bn254 = "0.4"
+ark-ec = "0.4"
+ark-ff = "0.4"
+ark-std = "0.4"
+clap = "4.0"
