@@ -1049,6 +1049,45 @@ pub fn build(b: *std.Build) void {
     // const debug_constructor_step = b.step("debug-constructor", "Debug constructor execution");
     // debug_constructor_step.dependOn(&run_debug_constructor.step);
 
+    // Tracing test suite
+    const tracing_prestate_test = b.addTest(.{
+        .name = "prestate-tracer-test",
+        .root_source_file = b.path("src/evm/prestate_tracer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tracing_prestate_test.root_module.addImport("primitives", primitives_mod);
+    tracing_prestate_test.root_module.addImport("crypto", crypto_mod);
+    tracing_prestate_test.root_module.addImport("evm", evm_mod);
+    tracing_prestate_test.root_module.addImport("build_options", build_options_mod);
+    const run_tracing_prestate = b.addRunArtifact(tracing_prestate_test);
+    
+    // Add prestate tracer individual test step
+    const test_prestate_step = b.step("test-prestate-tracer", "Run prestate tracer tests");
+    test_prestate_step.dependOn(&run_tracing_prestate.step);
+
+    // Add tracer tests (includes DebuggingTracer, NoOpTracer, LoggingTracer, FileTracer)
+    const tracer_test = b.addTest(.{
+        .name = "tracer-test",
+        .root_source_file = b.path("src/evm/tracer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    tracer_test.root_module.addImport("primitives", primitives_mod);
+    tracer_test.root_module.addImport("crypto", crypto_mod);
+    tracer_test.root_module.addImport("evm", evm_mod);
+    tracer_test.root_module.addImport("build_options", build_options_mod);
+    const run_tracer_test = b.addRunArtifact(tracer_test);
+    
+    // Add tracer individual test step
+    const test_tracer_step = b.step("test-tracer", "Run tracer tests");
+    test_tracer_step.dependOn(&run_tracer_test.step);
+
+    // Combined tracing test step that runs both
+    const tracing_test_step = b.step("test-tracing", "Run all tracing-related tests");
+    tracing_test_step.dependOn(&run_tracing_prestate.step);
+    tracing_test_step.dependOn(&run_tracer_test.step);
+
     // Snailtracer test - commented out as test file was removed
     // const snailtracer_test = b.addTest(.{
     //     .name = "snailtracer-test",
@@ -2042,22 +2081,6 @@ pub fn build(b: *std.Build) void {
     // CREATE/CREATE2 differential test removed - file no longer exists
 
     // Simple block execution test removed - file no longer exists
-
-    // TRACER REMOVED: Commenting out tracer tests until tracer is reimplemented
-    // See: https://github.com/evmts/guillotine/issues/325
-    // const tracer_test = b.addTest(.{
-    //     .name = "tracer-test",
-    //     .root_source_file = b.path("test/evm/tracer_test.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // tracer_test.root_module.addImport("evm", evm_mod);
-    // tracer_test.root_module.addImport("Address", primitives_mod);
-    //
-    // const run_tracer_test = b.addRunArtifact(tracer_test);
-    // test_step.dependOn(&run_tracer_test.step);
-    // const tracer_test_step = b.step("test-tracer", "Run tracer test");
-    // tracer_test_step.dependOn(&run_tracer_test.step);
 
     // Add compare execution test
     // NOTE: Tracer test disabled - requires tracer reimplementation

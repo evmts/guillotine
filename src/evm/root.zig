@@ -52,6 +52,8 @@ pub const LoggingTracer = @import("tracer.zig").LoggingTracer;
 pub const FileTracer = @import("tracer.zig").FileTracer;
 pub const NoOpTracer = @import("tracer.zig").NoOpTracer;
 pub const DebuggingTracer = @import("tracer.zig").DebuggingTracer;
+pub const PrestateTracer = @import("prestate_tracer.zig").PrestateTracer;
+pub const write_prestate_json = @import("prestate_tracer.zig").write_prestate_json;
 
 // Bytecode modules
 pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
@@ -127,6 +129,7 @@ test {
     _ = FileTracer;
     _ = NoOpTracer;
     _ = DebuggingTracer;
+    _ = PrestateTracer;
     
     // Test bytecode modules
     _ = BytecodeConfig;

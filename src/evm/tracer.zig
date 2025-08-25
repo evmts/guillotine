@@ -19,6 +19,7 @@ const block_info_mod = @import("block_info.zig");
 const call_params_mod = @import("call_params.zig");
 const call_result_mod = @import("call_result.zig");
 const hardfork_mod = @import("hardfork.zig");
+const PrestateTracer = @import("prestate_tracer.zig").PrestateTracer;
 
 // ============================================================================
 // NO-OP TRACER
@@ -53,6 +54,32 @@ pub const NoOpTracer = struct {
         std.debug.assert(err != error.OutOfMemory); // Suppress error set discard warning
         // FrameType is comptime, no need to discard
     }
+
+    // Prestate-style hooks for compatibility (no-ops)
+    pub fn on_transaction_start(self: *NoOpTracer) void { _ = self; }
+    pub fn on_transaction_end(self: *NoOpTracer) void { _ = self; }
+    pub fn on_storage_read(self: *NoOpTracer, address: Address, slot: u256, value: u256, is_warm: bool) void {
+        _ = self; _ = address; _ = slot; _ = value; _ = is_warm;
+    }
+    pub fn on_storage_write(self: *NoOpTracer, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
+        _ = self; _ = address; _ = slot; _ = old_value; _ = new_value; _ = is_warm;
+    }
+    pub fn on_balance_read(self: *NoOpTracer, address: Address, balance: u256) void { _ = self; _ = address; _ = balance; }
+    pub fn on_balance_change(self: *NoOpTracer, address: Address, old_balance: u256, new_balance: u256) void {
+        _ = self; _ = address; _ = old_balance; _ = new_balance;
+    }
+    pub fn on_nonce_read(self: *NoOpTracer, address: Address, nonce: u64) void { _ = self; _ = address; _ = nonce; }
+    pub fn on_nonce_change(self: *NoOpTracer, address: Address, old_nonce: u64, new_nonce: u64) void { _ = self; _ = address; _ = old_nonce; _ = new_nonce; }
+    pub fn on_code_read(self: *NoOpTracer, address: Address, code: []const u8) void { _ = self; _ = address; _ = code; }
+    pub fn on_code_change(self: *NoOpTracer, address: Address, old_code: []const u8, new_code: []const u8) void {
+        _ = self; _ = address; _ = old_code; _ = new_code;
+    }
+    pub fn on_account_created(self: *NoOpTracer, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
+        _ = self; _ = address; _ = initial_balance; _ = initial_nonce; _ = code;
+    }
+    pub fn on_account_destroyed(self: *NoOpTracer, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
+        _ = self; _ = address; _ = beneficiary; _ = balance_transferred; _ = had_code; _ = storage_cleared;
+    }
 };
 
 // ============================================================================
@@ -86,6 +113,9 @@ pub const DebuggingTracer = struct {
     // Statistics
     total_instructions: u64 = 0,
     total_gas_used: u64 = 0,
+    // Optional composed prestate tracer
+    prestate_tracer: ?*PrestateTracer = null,
+    prestate_enabled: bool = false,
     
     pub const ExecutionStep = struct {
         step_number: u64,
@@ -143,6 +173,13 @@ pub const DebuggingTracer = struct {
         self.state_snapshots.deinit();
         
         self.breakpoints.deinit();
+
+        if (self.prestate_tracer) |pt| {
+            pt.deinit();
+            self.allocator.destroy(pt);
+            self.prestate_tracer = null;
+            self.prestate_enabled = false;
+        }
     }
     
     /// Enable or disable step-by-step execution mode
@@ -244,6 +281,9 @@ pub const DebuggingTracer = struct {
         self.captureStateForStep(pc, opcode, FrameType, frame, true) catch |err| {
             std.log.warn("Failed to capture before state: {}", .{err});
         };
+        if (self.prestate_tracer) |pt| {
+            pt.beforeOp(pc, opcode, FrameType, frame);
+        }
     }
     
     /// Required tracer interface: called after each operation
@@ -252,7 +292,7 @@ pub const DebuggingTracer = struct {
         self.total_instructions += 1;
         
         // Capture state after operation to complete the step record
-        self.captureStateForStep(pc, opcode, FrameType, frame) catch |err| {
+        self.captureStateForStep(pc, opcode, FrameType, frame, false) catch |err| {
             std.log.warn("Failed to capture after state: {}", .{err});
         };
         
@@ -260,13 +300,13 @@ pub const DebuggingTracer = struct {
         self.captureState(pc, FrameType, frame) catch |err| {
             std.log.warn("Failed to capture state snapshot: {}", .{err});
         };
+        if (self.prestate_tracer) |pt| {
+            pt.afterOp(pc, opcode, FrameType, frame);
+        }
     }
     
     /// Required tracer interface: called when an error occurs
     pub fn onError(self: *Self, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        _ = frame;
-        _ = pc;
-        
         // Record error in current step if we have one
         if (self.steps.items.len > 0) {
             const current_step = &self.steps.items[self.steps.items.len - 1];
@@ -281,6 +321,9 @@ pub const DebuggingTracer = struct {
         self.paused = true;
         
         std.log.debug("DebuggingTracer: Error occurred in frame type {s}: {}", .{ @typeName(FrameType), err });
+        if (self.prestate_tracer) |pt| {
+            pt.onError(pc, err, FrameType, frame);
+        }
     }
     
     /// Helper function to capture state for step recording
@@ -379,6 +422,50 @@ pub const DebuggingTracer = struct {
             .history_size = self.steps.items.len,
             .snapshot_count = self.state_snapshots.items.len,
         };
+    }
+
+    // ===== Prestate composition API =====
+    pub fn enable_prestate_tracing(self: *Self, diff_mode: bool, disable_storage: bool, disable_code: bool) !void {
+        if (!self.prestate_enabled) {
+            const pt = try self.allocator.create(PrestateTracer);
+            pt.* = PrestateTracer.init(self.allocator);
+            pt.configure(diff_mode, disable_storage, disable_code);
+            self.prestate_tracer = pt;
+            self.prestate_enabled = true;
+        }
+    }
+
+    pub fn disable_prestate_tracing(self: *Self) void {
+        if (self.prestate_tracer) |pt| {
+            pt.deinit();
+            self.allocator.destroy(pt);
+            self.prestate_tracer = null;
+            self.prestate_enabled = false;
+        }
+    }
+
+    pub fn get_prestate_tracer(self: *Self) ?*PrestateTracer { return self.prestate_tracer; }
+
+    // Delegate prestate hooks if enabled (safe to call via @hasDecl)
+    pub fn on_transaction_start(self: *Self) void { if (self.prestate_tracer) |pt| pt.on_transaction_start(); }
+    pub fn on_transaction_end(self: *Self) void { if (self.prestate_tracer) |pt| pt.on_transaction_end(); }
+    pub fn on_storage_read(self: *Self, address: Address, slot: u256, value: u256, is_warm: bool) void {
+        if (self.prestate_tracer) |pt| pt.on_storage_read(address, slot, value, is_warm);
+    }
+    pub fn on_storage_write(self: *Self, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
+        if (self.prestate_tracer) |pt| pt.on_storage_write(address, slot, old_value, new_value, is_warm);
+    }
+    pub fn on_balance_read(self: *Self, address: Address, balance: u256) void { if (self.prestate_tracer) |pt| pt.on_balance_read(address, balance); }
+    pub fn on_balance_change(self: *Self, address: Address, old_balance: u256, new_balance: u256) void { if (self.prestate_tracer) |pt| pt.on_balance_change(address, old_balance, new_balance); }
+    pub fn on_nonce_read(self: *Self, address: Address, nonce: u64) void { if (self.prestate_tracer) |pt| pt.on_nonce_read(address, nonce); }
+    pub fn on_nonce_change(self: *Self, address: Address, old_nonce: u64, new_nonce: u64) void { if (self.prestate_tracer) |pt| pt.on_nonce_change(address, old_nonce, new_nonce); }
+    pub fn on_code_read(self: *Self, address: Address, code: []const u8) void { if (self.prestate_tracer) |pt| pt.on_code_read(address, code); }
+    pub fn on_code_change(self: *Self, address: Address, old_code: []const u8, new_code: []const u8) void { if (self.prestate_tracer) |pt| pt.on_code_change(address, old_code, new_code); }
+    pub fn on_account_created(self: *Self, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.on_account_created(address, initial_balance, initial_nonce, code);
+    }
+    pub fn on_account_destroyed(self: *Self, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
+        if (self.prestate_tracer) |pt| pt.on_account_destroyed(address, beneficiary, balance_transferred, had_code, storage_cleared);
     }
 };
 
@@ -919,6 +1006,26 @@ test "file tracer writes to file" {
     try std.testing.expect(std.mem.indexOf(u8, contents, "\"gas\":997") != null);
 }
 
+test "DebuggingTracer with prestate mode" {
+    const allocator = std.testing.allocator;
+    var debug_tracer = DebuggingTracer.init();
+    defer debug_tracer.deinit();
+
+    try debug_tracer.enable_prestate_tracing(true, false, false);
+    debug_tracer.on_transaction_start();
+
+    const addr: Address = [_]u8{1} ** 20;
+    debug_tracer.on_balance_read(addr, 1000);
+    debug_tracer.on_balance_change(addr, 1000, 2000);
+
+    debug_tracer.on_transaction_end();
+
+    const pt = debug_tracer.get_prestate_tracer().?;
+    try std.testing.expect(pt.is_diff_mode());
+    try std.testing.expect(pt.prestate.contains(addr));
+    _ = allocator; // suppress unused if any
+}
+
 test "tracer with gas cost computation" {
     const allocator = std.testing.allocator;
     
@@ -1042,7 +1149,7 @@ const TestHost = struct {
 
     pub fn get_block_info(self: *Self) block_info_mod.DefaultBlockInfo {
         _ = self;
-        return .{};
+        return block_info_mod.DefaultBlockInfo.init();
     }
 
     pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
@@ -1139,7 +1246,7 @@ const TestHost = struct {
 
     pub fn get_hardfork(self: *Self) hardfork_mod.Hardfork {
         _ = self;
-        return .latest;
+        return hardfork_mod.Hardfork.DEFAULT;
     }
 
     pub fn get_is_static(self: *Self) bool {
