@@ -1,4 +1,5 @@
 import { type Accessor, createSignal, type Setter, Show } from 'solid-js'
+import BytecodeBlocksMap from '~/components/evm-debugger/BytecodeBlocksMap'
 import BytecodeLoader from '~/components/evm-debugger/BytecodeLoader'
 import Controls from '~/components/evm-debugger/Controls'
 import ErrorAlert from '~/components/evm-debugger/ErrorAlert'
@@ -66,12 +67,19 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				<ErrorAlert error={props.error()} setError={props.setError} />
 				<StateSummary state={props.state as EvmState} isUpdating={isUpdating()} />
 				<Show when={activePanel() === 'all' || activePanel() === 'bytecode'}>
-					<ExecutionStepsView
-						blocks={props.state.blocks}
-						currentBlockStartIndex={props.state.currentBlockStartIndex}
-						currentInstructionIndex={props.state.currentInstructionIndex}
-						rawBytecode={props.bytecode()}
-					/>
+					<div class="flex flex-col gap-4">
+						<BytecodeBlocksMap
+							codeHex={props.state.codeHex}
+							blocks={props.state.blocks}
+							currentBlockStartIndex={props.state.currentBlockStartIndex}
+						/>
+						<ExecutionStepsView
+							blocks={props.state.blocks}
+							currentBlockStartIndex={props.state.currentBlockStartIndex}
+							currentInstructionIndex={props.state.currentInstructionIndex}
+							rawBytecode={props.bytecode()}
+						/>
+					</div>
 				</Show>
 
 				<Show when={activePanel() === 'all' || activePanel() === 'gas'}>
