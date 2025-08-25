@@ -923,12 +923,19 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
             // Access the storage slot for warm/cold accounting (EIP-2929)
-            _ = self.host.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            const access_cost = self.host.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             // Load value from storage
             const value = self.host.get_storage(contract_addr, slot);
             try self.stack.push(value);
+            // Call tracer AFTER successful read (optional presence)
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "on_storage_read")) {
+                    const is_warm = access_cost == GasConstants.WarmStorageReadCost or access_cost == GasConstants.SloadGas;
+                    self.tracer.on_storage_read(contract_addr, slot, value, is_warm);
+                }
+            }
         }
         pub fn sstore(self: *Self) Error!void {
             // SSTORE stores a value to storage
@@ -946,13 +953,28 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Use the currently executing contract's address
             const addr = self.contract_address;
             // Access the storage slot for warm/cold accounting (EIP-2929)
-            _ = self.host.access_storage_slot(addr, slot) catch |err| switch (err) {
+            const access_cost = self.host.access_storage_slot(addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
-            // Use host interface for journaling
+            // Snapshot old value then write
+            const tracer_enabled = (config.TracerType != null)
+                and @hasDecl(@TypeOf(self.tracer), "on_storage_write");
+
+            // Capture before write; compiled out when tracer is off
+            const _old_value = if (comptime tracer_enabled)
+                self.host.get_storage(addr, slot)
+            else
+                undefined;
+
             self.host.set_storage(addr, slot, value) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
+
+            if (comptime tracer_enabled) {
+                const is_warm = access_cost == GasConstants.WarmStorageReadCost
+                    or access_cost == GasConstants.SloadGas;
+                self.tracer.on_storage_write(addr, slot, _old_value, value, is_warm);
+            }
         }
         // Transient storage operations (EIP-1153)
         pub fn tload(self: *Self) Error!void {
@@ -970,6 +992,12 @@ pub fn Frame(comptime config: FrameConfig) type {
                 else => return Error.AllocationError,
             };
             try self.stack.push(value);
+            // Call tracer AFTER successful read (compiled out when tracer is off)
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(config.TracerType.?, "on_storage_read")) {
+                    self.tracer.on_storage_read(addr, slot, value, true);
+                }
+            }
         }
         pub fn tstore(self: *Self) Error!void {
             // TSTORE stores a value to transient storage
@@ -987,10 +1015,21 @@ pub fn Frame(comptime config: FrameConfig) type {
             const db = self.database orelse return Error.InvalidOpcode;
             // Use the currently executing contract's address
             const addr = self.contract_address;
+            // Capture old value for tracer (compiled out when tracer is off)
+            const _old_value = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "on_storage_write"))
+                db.get_transient_storage(addr, slot) catch 0
+            else
+                undefined;
             // Store value to transient storage
             db.set_transient_storage(addr.bytes, slot, value) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
+            // Call tracer AFTER successful write (compiled out when tracer is off)
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(config.TracerType.?, "on_storage_write")) {
+                    self.tracer.on_storage_write(addr, slot, _old_value, value, true);
+                }
+            }
         }
         // Environment/Context opcodes
         /// ADDRESS opcode (0x30) - Get address of currently executing account
@@ -1016,6 +1055,11 @@ pub fn Frame(comptime config: FrameConfig) type {
             const bal = self.host.get_balance(addr);
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "on_balance_read")) {
+                    self.tracer.on_balance_read(addr, bal);
+                }
+            }
         }
         /// ORIGIN opcode (0x32) - Get execution origination address
         /// Pushes the address of the account that initiated the transaction.
@@ -1187,6 +1231,11 @@ pub fn Frame(comptime config: FrameConfig) type {
             const code = self.host.get_code(addr);
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             try self.stack.push(code_len);
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "on_code_read")) {
+                    self.tracer.on_code_read(addr, code);
+                }
+            }
         }
         /// EXTCODECOPY opcode (0x3C) - Copy account's code to memory
         /// Copies code from an external account to memory.
@@ -1224,6 +1273,11 @@ pub fn Frame(comptime config: FrameConfig) type {
                     const src_slice = code[offset_usize .. offset_usize + copy_len];
                     self.memory.set_data(dest_offset_usize, src_slice) catch return Error.OutOfBounds;
                     copied = copy_len;
+                }
+            }
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "on_code_read")) {
+                    self.tracer.on_code_read(addr, code);
                 }
             }
             if (copied < length_usize) {
@@ -1310,6 +1364,11 @@ pub fn Frame(comptime config: FrameConfig) type {
             }
             const hash_word = @as(WordType, @truncate(hash_u256));
             try self.stack.push(hash_word);
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "on_code_read")) {
+                    self.tracer.on_code_read(addr, code);
+                }
+            }
         }
         /// CHAINID opcode (0x46) - Get chain ID
         /// Pushes the chain ID of the current network.
@@ -1326,6 +1385,12 @@ pub fn Frame(comptime config: FrameConfig) type {
             const bal = self.host.get_balance(self.contract_address);
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
+            // Call tracer AFTER successful read (compiled out when tracer is off)
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(config.TracerType.?, "on_balance_read")) {
+                    self.tracer.on_balance_read(self.contract_address, bal);
+                }
+            }
         }
         // Block information opcodes
         /// BLOCKHASH opcode (0x40) - Get hash of specific block
@@ -2264,7 +2329,17 @@ pub fn Frame(comptime config: FrameConfig) type {
                 @branchHint(.unlikely);
                 return Error.WriteProtection;
             }
-
+            
+            // Capture state for tracer before destruction (compiled out when tracer is off)
+            const _account_balance = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "on_account_destroyed"))
+                self.host.get_balance(self.contract_address)
+            else
+                undefined;
+            const _has_code = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "on_account_destroyed"))
+                self.host.get_code(self.contract_address).len > 0
+            else
+                undefined;
+            
             // Mark contract for destruction via host interface
             self.host.mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 else => {
@@ -2272,7 +2347,14 @@ pub fn Frame(comptime config: FrameConfig) type {
                     return Error.OutOfGas;
                 },
             };
-
+            
+            // Call tracer AFTER successful destruction mark (compiled out when tracer is off)
+            if (comptime config.TracerType != null) {
+                if (comptime @hasDecl(config.TracerType.?, "on_account_destroyed")) {
+                    self.tracer.on_account_destroyed(self.contract_address, recipient, _account_balance, _has_code, true);
+                }
+            }
+            
             // According to EIP-6780 (Cancun hardfork), SELFDESTRUCT only actually destroys
             // the contract if it was created in the same transaction. This is handled by the host.
             // SELFDESTRUCT always stops execution
