@@ -36,9 +36,7 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             .maxBytecodeSize = config.max_bytecode_size,
         });
         pub const WordType = config.WordType;
-        pub const Error = Frame.Error
-            || error{ OutOfMemory, TruncatedPush, InvalidJumpDestination, MissingJumpDestMetadata, InitcodeTooLarge }
-            || (if (config.TracerType != null) error{ ExecutionPaused } else error{});
+        pub const Error = Frame.Error || error{ OutOfMemory, TruncatedPush, InvalidJumpDestination, MissingJumpDestMetadata, InitcodeTooLarge } || (if (config.TracerType != null) error{ExecutionPaused} else error{});
         pub const HandlerFn = plan_mod.HandlerFn;
 
         const Self = @This();
@@ -217,7 +215,7 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
                 // Provide trace handlers to planner (compile-time gated)
                 planner.setTraceHandlers(&trace_before_op_handler, &trace_after_op_handler);
             }
-            
+
             // Use getOrAnalyze with the actual hardfork from host
             const plan_ptr = try planner.getOrAnalyze(bytecode, handlers, host.get_hardfork());
 
@@ -2561,10 +2559,10 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
                 // If tracer supports pause/resume, handle pause here
                 if (comptime @hasField(@TypeOf(self.tracer), "paused")) {
                     if (@field(self.tracer, "paused")) {
-                        if (comptime @hasDecl(@TypeOf(self.tracer), "set_resume_idx")) {
+                        if (comptime @hasDecl(@TypeOf(self.tracer), "setResumeIdx")) {
                             // Resume at the opcode handler index (next index)
                             const resume_idx: u32 = @intCast(interpreter.instruction_idx + 1);
-                            self.tracer.set_resume_idx(resume_idx);
+                            self.tracer.setResumeIdx(resume_idx);
                         }
                         return Error.ExecutionPaused;
                     }
