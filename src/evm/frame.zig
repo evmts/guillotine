@@ -923,7 +923,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Use the currently executing contract's address
             const contract_addr = self.contract_address;
             // Access the storage slot for warm/cold accounting (EIP-2929)
-            const access_cost = self.host.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            const _access_cost = self.host.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             // Load value from storage
@@ -932,7 +932,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Call tracer AFTER successful read (optional presence)
             if (comptime config.TracerType != null) {
                 if (comptime @hasDecl(@TypeOf(self.tracer), "on_storage_read")) {
-                    const is_warm = access_cost == GasConstants.WarmStorageReadCost or access_cost == GasConstants.SloadGas;
+                    const is_warm = _access_cost == GasConstants.WarmStorageReadCost or _access_cost == GasConstants.SloadGas;
                     self.tracer.on_storage_read(contract_addr, slot, value, is_warm);
                 }
             }
@@ -953,7 +953,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Use the currently executing contract's address
             const addr = self.contract_address;
             // Access the storage slot for warm/cold accounting (EIP-2929)
-            const access_cost = self.host.access_storage_slot(addr, slot) catch |err| switch (err) {
+            const _access_cost = self.host.access_storage_slot(addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             // Snapshot old value then write
@@ -971,8 +971,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             };
 
             if (comptime tracer_enabled) {
-                const is_warm = access_cost == GasConstants.WarmStorageReadCost
-                    or access_cost == GasConstants.SloadGas;
+                const is_warm = _access_cost == GasConstants.WarmStorageReadCost
+                    or _access_cost == GasConstants.SloadGas;
                 self.tracer.on_storage_write(addr, slot, _old_value, value, is_warm);
             }
         }
