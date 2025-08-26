@@ -931,9 +931,9 @@ pub fn Frame(comptime config: FrameConfig) type {
             try self.stack.push(value);
             // Call tracer AFTER successful read (optional presence)
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(@TypeOf(self.tracer), "on_storage_read")) {
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onStorageRead")) {
                     const is_warm = _access_cost == GasConstants.WarmStorageReadCost or _access_cost == GasConstants.SloadGas;
-                    self.tracer.on_storage_read(contract_addr, slot, value, is_warm);
+                    self.tracer.onStorageRead(contract_addr, slot, value, is_warm);
                 }
             }
         }
@@ -957,8 +957,7 @@ pub fn Frame(comptime config: FrameConfig) type {
                 else => return Error.AllocationError,
             };
             // Snapshot old value then write
-            const tracer_enabled = (config.TracerType != null)
-                and @hasDecl(@TypeOf(self.tracer), "on_storage_write");
+            const tracer_enabled = (config.TracerType != null) and @hasDecl(@TypeOf(self.tracer), "onStorageWrite");
 
             // Capture before write; compiled out when tracer is off
             const _old_value = if (comptime tracer_enabled)
@@ -971,9 +970,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             };
 
             if (comptime tracer_enabled) {
-                const is_warm = _access_cost == GasConstants.WarmStorageReadCost
-                    or _access_cost == GasConstants.SloadGas;
-                self.tracer.on_storage_write(addr, slot, _old_value, value, is_warm);
+                const is_warm = _access_cost == GasConstants.WarmStorageReadCost or _access_cost == GasConstants.SloadGas;
+                self.tracer.onStorageWrite(addr, slot, _old_value, value, is_warm);
             }
         }
         // Transient storage operations (EIP-1153)
@@ -994,8 +992,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             try self.stack.push(value);
             // Call tracer AFTER successful read (compiled out when tracer is off)
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(config.TracerType.?, "on_storage_read")) {
-                    self.tracer.on_storage_read(addr, slot, value, true);
+                if (comptime @hasDecl(config.TracerType.?, "onStorageRead")) {
+                    self.tracer.onStorageRead(addr, slot, value, true);
                 }
             }
         }
@@ -1016,7 +1014,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             // Use the currently executing contract's address
             const addr = self.contract_address;
             // Capture old value for tracer (compiled out when tracer is off)
-            const _old_value = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "on_storage_write"))
+            const _old_value = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "onStorageWrite"))
                 db.get_transient_storage(addr, slot) catch 0
             else
                 undefined;
@@ -1026,8 +1024,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             };
             // Call tracer AFTER successful write (compiled out when tracer is off)
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(config.TracerType.?, "on_storage_write")) {
-                    self.tracer.on_storage_write(addr, slot, _old_value, value, true);
+                if (comptime @hasDecl(config.TracerType.?, "onStorageWrite")) {
+                    self.tracer.onStorageWrite(addr, slot, _old_value, value, true);
                 }
             }
         }
@@ -1056,8 +1054,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(@TypeOf(self.tracer), "on_balance_read")) {
-                    self.tracer.on_balance_read(addr, bal);
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onBalanceRead")) {
+                    self.tracer.onBalanceRead(addr, bal);
                 }
             }
         }
@@ -1232,8 +1230,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             const code_len = @as(WordType, @truncate(@as(u256, @intCast(code.len))));
             try self.stack.push(code_len);
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(@TypeOf(self.tracer), "on_code_read")) {
-                    self.tracer.on_code_read(addr, code);
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onCodeRead")) {
+                    self.tracer.onCodeRead(addr, code);
                 }
             }
         }
@@ -1276,8 +1274,8 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
             }
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(@TypeOf(self.tracer), "on_code_read")) {
-                    self.tracer.on_code_read(addr, code);
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onCodeRead")) {
+                    self.tracer.onCodeRead(addr, code);
                 }
             }
             if (copied < length_usize) {
@@ -1365,8 +1363,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             const hash_word = @as(WordType, @truncate(hash_u256));
             try self.stack.push(hash_word);
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(@TypeOf(self.tracer), "on_code_read")) {
-                    self.tracer.on_code_read(addr, code);
+                if (comptime @hasDecl(@TypeOf(self.tracer), "onCodeRead")) {
+                    self.tracer.onCodeRead(addr, code);
                 }
             }
         }
@@ -1387,8 +1385,8 @@ pub fn Frame(comptime config: FrameConfig) type {
             try self.stack.push(balance_word);
             // Call tracer AFTER successful read (compiled out when tracer is off)
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(config.TracerType.?, "on_balance_read")) {
-                    self.tracer.on_balance_read(self.contract_address, bal);
+                if (comptime @hasDecl(config.TracerType.?, "onBalanceRead")) {
+                    self.tracer.onBalanceRead(self.contract_address, bal);
                 }
             }
         }
@@ -2329,17 +2327,17 @@ pub fn Frame(comptime config: FrameConfig) type {
                 @branchHint(.unlikely);
                 return Error.WriteProtection;
             }
-            
+
             // Capture state for tracer before destruction (compiled out when tracer is off)
-            const _account_balance = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "on_account_destroyed"))
+            const _account_balance = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "onAccountDestroyed"))
                 self.host.get_balance(self.contract_address)
             else
                 undefined;
-            const _has_code = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "on_account_destroyed"))
+            const _has_code = if (comptime config.TracerType != null and @hasDecl(config.TracerType.?, "onAccountDestroyed"))
                 self.host.get_code(self.contract_address).len > 0
             else
                 undefined;
-            
+
             // Mark contract for destruction via host interface
             self.host.mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 else => {
@@ -2347,14 +2345,14 @@ pub fn Frame(comptime config: FrameConfig) type {
                     return Error.OutOfGas;
                 },
             };
-            
+
             // Call tracer AFTER successful destruction mark (compiled out when tracer is off)
             if (comptime config.TracerType != null) {
-                if (comptime @hasDecl(config.TracerType.?, "on_account_destroyed")) {
-                    self.tracer.on_account_destroyed(self.contract_address, recipient, _account_balance, _has_code, true);
+                if (comptime @hasDecl(config.TracerType.?, "onAccountDestroyed")) {
+                    self.tracer.onAccountDestroyed(self.contract_address, recipient, _account_balance, _has_code, true);
                 }
             }
-            
+
             // According to EIP-6780 (Cancun hardfork), SELFDESTRUCT only actually destroys
             // the contract if it was created in the same transaction. This is handled by the host.
             // SELFDESTRUCT always stops execution

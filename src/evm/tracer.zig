@@ -56,29 +56,74 @@ pub const NoOpTracer = struct {
     }
 
     // Prestate-style hooks for compatibility (no-ops)
-    pub fn on_transaction_start(self: *NoOpTracer) void { _ = self; }
-    pub fn on_transaction_end(self: *NoOpTracer) void { _ = self; }
-    pub fn on_storage_read(self: *NoOpTracer, address: Address, slot: u256, value: u256, is_warm: bool) void {
-        _ = self; _ = address; _ = slot; _ = value; _ = is_warm;
+    pub fn onTransactionStart(self: *NoOpTracer) void {
+        _ = self;
     }
-    pub fn on_storage_write(self: *NoOpTracer, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
-        _ = self; _ = address; _ = slot; _ = old_value; _ = new_value; _ = is_warm;
+    pub fn onTransactionEnd(self: *NoOpTracer) void {
+        _ = self;
     }
-    pub fn on_balance_read(self: *NoOpTracer, address: Address, balance: u256) void { _ = self; _ = address; _ = balance; }
-    pub fn on_balance_change(self: *NoOpTracer, address: Address, old_balance: u256, new_balance: u256) void {
-        _ = self; _ = address; _ = old_balance; _ = new_balance;
+    pub fn onStorageRead(self: *NoOpTracer, address: Address, slot: u256, value: u256, is_warm: bool) void {
+        _ = self;
+        _ = address;
+        _ = slot;
+        _ = value;
+        _ = is_warm;
     }
-    pub fn on_nonce_read(self: *NoOpTracer, address: Address, nonce: u64) void { _ = self; _ = address; _ = nonce; }
-    pub fn on_nonce_change(self: *NoOpTracer, address: Address, old_nonce: u64, new_nonce: u64) void { _ = self; _ = address; _ = old_nonce; _ = new_nonce; }
-    pub fn on_code_read(self: *NoOpTracer, address: Address, code: []const u8) void { _ = self; _ = address; _ = code; }
-    pub fn on_code_change(self: *NoOpTracer, address: Address, old_code: []const u8, new_code: []const u8) void {
-        _ = self; _ = address; _ = old_code; _ = new_code;
+    pub fn onStorageWrite(self: *NoOpTracer, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
+        _ = self;
+        _ = address;
+        _ = slot;
+        _ = old_value;
+        _ = new_value;
+        _ = is_warm;
     }
-    pub fn on_account_created(self: *NoOpTracer, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
-        _ = self; _ = address; _ = initial_balance; _ = initial_nonce; _ = code;
+    pub fn onBalanceRead(self: *NoOpTracer, address: Address, balance: u256) void {
+        _ = self;
+        _ = address;
+        _ = balance;
     }
-    pub fn on_account_destroyed(self: *NoOpTracer, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
-        _ = self; _ = address; _ = beneficiary; _ = balance_transferred; _ = had_code; _ = storage_cleared;
+    pub fn onBalanceChange(self: *NoOpTracer, address: Address, old_balance: u256, new_balance: u256) void {
+        _ = self;
+        _ = address;
+        _ = old_balance;
+        _ = new_balance;
+    }
+    pub fn onNonceRead(self: *NoOpTracer, address: Address, nonce: u64) void {
+        _ = self;
+        _ = address;
+        _ = nonce;
+    }
+    pub fn onNonceChange(self: *NoOpTracer, address: Address, old_nonce: u64, new_nonce: u64) void {
+        _ = self;
+        _ = address;
+        _ = old_nonce;
+        _ = new_nonce;
+    }
+    pub fn onCodeRead(self: *NoOpTracer, address: Address, code: []const u8) void {
+        _ = self;
+        _ = address;
+        _ = code;
+    }
+    pub fn onCodeChange(self: *NoOpTracer, address: Address, old_code: []const u8, new_code: []const u8) void {
+        _ = self;
+        _ = address;
+        _ = old_code;
+        _ = new_code;
+    }
+    pub fn onAccountCreated(self: *NoOpTracer, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
+        _ = self;
+        _ = address;
+        _ = initial_balance;
+        _ = initial_nonce;
+        _ = code;
+    }
+    pub fn onAccountDestroyed(self: *NoOpTracer, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
+        _ = self;
+        _ = address;
+        _ = beneficiary;
+        _ = balance_transferred;
+        _ = had_code;
+        _ = storage_cleared;
     }
 };
 
@@ -120,7 +165,7 @@ pub const DebuggingTracer = struct {
     // Optional composed prestate tracer
     prestate_tracer: ?*PrestateTracer = null,
     prestate_enabled: bool = false,
-    
+
     // Execution control helpers (keep interpreter logic minimal)
     pub const ExecutionResult = enum { Completed, Paused };
 
@@ -537,28 +582,46 @@ pub const DebuggingTracer = struct {
         }
     }
 
-    pub fn get_prestate_tracer(self: *Self) ?*PrestateTracer { return self.prestate_tracer; }
+    pub fn getPrestateTracer(self: *Self) ?*PrestateTracer {
+        return self.prestate_tracer;
+    }
 
     // Delegate prestate hooks if enabled (safe to call via @hasDecl)
-    pub fn on_transaction_start(self: *Self) void { if (self.prestate_tracer) |pt| pt.on_transaction_start(); }
-    pub fn on_transaction_end(self: *Self) void { if (self.prestate_tracer) |pt| pt.on_transaction_end(); }
-    pub fn on_storage_read(self: *Self, address: Address, slot: u256, value: u256, is_warm: bool) void {
-        if (self.prestate_tracer) |pt| pt.on_storage_read(address, slot, value, is_warm);
+    pub fn onTransactionStart(self: *Self) void {
+        if (self.prestate_tracer) |pt| pt.onTransactionStart();
     }
-    pub fn on_storage_write(self: *Self, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
-        if (self.prestate_tracer) |pt| pt.on_storage_write(address, slot, old_value, new_value, is_warm);
+    pub fn onTransactionEnd(self: *Self) void {
+        if (self.prestate_tracer) |pt| pt.onTransactionEnd();
     }
-    pub fn on_balance_read(self: *Self, address: Address, balance: u256) void { if (self.prestate_tracer) |pt| pt.on_balance_read(address, balance); }
-    pub fn on_balance_change(self: *Self, address: Address, old_balance: u256, new_balance: u256) void { if (self.prestate_tracer) |pt| pt.on_balance_change(address, old_balance, new_balance); }
-    pub fn on_nonce_read(self: *Self, address: Address, nonce: u64) void { if (self.prestate_tracer) |pt| pt.on_nonce_read(address, nonce); }
-    pub fn on_nonce_change(self: *Self, address: Address, old_nonce: u64, new_nonce: u64) void { if (self.prestate_tracer) |pt| pt.on_nonce_change(address, old_nonce, new_nonce); }
-    pub fn on_code_read(self: *Self, address: Address, code: []const u8) void { if (self.prestate_tracer) |pt| pt.on_code_read(address, code); }
-    pub fn on_code_change(self: *Self, address: Address, old_code: []const u8, new_code: []const u8) void { if (self.prestate_tracer) |pt| pt.on_code_change(address, old_code, new_code); }
-    pub fn on_account_created(self: *Self, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
-        if (self.prestate_tracer) |pt| pt.on_account_created(address, initial_balance, initial_nonce, code);
+    pub fn onStorageRead(self: *Self, address: Address, slot: u256, value: u256, is_warm: bool) void {
+        if (self.prestate_tracer) |pt| pt.onStorageRead(address, slot, value, is_warm);
     }
-    pub fn on_account_destroyed(self: *Self, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
-        if (self.prestate_tracer) |pt| pt.on_account_destroyed(address, beneficiary, balance_transferred, had_code, storage_cleared);
+    pub fn onStorageWrite(self: *Self, address: Address, slot: u256, old_value: u256, new_value: u256, is_warm: bool) void {
+        if (self.prestate_tracer) |pt| pt.onStorageWrite(address, slot, old_value, new_value, is_warm);
+    }
+    pub fn onBalanceRead(self: *Self, address: Address, balance: u256) void {
+        if (self.prestate_tracer) |pt| pt.onBalanceRead(address, balance);
+    }
+    pub fn onBalanceChange(self: *Self, address: Address, old_balance: u256, new_balance: u256) void {
+        if (self.prestate_tracer) |pt| pt.onBalanceChange(address, old_balance, new_balance);
+    }
+    pub fn onNonceRead(self: *Self, address: Address, nonce: u64) void {
+        if (self.prestate_tracer) |pt| pt.onNonceRead(address, nonce);
+    }
+    pub fn onNonceChange(self: *Self, address: Address, old_nonce: u64, new_nonce: u64) void {
+        if (self.prestate_tracer) |pt| pt.onNonceChange(address, old_nonce, new_nonce);
+    }
+    pub fn onCodeRead(self: *Self, address: Address, code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.onCodeRead(address, code);
+    }
+    pub fn onCodeChange(self: *Self, address: Address, old_code: []const u8, new_code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.onCodeChange(address, old_code, new_code);
+    }
+    pub fn onAccountCreated(self: *Self, address: Address, initial_balance: u256, initial_nonce: u64, code: []const u8) void {
+        if (self.prestate_tracer) |pt| pt.onAccountCreated(address, initial_balance, initial_nonce, code);
+    }
+    pub fn onAccountDestroyed(self: *Self, address: Address, beneficiary: Address, balance_transferred: u256, had_code: bool, storage_cleared: bool) void {
+        if (self.prestate_tracer) |pt| pt.onAccountDestroyed(address, beneficiary, balance_transferred, had_code, storage_cleared);
     }
 };
 
@@ -1105,16 +1168,16 @@ test "DebuggingTracer with prestate mode" {
     defer debug_tracer.deinit();
 
     try debug_tracer.enable_prestate_tracing(true, false, false);
-    debug_tracer.on_transaction_start();
+    debug_tracer.onTransactionStart();
 
     const addr: Address = [_]u8{1} ** 20;
-    debug_tracer.on_balance_read(addr, 1000);
-    debug_tracer.on_balance_change(addr, 1000, 2000);
+    debug_tracer.onBalanceRead(addr, 1000);
+    debug_tracer.onBalanceChange(addr, 1000, 2000);
 
-    debug_tracer.on_transaction_end();
+    debug_tracer.onTransactionEnd();
 
-    const pt = debug_tracer.get_prestate_tracer().?;
-    try std.testing.expect(pt.is_diff_mode());
+    const pt = debug_tracer.getPrestateTracer().?;
+    try std.testing.expect(pt.isDiffMode());
     try std.testing.expect(pt.prestate.contains(addr));
     _ = allocator; // suppress unused if any
 }
