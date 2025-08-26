@@ -87,6 +87,9 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
         
         // Special metadata for entry block
         start: JumpDestMetadata,
+        // Trace handlers (only when injection enabled at comptime)
+        trace_before: if (Cfg.inject_tracing) *const HandlerFn else void,
+        trace_after: if (Cfg.inject_tracing) *const HandlerFn else void,
 
         /// Create a planner with LRU cache for repeated bytecode analysis.
         /// This is the standard initialization method for production use.
@@ -103,7 +106,17 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
                 .cache_hits = 0,
                 .cache_misses = 0,
                 .start = .{ .gas = 0, .min_stack = 0, .max_stack = 0 },
+                .trace_before = if (Cfg.inject_tracing) blk: { break :blk undefined; } else {},
+                .trace_after = if (Cfg.inject_tracing) blk: { break :blk undefined; } else {},
             };
+        }
+
+        /// Configure trace handler pointers (no-op when injection disabled)
+        pub fn setTraceHandlers(self: *Self, trace_before: if (Cfg.inject_tracing) *const HandlerFn else void, trace_after: if (Cfg.inject_tracing) *const HandlerFn else void) void {
+            if (comptime Cfg.inject_tracing) {
+                self.trace_before = trace_before;
+                self.trace_after = trace_after;
+            }
         }
         
         
@@ -134,10 +147,12 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
         /// The hardfork parameter is included in the cache key to avoid incorrect
         /// plan reuse when hardfork rules change (e.g., new opcodes, gas costs).
         pub fn getOrAnalyze(self: *Self, bytecode: []const u8, handlers: [256]*const HandlerFn, hardfork: Hardfork) !*const PlanType {
-            // Include hardfork in cache key to avoid incorrect plan reuse
+            // Include hardfork and inject flag in cache key to avoid incorrect plan reuse
             var hasher = std.hash.Wyhash.init(0);
             hasher.update(bytecode);
             hasher.update(std.mem.asBytes(&hardfork));
+            const inject_flag: u8 = if (Cfg.inject_tracing) 1 else 0;
+            hasher.update(&[_]u8{inject_flag});
             const key = hasher.final();
             
             // Check cache
@@ -411,7 +426,7 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
             var pc_map = std.AutoHashMap(PcType, InstructionIndexType).init(allocator);
             errdefer pc_map.deinit();
             
-            // Build instruction stream with handlers and metadata
+            // Build instruction stream with handlers and metadata (with optional trace injection)
             i = 0;
             // Dense PC->instruction index table for fast JUMP/JUMPI
             var dense_pc_to_idx = try allocator.alloc(?PlanType.InstructionIndexType, N);
@@ -425,6 +440,11 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
                 const current_instruction_idx = @as(InstructionIndexType, @intCast(stream.items.len));
                 try pc_map.put(@as(PcType, @intCast(i)), current_instruction_idx);
                 dense_pc_to_idx[i] = current_instruction_idx;
+                
+                // Inject tracing before the instruction
+                if (comptime Cfg.inject_tracing) {
+                    try stream.append(allocator, .{ .handler = self.trace_before });
+                }
                 
                 // Handle PUSH opcodes
                 if (op >= @intFromEnum(Opcode.PUSH1) and op <= @intFromEnum(Opcode.PUSH32)) {
@@ -530,7 +550,11 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
                         try constants.append(allocator, value);
                         try stream.append(allocator, .{ .pointer_index = const_idx });
                     }
-                    
+                    // Append after-trace if injected
+                    if (comptime Cfg.inject_tracing) {
+                        try stream.append(allocator, .{ .handler = self.trace_after });
+                    }
+
                     // Skip the next instruction if we fused
                     if (fused and next_pc < N) {
                         i = next_pc + 1;
@@ -571,12 +595,19 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
                         // This shouldn't happen - every JUMPDEST should have metadata
                         return error.MissingJumpDestMetadata;
                     }
-                    
+                    // Append after-trace if injected
+                    if (comptime Cfg.inject_tracing) {
+                        try stream.append(allocator, .{ .handler = self.trace_after });
+                    }
+
                     i += 1;
                 } else if (op == @intFromEnum(Opcode.PC)) {
                     // PC opcode needs to store the current program counter value
                     try stream.append(allocator, .{ .handler = handlers[op] });
                     try stream.append(allocator, .{ .inline_value = @intCast(i) });
+                    if (comptime Cfg.inject_tracing) {
+                        try stream.append(allocator, .{ .handler = self.trace_after });
+                    }
                     i += 1;
                 } else {
                     if (N <= 64) {
@@ -588,6 +619,9 @@ pub fn Planner(comptime Cfg: PlannerConfig) type {
                         log.warn("Uninitialized handler for opcode {x} at PC {}", .{ op, i });
                     }
                     try stream.append(allocator, .{ .handler = handler_ptr });
+                    if (comptime Cfg.inject_tracing) {
+                        try stream.append(allocator, .{ .handler = self.trace_after });
+                    }
                     i += 1;
                 }
             }

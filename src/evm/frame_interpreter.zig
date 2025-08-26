@@ -29,13 +29,16 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             .WordType = config.WordType,
             .maxBytecodeSize = config.max_bytecode_size,
             .stack_size = config.stack_size,
+            .inject_tracing = (config.TracerType != null),
         });
         pub const Plan = plan_mod.Plan(.{
             .WordType = config.WordType,
             .maxBytecodeSize = config.max_bytecode_size,
         });
         pub const WordType = config.WordType;
-        pub const Error = Frame.Error || error{ OutOfMemory, TruncatedPush, InvalidJumpDestination, MissingJumpDestMetadata, InitcodeTooLarge };
+        pub const Error = Frame.Error
+            || error{ OutOfMemory, TruncatedPush, InvalidJumpDestination, MissingJumpDestMetadata, InitcodeTooLarge }
+            || (if (config.TracerType != null) error{ ExecutionPaused } else error{});
         pub const HandlerFn = plan_mod.HandlerFn;
 
         const Self = @This();
@@ -210,6 +213,11 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             errdefer frame.deinit(allocator);
             var planner = try Planner.init(allocator, 32); // Small cache for frame interpreter
 
+            if (comptime config.TracerType != null) {
+                // Provide trace handlers to planner (compile-time gated)
+                planner.setTraceHandlers(&trace_before_op_handler, &trace_after_op_handler);
+            }
+            
             // Use getOrAnalyze with the actual hardfork from host
             const plan_ptr = try planner.getOrAnalyze(bytecode, handlers, host.get_hardfork());
 
@@ -238,19 +246,29 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             };
         }
 
-        /// Get current PC by instruction index (O(1) if mapping present)
+        /// Get current PC by instruction index.
+        /// When tracing is enabled, also resolves PCs at adjacent trace indices; otherwise identical to pre-change behavior.
         pub fn getCurrentPc(self: *const Self) ?Plan.PcType {
-            if (self.idx_to_pc.len != 0) {
-                const pc = self.idx_to_pc[self.instruction_idx];
-                const invalid_pc: Plan.PcType = std.math.maxInt(Plan.PcType);
-                if (pc != invalid_pc) {
-                    return pc;
-                } else {
-                    return null;
-                }
-            } else {
-                return null;
+            if (self.idx_to_pc.len == 0) return null;
+            const invalid_pc: Plan.PcType = std.math.maxInt(Plan.PcType);
+            const idx = self.instruction_idx;
+            // Exact index fast path
+            if (idx < self.idx_to_pc.len) {
+                const pc0 = self.idx_to_pc[idx];
+                if (pc0 != invalid_pc) return pc0;
             }
+            // Neighbor probes only compiled when tracing is enabled
+            if (comptime config.TracerType != null) {
+                if (idx + 1 < self.idx_to_pc.len) {
+                    const pc1 = self.idx_to_pc[idx + 1];
+                    if (pc1 != invalid_pc) return pc1;
+                }
+                if (idx > 0 and idx - 1 < self.idx_to_pc.len) {
+                    const pc2 = self.idx_to_pc[idx - 1];
+                    if (pc2 != invalid_pc) return pc2;
+                }
+            }
+            return null;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -265,7 +283,8 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             self.plan.debugPrint();
 
             if (self.plan.instructionStream.len == 0) return;
-            return try self.plan.instructionStream[0].handler(&self.frame, self.plan);
+            const start_idx: Plan.InstructionIndexType = if (comptime config.TracerType != null) self.instruction_idx else 0;
+            return try self.plan.instructionStream[start_idx].handler(&self.frame, self.plan);
         }
 
         /// Pretty print the interpreter state for debugging.
@@ -2527,10 +2546,34 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             const plan_ptr = @as(*const Plan, @ptrCast(@alignCast(plan)));
             const interpreter = @as(*Self, @fieldParentPtr("frame", self));
 
-            // Call tracer before operation
-            self.tracer.beforeOp(Frame, self);
+            // Resolve current PC robustly
+            const pc_opt = interpreter.getCurrentPc();
+            const pc_u32: u32 = @intCast(pc_opt orelse 0);
+            // Compute opcode from bytecode
+            const opcode: u8 = if (pc_opt) |pcv| blk: {
+                const p: usize = @intCast(pcv);
+                break :blk if (p < self.bytecode.len) self.bytecode[p] else 0;
+            } else 0;
 
-            // Get the next handler - trace handlers don't have metadata
+            // Call tracer.beforeOp via Frame helpers
+            if (comptime config.TracerType != null) {
+                self.traceBeforeOp(pc_u32, opcode);
+                // If tracer supports pause/resume, handle pause here
+                if (comptime @hasField(@TypeOf(self.tracer), "paused")) {
+                    if (@field(self.tracer, "paused")) {
+                        if (comptime @hasDecl(@TypeOf(self.tracer), "set_resume_idx")) {
+                            // Resume at the opcode handler index (next index)
+                            const resume_idx: u32 = @intCast(interpreter.instruction_idx + 1);
+                            self.tracer.set_resume_idx(resume_idx);
+                        }
+                        return Error.ExecutionPaused;
+                    }
+                }
+            }
+
+            // Move to opcode handler and dispatch
+            interpreter.instruction_idx += 1;
+            if (interpreter.instruction_idx >= plan_ptr.instructionStream.len) return Error.STOP;
             const next_handler = plan_ptr.instructionStream[interpreter.instruction_idx].handler;
             return dispatchNext(next_handler, self, plan_ptr);
         }
@@ -2540,10 +2583,22 @@ pub fn FrameInterpreter(comptime config: frame_mod.FrameConfig) type {
             const plan_ptr = @as(*const Plan, @ptrCast(@alignCast(plan)));
             const interpreter = @as(*Self, @fieldParentPtr("frame", self));
 
-            // Call tracer after operation
-            self.tracer.afterOp(Frame, self);
+            // Resolve current PC robustly
+            const pc_opt = interpreter.getCurrentPc();
+            const pc_u32: u32 = @intCast(pc_opt orelse 0);
+            const opcode: u8 = if (pc_opt) |pcv| blk: {
+                const p: usize = @intCast(pcv);
+                break :blk if (p < self.bytecode.len) self.bytecode[p] else 0;
+            } else 0;
 
-            // Get the next handler - trace handlers don't have metadata
+            // Call tracer.afterOp via Frame helper
+            if (comptime config.TracerType != null) {
+                self.traceAfterOp(pc_u32, opcode);
+            }
+
+            // Advance to the next instruction (entry index of next opcode)
+            interpreter.instruction_idx += 1;
+            if (interpreter.instruction_idx >= plan_ptr.instructionStream.len) return Error.STOP;
             const next_handler = plan_ptr.instructionStream[interpreter.instruction_idx].handler;
             return dispatchNext(next_handler, self, plan_ptr);
         }

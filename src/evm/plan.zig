@@ -236,7 +236,7 @@ pub fn Plan(comptime cfg: PlanConfig) type {
         }
 
         /// Get the next instruction handler and advance the instruction pointer.
-        /// Advances by 1 or 2 based on whether the opcode has metadata.
+        /// Advances idx first (by 1 or 2 based on metadata), then returns the handler at the new idx.
         pub fn getNextInstruction(
             self: *const Self,
             idx: *InstructionIndexType,
@@ -311,26 +311,16 @@ pub fn Plan(comptime cfg: PlanConfig) type {
                 else => false,
             };
 
-            // Get the current handler, then advance index
-            if (idx.* >= self.instructionStream.len) {
-                log.warn("getNextInstruction: idx {} >= instructionStream.len {}", .{ idx.*, self.instructionStream.len });
-                return &end_of_stream_handler;
-            }
-            const handler = self.instructionStream[idx.*].handler;
-
-            // Debug logging for null handler issue
-            const handler_addr = @intFromPtr(handler);
-            std.debug.print("getNextInstruction: idx={}, opcode_value=0x{x}, handler_addr=0x{x}\n", .{ idx.*, opcode_value, handler_addr });
-            if (handler_addr < 0x1000) {
-                std.debug.print("ERROR: handler from instructionStream[{}] has null/low address: 0x{x}\n", .{ idx.*, handler_addr });
-            }
-
             // Advance past current instruction and its metadata
             idx.* += 1;
             if (has_metadata) idx.* += 1;
 
-            // Return the current handler
-            return handler;
+            // Now return the next handler (or end-of-stream if at end)
+            if (idx.* >= self.instructionStream.len) {
+                log.warn("getNextInstruction: advanced idx {} beyond stream len {}", .{ idx.*, self.instructionStream.len });
+                return &end_of_stream_handler;
+            }
+            return self.instructionStream[idx.*].handler;
         }
 
         /// Get instruction index for a given PC value.
@@ -731,9 +721,9 @@ test "Plan getNextInstruction advances correctly" {
     try std.testing.expectEqual(@intFromPtr(&testHandler), @intFromPtr(handler2));
     try std.testing.expectEqual(@as(TestPlan.InstructionIndexType, 3), idx); // Skipped metadata
 
-    // Test advancing from MUL (no metadata)
+    // Test advancing from MUL (no metadata); next is end-of-stream
     const handler3 = plan.getNextInstruction(&idx, .MUL);
-    try std.testing.expectEqual(@intFromPtr(&testHandler), @intFromPtr(handler3));
+    try std.testing.expectEqual(@intFromPtr(&end_of_stream_handler), @intFromPtr(handler3));
     try std.testing.expectEqual(@as(TestPlan.InstructionIndexType, 4), idx);
 }
 

@@ -856,6 +856,30 @@ pub fn build(b: *std.Build) void {
     const compiler_test_step = b.step("test-compiler", "Run Compiler tests");
     compiler_test_step.dependOn(&run_compiler_test.step);
 
+    // Tracing test suite
+    // Add tracer tests (includes DebuggingTracer, NoOpTracer, LoggingTracer, FileTracer)
+    const tracer_test = b.addTest(.{
+        .name = "tracer-test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evm/tracer.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    tracer_test.root_module.addImport("primitives", primitives_mod);
+    tracer_test.root_module.addImport("crypto", crypto_mod);
+    tracer_test.root_module.addImport("evm", evm_mod);
+    tracer_test.root_module.addImport("build_options", build_options_mod);
+    const run_tracer_test = b.addRunArtifact(tracer_test);
+
+    // Add tracer individual test step
+    const test_tracer_step = b.step("test-tracer", "Run tracer tests");
+    test_tracer_step.dependOn(&run_tracer_test.step);
+
+    // Combined tracing test step that runs all tracing-related tests
+    const tracing_test_step = b.step("test-tracing", "Run all tracing-related tests");
+    tracing_test_step.dependOn(&run_tracer_test.step);
+
     const devtool_test = b.addTest(.{
         .name = "devtool-test",
         .root_module = b.createModule(.{

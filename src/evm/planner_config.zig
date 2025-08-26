@@ -26,6 +26,8 @@ pub const PlannerConfig = struct {
     vector_length: ?comptime_int = std.simd.suggestVectorLength(u8),
     /// Match stack sizing philosophy with stack.zig / FrameConfig.
     stack_size: u12 = 1024,
+    /// Compile-time toggle: inject generic trace handlers around opcodes.
+    inject_tracing: bool = false,
 
     /// PcType: chosen program-counter type (u16 or u32) from maxBytecodeSize.
     pub fn PcType(comptime self: Self) type {

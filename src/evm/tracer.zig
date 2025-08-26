@@ -75,6 +75,7 @@ pub const DebuggingTracer = struct {
     step_mode: bool = false,          // true = step through each instruction
     paused: bool = false,             // true = execution is paused
     breakpoints: std.AutoHashMap(u32, void),    // Set of PC values to break on
+    resume_idx: ?u32 = null, // Resume index for paused execution (instruction stream index)
     
     // Execution history
     steps: std.ArrayList(ExecutionStep),
@@ -86,6 +87,9 @@ pub const DebuggingTracer = struct {
     // Statistics
     total_instructions: u64 = 0,
     total_gas_used: u64 = 0,
+
+    // Execution control helpers (keep interpreter logic minimal)
+    pub const ExecutionResult = enum { Completed, Paused };
     
     pub const ExecutionStep = struct {
         step_number: u64,
@@ -143,6 +147,44 @@ pub const DebuggingTracer = struct {
         self.state_snapshots.deinit(self.allocator);
         
         self.breakpoints.deinit();
+    }
+
+    /// Run the interpreter until a pause (step/breakpoint) or STOP.
+    /// Generic over the interpreter type to avoid coupling.
+    pub fn run_until_pause_or_stop(self: *Self, comptime InterpreterType: type, interpreter: *InterpreterType) !ExecutionResult {
+        // If we have a resume index, set the interpreter to that point
+        if (self.take_resume_idx()) |i| {
+            interpreter.instruction_idx = @intCast(i);
+        }
+        // Run interpreter; catch pause/stop conditions
+        interpreter.interpret() catch |err| switch (err) {
+            error.ExecutionPaused => return .Paused,
+            error.STOP => return .Completed,
+            else => return err,
+        };
+        // If interpret returns cleanly, treat as Completed
+        return .Completed;
+    }
+
+    /// Execute exactly one instruction (step). Returns Paused at next before, or Completed at STOP.
+    pub fn stepSingle(self: *Self, comptime InterpreterType: type, interpreter: *InterpreterType) !ExecutionResult {
+        // Enable step mode and clear paused flag
+        self.step_mode = true;
+        self.paused = false;
+        defer self.step_mode = false;
+        return try self.run_until_pause_or_stop(InterpreterType, interpreter);
+    }
+
+    /// Set instruction index to resume from when paused
+    pub fn set_resume_idx(self: *Self, idx: u32) void {
+        self.resume_idx = idx;
+    }
+
+    /// Take and clear the pending resume index
+    pub fn take_resume_idx(self: *Self) ?u32 {
+        const i = self.resume_idx;
+        self.resume_idx = null;
+        return i;
     }
     
     /// Enable or disable step-by-step execution mode
@@ -205,12 +247,8 @@ pub const DebuggingTracer = struct {
     /// Create a snapshot of the current state
     pub fn captureState(self: *Self, pc: u32, comptime FrameType: type, frame: *const FrameType) !void {
         // Get current stack contents
-        const stack_copy = try self.allocator.alloc(u256, frame.next_stack_index);
-        for (0..frame.next_stack_index) |i| {
-            // Access stack items from bottom to top for consistent ordering
-            stack_copy[i] = frame.stack[i];
-        }
-        
+        const stack_copy = try self.copyStack(FrameType, frame);
+
         const snapshot = StateSnapshot{
             .pc = pc,
             .gas_remaining = @max(frame.gas_remaining, 0),
@@ -252,7 +290,7 @@ pub const DebuggingTracer = struct {
         self.total_instructions += 1;
         
         // Capture state after operation to complete the step record
-        self.captureStateForStep(pc, opcode, FrameType, frame) catch |err| {
+        self.captureStateForStep(pc, opcode, FrameType, frame, false) catch |err| {
             std.log.warn("Failed to capture after state: {}", .{err});
         };
         
@@ -288,10 +326,7 @@ pub const DebuggingTracer = struct {
         const gas = @max(frame.gas_remaining, 0);
         
         // Create stack copy
-        const stack_copy = try self.allocator.alloc(u256, frame.next_stack_index);
-        for (0..frame.next_stack_index) |i| {
-            stack_copy[i] = frame.stack[i];
-        }
+        const stack_copy = try self.copyStack(FrameType, frame);
         
         if (is_before) {
             // Start a new execution step
@@ -336,6 +371,18 @@ pub const DebuggingTracer = struct {
                 self.allocator.free(stack_copy);
             }
         }
+    }
+
+    /// Copy the current stack contents from a generic frame type.
+    fn copyStack(self: *Self, comptime FrameType: type, frame: *const FrameType) ![]u256 {
+        const slice_any = frame.stack.get_slice();
+        const count = slice_any.len;
+        var out = try self.allocator.alloc(u256, count);
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            out[i] = @intCast(slice_any[i]);
+        }
+        return out;
     }
     
     /// Reset all debugging state
@@ -1244,18 +1291,22 @@ test "DebuggingTracer memory management" {
     
     // This test verifies that the tracer properly manages memory
     // when used with a mock frame
+    const MockStack = struct {
+        data: [16]u256 = [_]u256{0} ** 16,
+        used: usize = 0,
+        pub fn get_slice(self: *const @This()) []const u256 {
+            return self.data[0..self.used];
+        }
+    };
     const MockFrame = struct {
         gas_remaining: i64 = 1000,
         bytecode: []const u8,
-        next_stack_index: usize,
-        stack: [16]u256,
-        
+        stack: MockStack = .{},
         fn init() @This() {
             return .{
                 .gas_remaining = 1000,
                 .bytecode = &[_]u8{0x60, 0x05}, // PUSH1 5
-                .next_stack_index = 0,
-                .stack = [_]u256{0} ** 16,
+                .stack = .{},
             };
         }
     };
@@ -1274,4 +1325,72 @@ test "DebuggingTracer memory management" {
     try std.testing.expectEqual(@as(u32, 0), step.pc);
     try std.testing.expectEqual(@as(u8, 0x60), step.opcode);
     try std.testing.expectEqualStrings("PUSH1", step.opcode_name);
+}
+
+test "DebuggingTracer stepping basic: fused PUSH1 3 + ADD" {
+    const allocator = std.testing.allocator;
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const HostMock = @import("host_mock.zig").HostMock;
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    // Bytecode: PUSH1 5, PUSH1 3, ADD, STOP
+    const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01, 0x00 };
+
+    var interpreter = try Interpreter.init(allocator, &bytecode, 1_000_000, {}, HostMock.init());
+    defer interpreter.deinit(allocator);
+
+    var tracer = &interpreter.frame.tracer;
+
+    // 1) First step pauses at first trace_before (PC=0), no execution yet
+    var res = try tracer.stepSingle(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expectEqual(@as(?Interpreter.Plan.PcType, 0), interpreter.getCurrentPc());
+    try std.testing.expectEqual(@as(usize, 0), interpreter.frame.stack.size());
+
+    // 2) Execute PUSH1 5
+    res = try tracer.stepSingle(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expectEqual(@as(?Interpreter.Plan.PcType, 2), interpreter.getCurrentPc());
+    try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
+    try std.testing.expectEqual(@as(u256, 5), interpreter.frame.stack.peek_unsafe());
+
+    // 3) Next step executes fused (PUSH1 3 + ADD), and pauses at STOP (PC=5)
+    res = try tracer.stepSingle(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expectEqual(@as(?Interpreter.Plan.PcType, 5), interpreter.getCurrentPc());
+    try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
+    try std.testing.expectEqual(@as(u256, 8), interpreter.frame.stack.peek_unsafe());
+
+    // 4) Execute STOP -> Completed
+    res = try tracer.stepSingle(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Completed, res);
+}
+
+test "DebuggingTracer breakpoint: pause at STOP, then complete" {
+    const allocator = std.testing.allocator;
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const HostMock = @import("host_mock.zig").HostMock;
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    // Bytecode: PUSH1 5, PUSH1 3, ADD, STOP
+    const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01, 0x00 };
+
+    var interpreter = try Interpreter.init(allocator, &bytecode, 1_000_000, {}, HostMock.init());
+    defer interpreter.deinit(allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    // Break at PC=5 (STOP) to avoid dependence on fusion of PUSH+ADD
+    try tracer.addBreakpoint(5);
+
+    // Run until breakpoint: should pause before executing STOP
+    var res = try tracer.run_until_pause_or_stop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expectEqual(@as(?Interpreter.Plan.PcType, 5), interpreter.getCurrentPc());
+    // Ensure result is computed
+    try std.testing.expectEqual(@as(usize, 1), interpreter.frame.stack.size());
+    try std.testing.expectEqual(@as(u256, 8), interpreter.frame.stack.peek_unsafe());
+
+    // Resume: should execute STOP -> Completed
+    res = try tracer.run_until_pause_or_stop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Completed, res);
 }
