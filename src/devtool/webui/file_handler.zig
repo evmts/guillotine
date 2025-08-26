@@ -6,14 +6,14 @@ const WebUIError = types.WebUIError;
 const Webui = @import("webui.zig");
 
 // C function declarations for file handling
-pub extern fn webui_set_root_folder(window: usize, path: [*:0]const u8) callconv(.C) bool;
-pub extern fn webui_set_browser_folder(path: [*:0]const u8) callconv(.C) void;
-pub extern fn webui_set_default_root_folder(path: [*:0]const u8) callconv(.C) bool;
+pub extern fn webui_set_root_folder(window: usize, path: [*:0]const u8) callconv(.c) bool;
+pub extern fn webui_set_browser_folder(path: [*:0]const u8) callconv(.c) void;
+pub extern fn webui_set_default_root_folder(path: [*:0]const u8) callconv(.c) bool;
 
 pub extern fn webui_set_file_handler(
     window: usize,
-    handler: *const fn (filename: [*:0]const u8, length: *c_int) callconv(.C) ?*const anyopaque,
-) callconv(.C) void;
+    handler: *const fn (filename: [*:0]const u8, length: *c_int) callconv(.c) ?*const anyopaque,
+) callconv(.c) void;
 
 pub extern fn webui_set_file_handler_window(
     window: usize,
@@ -21,14 +21,14 @@ pub extern fn webui_set_file_handler_window(
         window: usize,
         filename: [*:0]const u8,
         length: *c_int,
-    ) callconv(.C) ?*const anyopaque,
-) callconv(.C) void;
+    ) callconv(.c) ?*const anyopaque,
+) callconv(.c) void;
 
 pub extern fn webui_interface_set_response_file_handler(
     window: usize,
     response: *const anyopaque,
     length: usize,
-) callconv(.C) void;
+) callconv(.c) void;
 
 /// Set the web-server root folder path for a specific window.
 pub fn set_root_folder(self: Webui, path: [:0]const u8) !void {
@@ -47,7 +47,7 @@ pub fn set_browser_folder(self: Webui, path: [:0]const u8) void {
 /// This deactivates any previous handler set with `setFileHandlerWindow`.
 pub fn set_file_handler(self: Webui, comptime handler: fn (filename: []const u8) ?[]const u8) void {
     const tmp_struct = struct {
-        fn handle(tmp_filename: [*:0]const u8, length: *c_int) callconv(.C) ?*const anyopaque {
+        fn handle(tmp_filename: [*:0]const u8, length: *c_int) callconv(.c) ?*const anyopaque {
             const len = std.mem.len(tmp_filename);
             const content = handler(tmp_filename[0..len]);
             if (content) |val| {
@@ -66,7 +66,7 @@ pub fn set_file_handler(self: Webui, comptime handler: fn (filename: []const u8)
 /// This deactivates any previous handler set with `setFileHandler`.
 pub fn set_file_handler_window(self: Webui, comptime handler: fn (window_handle: usize, filename: []const u8) ?[]const u8) void {
     const tmp_struct = struct {
-        fn handle(window: usize, tmp_filename: [*:0]const u8, length: *c_int) callconv(.C) ?*const anyopaque {
+        fn handle(window: usize, tmp_filename: [*:0]const u8, length: *c_int) callconv(.c) ?*const anyopaque {
             const len = std.mem.len(tmp_filename);
             const content = handler(window, tmp_filename[0..len]);
             if (content) |val| {

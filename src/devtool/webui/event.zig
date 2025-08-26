@@ -8,28 +8,28 @@ const EventKind = types.EventKind;
 const Webui = @import("webui.zig");
 
 // C function declarations for events
-pub extern fn webui_get_context(e: *Event) callconv(.C) *anyopaque;
-pub extern fn webui_show_client(e: *Event, content: [*:0]const u8) callconv(.C) bool;
-pub extern fn webui_close_client(e: *Event) callconv(.C) void;
-pub extern fn webui_send_raw_client(e: *Event, function: [*:0]const u8, raw: [*]const anyopaque, size: usize) callconv(.C) void;
-pub extern fn webui_navigate_client(e: *Event, url: [*:0]const u8) callconv(.C) void;
-pub extern fn webui_run_client(e: *Event, script: [*:0]const u8) callconv(.C) void;
-pub extern fn webui_script_client(e: *Event, script: [*:0]const u8, timeout: usize, buffer: [*]u8, buffer_length: usize) callconv(.C) bool;
-pub extern fn webui_get_count(e: *Event) callconv(.C) usize;
-pub extern fn webui_get_int_at(e: *Event, index: usize) callconv(.C) i64;
-pub extern fn webui_get_int(e: *Event) callconv(.C) i64;
-pub extern fn webui_get_float_at(e: *Event, index: usize) callconv(.C) f64;
-pub extern fn webui_get_float(e: *Event) callconv(.C) f64;
-pub extern fn webui_get_string_at(e: *Event, index: usize) callconv(.C) [*:0]const u8;
-pub extern fn webui_get_string(e: *Event) callconv(.C) [*:0]const u8;
-pub extern fn webui_get_bool_at(e: *Event, index: usize) callconv(.C) bool;
-pub extern fn webui_get_bool(e: *Event) callconv(.C) bool;
-pub extern fn webui_get_size_at(e: *Event, index: usize) callconv(.C) usize;
-pub extern fn webui_get_size(e: *Event) callconv(.C) usize;
-pub extern fn webui_return_int(e: *Event, n: i64) callconv(.C) void;
-pub extern fn webui_return_float(e: *Event, f: f64) callconv(.C) void;
-pub extern fn webui_return_string(e: *Event, s: [*:0]const u8) callconv(.C) void;
-pub extern fn webui_return_bool(e: *Event, b: bool) callconv(.C) void;
+pub extern fn webui_get_context(e: *Event) callconv(.c) *anyopaque;
+pub extern fn webui_show_client(e: *Event, content: [*:0]const u8) callconv(.c) bool;
+pub extern fn webui_close_client(e: *Event) callconv(.c) void;
+pub extern fn webui_send_raw_client(e: *Event, function: [*:0]const u8, raw: [*]const anyopaque, size: usize) callconv(.c) void;
+pub extern fn webui_navigate_client(e: *Event, url: [*:0]const u8) callconv(.c) void;
+pub extern fn webui_run_client(e: *Event, script: [*:0]const u8) callconv(.c) void;
+pub extern fn webui_script_client(e: *Event, script: [*:0]const u8, timeout: usize, buffer: [*]u8, buffer_length: usize) callconv(.c) bool;
+pub extern fn webui_get_count(e: *Event) callconv(.c) usize;
+pub extern fn webui_get_int_at(e: *Event, index: usize) callconv(.c) i64;
+pub extern fn webui_get_int(e: *Event) callconv(.c) i64;
+pub extern fn webui_get_float_at(e: *Event, index: usize) callconv(.c) f64;
+pub extern fn webui_get_float(e: *Event) callconv(.c) f64;
+pub extern fn webui_get_string_at(e: *Event, index: usize) callconv(.c) [*:0]const u8;
+pub extern fn webui_get_string(e: *Event) callconv(.c) [*:0]const u8;
+pub extern fn webui_get_bool_at(e: *Event, index: usize) callconv(.c) bool;
+pub extern fn webui_get_bool(e: *Event) callconv(.c) bool;
+pub extern fn webui_get_size_at(e: *Event, index: usize) callconv(.c) usize;
+pub extern fn webui_get_size(e: *Event) callconv(.c) usize;
+pub extern fn webui_return_int(e: *Event, n: i64) callconv(.c) void;
+pub extern fn webui_return_float(e: *Event, f: f64) callconv(.c) void;
+pub extern fn webui_return_string(e: *Event, s: [*:0]const u8) callconv(.c) void;
+pub extern fn webui_return_bool(e: *Event, b: bool) callconv(.c) void;
 
 pub const Event = extern struct {
     /// The window object number
