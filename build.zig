@@ -389,6 +389,14 @@ pub fn build(b: *std.Build) void {
         .name = "guillotine-devtool",
         .root_module = devtool_mod,
     });
+    
+    // WORKAROUND: WebUI dependency is incompatible with Zig 0.15
+    // The webui package's build.zig uses deprecated APIs (addSharedLibrary/addStaticLibrary)
+    // which were replaced by addLibrary() in Zig 0.15. Until the webui package is updated,
+    // we link against the pre-built library from a previous Zig 0.14 build.
+    // TODO: Remove this when webui package is updated for Zig 0.15 compatibility
+    devtool_exe.addObjectFile(b.path(".zig-cache/o/6f3d522b008c26741e0b75f911df4f12/libwebui.a"));
+    
     if (target.result.os.tag == .macos) {
         const swift_compile = b.addSystemCommand(&[_][]const u8{
             "swiftc",
