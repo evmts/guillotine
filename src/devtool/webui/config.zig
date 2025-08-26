@@ -8,13 +8,13 @@ const Browser = types.Browser;
 const Webui = @import("webui.zig");
 
 // C function declarations for configuration
-pub extern fn webui_set_config(option: Config, status: bool) callconv(.C) void;
-pub extern fn webui_set_event_blocking(window: usize, status: bool) callconv(.C) void;
-pub extern fn webui_set_timeout(second: usize) callconv(.C) void;
-pub extern fn webui_browser_exist(browser: Browser) callconv(.C) bool;
-pub extern fn webui_set_proxy(window: usize, proxy_server: [*:0]const u8) callconv(.C) void;
-pub extern fn webui_interface_is_app_running() callconv(.C) bool;
-pub extern fn webui_interface_get_window_id(window: usize) callconv(.C) usize;
+pub extern fn webui_set_config(option: Config, status: bool) callconv(.c) void;
+pub extern fn webui_set_event_blocking(window: usize, status: bool) callconv(.c) void;
+pub extern fn webui_set_timeout(second: usize) callconv(.c) void;
+pub extern fn webui_browser_exist(browser: Browser) callconv(.c) bool;
+pub extern fn webui_set_proxy(window: usize, proxy_server: [*:0]const u8) callconv(.c) void;
+pub extern fn webui_interface_is_app_running() callconv(.c) bool;
+pub extern fn webui_interface_get_window_id(window: usize) callconv(.c) usize;
 
 // Instance methods
 
