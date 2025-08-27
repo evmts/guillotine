@@ -1,7 +1,9 @@
+import ArrowDownToDot from 'lucide-solid/icons/arrow-down-to-dot'
 import { type Component, createMemo, For } from 'solid-js'
 import Code from '~/components/Code'
 import InfoTooltip from '~/components/InfoTooltip'
 import { Badge } from '~/components/ui/badge'
+import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '~/components/ui/table'
 import { cn } from '~/lib/cn'
@@ -12,6 +14,8 @@ interface BlocksViewProps {
 	currentInstructionIndex: number
 	currentPreanalyzedBlockStartIndex: number
 	rawBytecode: string
+	breakpoints: number[]
+	togglePcBreakpoint: (pc: number) => Promise<void>
 }
 
 const ExecutionStepsView: Component<BlocksViewProps> = (props) => {
@@ -74,7 +78,7 @@ const ExecutionStepsView: Component<BlocksViewProps> = (props) => {
 													return (
 														<div
 															class={cn(
-																'grid grid-cols-[100px_100px_140px_100px_auto] gap-3 py-1',
+																'grid grid-cols-[100px_100px_140px_100px_auto_28px] gap-3 py-1',
 																idx() !== blk.instructions.length - 1 && 'border-border/40 border-b',
 															)}
 														>
@@ -91,7 +95,19 @@ const ExecutionStepsView: Component<BlocksViewProps> = (props) => {
 																{instr.opcode}
 															</Badge>
 															<Code class="inline-block w-fit text-xs">{instr.hex}</Code>
-															{instr.data ? <Code class="inline-block w-fit text-xs">{instr.data}</Code> : null}
+															{instr.data ? <Code class="inline-block w-fit text-xs">{instr.data}</Code> : <div />}
+															<Button
+																variant="ghost"
+																class={cn(
+																	'h-5 w-5 p-0 hover:bg-amber-500/70 dark:hover:bg-amber-400/70',
+																	props.breakpoints.includes(instr.pc)
+																		? 'bg-amber-500 dark:bg-amber-400'
+																		: 'text-muted-foreground',
+																)}
+																onClick={() => props.togglePcBreakpoint(instr.pc)}
+															>
+																<ArrowDownToDot class="h-3 w-3" />
+															</Button>
 														</div>
 													)
 												}}

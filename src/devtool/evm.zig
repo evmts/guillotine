@@ -467,6 +467,72 @@ test "DevtoolEvm init + hex load + single step" {
     const s1 = try dv.singleStep();
     try std.testing.expect(!s1.completed);
     const json = try dv.serializeEvmState();
-    defer a.free(json);
+    // serializeEvmState allocates with dv.allocator (c_allocator); free accordingly
+    defer dv.allocator.free(json);
     try std.testing.expect(json.len > 0);
+}
+
+test "DevtoolEvm available breakpoints extraction" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+
+    // Program: PUSH1 1 (pc=0), PUSH1 2 (pc=2), ADD (pc=4)
+    try dv.loadBytecodeHex("0x6001600201");
+
+    const avail = try dv.getAvailableBreakpoints(a);
+    defer a.free(avail);
+
+    try std.testing.expectEqual(@as(usize, 3), avail.len);
+    // Should contain 0, 2, 4 in some order (we will sort a copy for comparison)
+    const sorted = try a.dupe(u32, avail);
+    defer a.free(sorted);
+    std.sort.block(u32, sorted, {}, comptime std.sort.asc(u32));
+    try std.testing.expectEqual(@as(u32, 0), sorted[0]);
+    try std.testing.expectEqual(@as(u32, 2), sorted[1]);
+    try std.testing.expectEqual(@as(u32, 4), sorted[2]);
+}
+
+test "DevtoolEvm add/remove/clear breakpoints and pause on hit" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+
+    // Program: PUSH1 1 (pc=0), PUSH1 2 (pc=2), ADD (pc=4), STOP (pc=5)
+    // Note: STOP isn't explicitly present here, execution will end after ADD in our tracer.
+    try dv.loadBytecodeHex("0x6001600201");
+
+    // Add a breakpoint at pc=2 and verify it is reported
+    try dv.addBreakpoint(2);
+    const bps = try dv.getBreakpoints(a);
+    defer a.free(bps);
+    try std.testing.expect(bps.len == 1);
+    // order is arbitrary, so check membership
+    var found = false;
+    for (bps) |pc| {
+        if (pc == 2) found = true;
+    }
+    try std.testing.expect(found);
+
+    // Run until pause and ensure we paused before executing pc=2
+    const res1 = try dv.runUntilHalt();
+    try std.testing.expect(res1 == .paused);
+    const pc1_opt = dv.interpreter.?.getCurrentPc();
+    try std.testing.expect(pc1_opt != null);
+    try std.testing.expectEqual(@as(usize, 2), pc1_opt.?);
+
+    // Remove that breakpoint
+    const removed = try dv.removeBreakpoint(2);
+    try std.testing.expect(removed);
+    // Clear breakpoints to ensure cleanup APIs work
+    dv.clearBreakpoints();
+    const bps2 = try dv.getBreakpoints(a);
+    defer a.free(bps2);
+    try std.testing.expectEqual(@as(usize, 0), bps2.len);
 }

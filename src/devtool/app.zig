@@ -48,8 +48,8 @@ fn alloc_error_json(allocator: std.mem.Allocator, msg: []const u8) ![]u8 {
     return try std.fmt.allocPrint(allocator, "{{\"error\":\"{s}\"}}", .{msg});
 }
 
-fn alloc_breakpoints_json(allocator: std.mem.Allocator, bps: []const u32) ![]u8 {
-    var s = try allocator.dupe(u8, "{\"breakpoints\":[");
+fn alloc_breakpoints_array_json(allocator: std.mem.Allocator, bps: []const u32) ![]u8 {
+    var s = try allocator.dupe(u8, "[");
     errdefer allocator.free(s);
     var i: usize = 0;
     while (i < bps.len) : (i += 1) {
@@ -62,7 +62,7 @@ fn alloc_breakpoints_json(allocator: std.mem.Allocator, bps: []const u32) ![]u8 
         allocator.free(s);
         s = next2;
     }
-    const out = try std.fmt.allocPrint(allocator, "{s}]}}", .{s});
+    const out = try std.fmt.allocPrint(allocator, "{s}]", .{s});
     allocator.free(s);
     return out;
 }
@@ -297,7 +297,7 @@ fn addBreakpointHandler(e: *webui.Event) void {
         };
         defer app.allocator.free(bps);
 
-        const json = alloc_breakpoints_json(app.allocator, bps) catch {
+        const json = alloc_breakpoints_array_json(app.allocator, bps) catch {
             e.return_string("{\"error\":\"Failed to format breakpoints\"}");
             return;
         };
@@ -353,7 +353,7 @@ fn removeBreakpointHandler(e: *webui.Event) void {
         };
         defer app.allocator.free(bps);
 
-        const json = alloc_breakpoints_json(app.allocator, bps) catch {
+        const json = alloc_breakpoints_array_json(app.allocator, bps) catch {
             e.return_string("{\"error\":\"Failed to format breakpoints\"}");
             return;
         };
@@ -377,7 +377,7 @@ fn clearBreakpointsHandler(e: *webui.Event) void {
     if (app.devtool_evm) |*evm| {
         evm.clearBreakpoints();
         const empty: []const u32 = &.{};
-        const json = alloc_breakpoints_json(app.allocator, empty) catch {
+        const json = alloc_breakpoints_array_json(app.allocator, empty) catch {
             e.return_string("{\"error\":\"Failed to format breakpoints\"}");
             return;
         };
@@ -409,7 +409,7 @@ fn getBreakpointsHandler(e: *webui.Event) void {
         };
         defer app.allocator.free(bps);
 
-        const json = alloc_breakpoints_json(app.allocator, bps) catch {
+        const json = alloc_breakpoints_array_json(app.allocator, bps) catch {
             e.return_string("{\"error\":\"Failed to format breakpoints\"}");
             return;
         };
@@ -441,7 +441,7 @@ fn getAvailableBreakpointsHandler(e: *webui.Event) void {
         };
         defer app.allocator.free(bps);
 
-        const json = alloc_breakpoints_json(app.allocator, bps) catch {
+        const json = alloc_breakpoints_array_json(app.allocator, bps) catch {
             e.return_string("{\"error\":\"Failed to format breakpoints\"}");
             return;
         };

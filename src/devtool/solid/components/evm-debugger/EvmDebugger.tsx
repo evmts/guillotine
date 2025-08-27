@@ -1,4 +1,5 @@
-import { type Accessor, createSignal, type Setter, Show } from 'solid-js'
+import { type Accessor, createEffect, createSignal, type Setter, Show } from 'solid-js'
+import Breakpoints from '~/components/evm-debugger/Breakpoints'
 import BytecodeLoader from '~/components/evm-debugger/BytecodeLoader'
 import Controls from '~/components/evm-debugger/Controls'
 import ErrorAlert from '~/components/evm-debugger/ErrorAlert'
@@ -11,6 +12,7 @@ import Stack from '~/components/evm-debugger/Stack'
 import StateDiff from '~/components/evm-debugger/StateDiff'
 import StateSummary from '~/components/evm-debugger/StateSummary'
 import type { EvmState } from '~/lib/types'
+import { addBreakpoint, getBreakpoints, removeBreakpoint } from '~/lib/utils'
 
 interface EvmDebuggerProps {
 	isDarkMode: Accessor<boolean>
@@ -31,6 +33,31 @@ interface EvmDebuggerProps {
 
 const EvmDebugger = (props: EvmDebuggerProps) => {
 	const [activePanel, setActivePanel] = createSignal('all')
+	const [breakpoints, setBreakpoints] = createSignal<number[]>([])
+
+	const refreshBreakpoints = async () => {
+		try {
+			setBreakpoints(await getBreakpoints())
+		} catch {
+			setBreakpoints([])
+		}
+	}
+
+	// Keep breakpoints refreshed on first load and when instruction advances
+	createEffect(() => {
+		void props.state.currentInstructionIndex
+		void props.state.pc
+		void refreshBreakpoints()
+	})
+
+	const togglePcBreakpoint = async (pc: number) => {
+		if (breakpoints().includes(pc)) {
+			await removeBreakpoint(pc)
+		} else {
+			await addBreakpoint(pc)
+		}
+		await refreshBreakpoints()
+	}
 
 	return (
 		<div class="min-h-screen bg-background text-foreground">
@@ -59,12 +86,21 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 			<div class="mx-auto flex max-w-7xl flex-col gap-6 px-3 pb-6 sm:px-6">
 				<ErrorAlert error={props.error()} setError={props.setError} />
 				<StateSummary state={props.state as EvmState} isUpdating={props.isRunning()} />
-				<Show when={activePanel() === 'all' || activePanel() === 'bytecode'}>
+				<Breakpoints
+					bytecode={props.bytecode()}
+					state={props.state as EvmState}
+					breakpoints={breakpoints()}
+					refreshBreakpoints={refreshBreakpoints}
+					togglePcBreakpoint={togglePcBreakpoint}
+				/>
+				<Show when={activePanel() === 'all' || activePanel() === 'execution'}>
 					<ExecutionStepsView
 						preanalyzedBlocks={props.state.preanalyzedBlocks}
 						currentPreanalyzedBlockStartIndex={props.state.currentPreanalyzedBlockStartIndex}
 						currentInstructionIndex={props.state.currentInstructionIndex}
 						rawBytecode={props.bytecode()}
+						breakpoints={breakpoints()}
+						togglePcBreakpoint={togglePcBreakpoint}
 					/>
 				</Show>
 

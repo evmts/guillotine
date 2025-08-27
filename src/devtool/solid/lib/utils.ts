@@ -236,8 +236,8 @@ export const opcodeToString = (opcode: number): string => {
 export async function addBreakpoint(pc: number | string): Promise<number[]> {
 	try {
 		const arg = typeof pc === 'number' ? String(pc) : pc
-		const breakpoints = assertJson(await window.add_breakpoint(arg))
-		return Array.isArray(breakpoints) ? breakpoints : []
+		const resp = await window.add_breakpoint(arg)
+		return assertJson<number[]>(resp)
 	} catch (err) {
 		throw new Error(`Failed to add breakpoint: ${err}`)
 	}
@@ -246,8 +246,8 @@ export async function addBreakpoint(pc: number | string): Promise<number[]> {
 export async function removeBreakpoint(pc: number | string): Promise<number[]> {
 	try {
 		const arg = typeof pc === 'number' ? String(pc) : pc
-		const breakpoints = assertJson(await window.remove_breakpoint(arg))
-		return Array.isArray(breakpoints) ? breakpoints : []
+		const resp = await window.remove_breakpoint(arg)
+		return assertJson<number[]>(resp)
 	} catch (err) {
 		throw new Error(`Failed to remove breakpoint: ${err}`)
 	}
@@ -255,8 +255,8 @@ export async function removeBreakpoint(pc: number | string): Promise<number[]> {
 
 export async function clearBreakpoints(): Promise<number[]> {
 	try {
-		const breakpoints = assertJson(await window.clear_breakpoints())
-		return Array.isArray(breakpoints) ? breakpoints : []
+		const resp = await window.clear_breakpoints()
+		return assertJson<number[]>(resp)
 	} catch (err) {
 		throw new Error(`Failed to clear breakpoints: ${err}`)
 	}
@@ -264,8 +264,8 @@ export async function clearBreakpoints(): Promise<number[]> {
 
 export async function getBreakpoints(): Promise<number[]> {
 	try {
-		const breakpoints = assertJson(await window.get_breakpoints())
-		return Array.isArray(breakpoints) ? breakpoints : []
+		const resp = await window.get_breakpoints()
+		return assertJson<number[]>(resp)
 	} catch (err) {
 		throw new Error(`Failed to get breakpoints: ${err}`)
 	}
@@ -273,8 +273,8 @@ export async function getBreakpoints(): Promise<number[]> {
 
 export async function getAvailableBreakpoints(): Promise<number[]> {
 	try {
-		const breakpoints = assertJson(await window.get_available_breakpoints())
-		return Array.isArray(breakpoints) ? breakpoints : []
+		const resp = await window.get_available_breakpoints()
+		return assertJson<number[]>(resp)
 	} catch (err) {
 		throw new Error(`Failed to get available breakpoints: ${err}`)
 	}

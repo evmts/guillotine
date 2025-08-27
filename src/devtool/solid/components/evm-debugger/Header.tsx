@@ -48,6 +48,14 @@ const Header: Component<HeaderProps> = (props) => {
 							All panels
 						</ToggleButton>
 						<ToggleButton
+							pressed={props.activePanel === 'execution'}
+							onChange={() => props.setActivePanel('execution')}
+							size="sm"
+							class="whitespace-nowrap hover:bg-amber-100 data-[pressed]:bg-amber-100 dark:data-[pressed]:bg-amber-950 dark:hover:bg-amber-950"
+						>
+							Execution
+						</ToggleButton>
+						<ToggleButton
 							pressed={props.activePanel === 'stack'}
 							onChange={() => props.setActivePanel('stack')}
 							size="sm"
@@ -78,14 +86,6 @@ const Header: Component<HeaderProps> = (props) => {
 							class="whitespace-nowrap hover:bg-amber-100 data-[pressed]:bg-amber-100 dark:data-[pressed]:bg-amber-950 dark:hover:bg-amber-950"
 						>
 							Logs
-						</ToggleButton>
-						<ToggleButton
-							pressed={props.activePanel === 'bytecode'}
-							onChange={() => props.setActivePanel('bytecode')}
-							size="sm"
-							class="whitespace-nowrap hover:bg-amber-100 data-[pressed]:bg-amber-100 dark:data-[pressed]:bg-amber-950 dark:hover:bg-amber-950"
-						>
-							Bytecode
 						</ToggleButton>
 						<ToggleButton
 							pressed={props.activePanel === 'gas'}
