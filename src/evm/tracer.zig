@@ -563,11 +563,11 @@ pub const DebuggingTracer = struct {
     }
 
     // ===== Prestate composition API =====
-    pub fn enable_prestate_tracing(self: *Self, diff_mode: bool, disable_storage: bool, disable_code: bool) !void {
+    pub fn enable_prestate_tracing(self: *Self, diff_mode: bool, disable_storage: bool, disable_code: bool, include_empty: bool) !void {
         if (!self.prestate_enabled) {
             const pt = try self.allocator.create(PrestateTracer);
             pt.* = PrestateTracer.init(self.allocator);
-            pt.configure(diff_mode, disable_storage, disable_code);
+            pt.configure(diff_mode, disable_storage, disable_code, include_empty);
             self.prestate_tracer = pt;
             self.prestate_enabled = true;
         }
@@ -1167,7 +1167,7 @@ test "DebuggingTracer with prestate mode" {
     var debug_tracer = DebuggingTracer.init();
     defer debug_tracer.deinit();
 
-    try debug_tracer.enable_prestate_tracing(true, false, false);
+    try debug_tracer.enable_prestate_tracing(true, false, false, false);
     debug_tracer.onTransactionStart();
 
     const addr: Address = [_]u8{1} ** 20;
