@@ -23,15 +23,14 @@ interface EvmDebuggerProps {
 	setState: Setter<EvmState>
 	bytecode: Accessor<string>
 	setBytecode: Setter<string>
-	handleRunPause: () => void
+	handleRun: () => void
+	handleBlock: () => void
 	handleStep: () => void
 	handleReset: () => void
 }
 
 const EvmDebugger = (props: EvmDebuggerProps) => {
-	const [isUpdating, setIsUpdating] = createSignal(false)
 	const [activePanel, setActivePanel] = createSignal('all')
-	const [executionSpeed, setExecutionSpeed] = createSignal(100)
 
 	return (
 		<div class="min-h-screen bg-background text-foreground">
@@ -42,15 +41,10 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				setActivePanel={setActivePanel}
 			/>
 			<Controls
-				isRunning={props.isRunning()}
-				setIsRunning={props.setIsRunning}
 				setError={props.setError}
 				setState={props.setState as Setter<EvmState>}
-				isUpdating={isUpdating()}
-				setIsUpdating={setIsUpdating}
-				executionSpeed={executionSpeed()}
-				setExecutionSpeed={setExecutionSpeed}
-				handleRunPause={props.handleRunPause}
+				handleRun={props.handleRun}
+				handleBlock={props.handleBlock}
 				handleStep={props.handleStep}
 				handleReset={props.handleReset}
 				bytecode={props.bytecode()}
@@ -60,12 +54,11 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				bytecode={props.bytecode()}
 				setBytecode={props.setBytecode}
 				setError={props.setError}
-				setIsRunning={props.setIsRunning}
 				setState={props.setState as Setter<EvmState>}
 			/>
 			<div class="mx-auto flex max-w-7xl flex-col gap-6 px-3 pb-6 sm:px-6">
 				<ErrorAlert error={props.error()} setError={props.setError} />
-				<StateSummary state={props.state as EvmState} isUpdating={isUpdating()} />
+				<StateSummary state={props.state as EvmState} isUpdating={props.isRunning()} />
 				<Show when={activePanel() === 'all' || activePanel() === 'bytecode'}>
 					<ExecutionStepsView
 						preanalyzedBlocks={props.state.preanalyzedBlocks}

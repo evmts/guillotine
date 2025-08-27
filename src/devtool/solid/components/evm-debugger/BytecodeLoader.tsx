@@ -12,7 +12,6 @@ interface BytecodeLoaderProps {
 	bytecode: string
 	setBytecode: Setter<string>
 	setError: Setter<string>
-	setIsRunning: Setter<boolean>
 	setState: Setter<EvmState>
 }
 
@@ -23,7 +22,6 @@ const BytecodeLoader: Component<BytecodeLoaderProps> = (props) => {
 		try {
 			props.setError('')
 			await loadBytecode(props.bytecode)
-			props.setIsRunning(false)
 			const state = await resetEvm()
 			props.setState(state)
 		} catch (err) {

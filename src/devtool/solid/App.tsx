@@ -3,7 +3,7 @@ import { createStore } from 'solid-js/store'
 import EvmDebugger from '~/components/evm-debugger/EvmDebugger'
 import { Toaster } from '~/components/ui/sonner'
 import { type EvmState, sampleContracts } from '~/lib/types'
-import { loadBytecode, resetEvm, stepEvm } from '~/lib/utils'
+import { blockEvm, loadBytecode, resetEvm, runEvm, stepEvm } from '~/lib/utils'
 
 declare global {
 	interface Window {
@@ -12,14 +12,13 @@ declare global {
 		reset_evm: () => Promise<string>
 		step_evm: () => Promise<string>
 		get_evm_state: () => Promise<string>
+		run_evm: () => Promise<string>
+		block_evm: () => Promise<string>
 		add_breakpoint: (pc: number | string) => Promise<string>
 		remove_breakpoint: (pc: number | string) => Promise<string>
 		get_breakpoints: () => Promise<string>
 		get_available_breakpoints: () => Promise<string>
 		clear_breakpoints: () => Promise<string>
-		handleRunPause: () => void
-		handleStep: () => void
-		handleReset: () => void
 		on_web_ui_ready: () => void
 	}
 }
@@ -49,8 +48,26 @@ function App() {
 		currentPreanalyzedBlockStartIndex: 0,
 	})
 
-	const handleRunPause = () => {
-		setIsRunning(!isRunning())
+	const handleRun = async () => {
+		try {
+			setError('')
+			setIsRunning(true)
+			const newState = await runEvm()
+			setIsRunning(false)
+			setState(newState)
+		} catch (err) {
+			setError(`${err}`)
+		}
+	}
+
+	const handleBlock = async () => {
+		try {
+			setError('')
+			const newState = await blockEvm()
+			setState(newState)
+		} catch (err) {
+			setError(`${err}`)
+		}
 	}
 
 	const handleStep = async () => {
@@ -75,10 +92,6 @@ function App() {
 	}
 
 	onMount(async () => {
-		window.handleRunPause = handleRunPause
-		window.handleStep = handleStep
-		window.handleReset = handleReset
-
 		// Wait for WebUI connection event
 		window.on_web_ui_ready = async () => {
 			try {
@@ -93,7 +106,7 @@ function App() {
 		const handleKeyDown = (event: KeyboardEvent) => {
 			if (event.code === 'Space') {
 				event.preventDefault()
-				handleRunPause()
+				handleRun()
 			}
 		}
 		window.addEventListener('keydown', handleKeyDown)
@@ -108,26 +121,6 @@ function App() {
 			window.removeEventListener('keydown', handleKeyDown)
 			mediaQuery.removeEventListener('change', listener)
 		})
-	})
-
-	createEffect(() => {
-		if (isRunning() && bytecode()) {
-			const intervalId = setInterval(async () => {
-				try {
-					const newState = await stepEvm()
-					if (newState.completed) {
-						setIsRunning(false)
-					}
-					setState(newState)
-				} catch (err) {
-					setError(`${err}`)
-					setIsRunning(false)
-				}
-			}, 200)
-			onCleanup(() => {
-				clearInterval(intervalId)
-			})
-		}
 	})
 
 	createEffect(() => {
@@ -151,7 +144,8 @@ function App() {
 				setState={setState}
 				bytecode={bytecode}
 				setBytecode={setBytecode}
-				handleRunPause={handleRunPause}
+				handleRun={handleRun}
+				handleBlock={handleBlock}
 				handleStep={handleStep}
 				handleReset={handleReset}
 			/>

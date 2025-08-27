@@ -159,6 +159,72 @@ fn stepEvmHandler(e: *webui.Event) void {
     }
 }
 
+fn runEvmHandler(e: *webui.Event) void {
+    const app_ptr = e.get_ptr();
+    const app: *App = @ptrCast(@alignCast(app_ptr));
+
+    if (app.devtool_evm) |*evm| {
+        const run_result = evm.runUntilHalt() catch {
+            const json = alloc_error_json(app.allocator, "Failed to run EVM") catch {
+                e.return_string("{\"error\":\"Failed to run EVM\"}");
+                return;
+            };
+            return_json_owned(e, app.allocator, json);
+            return;
+        };
+        _ = run_result;
+
+        const state_json = evm.serializeEvmState() catch {
+            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
+                e.return_string("{\"error\":\"Failed to serialize state\"}");
+                return;
+            };
+            return_json_owned(e, app.allocator, json);
+            return;
+        };
+        return_json_from_evm(e, app.allocator, evm.allocator, state_json);
+    } else {
+        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
+            e.return_string("{\"error\":\"EVM not initialized\"}");
+            return;
+        };
+        return_json_owned(e, app.allocator, json);
+    }
+}
+
+fn blockEvmHandler(e: *webui.Event) void {
+    const app_ptr = e.get_ptr();
+    const app: *App = @ptrCast(@alignCast(app_ptr));
+
+    if (app.devtool_evm) |*evm| {
+        const run_result = evm.runUntilNextBlock() catch {
+            const json = alloc_error_json(app.allocator, "Failed to run block") catch {
+                e.return_string("{\"error\":\"Failed to run block\"}");
+                return;
+            };
+            return_json_owned(e, app.allocator, json);
+            return;
+        };
+        _ = run_result;
+
+        const state_json = evm.serializeEvmState() catch {
+            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
+                e.return_string("{\"error\":\"Failed to serialize state\"}");
+                return;
+            };
+            return_json_owned(e, app.allocator, json);
+            return;
+        };
+        return_json_from_evm(e, app.allocator, evm.allocator, state_json);
+    } else {
+        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
+            e.return_string("{\"error\":\"EVM not initialized\"}");
+            return;
+        };
+        return_json_owned(e, app.allocator, json);
+    }
+}
+
 fn getEvmStateHandler(e: *webui.Event) void {
     const app_ptr = e.get_ptr();
     const app: *App = @ptrCast(@alignCast(app_ptr));
@@ -436,6 +502,10 @@ pub fn run(self: *App) !void {
 
     _ = try self.window.bind("step_evm", stepEvmHandler);
     self.window.set_context("step_evm", self);
+    _ = try self.window.bind("block_evm", blockEvmHandler);
+    self.window.set_context("block_evm", self);
+    _ = try self.window.bind("run_evm", runEvmHandler);
+    self.window.set_context("run_evm", self);
 
     _ = try self.window.bind("get_evm_state", getEvmStateHandler);
     self.window.set_context("get_evm_state", self);

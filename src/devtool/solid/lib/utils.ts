@@ -18,7 +18,9 @@ export async function loadBytecode(bytecodeHex: string): Promise<void> {
 
 export async function resetEvm(): Promise<EvmState> {
 	try {
-		return assertJson(await window.reset_evm())
+		assertJson(await window.reset_evm())
+		// step once after reset to be place pointer right before the first instruction
+		return assertJson(await stepEvm())
 	} catch (err) {
 		throw new Error(`Failed to reset EVM: ${err}`)
 	}
@@ -32,13 +34,19 @@ export async function stepEvm(): Promise<EvmState> {
 	}
 }
 
-export async function toggleRunPause(): Promise<EvmState> {
+export async function blockEvm(): Promise<EvmState> {
 	try {
-		console.log('toggle_run_pause')
-		// For now, just get the current state since we don't have continuous execution yet
-		return await getEvmState()
+		return assertJson(await window.block_evm())
 	} catch (err) {
-		throw new Error(`Failed to toggle run/pause: ${err}`)
+		throw new Error(`Failed to run block: ${err}`)
+	}
+}
+
+export async function runEvm(): Promise<EvmState> {
+	try {
+		return assertJson(await window.run_evm())
+	} catch (err) {
+		throw new Error(`Failed to run EVM: ${err}`)
 	}
 }
 

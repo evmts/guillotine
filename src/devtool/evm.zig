@@ -174,11 +174,15 @@ pub fn singleStep(self: *DevtoolEvm) !DebugStepResult {
 
 pub fn runUntilHalt(self: *DevtoolEvm) !RunResult {
     if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;
-    const r = try self.interpreter.?.frame.tracer.runUntilPauseOrStop(Interpreter, self.interpreter.?);
+    // Ensure we are not in step mode and not paused before running
+    const f = &self.interpreter.?.frame;
+    f.tracer.setStepMode(false);
+    f.tracer.resumeExecution();
+    const r = try f.tracer.runUntilPauseOrStop(Interpreter, self.interpreter.?);
     if (r == .Completed) {
         self.is_completed = true;
         if (!self.tx_ended) {
-            self.interpreter.?.frame.tracer.onTransactionEnd();
+            f.tracer.onTransactionEnd();
             self.tx_ended = true;
         }
         return .completed;
@@ -187,6 +191,84 @@ pub fn runUntilHalt(self: *DevtoolEvm) !RunResult {
 }
 
 // singleStep defined above
+
+/// Execute until the end of the current basic block (as determined by preanalysis)
+/// or until a breakpoint/STOP is reached. Stops before executing the first
+/// instruction of the next block.
+pub fn runUntilNextBlock(self: *DevtoolEvm) !RunResult {
+    if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;
+    if (self.is_completed) return .completed;
+
+    const interp = self.interpreter.?;
+    const f = &interp.frame;
+
+    // Collect preanalyzed blocks and locate the current block by instruction index
+    const blocks = try debug_state.collect_blocks_for_interpreter(Interpreter, self.allocator, interp);
+    defer {
+        // Free blocks and their instruction arrays
+        for (blocks) |blk| {
+            for (blk.instructions) |ins| {
+                self.allocator.free(ins.opcode);
+                self.allocator.free(ins.hex);
+                self.allocator.free(ins.data);
+            }
+            self.allocator.free(blk.instructions);
+        }
+        self.allocator.free(blocks);
+    }
+
+    const cur_idx_usize: usize = interp.instruction_idx;
+    var current_block_instrs: []const debug_state.InstructionJson = &.{};
+    var found_block = false;
+    var i: usize = 0;
+    var current_block_start_idx: usize = 0;
+    while (i < blocks.len) : (i += 1) {
+        const blk = blocks[i];
+        const bi = blk.firstInstructionIndex;
+        if (bi <= cur_idx_usize and (!found_block or bi >= current_block_start_idx)) {
+            current_block_start_idx = bi;
+            current_block_instrs = blk.instructions;
+            found_block = true;
+        }
+    }
+
+    // Helper to check if a PC belongs to the current block
+    const pc_in_current_block = struct {
+        fn contains(instrs: []const debug_state.InstructionJson, pc: u32) bool {
+            var j: usize = 0;
+            while (j < instrs.len) : (j += 1) {
+                if (instrs[j].pc == pc) return true;
+            }
+            return false;
+        }
+    };
+
+    // Step through instructions until we leave the current block, hit a breakpoint, or complete
+    while (true) {
+        const res = try f.tracer.stepSingle(Interpreter, self.interpreter.?);
+        if (res == .Completed) {
+            self.is_completed = true;
+            if (!self.tx_ended) {
+                f.tracer.onTransactionEnd();
+                self.tx_ended = true;
+            }
+            return .completed;
+        }
+        // Next PC to execute
+        const next_pc_opt = interp.getCurrentPc();
+        if (next_pc_opt == null) return .paused;
+        const next_pc: u32 = @intCast(next_pc_opt.?);
+
+        // Stop if next instruction is a breakpoint
+        if (f.tracer.hasBreakpoint(next_pc)) return .paused;
+
+        // If the next PC is not in the current block, we've reached the next block
+        if (!pc_in_current_block.contains(current_block_instrs, next_pc)) {
+            return .paused;
+        }
+        // Otherwise continue stepping within the current block
+    }
+}
 
 pub fn addBreakpoint(self: *DevtoolEvm, pc: u32) !void {
     if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;

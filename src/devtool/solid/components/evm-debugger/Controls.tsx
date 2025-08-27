@@ -1,24 +1,18 @@
 import { isMobile } from '@solid-primitives/platform'
-import GaugeIcon from 'lucide-solid/icons/gauge'
-import PauseIcon from 'lucide-solid/icons/pause'
 import PlayIcon from 'lucide-solid/icons/play'
 import RotateCcwIcon from 'lucide-solid/icons/rotate-ccw'
+import SkipForwardIcon from 'lucide-solid/icons/skip-forward'
 import StepForwardIcon from 'lucide-solid/icons/step-forward'
-import { type Component, type Setter, Show } from 'solid-js'
+import type { Component, Setter } from 'solid-js'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import type { EvmState } from '~/lib/types'
 
 interface ControlsProps {
-	isRunning: boolean
-	setIsRunning: Setter<boolean>
 	setError: Setter<string>
 	setState: Setter<EvmState>
-	isUpdating: boolean
-	setIsUpdating: Setter<boolean>
-	executionSpeed: number
-	setExecutionSpeed: Setter<number>
-	handleRunPause: () => void
+	handleRun: () => void
+	handleBlock: () => void
 	handleStep: () => void
 	handleReset: () => void
 	bytecode: string
@@ -28,7 +22,8 @@ interface ControlsProps {
 const Controls: Component<ControlsProps> = (props) => {
 	const onReset = () => props.handleReset()
 	const onStep = () => props.handleStep()
-	const onRunPause = () => props.handleRunPause()
+	const onRun = () => props.handleRun()
+	const onBlock = () => props.handleBlock()
 
 	return (
 		<div class="sticky top-18 z-50 flex w-full justify-center px-4">
@@ -53,7 +48,7 @@ const Controls: Component<ControlsProps> = (props) => {
 					variant="outline"
 					size="sm"
 					onClick={onStep}
-					disabled={props.isRunning || !props.bytecode || props.isExecutionComplete}
+					disabled={!props.bytecode || props.isExecutionComplete}
 					aria-label="Step EVM (S)"
 					class="flex items-center gap-2"
 				>
@@ -66,33 +61,36 @@ const Controls: Component<ControlsProps> = (props) => {
 					)}
 				</Button>
 				<Button
-					variant={props.isRunning ? 'secondary' : 'outline'}
+					variant="outline"
 					size="sm"
-					onClick={onRunPause}
-					disabled={!props.bytecode}
-					aria-label={props.isRunning ? 'Pause EVM (Space)' : 'Run EVM (Space)'}
+					onClick={onBlock}
+					disabled={!props.bytecode || props.isExecutionComplete}
+					aria-label="Run block (B)"
 					class="flex items-center gap-2"
 				>
-					<Show when={props.isRunning} fallback={<PlayIcon class="h-4 w-4" />}>
-						<PauseIcon class="h-4 w-4" />
-					</Show>
-					{props.isRunning ? 'Pause' : 'Run'}
+					<SkipForwardIcon class="h-4 w-4" />
+					Block
+					{!isMobile && (
+						<Badge variant="outline" class="px-1.5 py-0.5 font-mono font-normal text-muted-foreground text-xs">
+							B
+						</Badge>
+					)}
+				</Button>
+				<Button
+					variant={'outline'}
+					size="sm"
+					onClick={onRun}
+					disabled={!props.bytecode || props.isExecutionComplete}
+					aria-label={'Run EVM (Space)'}
+					class="flex items-center gap-2"
+				>
+					<PlayIcon class="h-4 w-4" />
+					Run
 					{!isMobile && (
 						<Badge variant="outline" class="px-1.5 py-0.5 font-mono font-normal text-muted-foreground text-xs">
 							Space
 						</Badge>
 					)}
-				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					disabled={!props.isRunning || !props.bytecode}
-					onClick={onRunPause}
-					aria-label="Speed"
-					class="flex items-center gap-2"
-				>
-					<GaugeIcon class="h-4 w-4" />
-					Speed
 				</Button>
 			</div>
 		</div>
