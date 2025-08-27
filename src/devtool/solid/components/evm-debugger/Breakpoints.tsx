@@ -142,7 +142,7 @@ const Breakpoints: Component<BreakpointsProps> = (props) => {
 						<div class="flex flex-wrap gap-2">
 							<For each={groupedOpcodes()}>
 								{(op) => (
-									<Badge variant="secondary" class="gap-1">
+									<Badge variant="secondary" class="gap-1 h-8">
 										{op}
 										<Button
 											variant="ghost"
@@ -168,7 +168,7 @@ const Breakpoints: Component<BreakpointsProps> = (props) => {
 						<div class="flex flex-wrap gap-2">
 							<For each={customPcs()}>
 								{(pc) => (
-									<Badge variant="secondary" class="gap-1 font-mono">
+									<Badge variant="secondary" class="gap-1 font-mono h-8">
 										0x{pc.toString(16)}
 										<Button
 											variant="ghost"
