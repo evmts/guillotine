@@ -135,7 +135,8 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
     var interp_val = try Interpreter.init(self.allocator, self.bytecode, 1_000_000, {}, self.host);
     // ensure tracer is clean and enable prestate tracing
     interp_val.frame.tracer.reset();
-    interp_val.frame.tracer.enable_prestate_tracing(true, false, false) catch {};
+    // Enable prestate tracing in diff mode; do not include empty accounts
+    interp_val.frame.tracer.enable_prestate_tracing(true, false, false, false) catch {};
     const ptr = try self.allocator.create(Interpreter);
     ptr.* = interp_val;
     self.interpreter = ptr;
@@ -360,10 +361,6 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
             }
         }
         const err_dup: ?[]const u8 = if (err_dup_raw) |e| e else null;
-        var per_step_state: debug_state.StateJson = .{ .pre = &.{}, .post = &.{} };
-        if (f.tracer.prestate_tracer) |pt| {
-            per_step_state = try debug_state.build_state_for_step(self.allocator, pt, s.step_number);
-        }
         steps[idx] = .{
             .step = s.step_number,
             .pc = s.pc,
@@ -377,7 +374,6 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
             .memSizeAfter = s.memory_size_after,
             .depth = s.depth,
             .err = err_dup,
-            .state = per_step_state,
         };
     }
 

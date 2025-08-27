@@ -18,8 +18,6 @@ pub const StepJson = struct {
     memSizeAfter: usize,
     depth: u32,
     err: ?[]const u8,
-    // Per-step diff state (pre/post for changed accounts only)
-    state: StateJson,
 };
 
 pub const DebuggerStateJson = struct {
@@ -240,7 +238,6 @@ pub fn free_step_json(allocator: std.mem.Allocator, step: StepJson) void {
     for (step.stackAfter) |s| allocator.free(s);
     allocator.free(step.stackAfter);
     if (step.err) |e| allocator.free(e);
-    free_state_json(allocator, step.state);
     allocator.free(step.op);
 }
 
@@ -345,32 +342,6 @@ pub fn build_accounts_from_map(
     return out;
 }
 
-pub fn build_state_for_step(
-    allocator: std.mem.Allocator,
-    pt: *const evm.PrestateTracer,
-    step_number_debug: u64,
-) !StateJson {
-    const target = step_number_debug + 1; // compensate alignment with DebuggingTracer
-    // We produce pre/post for only accounts touched at this step.
-    var pre_map = std.AutoHashMap(Address, evm.PrestateTracer.AccountState).init(allocator);
-    defer pre_map.deinit();
-    var post_map = std.AutoHashMap(Address, evm.PrestateTracer.AccountState).init(allocator);
-    defer post_map.deinit();
-    for (pt.state_changes.items) |c| {
-        if (c.step_number != target) continue;
-        // Initialize entries if not present by cloning from global pre/post maps when available
-        if (pt.prestate.get(c.address)) |ps| {
-            if (!pre_map.contains(c.address)) try pre_map.put(c.address, ps);
-        }
-        if (pt.poststate.get(c.address)) |ps2| {
-            if (!post_map.contains(c.address)) try post_map.put(c.address, ps2);
-        }
-    }
-    return .{
-        .pre = try build_accounts_from_map(allocator, &pre_map, pt.disable_storage, pt.disable_code),
-        .post = try build_accounts_from_map(allocator, &post_map, pt.disable_storage, pt.disable_code),
-    };
-}
 
 pub fn build_state_until(
     allocator: std.mem.Allocator,
