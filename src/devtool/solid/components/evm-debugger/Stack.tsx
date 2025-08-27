@@ -16,7 +16,8 @@ interface StackProps {
 }
 
 const Stack: Component<StackProps> = ({ state }) => {
-	const stack = state.stack.reverse()
+	// Create a reversed copy without mutating the original
+	const stack = [...state.stack].reverse()
 
 	const handleCopy = (item: string, index: number) => {
 		copyToClipboard(item)
