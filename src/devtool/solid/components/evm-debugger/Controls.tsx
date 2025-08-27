@@ -22,6 +22,7 @@ interface ControlsProps {
 	handleStep: () => void
 	handleReset: () => void
 	bytecode: string
+	isExecutionComplete: boolean
 }
 
 const Controls: Component<ControlsProps> = (props) => {
@@ -52,7 +53,7 @@ const Controls: Component<ControlsProps> = (props) => {
 					variant="outline"
 					size="sm"
 					onClick={onStep}
-					disabled={props.isRunning || !props.bytecode}
+					disabled={props.isRunning || !props.bytecode || props.isExecutionComplete}
 					aria-label="Step EVM (S)"
 					class="flex items-center gap-2"
 				>

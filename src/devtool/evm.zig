@@ -1,955 +1,396 @@
 const std = @import("std");
 const Evm = @import("evm");
-const primitives = @import("primitives");
-const MemoryDatabase = Evm.MemoryDatabase;
-const DatabaseInterface = Evm.DatabaseInterface;
-const OpcodeMetadata = Evm.OpcodeMetadata;
-const Host = Evm.Host;
-// Use primitives.Address module directly
-const Bytes32 = primitives.Bytes32;
-const StorageKey = primitives.StorageKey;
-const testing = std.testing;
 const debug_state = @import("debug_state.zig");
-
-// Default EVM configuration for devtool (currently unused)
-const config = Evm.EvmConfig.init(.CANCUN);
-const EvmType = Evm.Evm;
 
 const DevtoolEvm = @This();
 
-allocator: std.mem.Allocator,
-database: MemoryDatabase,
-evm: EvmType,
-host: Host,
-bytecode: []u8,
+// Compile-time frame config with DebuggingTracer enabled
+const FRAME_CFG = Evm.FrameConfig{
+    .TracerType = Evm.DebuggingTracer,
+    .has_database = false,
+};
 
-// Debug-specific fields
-current_frame: ?*Evm.Frame,
-current_contract: ?*Evm.Contract,
-analysis: ?*Evm.CodeAnalysis,
-instr_index: usize,
-is_paused: bool,
+const Interpreter = Evm.createFrameInterpreter(FRAME_CFG);
+
+allocator: std.mem.Allocator,
+host: Evm.Host,
+bytecode: []u8,
+interpreter: ?*Interpreter,
 is_initialized: bool,
 is_completed: bool,
+tx_started: bool = false,
+tx_ended: bool = false,
+available_breakpoints: []u32 = &.{},
 
-// Storage tracking for debugging
-storage_changes: std.AutoHashMap(StorageKey, u256),
-
-/// Result of a single step execution
 pub const DebugStepResult = struct {
     gas_before: u64,
     gas_after: u64,
     completed: bool,
     error_occurred: bool,
-    execution_error: ?anyerror,
 };
 
+pub const RunResult = enum { paused, completed };
+
 pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
-    var database = MemoryDatabase.init(allocator);
-    errdefer database.deinit();
-
-    const db_interface = database.to_database_interface();
-    var evm = try EvmType.init(allocator, db_interface, null, null, null, 0, false, null);
-    errdefer evm.deinit();
-
-    // Host must outlive frames; store on struct
-    const host = Host.init(&evm);
-
-    var storage_changes = std.AutoHashMap(StorageKey, u256).init(allocator);
-    errdefer storage_changes.deinit();
-
-    return DevtoolEvm{
-        .allocator = allocator,
-        .database = database,
-        .evm = evm,
-        .host = host,
-        .bytecode = &[_]u8{},
-        .current_frame = null,
-        .current_contract = null,
-        .analysis = null,
-        .instr_index = 0,
-        .is_paused = false,
+    _ = allocator; // use C allocator to avoid strict alignment issues in devtool
+    return .{
+        .allocator = std.heap.c_allocator,
+        .host = Evm.HostMock.init(),
+        .bytecode = &.{},
+        .interpreter = null,
         .is_initialized = false,
         .is_completed = false,
-        .storage_changes = storage_changes,
     };
 }
 
 pub fn deinit(self: *DevtoolEvm) void {
-    // Clean up current execution state
-    if (self.current_contract) |contract| {
-        contract.deinit(self.allocator, null);
-        self.allocator.destroy(contract);
+    if (self.interpreter) |interp| {
+        interp.deinit(self.allocator);
+        self.allocator.destroy(interp);
     }
-    if (self.current_frame) |frame| {
-        frame.deinit();
-        self.allocator.destroy(frame);
-    }
-    if (self.analysis) |a| {
-        a.deinit();
-        self.allocator.destroy(a);
-    }
-    if (self.bytecode.len > 0) {
-        self.allocator.free(self.bytecode);
-    }
-    self.storage_changes.deinit();
-    self.evm.deinit();
-    self.database.deinit();
+    if (self.bytecode.len != 0) self.allocator.free(self.bytecode);
+    if (self.available_breakpoints.len != 0) self.allocator.free(self.available_breakpoints);
 }
 
 pub fn setBytecode(self: *DevtoolEvm, bytecode: []const u8) !void {
-    // Free existing bytecode if any
-    if (self.bytecode.len > 0) {
-        self.allocator.free(self.bytecode);
-    }
-
-    // Allocate and copy new bytecode
+    if (self.bytecode.len != 0) self.allocator.free(self.bytecode);
     self.bytecode = try self.allocator.alloc(u8, bytecode.len);
     @memcpy(self.bytecode, bytecode);
+    try self.aggregateAvailableBreakpoints();
 }
 
-/// Load bytecode from hex string and initialize execution
 pub fn loadBytecodeHex(self: *DevtoolEvm, hex_string: []const u8) !void {
-    // Validate input
-    if (hex_string.len == 0) {
-        return error.EmptyBytecode;
-    }
-
-    // Remove 0x prefix if present
-    const hex_data = if (std.mem.startsWith(u8, hex_string, "0x"))
-        hex_string[2..]
-    else
-        hex_string;
-
-    // Validate hex string
-    if (hex_data.len == 0) {
-        return error.EmptyBytecode;
-    }
-
-    if (hex_data.len % 2 != 0) {
-        return error.InvalidHexLength;
-    }
-
-    // Validate all characters are hex
-    for (hex_data) |char| {
-        if (!std.ascii.isHex(char)) {
-            return error.InvalidHexCharacter;
-        }
-    }
-
-    // Convert hex string to bytes
-    const bytecode_len = hex_data.len / 2;
-    const bytecode = try self.allocator.alloc(u8, bytecode_len);
-    defer self.allocator.free(bytecode);
-
-    _ = try std.fmt.hexToBytes(bytecode, hex_data);
-
-    // Set the bytecode
-    try self.setBytecode(bytecode);
-
-    // Reset execution state
+    if (hex_string.len == 0) return error.EmptyBytecode;
+    const hex_data = if (std.mem.startsWith(u8, hex_string, "0x")) hex_string[2..] else hex_string;
+    if (hex_data.len == 0) return error.EmptyBytecode;
+    if (hex_data.len % 2 != 0) return error.InvalidHexLength;
+    for (hex_data) |c| if (!std.ascii.isHex(c)) return error.InvalidHexCharacter;
+    const n = hex_data.len / 2;
+    const tmp = try self.allocator.alloc(u8, n);
+    defer self.allocator.free(tmp);
+    _ = try std.fmt.hexToBytes(tmp, hex_data);
+    try self.setBytecode(tmp);
     try self.resetExecution();
 }
 
-/// Initialize execution with current bytecode
+fn pushDataLen(op: u8) u8 {
+    // PUSH0 (0x5f) has 0 bytes; PUSH1..PUSH32 (0x60..0x7f) have 1..32 bytes
+    if (op == 0x5f) return 0;
+    if (op >= 0x60 and op <= 0x7f) return @as(u8, op - 0x60 + 1);
+    return 0;
+}
+
+fn aggregateAvailableBreakpoints(self: *DevtoolEvm) !void {
+    // Free previous cached list
+    if (self.available_breakpoints.len != 0) {
+        self.allocator.free(self.available_breakpoints);
+        self.available_breakpoints = &.{};
+    }
+    const code = self.bytecode;
+    if (code.len == 0) {
+        self.available_breakpoints = &.{};
+        return;
+    }
+    // First pass: count instructions
+    var count: usize = 0;
+    var i: usize = 0;
+    while (i < code.len) {
+        count += 1;
+        const op = code[i];
+        const plen = pushDataLen(op);
+        const after = i + 1;
+        const rem = if (after <= code.len) (code.len - after) else 0;
+        const data_len: usize = if (plen == 0) 0 else @min(rem, plen);
+        i = after + data_len;
+    }
+    // Second pass: fill PCs
+    var pcs = try self.allocator.alloc(u32, count);
+    var idx: usize = 0;
+    i = 0;
+    while (i < code.len) : ({
+        const op2 = code[i];
+        const plen2 = pushDataLen(op2);
+        const after2 = i + 1;
+        const rem2 = if (after2 <= code.len) (code.len - after2) else 0;
+        const data_len2: usize = if (plen2 == 0) 0 else @min(rem2, plen2);
+        i = after2 + data_len2;
+    }) {
+        pcs[idx] = @intCast(i);
+        idx += 1;
+    }
+    self.available_breakpoints = pcs;
+}
+
 pub fn resetExecution(self: *DevtoolEvm) !void {
-    // Clean up existing execution state
-    if (self.current_contract) |contract| {
-        contract.deinit(self.allocator, null);
-        self.allocator.destroy(contract);
-        self.current_contract = null;
+    if (self.interpreter) |interp| {
+        interp.deinit(self.allocator);
+        self.allocator.destroy(interp);
+        self.interpreter = null;
     }
-    if (self.current_frame) |frame| {
-        frame.deinit();
-        self.allocator.destroy(frame);
-        self.current_frame = null;
-    }
-    // Clear any previous host output to avoid dangling slices to freed frame memory
-    // This prevents serializeEvmState formatting an invalid slice after resets
-    self.host.set_output(&.{}) catch {};
-    // Clean up previous analysis if present before creating a new one
-    if (self.analysis) |a| {
-        a.deinit();
-        self.allocator.destroy(a);
-        self.analysis = null;
-    }
-
-    // Clear storage tracking
-    self.storage_changes.clearRetainingCapacity();
-
+    self.is_completed = false;
     if (self.bytecode.len == 0) {
         self.is_initialized = false;
         return;
     }
-
-    // Create contract from bytecode
-    const contract = try self.allocator.create(Evm.Contract);
-    errdefer self.allocator.destroy(contract);
-
-    contract.* = Evm.Contract.init_at_address(primitives.Address.ZERO, // caller
-        primitives.Address.ZERO, // address
-        0, // value
-        1000000, // gas
-        self.bytecode, &[_]u8{}, // input
-        false // is_static
-    );
-
-    self.current_contract = contract;
-
-    // Build code analysis for the current bytecode using default opcode metadata
-    const table = OpcodeMetadata.DEFAULT;
-    const analysis = try Evm.CodeAnalysis.from_code(self.allocator, self.bytecode, &table);
-    // Own the analysis in the devtool for frame lifetime
-    const analysis_ptr = try self.allocator.create(Evm.CodeAnalysis);
-    analysis_ptr.* = analysis;
-    self.analysis = analysis_ptr;
-
-    // Prepare frame dependencies from the VM
-    const frame_val = try Evm.Frame.init(
-        1_000_000, // gas_remaining
-        false, // static_call
-        0, // call_depth
-        contract.address, // contract_address
-        contract.caller, // caller
-        0, // value
-        analysis_ptr, // analysis
-        self.host, // host
-        self.evm.state.database, // state
-        self.evm.chain_rules, // chain_rules
-        &self.evm.self_destruct, // self_destruct
-        &[_]u8{}, // input
-        self.allocator, // allocator
-    );
-    const frame_ptr = try self.allocator.create(Evm.Frame);
-    frame_ptr.* = frame_val;
-    // Ensure opcodes that reference code (e.g., CODECOPY, CODESIZE) have access
-    // to the actual contract bytecode
-    frame_ptr.code = self.bytecode;
-    // Start at first instruction to mirror interpreter
-    frame_ptr.instruction = &analysis_ptr.instructions[0];
-    self.current_frame = frame_ptr;
-
+    var interp_val = try Interpreter.init(self.allocator, self.bytecode, 1_000_000, {}, self.host);
+    // ensure tracer is clean and enable prestate tracing
+    interp_val.frame.tracer.reset();
+    interp_val.frame.tracer.enable_prestate_tracing(true, false, false) catch {};
+    const ptr = try self.allocator.create(Interpreter);
+    ptr.* = interp_val;
+    self.interpreter = ptr;
     self.is_initialized = true;
-    self.is_paused = false;
-    // Always start at the first instruction (BEGINBLOCK). The step loop will
-    // process the BEGINBLOCK meta (charge gas/validate) and then advance to the
-    // first visible opcode in the same call.
-    self.instr_index = 0;
-    // analysis-driven stepping does not expose opcode byte/name in UI
-    self.is_completed = false;
-    // No PC tracking for UI
+    self.tx_started = true;
+    self.tx_ended = false;
+    // begin tx lifecycle for prestate when enabled
+    self.interpreter.?.frame.tracer.onTransactionStart();
 }
 
-/// Get current EVM state as JSON string
-pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
-    if (!self.is_initialized or self.current_frame == null) {
-        const empty_state = try debug_state.createEmptyEvmStateJson(self.allocator);
-        defer debug_state.freeEvmStateJson(self.allocator, empty_state);
-        return try std.json.stringifyAlloc(self.allocator, empty_state, .{});
+pub fn singleStep(self: *DevtoolEvm) !DebugStepResult {
+    if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;
+    if (self.is_completed) {
+        const f = &self.interpreter.?.frame;
+        return .{ .gas_before = @as(u64, @intCast(@max(f.gas_remaining, 0))), .gas_after = @as(u64, @intCast(@max(f.gas_remaining, 0))), .completed = true, .error_occurred = false };
     }
-
-    const frame = self.current_frame.?;
-    // Serialize storage changes
-    var storage_entries = std.ArrayList(debug_state.StorageEntry).init(self.allocator);
-    defer storage_entries.deinit();
-
-    var storage_iter = self.storage_changes.iterator();
-    while (storage_iter.next()) |entry| {
-        const key_hex = try debug_state.formatU256Hex(self.allocator, entry.key_ptr.slot);
-        const value_hex = try debug_state.formatU256Hex(self.allocator, entry.value_ptr.*);
-        try storage_entries.append(.{
-            .key = key_hex,
-            .value = value_hex,
-        });
-    }
-
-    // Build block list from analysis
-    var blocks = std.ArrayList(debug_state.BlockJson).init(self.allocator);
-    defer {
-        // moved later into state
-    }
-    var current_block_start_index: usize = 0;
-    if (self.analysis) |a| {
-        const instrs = a.instructions;
-        // derive current index from frame instruction pointer when available
-        var derived_idx: usize = if (self.instr_index < instrs.len) self.instr_index else 0;
-        if (self.current_frame) |f| {
-            const base: [*]const @TypeOf(instrs[0]) = instrs.ptr;
-            derived_idx = (@intFromPtr(f.instruction) - @intFromPtr(base)) / @sizeOf(@TypeOf(instrs[0]));
-            self.instr_index = derived_idx;
-        }
-        // find current block start
-        var search: usize = if (derived_idx < instrs.len) derived_idx else 0;
-        while (search > 0 and instrs[search].arg != .block_info) : (search -= 1) {}
-        current_block_start_index = search;
-
-        // enumerate all blocks
-        var i: usize = 0;
-        while (i < instrs.len) : (i += 1) {
-            if (instrs[i].arg == .block_info) {
-                // Collect a 1:1 list of analysis-visible instructions within this block.
-                // We intentionally avoid expanding to raw PCs; rows align strictly with
-                // instruction indices to make stepping foolproof.
-                var pcs = std.ArrayList(u32).init(self.allocator);
-                var opcodes = std.ArrayList([]const u8).init(self.allocator);
-                var hexes = std.ArrayList([]const u8).init(self.allocator);
-                var datas = std.ArrayList([]const u8).init(self.allocator);
-                var dbg_inst_indices = std.ArrayList(u32).init(self.allocator);
-                var dbg_inst_mapped_pcs = std.ArrayList(u32).init(self.allocator);
-                defer pcs.deinit();
-                defer opcodes.deinit();
-                defer hexes.deinit();
-                defer datas.deinit();
-                defer dbg_inst_indices.deinit();
-                defer dbg_inst_mapped_pcs.deinit();
-
-                // Find the first PC that maps to this block as a fallback origin
-                var block_start_pc: ?usize = null;
-                var scan_pc: usize = 0;
-                while (scan_pc < a.code_len) : (scan_pc += 1) {
-                    if (a.pc_to_block_start[scan_pc] == i) {
-                        block_start_pc = scan_pc;
-                        break;
-                    }
-                }
-
-                var j: usize = i + 1;
-                var last_pc_opt: ?usize = block_start_pc;
-                while (j < instrs.len and instrs[j].arg != .block_info) : (j += 1) {
-                    // Prefer direct mapping from instruction to PC when available
-                    const mapped_u16: u16 = if (j < a.inst_to_pc.len) a.inst_to_pc[j] else std.math.maxInt(u16);
-                    var pc: usize = 0;
-                    if (mapped_u16 != std.math.maxInt(u16)) {
-                        pc = mapped_u16;
-                        last_pc_opt = pc;
-                    } else if (last_pc_opt) |prev_pc| {
-                        // Derive a best-effort PC by advancing from the previous PC
-                        const prev_op: u8 = if (prev_pc < a.code_len) a.code[prev_pc] else 0;
-                        const imm_len: usize = if (prev_op == 0x5f) 0 else if (prev_op >= 0x60 and prev_op <= 0x7f) @intCast(prev_op - 0x5f) else 0;
-                        pc = prev_pc + 1 + imm_len;
-                        last_pc_opt = pc;
-                    } else {
-                        // Fallback to 0 when no mapping exists; UI highlight uses index, not PC
-                        pc = 0;
-                    }
-
-                    // Debugging aids
-                    dbg_inst_indices.append(@intCast(j)) catch {};
-                    dbg_inst_mapped_pcs.append(@intCast(mapped_u16)) catch {};
-
-                    // Populate display fields from original code at derived PC (best-effort)
-                    const op_byte: u8 = if (pc < a.code_len) a.code[pc] else 0;
-                    const hex_str = try std.fmt.allocPrint(self.allocator, "0x{x:0>2}", .{op_byte});
-                    const name = try self.allocator.dupe(u8, debug_state.opcodeToString(op_byte));
-                    var data_str: []const u8 = &[_]u8{};
-                    if (op_byte >= 0x60 and op_byte <= 0x7f and pc + 1 <= a.code_len) {
-                        const imm_len2: usize = op_byte - 0x5f;
-                        if (pc + 1 + imm_len2 <= a.code_len) {
-                            const slice = a.code[pc + 1 .. pc + 1 + imm_len2];
-                            data_str = try debug_state.formatBytesHex(self.allocator, slice);
-                        } else {
-                            data_str = try self.allocator.dupe(u8, "0x");
-                        }
-                    } else {
-                        data_str = try self.allocator.dupe(u8, "");
-                    }
-
-                    pcs.append(@intCast(pc)) catch {};
-                    opcodes.append(name) catch {};
-                    hexes.append(hex_str) catch {};
-                    datas.append(data_str) catch {};
-                }
-
-                blocks.append(.{
-                    .beginIndex = i,
-                    .gasCost = instrs[i].arg.block_info.gas_cost,
-                    .stackReq = instrs[i].arg.block_info.stack_req,
-                    .stackMaxGrowth = instrs[i].arg.block_info.stack_max_growth,
-                    .pcs = try pcs.toOwnedSlice(),
-                    .opcodes = try opcodes.toOwnedSlice(),
-                    .hex = try hexes.toOwnedSlice(),
-                    .data = try datas.toOwnedSlice(),
-                    .instIndices = try dbg_inst_indices.toOwnedSlice(),
-                    .instMappedPcs = try dbg_inst_mapped_pcs.toOwnedSlice(),
-                }) catch {};
-            }
+    const f = &self.interpreter.?.frame;
+    const gas_before: u64 = @intCast(@max(f.gas_remaining, 0));
+    const res = try f.tracer.stepSingle(Interpreter, self.interpreter.?);
+    if (res == .Completed) {
+        self.is_completed = true;
+        if (!self.tx_ended) {
+            self.interpreter.?.frame.tracer.onTransactionEnd();
+            self.tx_ended = true;
         }
     }
-
-    const state = debug_state.EvmStateJson{
-        .gasLeft = frame.gas_remaining,
-        .depth = frame.depth,
-        .stack = try debug_state.serializeStack(self.allocator, &frame.stack),
-        .memory = try debug_state.serializeMemory(self.allocator, &frame.memory),
-        .storage = try storage_entries.toOwnedSlice(),
-        .logs = try self.allocator.alloc([]const u8, 0),
-        .returnData = blk: {
-            const out = self.host.get_output();
-            if (out.len == 0) break :blk try self.allocator.dupe(u8, "0x");
-            const formatted = debug_state.formatBytesHex(self.allocator, out) catch
-                break :blk try self.allocator.dupe(u8, "0x");
-            break :blk formatted;
-        },
+    const recent = f.tracer.getRecentSteps(1);
+    const had_error = if (recent.len == 1) recent[0].error_occurred else false;
+    return .{
+        .gas_before = gas_before,
+        .gas_after = @as(u64, @intCast(@max(f.gas_remaining, 0))),
         .completed = self.is_completed,
-        .currentInstructionIndex = self.instr_index,
-        .currentBlockStartIndex = current_block_start_index,
-        .blocks = try blocks.toOwnedSlice(),
+        .error_occurred = had_error,
+    };
+}
+
+pub fn runUntilHalt(self: *DevtoolEvm) !RunResult {
+    if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;
+    const r = try self.interpreter.?.frame.tracer.runUntilPauseOrStop(Interpreter, self.interpreter.?);
+    if (r == .Completed) {
+        self.is_completed = true;
+        if (!self.tx_ended) {
+            self.interpreter.?.frame.tracer.onTransactionEnd();
+            self.tx_ended = true;
+        }
+        return .completed;
+    }
+    return .paused;
+}
+
+// singleStep defined above
+
+pub fn addBreakpoint(self: *DevtoolEvm, pc: u32) !void {
+    if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;
+    try self.interpreter.?.frame.tracer.addBreakpoint(pc);
+}
+
+pub fn removeBreakpoint(self: *DevtoolEvm, pc: u32) !bool {
+    if (!self.is_initialized or self.interpreter == null) return false;
+    return self.interpreter.?.frame.tracer.removeBreakpoint(pc);
+}
+
+pub fn clearBreakpoints(self: *DevtoolEvm) void {
+    if (self.interpreter) |i| i.frame.tracer.clearBreakpoints();
+}
+/// Return a newly allocated slice of PCs for all current breakpoints.
+pub fn getBreakpoints(self: *DevtoolEvm, allocator: std.mem.Allocator) ![]u32 {
+    if (self.interpreter == null) return allocator.alloc(u32, 0);
+    var list = std.ArrayList(u32){};
+    defer list.deinit(allocator);
+    var it = self.interpreter.?.frame.tracer.breakpoints.iterator();
+    while (it.next()) |e| {
+        try list.append(allocator, e.key_ptr.*);
+    }
+    // Note: order is arbitrary due to hash map iteration
+    return try list.toOwnedSlice(allocator);
+}
+
+/// Return a newly allocated slice of all instruction PCs in the current bytecode.
+pub fn getAvailableBreakpoints(self: *DevtoolEvm, allocator: std.mem.Allocator) ![]u32 {
+    const src = self.available_breakpoints;
+    const out = try allocator.alloc(u32, src.len);
+    if (src.len != 0) @memcpy(out, src);
+    return out;
+}
+
+pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
+    if (!self.is_initialized or self.interpreter == null) {
+        // Minimal empty payload for UI boot
+        const st = debug_state.DebuggerStateJson{
+            .gasLeft = 0,
+            .depth = 0,
+            .stack = &.{},
+            .memory = try self.allocator.dupe(u8, "0x"),
+            .storage = &.{},
+            .logs = &.{},
+            .returnData = try self.allocator.dupe(u8, "0x"),
+            .completed = false,
+            .currentInstructionIndex = 0,
+            .pc = 0,
+            .steps = &.{},
+            .state = .{ .pre = &.{}, .post = &.{} },
+        };
+        defer debug_state.free_debugger_state_json(self.allocator, st);
+        const printed = try std.fmt.allocPrint(self.allocator, "{f}", .{std.json.fmt(st, .{})});
+        return printed;
+    }
+
+    const interp = self.interpreter.?;
+    const f = &interp.frame;
+
+    // Stack formatting: Frame stack slice is top-first at index 0
+    const stack_slice = f.stack.get_slice();
+    const stack_hex = try debug_state.format_stack_hex(self.allocator, stack_slice);
+
+    // Memory formatting: dump full memory into hex (can optimize to prefix later)
+    const mem_size = f.memory.size();
+    const mem_bytes = if (mem_size == 0) &.{} else f.memory.get_slice(0, mem_size) catch &.{};
+    const mem_hex = try debug_state.format_bytes_hex(self.allocator, mem_bytes);
+
+    // Return data
+    const ret_hex = blk: {
+        if (f.output_data.items.len == 0) break :blk try self.allocator.dupe(u8, "0x");
+        break :blk try debug_state.format_bytes_hex(self.allocator, f.output_data.items);
     };
 
-    // Serialize to JSON and clean up
-    const json = try std.json.stringifyAlloc(self.allocator, state, .{});
-    debug_state.freeEvmStateJson(self.allocator, state);
-    return json;
-}
-
-/// Execute a single instruction and return debug information
-pub fn stepExecute(self: *DevtoolEvm) !DebugStepResult {
-    if (!self.is_initialized or self.current_frame == null) {
-        return error.NotInitialized;
-    }
-
-    if (self.is_completed) {
-        const frame_done = self.current_frame.?;
-        return DebugStepResult{
-            .gas_before = frame_done.gas_remaining,
-            .gas_after = frame_done.gas_remaining,
-            .completed = true,
-            .error_occurred = false,
-            .execution_error = null,
-        };
-    }
-
-    const frame = self.current_frame.?;
-
-    const analysis = self.analysis.?;
-    const instructions = analysis.instructions;
-
-    // Already finished?
-    if (self.is_completed or self.instr_index >= instructions.len) {
-        return DebugStepResult{
-            .gas_before = frame.gas_remaining,
-            .gas_after = frame.gas_remaining,
-            .completed = true,
-            .error_occurred = false,
-            .execution_error = null,
-        };
-    }
-
-    // Analysis-first stepping
-    const gas_before = frame.gas_remaining;
-
-    var exec_err: ?Evm.ExecutionError.Error = null;
-
-    // Execute exactly one visible instruction per step.
-    // 1) BeginBlock charge/validation (only once when entering a block)
-    {
-        const ip0 = frame.instruction;
-        if (ip0.arg == .block_info) {
-            const block = ip0.arg.block_info;
-            if (frame.gas_remaining < block.gas_cost) {
-                frame.gas_remaining = 0;
-                exec_err = Evm.ExecutionError.Error.OutOfGas;
-                self.is_completed = true;
-            } else {
-                frame.gas_remaining -= block.gas_cost;
-                const current_stack_size: u16 = @intCast(frame.stack.size());
-                if (current_stack_size < block.stack_req) {
-                    exec_err = Evm.ExecutionError.Error.StackUnderflow;
-                    self.is_completed = true;
-                } else if (current_stack_size + block.stack_max_growth > 1024) {
-                    exec_err = Evm.ExecutionError.Error.StackOverflow;
-                    self.is_completed = true;
-                } else {
-                    frame.instruction = ip0.next_instruction;
-                }
+    // Recent tracer steps
+    const recent = f.tracer.getRecentSteps(64);
+    var steps = try self.allocator.alloc(debug_state.StepJson, recent.len);
+    var idx: usize = 0;
+    while (idx < recent.len) : (idx += 1) {
+        const s = recent[idx];
+        const sb = try debug_state.format_stack_hex(self.allocator, s.stack_before);
+        const sa = try debug_state.format_stack_hex(self.allocator, s.stack_after);
+        const op_name = try self.allocator.dupe(u8, s.opcode_name);
+        var err_dup_raw: ?[]u8 = null;
+        if (s.error_occurred) {
+            if (s.error_msg) |m| {
+                err_dup_raw = try self.allocator.dupe(u8, m);
             }
         }
+        const err_dup: ?[]const u8 = if (err_dup_raw) |e| e else null;
+        var per_step_state: debug_state.StateJson = .{ .pre = &.{}, .post = &.{} };
+        if (f.tracer.prestate_tracer) |pt| {
+            per_step_state = try debug_state.build_state_for_step(self.allocator, pt, s.step_number);
+        }
+        steps[idx] = .{
+            .step = s.step_number,
+            .pc = s.pc,
+            .op = op_name,
+            .gasBefore = s.gas_before,
+            .gasAfter = s.gas_after,
+            .gasCost = s.gas_cost,
+            .stackBefore = sb,
+            .stackAfter = sa,
+            .memSizeBefore = s.memory_size_before,
+            .memSizeAfter = s.memory_size_after,
+            .depth = s.depth,
+            .err = err_dup,
+            .state = per_step_state,
+        };
     }
 
-    if (!self.is_completed and exec_err == null) {
-        var executed_visible = false;
-        while (!executed_visible) {
-            const ip = frame.instruction;
-            if (ip.arg == .block_info) break; // reached next block; end step
+    const pc_opt = interp.getCurrentPc();
+    // pre/post states and cumulative changes
+    var cumulative_state: debug_state.StateJson = .{ .pre = &.{}, .post = &.{} };
+    if (f.tracer.prestate_tracer) |pt| {
+        const last_step = if (recent.len > 0) recent[recent.len - 1].step_number else 0;
+        cumulative_state = try debug_state.build_state_until(self.allocator, pt, last_step);
+    }
 
-            const next_ip = ip.next_instruction;
-            const op_fn = ip.opcode_fn;
-            switch (ip.arg) {
-                .block_info => break,
-                .conditional_jump => |true_target| {
-                    const cond = frame.stack.pop_unsafe();
-                    if (cond != 0) {
-                        frame.instruction = true_target;
-                    } else {
-                        frame.instruction = next_ip;
-                    }
-                    break; // end step after updating ip
-                },
-                .word => |value| {
-                    frame.stack.append(value) catch {
-                        exec_err = Evm.ExecutionError.Error.StackOverflow;
-                        self.is_completed = true;
-                    };
-                    frame.instruction = next_ip;
-                    executed_visible = true;
-                },
-                .keccak => |params| {
-                    if (frame.gas_remaining < params.gas_cost) {
-                        frame.gas_remaining = 0;
-                        exec_err = Evm.ExecutionError.Error.OutOfGas;
-                        self.is_completed = true;
-                        executed_visible = true;
-                        break;
-                    }
-                    frame.gas_remaining -= params.gas_cost;
-                    const size: u256 = if (params.size) |imm| @as(u256, @intCast(imm)) else frame.stack.pop_unsafe();
-                    const offset = frame.stack.pop_unsafe();
-                    if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
-                        exec_err = Evm.ExecutionError.Error.OutOfOffset;
-                        self.is_completed = true;
-                        executed_visible = true;
-                        break;
-                    }
-                    const offset_usize: usize = @intCast(offset);
-                    const size_usize: usize = @intCast(size);
-                    if (size == 0) {
-                        const empty_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
-                        frame.stack.append_unsafe(empty_hash);
-                    } else {
-                        const data = frame.memory.get_slice(offset_usize, size_usize) catch |err| {
-                            exec_err = err;
-                            self.is_completed = true;
-                            executed_visible = true;
-                            break;
-                        };
-                        var hash: [32]u8 = undefined;
-                        std.crypto.hash.sha3.Keccak256.hash(data, &hash, .{});
-                        const result = std.mem.readInt(u256, &hash, .big);
-                        frame.stack.append_unsafe(result);
-                    }
-                    frame.instruction = next_ip;
-                    executed_visible = true;
-                },
-                .none => {
-                    // Treat JUMPDEST as non-visible: skip and continue without ending the step
-                    const base2: [*]const @TypeOf(instructions[0]) = instructions.ptr;
-                    const cur_idx: usize = (@intFromPtr(ip) - @intFromPtr(base2)) / @sizeOf(@TypeOf(instructions[0]));
-                    var is_jumpdest = false;
-                    if (cur_idx < analysis.inst_to_pc.len) {
-                        const pc_u16 = analysis.inst_to_pc[cur_idx];
-                        if (pc_u16 != std.math.maxInt(u16)) {
-                            const pc_usize: usize = pc_u16;
-                            if (pc_usize < analysis.code_len and analysis.code[pc_usize] == 0x5b) {
-                                is_jumpdest = true;
-                            }
-                        }
-                    }
-                    if (is_jumpdest) {
-                        frame.instruction = next_ip;
-                        continue;
-                    }
-                    op_fn(@ptrCast(frame)) catch |err| {
-                        if (err == Evm.ExecutionError.Error.InvalidOpcode) {
-                            frame.gas_remaining = 0;
-                        }
-                        exec_err = err;
-                        self.is_completed = true;
-                    };
-                    frame.instruction = next_ip;
-                    executed_visible = true;
-                },
-                .gas_cost => |cost| {
-                    if (frame.gas_remaining < cost) {
-                        frame.gas_remaining = 0;
-                        exec_err = Evm.ExecutionError.Error.OutOfGas;
-                        self.is_completed = true;
-                        executed_visible = true;
-                        break;
-                    }
-                    frame.gas_remaining -= cost;
-                    op_fn(@ptrCast(frame)) catch |err| {
-                        if (err == Evm.ExecutionError.Error.InvalidOpcode) {
-                            frame.gas_remaining = 0;
-                        }
-                        exec_err = err;
-                        self.is_completed = true;
-                    };
-                    frame.instruction = next_ip;
-                    executed_visible = true;
-                },
-                .dynamic_gas => |dyn_gas| {
-                    if (frame.gas_remaining < dyn_gas.static_cost) {
-                        frame.gas_remaining = 0;
-                        exec_err = Evm.ExecutionError.Error.OutOfGas;
-                        self.is_completed = true;
-                        executed_visible = true;
-                        break;
-                    }
-                    frame.gas_remaining -= dyn_gas.static_cost;
-                    if (dyn_gas.gas_fn) |gas_fn| {
-                        const additional = gas_fn(frame) catch |err| {
-                            if (err == Evm.ExecutionError.Error.OutOfOffset) {
-                                exec_err = err;
-                                self.is_completed = true;
-                                executed_visible = true;
-                                break;
-                            }
-                            frame.gas_remaining = 0;
-                            exec_err = Evm.ExecutionError.Error.OutOfGas;
-                            self.is_completed = true;
-                            executed_visible = true;
-                            break;
-                        };
-                        if (frame.gas_remaining < additional) {
-                            frame.gas_remaining = 0;
-                            exec_err = Evm.ExecutionError.Error.OutOfGas;
-                            self.is_completed = true;
-                            executed_visible = true;
-                            break;
-                        }
-                        frame.gas_remaining -= additional;
-                    }
-                    op_fn(@ptrCast(frame)) catch |err| {
-                        if (err == Evm.ExecutionError.Error.InvalidOpcode) {
-                            frame.gas_remaining = 0;
-                        }
-                        exec_err = err;
-                        self.is_completed = true;
-                    };
-                    frame.instruction = next_ip;
-                    executed_visible = true;
-                },
-            }
-            if (exec_err) |e| {
-                if (e == Evm.ExecutionError.Error.STOP or e == Evm.ExecutionError.Error.REVERT) {
-                    self.is_completed = true;
-                }
+    // Minimal preanalyzed blocks via planner/plan helper
+    const preanalyzed_blocks = try debug_state.collect_blocks_for_interpreter(Interpreter, self.allocator, interp);
+    const cur_idx_usize: usize = interp.instruction_idx;
+    var current_block_start_idx: usize = 0;
+    // Choose the largest block.firstInstructionIndex <= current instruction index
+    for (preanalyzed_blocks) |blk| {
+        const bi: usize = blk.firstInstructionIndex;
+        if (bi <= cur_idx_usize and bi >= current_block_start_idx) current_block_start_idx = bi;
+    }
+
+    // Normalize the "currentInstructionIndex" for the UI to count EVM opcodes,
+    // not raw instruction-stream elements (which include trace hooks and metadata).
+    // We compute: block_begin_idx + 1 + offset_within_block_of_next_opcode
+    var ui_current_instr_idx: usize = 0;
+    // Find the current block by start index
+    var cur_block_instrs: []const debug_state.InstructionJson = &.{};
+    for (preanalyzed_blocks) |blk| {
+        if (blk.firstInstructionIndex == current_block_start_idx) {
+            cur_block_instrs = blk.instructions;
+            break;
+        }
+    }
+    const next_pc_opt = interp.getCurrentPc();
+    if (self.is_completed) {
+        // Completed: point just past the last instruction in the current block
+        ui_current_instr_idx = current_block_start_idx + 1 + cur_block_instrs.len;
+    } else if (next_pc_opt) |next_pc_val| {
+        // Locate next opcode within the current block by PC
+        var offset: usize = 0;
+        var found = false;
+        var i: usize = 0;
+        while (i < cur_block_instrs.len) : (i += 1) {
+            if (cur_block_instrs[i].pc == @as(u32, next_pc_val)) {
+                offset = i;
+                found = true;
                 break;
             }
         }
-    }
-
-    // sync UI index from pointer
-    const base_ptr: [*]const @TypeOf(instructions[0]) = instructions.ptr;
-    self.instr_index = (@intFromPtr(frame.instruction) - @intFromPtr(base_ptr)) / @sizeOf(@TypeOf(instructions[0]));
-
-    const had_error = exec_err != null and exec_err.? != Evm.ExecutionError.Error.STOP;
-    const completed = self.is_completed;
-
-    return DebugStepResult{
-        .gas_before = gas_before,
-        .gas_after = frame.gas_remaining,
-        .completed = completed,
-        .error_occurred = had_error,
-        .execution_error = if (had_error) exec_err else null,
-    };
-}
-
-// Map an instruction index in analysis.instructions to the corresponding bytecode PC.
-// Returns null if the mapping cannot be determined (e.g., out of bounds or meta instruction without a following opcode).
-// PC mapping helpers are no longer needed in analysis-first UI; intentionally removed.
-
-test "DevtoolEvm.init creates EVM instance" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    try testing.expect(devtool_evm.allocator.ptr == allocator.ptr);
-    try testing.expectEqual(@as(usize, 0), devtool_evm.bytecode.len);
-    try testing.expectEqual(@as(u16, 0), devtool_evm.evm.depth);
-    try testing.expectEqual(false, devtool_evm.evm.read_only);
-    try testing.expectEqual(false, devtool_evm.is_initialized);
-    try testing.expectEqual(false, devtool_evm.is_paused);
-    try testing.expect(devtool_evm.current_frame == null);
-    try testing.expect(devtool_evm.current_contract == null);
-}
-
-test "DevtoolEvm.setBytecode stores bytecode" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Test with simple bytecode
-    const test_bytecode = &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }; // PUSH1 1 PUSH1 2 ADD
-    try devtool_evm.setBytecode(test_bytecode);
-
-    try testing.expectEqual(test_bytecode.len, devtool_evm.bytecode.len);
-    try testing.expectEqualSlices(u8, test_bytecode, devtool_evm.bytecode);
-
-    // Test replacing bytecode
-    const new_bytecode = &[_]u8{ 0x60, 0x10, 0x60, 0x20, 0x01, 0x00 }; // PUSH1 16 PUSH1 32 ADD STOP
-    try devtool_evm.setBytecode(new_bytecode);
-
-    try testing.expectEqual(new_bytecode.len, devtool_evm.bytecode.len);
-    try testing.expectEqualSlices(u8, new_bytecode, devtool_evm.bytecode);
-}
-
-test "DevtoolEvm.setBytecode handles empty bytecode" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Test with empty bytecode
-    const empty_bytecode = &[_]u8{};
-    try devtool_evm.setBytecode(empty_bytecode);
-
-    try testing.expectEqual(@as(usize, 0), devtool_evm.bytecode.len);
-}
-
-test "DevtoolEvm.loadBytecodeHex parses hex correctly" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Test with 0x prefix
-    try devtool_evm.loadBytecodeHex("0x6001600201");
-    try testing.expectEqual(@as(usize, 5), devtool_evm.bytecode.len);
-    try testing.expectEqualSlices(u8, &[_]u8{ 0x60, 0x01, 0x60, 0x02, 0x01 }, devtool_evm.bytecode);
-    try testing.expectEqual(true, devtool_evm.is_initialized);
-    try testing.expect(devtool_evm.current_frame != null);
-    try testing.expect(devtool_evm.current_contract != null);
-
-    // Test without 0x prefix
-    try devtool_evm.loadBytecodeHex("6010602001");
-    try testing.expectEqual(@as(usize, 5), devtool_evm.bytecode.len);
-    try testing.expectEqualSlices(u8, &[_]u8{ 0x60, 0x10, 0x60, 0x20, 0x01 }, devtool_evm.bytecode);
-}
-
-test "DevtoolEvm.serializeEvmState returns valid JSON" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Test empty state
-    const empty_json = try devtool_evm.serializeEvmState();
-    defer allocator.free(empty_json);
-    try testing.expect(empty_json.len > 0);
-
-    // Test with loaded bytecode
-    try devtool_evm.loadBytecodeHex("0x6001600201");
-    const state_json = try devtool_evm.serializeEvmState();
-    defer allocator.free(state_json);
-    try testing.expect(state_json.len > 0);
-
-    // Should contain expected fields (basic check)
-    try testing.expect(std.mem.indexOf(u8, state_json, "gasLeft") != null);
-    try testing.expect(std.mem.indexOf(u8, state_json, "blocks") != null);
-    try testing.expect(std.mem.indexOf(u8, state_json, "currentInstructionIndex") != null);
-    try testing.expect(std.mem.indexOf(u8, state_json, "currentBlockStartIndex") != null);
-}
-
-test "DevtoolEvm.stepExecute executes single visible instruction per step" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Test error when not initialized
-    try testing.expectError(error.NotInitialized, devtool_evm.stepExecute());
-
-    // Load simple bytecode: PUSH1 1, PUSH1 2, ADD, STOP
-    try devtool_evm.loadBytecodeHex("0x6001600201");
-
-    // One visible-instruction step should NOT complete the program
-    const step1 = try devtool_evm.stepExecute();
-    try testing.expectEqual(false, step1.completed);
-    try testing.expectEqual(false, step1.error_occurred);
-}
-
-test "DevtoolEvm step execution modifies stack correctly" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Load bytecode: PUSH1 42, PUSH1 100
-    try devtool_evm.loadBytecodeHex("0x602a6064");
-
-    const frame = devtool_evm.current_frame.?;
-
-    // Initially stack should be empty
-    try testing.expectEqual(@as(usize, 0), frame.stack.size());
-
-    // Step
-    const step1 = try devtool_evm.stepExecute();
-    try testing.expectEqual(false, step1.completed);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size());
-    const value1 = try frame.stack.peek();
-    try testing.expectEqual(@as(u256, 42), value1);
-
-    // Step
-    const step2 = try devtool_evm.stepExecute();
-    try testing.expectEqual(false, step2.completed);
-    try testing.expectEqual(@as(usize, 2), frame.stack.size());
-    const value2 = try frame.stack.peek(); // Top of stack
-    try testing.expectEqual(@as(u256, 100), value2);
-    const value3 = try frame.stack.peek_n(1); // Second from top
-    try testing.expectEqual(@as(u256, 42), value3);
-}
-
-test "DevtoolEvm complete execution flow PUSH1 5 PUSH1 10 ADD" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Load bytecode: PUSH1 5, PUSH1 10, ADD (0x6005600a01)
-    const test_bytecode = "0x6005600a01";
-    try devtool_evm.loadBytecodeHex(test_bytecode);
-
-    // Get initial state
-    const initial_state = try devtool_evm.serializeEvmState();
-    defer allocator.free(initial_state);
-    try testing.expect(initial_state.len > 0);
-
-    // Step through execution
-    var step_count: u32 = 0;
-    var final_step: DebugStepResult = undefined;
-
-    while (step_count < 10) { // Safety limit
-        step_count += 1;
-
-        const step_result = devtool_evm.stepExecute() catch |err| {
-            try testing.expect(false); // Should not error in this test
-            return err;
-        };
-
-        // Verify step information is valid
-        // opcode name removed in analysis-first UI
-        try testing.expect(step_result.gas_after <= step_result.gas_before);
-
-        final_step = step_result;
-
-        if (step_result.completed) {
-            break;
+        if (!found) {
+            // Fallback: if PC is beyond this block, clamp to end; otherwise 0
+            if (cur_block_instrs.len != 0 and @as(usize, next_pc_val) > @as(usize, cur_block_instrs[cur_block_instrs.len - 1].pc)) {
+                offset = cur_block_instrs.len;
+            } else {
+                offset = 0;
+            }
         }
-
-        if (step_result.error_occurred) {
-            try testing.expect(false); // Should not error in this test
-            break;
-        }
-    }
-
-    // Verify execution completed
-    try testing.expect(final_step.completed);
-    try testing.expect(!final_step.error_occurred);
-
-    // Get final state
-    const final_state = try devtool_evm.serializeEvmState();
-    defer allocator.free(final_state);
-    try testing.expect(final_state.len > 0);
-
-    // Verify stack has result (should be 15 = 5 + 10)
-    if (devtool_evm.current_frame) |frame| {
-        try testing.expect(frame.stack.size() > 0);
-        const stack_top = try frame.stack.peek();
-        try testing.expectEqual(@as(u256, 15), stack_top);
+        ui_current_instr_idx = current_block_start_idx + 1 + offset;
     } else {
-        try testing.expect(false); // Frame should exist
+        // No PC available yet (e.g. just initialized): point to first opcode
+        ui_current_instr_idx = current_block_start_idx + 1;
     }
-}
 
-test "DevtoolEvm JSON serialization integration test" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Load simple bytecode: PUSH1 42
-    try devtool_evm.loadBytecodeHex("0x602a");
-
-    // Get initial state and parse JSON
-    const json_state = try devtool_evm.serializeEvmState();
-    defer allocator.free(json_state);
-
-    // Parse JSON to verify structure
-    const parsed = std.json.parseFromSlice(std.json.Value, allocator, json_state, .{}) catch |err| {
-        std.log.err("Failed to parse JSON: {}", .{err});
-        try testing.expect(false);
-        return;
+    const st = debug_state.DebuggerStateJson{
+        .gasLeft = @intCast(@max(f.gas_remaining, 0)),
+        .depth = f.host.get_depth(),
+        .stack = stack_hex,
+        .memory = mem_hex,
+        .storage = &.{},
+        .logs = &.{},
+        .returnData = ret_hex,
+        .completed = self.is_completed,
+        .currentInstructionIndex = ui_current_instr_idx,
+        .pc = @intCast(pc_opt orelse 0),
+        .steps = steps,
+        .state = cumulative_state,
+        .preanalyzedBlocks = preanalyzed_blocks,
+        .currentPreanalyzedBlockStartIndex = current_block_start_idx,
     };
-    defer parsed.deinit();
-
-    const obj = parsed.value.object;
-
-    // Verify required fields exist (analysis-first)
-    try testing.expect(obj.contains("gasLeft"));
-    try testing.expect(obj.contains("depth"));
-    try testing.expect(obj.contains("stack"));
-    try testing.expect(obj.contains("memory"));
-    try testing.expect(obj.contains("storage"));
-    try testing.expect(obj.contains("logs"));
-    try testing.expect(obj.contains("returnData"));
-    try testing.expect(obj.contains("blocks"));
-    try testing.expect(obj.contains("currentInstructionIndex"));
-    try testing.expect(obj.contains("currentBlockStartIndex"));
-
-    // Basic sanity: there should be at least one block
-    try testing.expect(obj.get("blocks") != null);
-
-    // Execute one step and verify state changes
-    _ = try devtool_evm.stepExecute();
-
-    const json_after_step = try devtool_evm.serializeEvmState();
-    defer allocator.free(json_after_step);
-
-    const parsed_after = std.json.parseFromSlice(std.json.Value, allocator, json_after_step, .{}) catch unreachable;
-    defer parsed_after.deinit();
-
-    const obj_after = parsed_after.value.object;
-
-    // After one block step the program may have completed; just ensure JSON parses
-    try testing.expect(obj_after.contains("blocks"));
+    defer debug_state.free_debugger_state_json(self.allocator, st);
+    const printed = try std.fmt.allocPrint(self.allocator, "{f}", .{std.json.fmt(st, .{})});
+    return printed;
 }
 
-test "DevtoolEvm fused patterns step-by-step across blocks" {
-    const allocator = testing.allocator;
-
-    var devtool_evm = try DevtoolEvm.init(allocator);
-    defer devtool_evm.deinit();
-
-    // Bytecode layout (blocks separated by JUMPDEST to force block-per-step):
-    // Block 1: PUSH1 0x05, PUSH1 0x03, ADD        => precomputed to single PUSH 0x08
-    // Block 2: JUMPDEST, PUSH1 0x02, PUSH1 0x03, MUL => precomputed to single PUSH 0x06
-    // Block 3: JUMPDEST, DUP1, PUSH0, EQ          => converted to ISZERO (non-zero -> 0)
-    // Terminator: STOP
-    // Hex: 60 05 60 03 01 5b 60 02 60 03 02 5b 80 5f 14 00
-    try devtool_evm.loadBytecodeHex("0x60056003015b60026003025b805f1400");
-
-    const frame = devtool_evm.current_frame.?;
-
-    // Step 1: executes Block 1, stack: [0x08]
-    const s1 = try devtool_evm.stepExecute();
-    try testing.expectEqual(false, s1.completed);
-    try testing.expectEqual(@as(usize, 1), frame.stack.size());
-    const v1 = try frame.stack.peek();
-    try testing.expectEqual(@as(u256, 8), v1);
-
-    // Step 2: executes Block 2, stack: [0x08, 0x06]
-    const s2 = try devtool_evm.stepExecute();
-    try testing.expectEqual(false, s2.completed);
-    try testing.expectEqual(@as(usize, 2), frame.stack.size());
-    const v2_top = try frame.stack.peek();
-    try testing.expectEqual(@as(u256, 6), v2_top);
-    const v2_second = try frame.stack.peek_n(1);
-    try testing.expectEqual(@as(u256, 8), v2_second);
-
-    // Step 3: executes Block 3 first visible instruction (ISZERO on top=6 -> 0)
-    // After ISZERO: stack becomes [0x08, 0x00]; not completed yet
-    const s3 = try devtool_evm.stepExecute();
-    try testing.expectEqual(false, s3.completed);
-    try testing.expectEqual(@as(usize, 2), frame.stack.size());
-    const v3_top = try frame.stack.peek();
-    try testing.expectEqual(@as(u256, 0), v3_top);
-    const v3_second = try frame.stack.peek_n(1);
-    try testing.expectEqual(@as(u256, 8), v3_second);
-
-    // Step 4: executes STOP in the same block; now completed
-    const s4 = try devtool_evm.stepExecute();
-    try testing.expectEqual(true, s4.completed);
+test "DevtoolEvm init + hex load + single step" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+    try dv.loadBytecodeHex("0x6001600201"); // PUSH1 1 PUSH1 2 ADD
+    try std.testing.expect(dv.is_initialized);
+    const s1 = try dv.singleStep();
+    try std.testing.expect(!s1.completed);
+    const json = try dv.serializeEvmState();
+    defer a.free(json);
+    try std.testing.expect(json.len > 0);
 }

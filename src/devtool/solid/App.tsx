@@ -12,6 +12,11 @@ declare global {
 		reset_evm: () => Promise<string>
 		step_evm: () => Promise<string>
 		get_evm_state: () => Promise<string>
+		add_breakpoint: (pc: number | string) => Promise<string>
+		remove_breakpoint: (pc: number | string) => Promise<string>
+		get_breakpoints: () => Promise<string>
+		get_available_breakpoints: () => Promise<string>
+		clear_breakpoints: () => Promise<string>
 		handleRunPause: () => void
 		handleStep: () => void
 		handleReset: () => void
@@ -34,8 +39,14 @@ function App() {
 		returnData: '0x',
 		completed: false,
 		currentInstructionIndex: 0,
-		currentBlockStartIndex: 0,
-		blocks: [],
+		pc: 0,
+		steps: [],
+		state: {
+			pre: [],
+			post: [],
+		},
+		preanalyzedBlocks: [],
+		currentPreanalyzedBlockStartIndex: 0,
 	})
 
 	const handleRunPause = () => {

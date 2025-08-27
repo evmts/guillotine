@@ -1,12 +1,25 @@
-export interface BlockJson {
-	beginIndex: number
+export interface PreanalyzedBlockJson {
+	pc: number
+	firstInstructionIndex: number
 	gasCost: number
-	stackReq: number
-	stackMaxGrowth: number
-	pcs: number[]
-	opcodes: string[]
-	hex: string[]
-	data: string[]
+	minStack: number
+	maxStack: number
+	instructions: InstructionJson[]
+}
+
+export interface AccountJson {
+	address: string
+	balance: string
+	nonce: number
+	code: string
+	storage: Array<{ key: string; value: string }>
+}
+
+export interface InstructionJson {
+	pc: number
+	opcode: string
+	hex: string
+	data: string
 }
 
 export interface EvmState {
@@ -19,8 +32,29 @@ export interface EvmState {
 	returnData: string
 	completed: boolean
 	currentInstructionIndex: number
-	currentBlockStartIndex: number
-	blocks: BlockJson[]
+	pc: number
+	steps: StepJson[]
+	state: {
+		pre: AccountJson[]
+		post: AccountJson[]
+	}
+	preanalyzedBlocks: PreanalyzedBlockJson[]
+	currentPreanalyzedBlockStartIndex: number
+}
+
+export interface StepJson {
+	step: number
+	pc: number
+	op: string
+	gasBefore: number
+	gasAfter: number
+	gasCost: number
+	stackBefore: string[]
+	stackAfter: string[]
+	memSizeBefore: number
+	memSizeAfter: number
+	depth: number
+	err?: string | null
 }
 
 export interface SampleContract {

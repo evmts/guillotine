@@ -54,6 +54,7 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				handleStep={props.handleStep}
 				handleReset={props.handleReset}
 				bytecode={props.bytecode()}
+				isExecutionComplete={props.state.completed}
 			/>
 			<BytecodeLoader
 				bytecode={props.bytecode()}
@@ -67,8 +68,8 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				<StateSummary state={props.state as EvmState} isUpdating={isUpdating()} />
 				<Show when={activePanel() === 'all' || activePanel() === 'bytecode'}>
 					<ExecutionStepsView
-						blocks={props.state.blocks}
-						currentBlockStartIndex={props.state.currentBlockStartIndex}
+						preanalyzedBlocks={props.state.preanalyzedBlocks}
+						currentPreanalyzedBlockStartIndex={props.state.currentPreanalyzedBlockStartIndex}
 						currentInstructionIndex={props.state.currentInstructionIndex}
 						rawBytecode={props.bytecode()}
 					/>

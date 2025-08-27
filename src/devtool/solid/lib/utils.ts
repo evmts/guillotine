@@ -1,18 +1,16 @@
 import type { EvmState } from '~/lib/types'
 
+function assertJson<T = unknown>(response: unknown): T {
+	if (typeof response === 'string') return JSON.parse(response) as T
+	if (typeof response === 'object' && response !== null && 'error' in response)
+		throw new Error(response.error as string)
+
+	return response as T
+}
+
 export async function loadBytecode(bytecodeHex: string): Promise<void> {
 	try {
-		console.log('load_bytecode', { bytecodeHex })
-		const response = await window.load_bytecode(bytecodeHex)
-		console.log('load_bytecode response:', response)
-
-		// Check if response contains error
-		if (typeof response === 'string') {
-			const parsed = JSON.parse(response)
-			if (parsed.error) {
-				throw new Error(parsed.error)
-			}
-		}
+		assertJson(await window.load_bytecode(bytecodeHex))
 	} catch (err) {
 		throw new Error(`Failed to load bytecode: ${err}`)
 	}
@@ -20,18 +18,7 @@ export async function loadBytecode(bytecodeHex: string): Promise<void> {
 
 export async function resetEvm(): Promise<EvmState> {
 	try {
-		console.log('reset_evm')
-		const response = await window.reset_evm()
-		console.log('reset_evm response:', response)
-
-		if (typeof response === 'string') {
-			const parsed = JSON.parse(response)
-			if (parsed.error) {
-				throw new Error(parsed.error)
-			}
-			return parsed
-		}
-		return response
+		return assertJson(await window.reset_evm())
 	} catch (err) {
 		throw new Error(`Failed to reset EVM: ${err}`)
 	}
@@ -39,18 +26,7 @@ export async function resetEvm(): Promise<EvmState> {
 
 export async function stepEvm(): Promise<EvmState> {
 	try {
-		console.log('step_evm')
-		const response = await window.step_evm()
-		console.log('step_evm response:', response)
-
-		if (typeof response === 'string') {
-			const parsed = JSON.parse(response)
-			if (parsed.error) {
-				throw new Error(parsed.error)
-			}
-			return parsed
-		}
-		return response
+		return assertJson(await window.step_evm())
 	} catch (err) {
 		throw new Error(`Failed to step: ${err}`)
 	}
@@ -68,32 +44,25 @@ export async function toggleRunPause(): Promise<EvmState> {
 
 export async function getEvmState(): Promise<EvmState> {
 	try {
-		console.log('get_evm_state')
-		const response = await window.get_evm_state()
-		console.log('get_evm_state response:', response)
+		const parsed = assertJson(await window.get_evm_state()) as EvmState
 
-		if (typeof response === 'string') {
-			const parsed = JSON.parse(response)
-			if (parsed.error) {
-				throw new Error(parsed.error)
-			}
-
-			// Map fields from Zig JSON to frontend state
-			return {
-				gasLeft: parsed.gasLeft,
-				depth: parsed.depth,
-				stack: parsed.stack || [],
-				memory: parsed.memory || '0x',
-				storage: parsed.storage || [],
-				logs: parsed.logs || [],
-				returnData: parsed.returnData || '0x',
-				completed: parsed.completed || false,
-				currentInstructionIndex: parsed.currentInstructionIndex || 0,
-				currentBlockStartIndex: parsed.currentBlockStartIndex || 0,
-				blocks: parsed.blocks || [],
-			}
-		}
-		return response
+		// Map fields from Zig JSON to frontend state (fallbacks preserved)
+		return {
+			gasLeft: parsed.gasLeft,
+			depth: parsed.depth,
+			stack: parsed.stack ?? [],
+			memory: parsed.memory ?? '0x',
+			storage: parsed.storage ?? [],
+			logs: parsed.logs ?? [],
+			returnData: parsed.returnData ?? '0x',
+			completed: parsed.completed ?? false,
+			currentInstructionIndex: parsed.currentInstructionIndex ?? 0,
+			preanalyzedBlocks: parsed.preanalyzedBlocks ?? [],
+			currentPreanalyzedBlockStartIndex: parsed.currentPreanalyzedBlockStartIndex ?? 0,
+			pc: parsed.pc ?? 0,
+			steps: parsed.steps ?? [],
+			state: parsed.state ?? { pre: [], post: [] },
+		} as EvmState
 	} catch (err) {
 		throw new Error(`Failed to get state: ${err}`)
 	}
@@ -252,4 +221,53 @@ export const opcodeToString = (opcode: number): string => {
 	}
 
 	return opcodes[opcode] || 'UNKNOWN'
+}
+
+// ============ Breakpoints API ============
+
+export async function addBreakpoint(pc: number | string): Promise<number[]> {
+	try {
+		const arg = typeof pc === 'number' ? String(pc) : pc
+		const breakpoints = assertJson(await window.add_breakpoint(arg))
+		return Array.isArray(breakpoints) ? breakpoints : []
+	} catch (err) {
+		throw new Error(`Failed to add breakpoint: ${err}`)
+	}
+}
+
+export async function removeBreakpoint(pc: number | string): Promise<number[]> {
+	try {
+		const arg = typeof pc === 'number' ? String(pc) : pc
+		const breakpoints = assertJson(await window.remove_breakpoint(arg))
+		return Array.isArray(breakpoints) ? breakpoints : []
+	} catch (err) {
+		throw new Error(`Failed to remove breakpoint: ${err}`)
+	}
+}
+
+export async function clearBreakpoints(): Promise<number[]> {
+	try {
+		const breakpoints = assertJson(await window.clear_breakpoints())
+		return Array.isArray(breakpoints) ? breakpoints : []
+	} catch (err) {
+		throw new Error(`Failed to clear breakpoints: ${err}`)
+	}
+}
+
+export async function getBreakpoints(): Promise<number[]> {
+	try {
+		const breakpoints = assertJson(await window.get_breakpoints())
+		return Array.isArray(breakpoints) ? breakpoints : []
+	} catch (err) {
+		throw new Error(`Failed to get breakpoints: ${err}`)
+	}
+}
+
+export async function getAvailableBreakpoints(): Promise<number[]> {
+	try {
+		const breakpoints = assertJson(await window.get_available_breakpoints())
+		return Array.isArray(breakpoints) ? breakpoints : []
+	} catch (err) {
+		throw new Error(`Failed to get available breakpoints: ${err}`)
+	}
 }

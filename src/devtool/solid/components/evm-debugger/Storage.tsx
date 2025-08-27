@@ -30,13 +30,13 @@ const Storage: Component<StorageProps> = ({ state }) => {
 		<Card class="overflow-hidden">
 			<CardHeader class="border-b p-3">
 				<div class="flex items-center justify-between">
-					<CardTitle class="text-sm">Storage ({Object.keys(state.storage).length})</CardTitle>
+					<CardTitle class="text-sm">Storage ({state.storage.length})</CardTitle>
 					<InfoTooltip>Key-value pairs</InfoTooltip>
 				</div>
 			</CardHeader>
 			<CardContent class="max-h-[300px] overflow-y-auto p-0">
 				<Show
-					when={Object.keys(state.storage).length > 0}
+					when={state.storage.length > 0}
 					fallback={
 						<div class="flex items-center justify-center gap-2 p-8 text-muted-foreground text-sm italic">
 							<RectangleEllipsisIcon class="h-5 w-5" />

@@ -1,68 +1,28 @@
 const std = @import("std");
+const evm = @import("evm");
 const primitives = @import("primitives");
-const Stack = @import("evm").Stack;
-const Memory = @import("evm").Memory;
+const Address = primitives.Address.Address;
 
-/// Debug state capture for EVM execution steps
-pub const DebugState = struct {
-    pc: usize,
-    opcode: u8,
-    opcode_name: []const u8,
-    gas_remaining: u64,
-    depth: u32,
-    is_static: bool,
-    stack_size: usize,
-    memory_size: usize,
-    has_error: bool,
-    error_name: ?[]const u8,
+// Tracer-oriented helpers and JSON types for the devtool UI.
 
-    pub fn capture(
-        pc: usize,
-        opcode: u8,
-        gas_remaining: u64,
-        depth: u32,
-        is_static: bool,
-        stack: *const Stack,
-        memory: *const Memory,
-        err: ?anyerror,
-    ) DebugState {
-        return DebugState{
-            .pc = pc,
-            .opcode = opcode,
-            .opcode_name = opcodeToString(opcode),
-            .gas_remaining = gas_remaining,
-            .depth = depth,
-            .is_static = is_static,
-            .stack_size = stack.size(),
-            .memory_size = memory.size(),
-            .has_error = err != null,
-            .error_name = if (err) |e| @errorName(e) else null,
-        };
-    }
-};
-
-/// Storage entry for JSON serialization
-pub const StorageEntry = struct {
-    key: []const u8,
-    value: []const u8,
-};
-
-/// Simple JSON-serializable state for the frontend
-pub const BlockJson = struct {
-    beginIndex: usize,
+pub const StepJson = struct {
+    step: u64,
+    pc: u32,
+    op: []const u8,
+    gasBefore: i32,
+    gasAfter: i32,
     gasCost: u32,
-    stackReq: u16,
-    stackMaxGrowth: u16,
-    pcs: []u32,
-    opcodes: [][]const u8,
-    hex: [][]const u8,
-    data: [][]const u8,
-    // debugging aids
-    instIndices: []u32,
-    instMappedPcs: []u32,
+    stackBefore: [][]const u8,
+    stackAfter: [][]const u8,
+    memSizeBefore: usize,
+    memSizeAfter: usize,
+    depth: u32,
+    err: ?[]const u8,
+    // Per-step diff state (pre/post for changed accounts only)
+    state: StateJson,
 };
 
-pub const EvmStateJson = struct {
+pub const DebuggerStateJson = struct {
     gasLeft: u64,
     depth: u32,
     stack: [][]const u8,
@@ -72,409 +32,376 @@ pub const EvmStateJson = struct {
     returnData: []const u8,
     completed: bool,
     currentInstructionIndex: usize,
-    currentBlockStartIndex: usize,
-    blocks: []BlockJson,
+    pc: u32,
+    steps: []StepJson,
+    // Execution-based cumulative state (pre/post for all touched accounts)
+    state: StateJson,
+    // Minimal preanalyzed blocks (entry + every JUMPDEST)
+    preanalyzedBlocks: []PreanalyzedBlock = &.{},
+    // Current block start instruction index among preanalyzed blocks
+    currentPreanalyzedBlockStartIndex: usize = 0,
 };
 
-/// Convert opcode byte to human-readable string
-pub fn opcodeToString(opcode: u8) []const u8 {
-    return switch (opcode) {
-        0x00 => "STOP",
-        0x01 => "ADD",
-        0x02 => "MUL",
-        0x03 => "SUB",
-        0x04 => "DIV",
-        0x05 => "SDIV",
-        0x06 => "MOD",
-        0x07 => "SMOD",
-        0x08 => "ADDMOD",
-        0x09 => "MULMOD",
-        0x0a => "EXP",
-        0x0b => "SIGNEXTEND",
-        0x10 => "LT",
-        0x11 => "GT",
-        0x12 => "SLT",
-        0x13 => "SGT",
-        0x14 => "EQ",
-        0x15 => "ISZERO",
-        0x16 => "AND",
-        0x17 => "OR",
-        0x18 => "XOR",
-        0x19 => "NOT",
-        0x1a => "BYTE",
-        0x1b => "SHL",
-        0x1c => "SHR",
-        0x1d => "SAR",
-        0x20 => "KECCAK256",
-        0x30 => "ADDRESS",
-        0x31 => "BALANCE",
-        0x32 => "ORIGIN",
-        0x33 => "CALLER",
-        0x34 => "CALLVALUE",
-        0x35 => "CALLDATALOAD",
-        0x36 => "CALLDATASIZE",
-        0x37 => "CALLDATACOPY",
-        0x38 => "CODESIZE",
-        0x39 => "CODECOPY",
-        0x3a => "GASPRICE",
-        0x3b => "EXTCODESIZE",
-        0x3c => "EXTCODECOPY",
-        0x3d => "RETURNDATASIZE",
-        0x3e => "RETURNDATACOPY",
-        0x3f => "EXTCODEHASH",
-        0x40 => "BLOCKHASH",
-        0x41 => "COINBASE",
-        0x42 => "TIMESTAMP",
-        0x43 => "NUMBER",
-        0x44 => "PREVRANDAO",
-        0x45 => "GASLIMIT",
-        0x46 => "CHAINID",
-        0x47 => "SELFBALANCE",
-        0x48 => "BASEFEE",
-        0x50 => "POP",
-        0x51 => "MLOAD",
-        0x52 => "MSTORE",
-        0x53 => "MSTORE8",
-        0x54 => "SLOAD",
-        0x55 => "SSTORE",
-        0x56 => "JUMP",
-        0x57 => "JUMPI",
-        0x58 => "PC",
-        0x59 => "MSIZE",
-        0x5a => "GAS",
-        0x5b => "JUMPDEST",
-        0x5f => "PUSH0",
-        0x60 => "PUSH1",
-        0x61 => "PUSH2",
-        0x62 => "PUSH3",
-        0x63 => "PUSH4",
-        0x64 => "PUSH5",
-        0x65 => "PUSH6",
-        0x66 => "PUSH7",
-        0x67 => "PUSH8",
-        0x68 => "PUSH9",
-        0x69 => "PUSH10",
-        0x6a => "PUSH11",
-        0x6b => "PUSH12",
-        0x6c => "PUSH13",
-        0x6d => "PUSH14",
-        0x6e => "PUSH15",
-        0x6f => "PUSH16",
-        0x70 => "PUSH17",
-        0x71 => "PUSH18",
-        0x72 => "PUSH19",
-        0x73 => "PUSH20",
-        0x74 => "PUSH21",
-        0x75 => "PUSH22",
-        0x76 => "PUSH23",
-        0x77 => "PUSH24",
-        0x78 => "PUSH25",
-        0x79 => "PUSH26",
-        0x7a => "PUSH27",
-        0x7b => "PUSH28",
-        0x7c => "PUSH29",
-        0x7d => "PUSH30",
-        0x7e => "PUSH31",
-        0x7f => "PUSH32",
-        0x80 => "DUP1",
-        0x81 => "DUP2",
-        0x82 => "DUP3",
-        0x83 => "DUP4",
-        0x84 => "DUP5",
-        0x85 => "DUP6",
-        0x86 => "DUP7",
-        0x87 => "DUP8",
-        0x88 => "DUP9",
-        0x89 => "DUP10",
-        0x8a => "DUP11",
-        0x8b => "DUP12",
-        0x8c => "DUP13",
-        0x8d => "DUP14",
-        0x8e => "DUP15",
-        0x8f => "DUP16",
-        0x90 => "SWAP1",
-        0x91 => "SWAP2",
-        0x92 => "SWAP3",
-        0x93 => "SWAP4",
-        0x94 => "SWAP5",
-        0x95 => "SWAP6",
-        0x96 => "SWAP7",
-        0x97 => "SWAP8",
-        0x98 => "SWAP9",
-        0x99 => "SWAP10",
-        0x9a => "SWAP11",
-        0x9b => "SWAP12",
-        0x9c => "SWAP13",
-        0x9d => "SWAP14",
-        0x9e => "SWAP15",
-        0x9f => "SWAP16",
-        0xa0 => "LOG0",
-        0xa1 => "LOG1",
-        0xa2 => "LOG2",
-        0xa3 => "LOG3",
-        0xa4 => "LOG4",
-        0xf0 => "CREATE",
-        0xf1 => "CALL",
-        0xf2 => "CALLCODE",
-        0xf3 => "RETURN",
-        0xf4 => "DELEGATECALL",
-        0xf5 => "CREATE2",
-        0xfa => "STATICCALL",
-        0xfd => "REVERT",
-        0xfe => "INVALID",
-        0xff => "SELFDESTRUCT",
-        else => "UNKNOWN",
-    };
+pub const AccountJson = struct {
+    address: []const u8,
+    balance: []const u8,
+    nonce: u64,
+    code: ?[]const u8 = null,
+    storage: []StorageEntry,
+};
+
+pub const StateJson = struct {
+    pre: []AccountJson,
+    post: []AccountJson,
+};
+
+pub const StorageEntry = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
+// Minimal block metadata available from planner/plan preanalysis
+pub const InstructionJson = struct {
+    pc: u32,
+    opcode: []const u8,
+    hex: []const u8,
+    data: []const u8,
+};
+
+pub const PreanalyzedBlock = struct {
+    // Block start PC (0 for entry, otherwise JUMPDEST PC)
+    pc: u32,
+    // Instruction stream index where this block begins
+    firstInstructionIndex: usize,
+    // Static gas cost accumulated within the block
+    gasCost: u32,
+    // Stack height range within the block
+    minStack: i16,
+    maxStack: i16,
+    // Per-block disassembly
+    instructions: []InstructionJson = &.{},
+};
+
+/// Collect preanalyzed basic blocks from a concrete Interpreter instance with minimal code.
+/// Returns one entry for the entry block (pc 0) and one per JUMPDEST.
+/// This function is generic over the Interpreter type to avoid changing core APIs.
+pub fn collect_blocks_for_interpreter(
+    comptime Interpreter: type,
+    allocator: std.mem.Allocator,
+    interp: *const Interpreter,
+) ![]PreanalyzedBlock {
+    var out = std.ArrayList(PreanalyzedBlock){};
+    errdefer out.deinit(allocator);
+
+    const plan = interp.plan;
+    const planner = interp.planner;
+    const code = interp.frame.bytecode;
+    const dense_opt = plan.pc_to_instruction_idx_dense;
+
+    // Build block start PCs: entry (0) + all JUMPDESTs that are instruction starts
+    var starts = std.ArrayList(u32){};
+    defer starts.deinit(allocator);
+    try starts.append(allocator, 0);
+    var pc_it: usize = 1;
+    while (pc_it < code.len) : (pc_it += 1) {
+        if (code[pc_it] != @intFromEnum(evm.Opcode.JUMPDEST)) continue;
+        const is_start = if (dense_opt) |dense|
+            (pc_it < dense.len and dense[pc_it] != null)
+        else
+            plan.getInstructionIndexForPc(@intCast(pc_it)) != null;
+        if (is_start) try starts.append(allocator, @intCast(pc_it));
+    }
+
+    // Entry begin index
+    const entry_begin: usize = if (dense_opt) |dense|
+        @intCast(dense[0] orelse 0)
+    else
+        @intCast(plan.getInstructionIndexForPc(0) orelse 0);
+
+    // Emit blocks with metadata and intra-block instruction lists
+    var bi: usize = 0;
+    while (bi < starts.items.len) : (bi += 1) {
+        const start_pc_u32 = starts.items[bi];
+        const start_pc: usize = @intCast(start_pc_u32);
+        const end_pc: usize = if (bi + 1 < starts.items.len) @intCast(starts.items[bi + 1]) else code.len;
+
+        // Begin instruction index
+        const begin_idx: usize = blk: {
+            if (start_pc == 0) break :blk entry_begin;
+            if (dense_opt) |dense| break :blk @intCast(dense[start_pc] orelse 0);
+            break :blk @intCast(plan.getInstructionIndexForPc(@intCast(start_pc)) orelse 0);
+        };
+
+        // Metadata
+        var gas_cost: u32 = 0;
+        var min_stack: i16 = 0;
+        var max_stack: i16 = 0;
+        if (start_pc == 0) {
+            gas_cost = planner.start.gas;
+            min_stack = planner.start.min_stack;
+            max_stack = planner.start.max_stack;
+        } else {
+            var idx_copy: Interpreter.Plan.InstructionIndexType = @intCast(begin_idx);
+            const md = plan.getMetadata(&idx_copy, .JUMPDEST);
+            const MetaT = @TypeOf(md);
+            const meta: @TypeOf(planner.start) = if (comptime MetaT == @TypeOf(planner.start)) md else md.*;
+            gas_cost = meta.gas;
+            min_stack = meta.min_stack;
+            max_stack = meta.max_stack;
+        }
+
+        // Enumerate instructions within [start_pc, end_pc)
+        var instrs = std.ArrayList(InstructionJson){};
+        defer instrs.deinit(allocator);
+        var scan: usize = start_pc;
+        while (scan < end_pc) : (scan += 1) {
+            const is_start_here = if (dense_opt) |dense|
+                (scan < dense.len and dense[scan] != null)
+            else
+                plan.getInstructionIndexForPc(@intCast(scan)) != null;
+            if (is_start_here) {
+                const op = code[scan];
+                // opcode name
+                const name_owned: []u8 = blk2: {
+                    const op_enum = std.meta.intToEnum(evm.Opcode, op) catch break :blk2 try allocator.dupe(u8, "UNKNOWN");
+                    const tag = @tagName(op_enum);
+                    break :blk2 try allocator.dupe(u8, tag);
+                };
+                // opcode hex
+                const hex_owned = try format_bytes_hex(allocator, &[_]u8{op});
+                // push data
+                var data_owned = try allocator.dupe(u8, "");
+                if (op == @intFromEnum(evm.Opcode.PUSH0)) {
+                    // no payload
+                } else if (op >= @intFromEnum(evm.Opcode.PUSH1) and op <= @intFromEnum(evm.Opcode.PUSH32)) {
+                    const n: usize = op - (@intFromEnum(evm.Opcode.PUSH1) - 1);
+                    const start = scan + 1;
+                    const end = @min(code.len, start + n);
+                    const slice = if (start < end) code[start..end] else &.{};
+                    allocator.free(data_owned);
+                    data_owned = try format_bytes_hex(allocator, slice);
+                }
+                try instrs.append(allocator, .{
+                    .pc = @intCast(scan),
+                    .opcode = name_owned,
+                    .hex = hex_owned,
+                    .data = data_owned,
+                });
+            }
+        }
+
+        try out.append(allocator, .{
+            .pc = start_pc_u32,
+            .firstInstructionIndex = begin_idx,
+            .gasCost = gas_cost,
+            .minStack = min_stack,
+            .maxStack = max_stack,
+            .instructions = try instrs.toOwnedSlice(allocator),
+        });
+    }
+
+    return try out.toOwnedSlice(allocator);
 }
 
-/// Format a u256 value as hex string
-pub fn formatU256Hex(allocator: std.mem.Allocator, value: u256) ![]u8 {
+pub fn format_u256_hex(allocator: std.mem.Allocator, value: u256) ![]u8 {
     return try std.fmt.allocPrint(allocator, "0x{x}", .{value});
 }
 
-/// Format bytes as hex string
-pub fn formatBytesHex(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    if (bytes.len == 0) return try allocator.dupe(u8, "0x");
-    return try std.fmt.allocPrint(allocator, "0x{}", .{std.fmt.fmtSliceHexLower(bytes)});
-}
-
-/// Serialize stack contents to hex string array
-pub fn serializeStack(allocator: std.mem.Allocator, stack: *const Stack) ![][]const u8 {
-    var stack_array = std.ArrayList([]const u8).init(allocator);
-    defer stack_array.deinit();
-
-    // Get stack items (top to bottom for debugging visibility)
+pub fn format_bytes_hex(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    // 0x + 2 hex chars per byte
+    const out_len = 2 + (bytes.len * 2);
+    var buf = try allocator.alloc(u8, out_len);
     var i: usize = 0;
-    while (i < stack.size()) {
-        const idx = i; // peek_n(0) is top, peek_n(1) is second from top, etc.
-        const value = stack.peek_n(idx) catch break;
-        const hex_str = try formatU256Hex(allocator, value);
-        try stack_array.append(hex_str);
-        i += 1;
+    buf[0] = '0';
+    buf[1] = 'x';
+    while (i < bytes.len) : (i += 1) {
+        const b = bytes[i];
+        const hi: u8 = (b >> 4) & 0x0F;
+        const lo: u8 = b & 0x0F;
+        buf[2 + i * 2] = if (hi < 10) '0' + hi else 'a' + (hi - 10);
+        buf[2 + i * 2 + 1] = if (lo < 10) '0' + lo else 'a' + (lo - 10);
     }
-
-    return try stack_array.toOwnedSlice();
+    return buf;
 }
 
-/// Serialize memory contents to hex string
-pub fn serializeMemory(allocator: std.mem.Allocator, memory: *const Memory) ![]u8 {
-    const memory_size = memory.size();
-    if (memory_size == 0) {
-        return try allocator.dupe(u8, "0x");
+pub fn format_stack_hex(allocator: std.mem.Allocator, values_top_first: []const u256) ![][]const u8 {
+    var out = std.ArrayList([]const u8){};
+    defer out.deinit(allocator);
+    var i: usize = 0;
+    while (i < values_top_first.len) : (i += 1) {
+        try out.append(allocator, try format_u256_hex(allocator, values_top_first[i]));
     }
-
-    // Read memory contents
-    const memory_read = @import("evm").memory.read;
-    const memory_data = try memory_read.get_slice(memory, 0, memory_size);
-    return try formatBytesHex(allocator, memory_data);
+    return try out.toOwnedSlice(allocator);
 }
 
-/// Create empty EVM state JSON for initial state
-pub fn createEmptyEvmStateJson(allocator: std.mem.Allocator) !EvmStateJson {
-    var empty_stack = std.ArrayList([]const u8).init(allocator);
-    defer empty_stack.deinit(std.testing.allocator);
-
-    var empty_storage = std.ArrayList(StorageEntry).init(allocator);
-    defer empty_storage.deinit();
-
-    var empty_logs = std.ArrayList([]const u8).init(allocator);
-    defer empty_logs.deinit();
-
-    return EvmStateJson{
-        .gasLeft = 0,
-        .depth = 0,
-        .stack = try empty_stack.toOwnedSlice(),
-        .memory = try allocator.dupe(u8, "0x"),
-        .storage = try empty_storage.toOwnedSlice(),
-        .logs = try empty_logs.toOwnedSlice(),
-        .returnData = try allocator.dupe(u8, "0x"),
-        .completed = false,
-        .currentInstructionIndex = 0,
-        .currentBlockStartIndex = 0,
-        .blocks = try allocator.alloc(BlockJson, 0),
-    };
+pub fn free_step_json(allocator: std.mem.Allocator, step: StepJson) void {
+    for (step.stackBefore) |s| allocator.free(s);
+    allocator.free(step.stackBefore);
+    for (step.stackAfter) |s| allocator.free(s);
+    allocator.free(step.stackAfter);
+    if (step.err) |e| allocator.free(e);
+    free_state_json(allocator, step.state);
+    allocator.free(step.op);
 }
 
-/// Free allocated memory from EvmStateJson
-pub fn freeEvmStateJson(allocator: std.mem.Allocator, state: EvmStateJson) void {
-    for (state.stack) |stack_item| {
-        allocator.free(stack_item);
-    }
+pub fn free_debugger_state_json(allocator: std.mem.Allocator, state: DebuggerStateJson) void {
+    for (state.stack) |s| allocator.free(s);
     allocator.free(state.stack);
-
     allocator.free(state.memory);
-
-    // Free storage entries
     for (state.storage) |entry| {
         allocator.free(entry.key);
         allocator.free(entry.value);
     }
     allocator.free(state.storage);
-
-    for (state.logs) |log_item| {
-        allocator.free(log_item);
-    }
+    for (state.logs) |s| allocator.free(s);
     allocator.free(state.logs);
-
     allocator.free(state.returnData);
-
-    // Free blocks
-    for (state.blocks) |blk| {
-        allocator.free(blk.pcs);
-        for (blk.opcodes) |s| allocator.free(s);
-        allocator.free(blk.opcodes);
-        for (blk.hex) |s| allocator.free(s);
-        allocator.free(blk.hex);
-        for (blk.data) |s| allocator.free(s);
-        allocator.free(blk.data);
-        allocator.free(blk.instIndices);
-        allocator.free(blk.instMappedPcs);
+    for (state.steps) |st| free_step_json(allocator, st);
+    allocator.free(state.steps);
+    free_state_json(allocator, state.state);
+    // Free preanalyzedBlocks inner arrays and slice
+    for (state.preanalyzedBlocks) |blk| {
+        for (blk.instructions) |ins| {
+            allocator.free(ins.opcode);
+            allocator.free(ins.hex);
+            allocator.free(ins.data);
+        }
+        allocator.free(blk.instructions);
     }
-    allocator.free(state.blocks);
+    allocator.free(state.preanalyzedBlocks);
 }
 
-test "DebugState.capture works correctly" {
-    const testing = std.testing;
-    // const Evm = @import("evm");
-
-    // Create minimal stack and memory for testing
-    var stack = try Stack.init(testing.allocator);
-    defer stack.deinit();
-    try stack.append(42);
-    try stack.append(100);
-
-    var memory = try Memory.init_default(testing.allocator);
-    defer memory.deinit();
-
-    const debug_state = DebugState.capture(
-        10, // pc
-        0x01, // ADD opcode
-        50000, // gas
-        1, // depth
-        false, // not static
-        &stack,
-        &memory,
-        null, // no error
-    );
-
-    try testing.expectEqual(@as(usize, 10), debug_state.pc);
-    try testing.expectEqual(@as(u8, 0x01), debug_state.opcode);
-    try testing.expectEqualStrings("ADD", debug_state.opcode_name);
-    try testing.expectEqual(@as(u64, 50000), debug_state.gas_remaining);
-    try testing.expectEqual(@as(u32, 1), debug_state.depth);
-    try testing.expectEqual(false, debug_state.is_static);
-    try testing.expectEqual(@as(usize, 2), debug_state.stack_size);
-    try testing.expectEqual(false, debug_state.has_error);
-    try testing.expect(debug_state.error_name == null);
+pub fn free_account_json(allocator: std.mem.Allocator, acct: AccountJson) void {
+    allocator.free(acct.address);
+    allocator.free(acct.balance);
+    if (acct.code) |c| allocator.free(c);
+    for (acct.storage) |s| {
+        allocator.free(s.key);
+        allocator.free(s.value);
+    }
+    allocator.free(acct.storage);
 }
 
-test "opcodeToString returns correct names" {
-    const testing = std.testing;
-
-    try testing.expectEqualStrings("STOP", opcodeToString(0x00));
-    try testing.expectEqualStrings("ADD", opcodeToString(0x01));
-    try testing.expectEqualStrings("PUSH1", opcodeToString(0x60));
-    try testing.expectEqualStrings("RETURN", opcodeToString(0xf3));
-    try testing.expectEqualStrings("UNKNOWN", opcodeToString(0xaa));
+pub fn free_state_json(allocator: std.mem.Allocator, st: StateJson) void {
+    for (st.pre) |a| free_account_json(allocator, a);
+    allocator.free(st.pre);
+    for (st.post) |a| free_account_json(allocator, a);
+    allocator.free(st.post);
 }
 
-test "formatU256Hex works correctly" {
-    const testing = std.testing;
-
-    const hex1 = try formatU256Hex(testing.allocator, 0);
-    defer testing.allocator.free(hex1);
-    try testing.expectEqualStrings("0x0", hex1);
-
-    const hex2 = try formatU256Hex(testing.allocator, 255);
-    defer testing.allocator.free(hex2);
-    try testing.expectEqualStrings("0xff", hex2);
-
-    const hex3 = try formatU256Hex(testing.allocator, 42);
-    defer testing.allocator.free(hex3);
-    try testing.expectEqualStrings("0x2a", hex3);
+fn format_address_hex(allocator: std.mem.Allocator, addr: Address) ![]u8 {
+    // 0x + 40 hex chars
+    var out = try allocator.alloc(u8, 2 + 40);
+    out[0] = '0';
+    out[1] = 'x';
+    var i: usize = 0;
+    while (i < addr.bytes.len) : (i += 1) {
+        const b = addr.bytes[i];
+        const hi: u8 = (b >> 4) & 0x0F;
+        const lo: u8 = b & 0x0F;
+        out[2 + i * 2] = if (hi < 10) '0' + hi else 'a' + (hi - 10);
+        out[2 + i * 2 + 1] = if (lo < 10) '0' + lo else 'a' + (lo - 10);
+    }
+    return out;
 }
 
-test "formatBytesHex works correctly" {
-    const testing = std.testing;
-
-    const hex1 = try formatBytesHex(testing.allocator, &[_]u8{});
-    defer testing.allocator.free(hex1);
-    try testing.expectEqualStrings("0x", hex1);
-
-    const hex2 = try formatBytesHex(testing.allocator, &[_]u8{ 0x12, 0x34, 0xab });
-    defer testing.allocator.free(hex2);
-    try testing.expectEqualStrings("0x1234ab", hex2);
+pub fn build_accounts_from_map(
+    allocator: std.mem.Allocator,
+    map: *const std.AutoHashMap(Address, evm.PrestateTracer.AccountState),
+    disable_storage: bool,
+    disable_code: bool,
+) ![]AccountJson {
+    var list = std.ArrayList(evm.PrestateTracer.AccountState){};
+    defer list.deinit(allocator);
+    var addr_list = std.ArrayList(Address){};
+    defer addr_list.deinit(allocator);
+    var it = map.iterator();
+    while (it.next()) |e| {
+        try list.append(allocator, e.value_ptr.*);
+        try addr_list.append(allocator, e.key_ptr.*);
+    }
+    var out = try allocator.alloc(AccountJson, list.items.len);
+    var i: usize = 0;
+    while (i < list.items.len) : (i += 1) {
+        const a = list.items[i];
+        const addr = addr_list.items[i];
+        var storage_entries: []StorageEntry = &.{};
+        if (!disable_storage and a.storage.count() > 0) {
+            var se_list = std.ArrayList(StorageEntry){};
+            defer se_list.deinit(allocator);
+            var sit = a.storage.iterator();
+            while (sit.next()) |se| {
+                const key_hex = try format_u256_hex(allocator, se.key_ptr.*);
+                const val_hex = try format_u256_hex(allocator, se.value_ptr.*);
+                try se_list.append(allocator, .{ .key = key_hex, .value = val_hex });
+            }
+            storage_entries = try se_list.toOwnedSlice(allocator);
+        }
+        const addr_hex = try format_address_hex(allocator, addr);
+        const bal_hex = try format_u256_hex(allocator, a.balance);
+        const code_hex = if (!disable_code and a.code.len > 0) try format_bytes_hex(allocator, a.code) else null;
+        out[i] = .{ .address = addr_hex, .balance = bal_hex, .nonce = a.nonce, .code = code_hex, .storage = storage_entries };
+    }
+    return out;
 }
 
-test "serializeStack works correctly" {
-    const testing = std.testing;
+pub fn build_state_for_step(
+    allocator: std.mem.Allocator,
+    pt: *const evm.PrestateTracer,
+    step_number_debug: u64,
+) !StateJson {
+    const target = step_number_debug + 1; // compensate alignment with DebuggingTracer
+    // We produce pre/post for only accounts touched at this step.
+    var pre_map = std.AutoHashMap(Address, evm.PrestateTracer.AccountState).init(allocator);
+    defer pre_map.deinit();
+    var post_map = std.AutoHashMap(Address, evm.PrestateTracer.AccountState).init(allocator);
+    defer post_map.deinit();
+    for (pt.state_changes.items) |c| {
+        if (c.step_number != target) continue;
+        // Initialize entries if not present by cloning from global pre/post maps when available
+        if (pt.prestate.get(c.address)) |ps| {
+            if (!pre_map.contains(c.address)) try pre_map.put(c.address, ps);
+        }
+        if (pt.poststate.get(c.address)) |ps2| {
+            if (!post_map.contains(c.address)) try post_map.put(c.address, ps2);
+        }
+    }
+    return .{
+        .pre = try build_accounts_from_map(allocator, &pre_map, pt.disable_storage, pt.disable_code),
+        .post = try build_accounts_from_map(allocator, &post_map, pt.disable_storage, pt.disable_code),
+    };
+}
 
-    // Test empty stack
-    var empty_stack = try Stack.init(testing.allocator);
-    defer empty_stack.deinit();
-    const empty_result = try serializeStack(testing.allocator, &empty_stack);
+pub fn build_state_until(
+    allocator: std.mem.Allocator,
+    pt: *const evm.PrestateTracer,
+    step_number_debug: u64,
+) !StateJson {
+    _ = step_number_debug;
+    // For cumulative state, include the entire pre/post maps. This mirrors writePrestateJson in diff mode.
+    return .{
+        .pre = try build_accounts_from_map(allocator, &pt.prestate, pt.disable_storage, pt.disable_code),
+        .post = try build_accounts_from_map(allocator, &pt.poststate, pt.disable_storage, pt.disable_code),
+    };
+}
+
+fn fmt_u64(a: std.mem.Allocator, n: u64) ![]u8 {
+    return try std.fmt.allocPrint(a, "{d}", .{n});
+}
+
+test "format helpers basic coverage" {
+    const t = std.testing;
+    const h1 = try format_u256_hex(t.allocator, 0);
+    defer t.allocator.free(h1);
+    try t.expectEqualStrings("0x0", h1);
+    const h2 = try format_bytes_hex(t.allocator, &[_]u8{ 0x12, 0xab });
+    defer t.allocator.free(h2);
+    try t.expectEqualStrings("0x12ab", h2);
+    var tmp = [_]u256{ 1, 2, 3 };
+    const hs = try format_stack_hex(t.allocator, &tmp);
     defer {
-        for (empty_result) |item| testing.allocator.free(item);
-        testing.allocator.free(empty_result);
+        for (hs) |s| t.allocator.free(s);
+        t.allocator.free(hs);
     }
-    try testing.expectEqual(@as(usize, 0), empty_result.len);
-
-    // Test stack with values
-    var stack = try Stack.init(testing.allocator);
-    defer stack.deinit();
-    try stack.append(42);
-    try stack.append(255);
-    try stack.append(1000);
-
-    const result = try serializeStack(testing.allocator, &stack);
-    defer {
-        for (result) |item| testing.allocator.free(item);
-        testing.allocator.free(result);
-    }
-
-    try testing.expectEqual(@as(usize, 3), result.len);
-    // Stack should be serialized top-first
-    try testing.expectEqualStrings("0x3e8", result[0]); // 1000
-    try testing.expectEqualStrings("0xff", result[1]); // 255
-    try testing.expectEqualStrings("0x2a", result[2]); // 42
-}
-
-test "serializeMemory works correctly" {
-    const testing = std.testing;
-    // const Evm = @import("evm");
-
-    // Test empty memory
-    var empty_memory = try Memory.init_default(testing.allocator);
-    defer empty_memory.deinit();
-
-    const empty_result = try serializeMemory(testing.allocator, &empty_memory);
-    defer testing.allocator.free(empty_result);
-    try testing.expectEqualStrings("0x", empty_result);
-
-    // Test memory with data
-    var memory = try Memory.init_default(testing.allocator);
-    defer memory.deinit();
-
-    const test_data = [_]u8{ 0x12, 0x34, 0x56, 0x78 };
-    const memory_write = @import("evm").memory.write;
-    try memory_write.set_data_bounded(&memory, 0, &test_data, 0, test_data.len);
-
-    const result = try serializeMemory(testing.allocator, &memory);
-    defer testing.allocator.free(result);
-    try testing.expectEqualStrings("0x12345678", result);
-}
-
-test "createEmptyEvmStateJson works correctly" {
-    const testing = std.testing;
-
-    const empty_state = try createEmptyEvmStateJson(testing.allocator);
-    defer freeEvmStateJson(testing.allocator, empty_state);
-
-    try testing.expectEqual(@as(u64, 0), empty_state.gasLeft);
-    try testing.expectEqual(@as(u32, 0), empty_state.depth);
-    try testing.expectEqual(@as(usize, 0), empty_state.stack.len);
-    try testing.expectEqualStrings("0x", empty_state.memory);
-    try testing.expectEqual(@as(usize, 0), empty_state.storage.len);
-    try testing.expectEqual(@as(usize, 0), empty_state.logs.len);
-    try testing.expectEqualStrings("0x", empty_state.returnData);
+    try t.expectEqual(@as(usize, 3), hs.len);
 }
