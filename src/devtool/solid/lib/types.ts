@@ -1,5 +1,8 @@
 export interface PreanalyzedBlockJson {
-	pc: number
+	// Explicit start/end PCs for this block (end is exclusive)
+	firstPc: number
+	lastPcExclusive: number
+	// Instruction stream index where this block begins
 	firstInstructionIndex: number
 	gasCost: number
 	minStack: number

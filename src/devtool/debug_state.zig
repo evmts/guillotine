@@ -66,8 +66,9 @@ pub const InstructionJson = struct {
 };
 
 pub const PreanalyzedBlock = struct {
-    // Block start PC (0 for entry, otherwise JUMPDEST PC)
-    pc: u32,
+    // Explicit start/end PCs for this block (end is exclusive)
+    firstPc: u32 = 0,
+    lastPcExclusive: u32 = 0,
     // Instruction stream index where this block begins
     firstInstructionIndex: usize,
     // Static gas cost accumulated within the block
@@ -188,7 +189,8 @@ pub fn collect_blocks_for_interpreter(
         }
 
         try out.append(allocator, .{
-            .pc = start_pc_u32,
+            .firstPc = start_pc_u32,
+            .lastPcExclusive = @intCast(end_pc),
             .firstInstructionIndex = begin_idx,
             .gasCost = gas_cost,
             .minStack = min_stack,

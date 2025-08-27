@@ -1,11 +1,11 @@
 import { createMemo, For, Show } from 'solid-js'
 import InfoTooltip from '~/components/InfoTooltip'
 import { cn } from '~/lib/cn'
-import type { BlockJson } from '~/lib/types'
+import type { PreanalyzedBlockJson } from '~/lib/types'
 
 interface BytecodeBlocksMapProps {
 	codeHex: string
-	blocks: BlockJson[]
+	blocks: PreanalyzedBlockJson[]
 	currentBlockStartIndex: number
 }
 
@@ -20,7 +20,7 @@ export default function BytecodeBlocksMap(props: BytecodeBlocksMapProps) {
 	})
 
 	// Map each pc to its block index (sorted by start pc), for coloring
-	const sortedBlocks = createMemo(() => [...props.blocks].sort((a, b) => a.blockStartPc - b.blockStartPc))
+	const sortedBlocks = createMemo(() => [...props.blocks].sort((a, b) => a.firstPc - b.firstPc))
 	const pcMaps = createMemo(() => {
 		const len = bytes().length
 		const idx: number[] = Array(len).fill(-1)
@@ -28,10 +28,10 @@ export default function BytecodeBlocksMap(props: BytecodeBlocksMapProps) {
 		const blocks = sortedBlocks()
 		for (let si = 0; si < blocks.length; si++) {
 			const b = blocks[si]
-			for (let pc = b.blockStartPc; pc < b.blockEndPcExclusive; pc++) {
+			for (let pc = b.firstPc; pc < b.lastPcExclusive; pc++) {
 				if (pc >= 0 && pc < len) {
 					idx[pc] = si
-					begin[pc] = b.beginIndex
+					begin[pc] = b.firstInstructionIndex
 				}
 			}
 		}
@@ -40,7 +40,7 @@ export default function BytecodeBlocksMap(props: BytecodeBlocksMapProps) {
 
 	// Current block position among blocks (1-based)
 	const currentSortedPos = createMemo(() => {
-		const idx = sortedBlocks().findIndex((b) => b.beginIndex === props.currentBlockStartIndex)
+		const idx = sortedBlocks().findIndex((b) => b.firstInstructionIndex === props.currentBlockStartIndex)
 		return idx >= 0 ? idx + 1 : 0
 	})
 
@@ -62,13 +62,13 @@ export default function BytecodeBlocksMap(props: BytecodeBlocksMapProps) {
 				<For each={bytes()}>
 					{(b, pc) => {
 						const sidx = createMemo(() => pcMaps().idx[pc()])
-						const beginIndex = createMemo(() => pcMaps().begin[pc()])
-						const isCurrent = createMemo(() => beginIndex() === props.currentBlockStartIndex)
+						const firstInstructionIndex = createMemo(() => pcMaps().begin[pc()])
+						const isCurrent = createMemo(() => firstInstructionIndex() === props.currentBlockStartIndex)
 						const isBlockStart = createMemo(() => {
 							const si = sidx()
 							if (si < 0) return false
 							const sb = sortedBlocks()
-							return pc() === sb[si].blockStartPc
+							return pc() === sb[si].firstPc
 						})
 
 						return (
@@ -83,7 +83,7 @@ export default function BytecodeBlocksMap(props: BytecodeBlocksMapProps) {
 												: 'bg-amber-100/20 dark:bg-amber-900/20'
 											: 'text-foreground/70',
 								)}
-								title={`pc=0x${pc().toString(16)}${beginIndex() >= 0 ? ` • block @${beginIndex()}` : ''}`}
+								title={`pc=0x${pc().toString(16)}${firstInstructionIndex() >= 0 ? ` • block @${firstInstructionIndex()}` : ''}`}
 							>
 								{isBlockStart() && sidx() >= 0 && (
 									<span class="absolute top-0.5 left-0.5 text-[9px] text-muted-foreground leading-none">
