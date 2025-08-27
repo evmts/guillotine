@@ -27,7 +27,6 @@ export interface EvmState {
 	depth: number
 	stack: string[]
 	memory: string
-	storage: Array<{ key: string; value: string }>
 	logs: string[]
 	returnData: string
 	completed: boolean

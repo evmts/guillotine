@@ -64,12 +64,12 @@ const Header: Component<HeaderProps> = (props) => {
 							Memory
 						</ToggleButton>
 						<ToggleButton
-							pressed={props.activePanel === 'storage'}
-							onChange={() => props.setActivePanel('storage')}
+							pressed={props.activePanel === 'state'}
+							onChange={() => props.setActivePanel('state')}
 							size="sm"
 							class="whitespace-nowrap hover:bg-amber-100 data-[pressed]:bg-amber-100 dark:data-[pressed]:bg-amber-950 dark:hover:bg-amber-950"
 						>
-							Storage
+							State
 						</ToggleButton>
 						<ToggleButton
 							pressed={props.activePanel === 'logs'}

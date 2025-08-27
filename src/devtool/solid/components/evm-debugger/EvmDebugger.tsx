@@ -8,8 +8,8 @@ import Header from '~/components/evm-debugger/Header'
 import LogsAndReturn from '~/components/evm-debugger/LogsAndReturn'
 import Memory from '~/components/evm-debugger/Memory'
 import Stack from '~/components/evm-debugger/Stack'
+import StateDiff from '~/components/evm-debugger/StateDiff'
 import StateSummary from '~/components/evm-debugger/StateSummary'
-import Storage from '~/components/evm-debugger/Storage'
 import type { EvmState } from '~/lib/types'
 
 interface EvmDebuggerProps {
@@ -78,8 +78,8 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 					<Show when={activePanel() === 'all' || activePanel() === 'memory'}>
 						<Memory state={props.state as EvmState} />
 					</Show>
-					<Show when={activePanel() === 'all' || activePanel() === 'storage'}>
-						<Storage state={props.state as EvmState} />
+					<Show when={activePanel() === 'all' || activePanel() === 'state'}>
+						<StateDiff state={props.state as EvmState} />
 					</Show>
 					<Show when={activePanel() === 'all' || activePanel() === 'logs'}>
 						<LogsAndReturn state={props.state as EvmState} />

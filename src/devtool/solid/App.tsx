@@ -33,7 +33,6 @@ function App() {
 		depth: 0,
 		stack: [],
 		memory: '0x',
-		storage: [],
 		logs: [],
 		returnData: '0x',
 		completed: false,
