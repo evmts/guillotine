@@ -313,6 +313,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
             .depth = 0,
             .stack = &.{},
             .memory = try self.allocator.dupe(u8, "0x"),
+            .bytecode = try self.allocator.dupe(u8, "0x"),
             .logs = &.{},
             .returnData = try self.allocator.dupe(u8, "0x"),
             .completed = false,
@@ -337,6 +338,9 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
     const mem_size = f.memory.size();
     const mem_bytes = if (mem_size == 0) &.{} else f.memory.get_slice(0, mem_size) catch &.{};
     const mem_hex = try debug_state.format_bytes_hex(self.allocator, mem_bytes);
+
+    // Loaded bytecode hex
+    const code_hex = try debug_state.format_bytes_hex(self.allocator, self.bytecode);
 
     // Return data
     const ret_hex = blk: {
@@ -441,6 +445,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
         .depth = f.host.get_depth(),
         .stack = stack_hex,
         .memory = mem_hex,
+        .bytecode = code_hex,
         .logs = &.{},
         .returnData = ret_hex,
         .completed = self.is_completed,

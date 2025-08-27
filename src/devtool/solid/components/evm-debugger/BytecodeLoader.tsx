@@ -1,5 +1,6 @@
+import CheckIcon from 'lucide-solid/icons/check'
 import UploadIcon from 'lucide-solid/icons/upload'
-import { type Component, createSignal, type Setter } from 'solid-js'
+import { type Component, createMemo, createSignal, onMount, type Setter } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
 import { Combobox, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxTrigger } from '~/components/ui/combobox'
@@ -9,25 +10,31 @@ import { type EvmState, sampleContracts } from '~/lib/types'
 import { loadBytecode, resetEvm } from '~/lib/utils'
 
 interface BytecodeLoaderProps {
-	bytecode: string
-	setBytecode: Setter<string>
+	loadedBytecode: string
 	setError: Setter<string>
 	setState: Setter<EvmState>
 }
 
 const BytecodeLoader: Component<BytecodeLoaderProps> = (props) => {
 	const [selectedContract, setSelectedContract] = createSignal(sampleContracts[7].name)
+	const [input, setInput] = createSignal('')
+
+	onMount(() => {
+		setInput(props.loadedBytecode && props.loadedBytecode !== '0x' ? props.loadedBytecode : sampleContracts[7].bytecode)
+	})
 
 	const handleLoadBytecode = async () => {
 		try {
 			props.setError('')
-			await loadBytecode(props.bytecode)
+			await loadBytecode(input())
 			const state = await resetEvm()
 			props.setState(state)
 		} catch (err) {
 			props.setError(`${err}`)
 		}
 	}
+
+	const isLoaded = createMemo(() => (props.loadedBytecode ?? '').toLowerCase() === (input() ?? '').toLowerCase())
 
 	return (
 		<Card class="mx-auto mt-6 max-w-7xl rounded-sm border-none bg-transparent shadow-none">
@@ -43,7 +50,7 @@ const BytecodeLoader: Component<BytecodeLoaderProps> = (props) => {
 						setSelectedContract(value || '')
 						const contract = sampleContracts.find((c) => c.name === value)
 						if (contract) {
-							props.setBytecode(contract.bytecode)
+							setInput(contract.bytecode)
 						}
 					}}
 					options={sampleContracts.map((c) => c.name)}
@@ -85,16 +92,23 @@ const BytecodeLoader: Component<BytecodeLoaderProps> = (props) => {
 				<TextFieldRoot>
 					<TextArea
 						id="bytecode"
-						value={props.bytecode}
-						onInput={(e) => props.setBytecode(e.currentTarget.value)}
+						value={input()}
+						onInput={(e) => setInput(e.currentTarget.value)}
 						class="h-24 font-mono"
 						placeholder="0x608060405234801561001057600080fd5b50..."
 						aria-label="EVM bytecode input"
 					/>
 				</TextFieldRoot>
-				<Button variant="secondary" size="sm" onClick={handleLoadBytecode} aria-label="Load bytecode" class="gap-2">
-					<UploadIcon class="h-4 w-4" />
-					Load Bytecode
+				<Button
+					variant={isLoaded() ? 'outline' : 'secondary'}
+					size="sm"
+					onClick={handleLoadBytecode}
+					aria-label="Load bytecode"
+					class="gap-2"
+					disabled={isLoaded()}
+				>
+					{isLoaded() ? <CheckIcon class="h-4 w-4" /> : <UploadIcon class="h-4 w-4" />}
+					{isLoaded() ? 'Loaded' : 'Load Bytecode'}
 				</Button>
 			</CardContent>
 		</Card>

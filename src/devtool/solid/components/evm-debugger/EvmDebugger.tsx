@@ -24,8 +24,6 @@ interface EvmDebuggerProps {
 	setError: Setter<string>
 	state: EvmState
 	setState: Setter<EvmState>
-	bytecode: Accessor<string>
-	setBytecode: Setter<string>
 	handleRun: () => void
 	handleBlock: () => void
 	handleStep: () => void
@@ -75,12 +73,11 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				handleBlock={props.handleBlock}
 				handleStep={props.handleStep}
 				handleReset={props.handleReset}
-				bytecode={props.bytecode()}
+				bytecode={props.state.bytecode}
 				isExecutionComplete={props.state.completed}
 			/>
 			<BytecodeLoader
-				bytecode={props.bytecode()}
-				setBytecode={props.setBytecode}
+				loadedBytecode={props.state.bytecode}
 				setError={props.setError}
 				setState={props.setState as Setter<EvmState>}
 			/>
@@ -88,7 +85,7 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				<ErrorAlert error={props.error()} setError={props.setError} />
 				<StateSummary state={props.state as EvmState} isUpdating={props.isRunning()} />
 				<Breakpoints
-					bytecode={props.bytecode()}
+					bytecode={props.state.bytecode}
 					state={props.state as EvmState}
 					breakpoints={breakpoints()}
 					refreshBreakpoints={refreshBreakpoints}
@@ -96,7 +93,7 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				/>
 				<Show when={activePanel() === 'all' || activePanel() === 'execution'}>
 					<BytecodeBlocksMap
-						codeHex={props.bytecode()}
+						codeHex={props.state.bytecode}
 						blocks={props.state.preanalyzedBlocks}
 						currentBlockStartIndex={props.state.currentPreanalyzedBlockStartIndex}
 					/>
@@ -104,7 +101,7 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 						preanalyzedBlocks={props.state.preanalyzedBlocks}
 						currentPreanalyzedBlockStartIndex={props.state.currentPreanalyzedBlockStartIndex}
 						currentInstructionIndex={props.state.currentInstructionIndex}
-						rawBytecode={props.bytecode()}
+						rawBytecode={props.state.bytecode}
 						breakpoints={breakpoints()}
 						togglePcBreakpoint={togglePcBreakpoint}
 					/>

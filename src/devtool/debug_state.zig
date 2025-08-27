@@ -25,6 +25,8 @@ pub const DebuggerStateJson = struct {
     depth: u32,
     stack: [][]const u8,
     memory: []const u8,
+    // Currently loaded bytecode (hex-encoded)
+    bytecode: []const u8,
     logs: [][]const u8,
     returnData: []const u8,
     completed: bool,
@@ -246,6 +248,7 @@ pub fn free_debugger_state_json(allocator: std.mem.Allocator, state: DebuggerSta
     for (state.stack) |s| allocator.free(s);
     allocator.free(state.stack);
     allocator.free(state.memory);
+    allocator.free(state.bytecode);
     for (state.logs) |s| allocator.free(s);
     allocator.free(state.logs);
     allocator.free(state.returnData);

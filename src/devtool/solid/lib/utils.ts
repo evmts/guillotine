@@ -60,7 +60,7 @@ export async function getEvmState(): Promise<EvmState> {
 			depth: parsed.depth,
 			stack: parsed.stack ?? [],
 			memory: parsed.memory ?? '0x',
-			storage: parsed.storage ?? [],
+			bytecode: parsed.bytecode ?? '0x',
 			logs: parsed.logs ?? [],
 			returnData: parsed.returnData ?? '0x',
 			completed: parsed.completed ?? false,

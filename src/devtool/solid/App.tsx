@@ -27,12 +27,12 @@ function App() {
 	const [isDarkMode, setIsDarkMode] = createSignal(false)
 	const [isRunning, setIsRunning] = createSignal(false)
 	const [error, setError] = createSignal<string>('')
-	const [bytecode, setBytecode] = createSignal(sampleContracts[7].bytecode)
 	const [state, setState] = createStore<EvmState>({
 		gasLeft: 0,
 		depth: 0,
 		stack: [],
 		memory: '0x',
+		bytecode: '0x',
 		logs: [],
 		returnData: '0x',
 		completed: false,
@@ -94,7 +94,7 @@ function App() {
 		// Wait for WebUI connection event
 		window.on_web_ui_ready = async () => {
 			try {
-				await loadBytecode(bytecode())
+				await loadBytecode(sampleContracts[7].bytecode)
 				const initialState = await resetEvm()
 				setState(initialState)
 			} catch (err) {
@@ -141,8 +141,6 @@ function App() {
 				setError={setError}
 				state={state}
 				setState={setState}
-				bytecode={bytecode}
-				setBytecode={setBytecode}
 				handleRun={handleRun}
 				handleBlock={handleBlock}
 				handleStep={handleStep}

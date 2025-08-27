@@ -30,6 +30,7 @@ export interface EvmState {
 	depth: number
 	stack: string[]
 	memory: string
+	bytecode: string
 	logs: string[]
 	returnData: string
 	completed: boolean
