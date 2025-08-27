@@ -1,6 +1,7 @@
 const std = @import("std");
 const Evm = @import("evm");
 const debug_state = @import("debug_state.zig");
+const OpcodeData = Evm.OpcodeData;
 
 const DevtoolEvm = @This();
 
@@ -390,6 +391,36 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
 
     // Minimal preanalyzed blocks via planner/plan helper
     const preanalyzed_blocks = try debug_state.collect_blocks_for_interpreter(Interpreter, self.allocator, interp);
+    // Fill dynamic gas per instruction from tracer steps
+    {
+        // Build a temporary PC -> (block_idx, instr_idx) map for quick lookup
+        var pc_map = std.AutoHashMap(u32, struct { b: usize, i: usize }).init(self.allocator);
+        defer pc_map.deinit();
+        var bi2: usize = 0;
+        while (bi2 < preanalyzed_blocks.len) : (bi2 += 1) {
+            const blk = preanalyzed_blocks[bi2];
+            var ii2: usize = 0;
+            while (ii2 < blk.instructions.len) : (ii2 += 1) {
+                const pc_u32 = blk.instructions[ii2].pc;
+                // ignore put errors silently for duplicates
+                _ = pc_map.put(pc_u32, .{ .b = bi2, .i = ii2 }) catch {};
+            }
+        }
+        // Walk over recorded steps and attribute dynamic gas
+        const trace_steps = interp.frame.tracer.steps.items;
+        var si: usize = 0;
+        while (si < trace_steps.len) : (si += 1) {
+            const stp = trace_steps[si];
+            const pc: u32 = stp.pc;
+            if (pc_map.get(pc)) |pos| {
+                const base: u32 = OpcodeData.OPCODE_INFO[stp.opcode].gas_cost;
+                const total: u32 = @intCast(@max(0, stp.gas_before - stp.gas_after));
+                const dyn: u32 = if (total > base) total - base else 0;
+                // Set dynGasCost at the matched instruction
+                preanalyzed_blocks[pos.b].instructions[pos.i].dynGasCost = dyn;
+            }
+        }
+    }
     const cur_idx_usize: usize = interp.instruction_idx;
     var current_block_start_idx: usize = 0;
     // Choose the largest block.firstInstructionIndex <= current instruction index

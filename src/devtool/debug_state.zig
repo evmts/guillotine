@@ -65,6 +65,11 @@ pub const InstructionJson = struct {
     opcode: []const u8,
     hex: []const u8,
     data: []const u8,
+    // Runtime dynamic gas info
+    dynGasCost: u32 = 0,
+    dynGasCandidate: bool = false,
+    // Static base gas cost for this opcode (excludes runtime dynamics)
+    staticGasCost: u32 = 0,
 };
 
 pub const PreanalyzedBlock = struct {
@@ -181,11 +186,47 @@ pub fn collect_blocks_for_interpreter(
                     allocator.free(data_owned);
                     data_owned = try format_bytes_hex(allocator, slice);
                 }
+                // Mark dynamic-gas candidate opcodes
+                const may_dyn: bool = switch (op) {
+                    0x51, // MLOAD
+                    0x52, // MSTORE
+                    0x53, // MSTORE8
+                    0x5e, // MCOPY
+                    0x37, // CALLDATACOPY
+                    0x39, // CODECOPY
+                    0x3c, // EXTCODECOPY
+                    0x3e, // RETURNDATACOPY
+                    0x54, // SLOAD
+                    0x55, // SSTORE
+                    0x20, // KECCAK256
+                    0x31, // BALANCE
+                    0x3b, // EXTCODESIZE
+                    0x3f, // EXTCODEHASH
+                    0xa0, // LOG0
+                    0xa1, // LOG1
+                    0xa2, // LOG2
+                    0xa3, // LOG3
+                    0xa4, // LOG4
+                    0xf0, // CREATE
+                    0xf1, // CALL
+                    0xf2, // CALLCODE
+                    0xf4, // DELEGATECALL
+                    0xf5, // CREATE2
+                    0xfa, // STATICCALL
+                    => true,
+                    else => false,
+                };
+                // Static base gas from opcode table
+                const static_gas: u32 = @intCast(evm.OpcodeData.OPCODE_INFO[op].gas_cost);
+
                 try instrs.append(allocator, .{
                     .pc = @intCast(scan),
                     .opcode = name_owned,
                     .hex = hex_owned,
                     .data = data_owned,
+                    .dynGasCost = 0,
+                    .dynGasCandidate = may_dyn,
+                    .staticGasCost = static_gas,
                 });
             }
         }

@@ -23,6 +23,9 @@ export interface InstructionJson {
 	opcode: string
 	hex: string
 	data: string
+	dynGasCost: number
+	dynGasCandidate: boolean
+	staticGasCost: number
 }
 
 export interface EvmState {
