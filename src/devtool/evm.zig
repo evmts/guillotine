@@ -786,7 +786,7 @@ test "DevtoolEvm stack state population - step by step execution" {
     const json_after_push1 = try dv.serializeEvmState();
     defer dv.allocator.free(json_after_push1);
     // Stack should now contain 1 after PUSH1 1 executed
-    try std.testing.expect(std.mem.indexOf(u8, json_after_push1, "\"0x0000000000000000000000000000000000000000000000000000000000000001\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_push1, "\"0x1\"") != null);
     
     // Remove breakpoint and add one at pc=4 (before ADD)
     _ = try dv.removeBreakpoint(2);
@@ -802,8 +802,8 @@ test "DevtoolEvm stack state population - step by step execution" {
     const json_after_push2 = try dv.serializeEvmState();
     defer dv.allocator.free(json_after_push2);
     // Stack should now contain [2, 1] (2 on top, 1 below)
-    try std.testing.expect(std.mem.indexOf(u8, json_after_push2, "\"0x0000000000000000000000000000000000000000000000000000000000000001\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json_after_push2, "\"0x0000000000000000000000000000000000000000000000000000000000000002\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_push2, "\"0x1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_push2, "\"0x2\"") != null);
     
     // Remove breakpoint and run to completion (ADD executes)
     _ = try dv.removeBreakpoint(4);
@@ -813,7 +813,7 @@ test "DevtoolEvm stack state population - step by step execution" {
     const json_after_add = try dv.serializeEvmState();
     defer dv.allocator.free(json_after_add);
     // Stack should now contain [3] (1+2=3)
-    try std.testing.expect(std.mem.indexOf(u8, json_after_add, "\"0x0000000000000000000000000000000000000000000000000000000000000003\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_add, "\"0x3\"") != null);
 }
 
 test "DevtoolEvm memory state population" {
@@ -823,14 +823,16 @@ test "DevtoolEvm memory state population" {
     var dv = try DevtoolEvm.init(a);
     defer dv.deinit();
     
-    const bytecode_hex = "0x602a600052"; // PUSH1 42, PUSH1 0, MSTORE
+    // Use bytecode that does memory operations
+    try dv.loadBytecodeHex("0x602a600052"); // PUSH1 42, PUSH1 0, MSTORE
+    
     // Serialize initial state
     const json_initial = try dv.serializeEvmState();
     defer dv.allocator.free(json_initial);
     
-    // Run until breakpoint
+    // Run until end
     const res1 = try dv.runUntilHalt();
-    try std.testing.expect(res1 == .paused);
+    try std.testing.expect(res1 == .completed);
     
     // Serialize state after MSTORE
     const json_after_mstore = try dv.serializeEvmState();
