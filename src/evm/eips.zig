@@ -1,5 +1,6 @@
 const primitives = @import("primitives");
 const AccessList = @import("access_list.zig").AccessList;
+const Hardfork = @import("hardfork.zig").Hardfork;
 
 // EIPs is a comptime known configuration of Eip and hardfork specific behavior
 pub const Eips = struct {
@@ -15,82 +16,21 @@ pub const Eips = struct {
         try access_list.pre_warm_addresses(.{coinbase});
     }
 
-    pub const Hardfork = enum {
-        /// Original Ethereum launch (July 2015).
-        /// Base EVM with fundamental opcodes.
-        FRONTIER,
-        /// First planned hardfork (March 2016).
-        /// Added DELEGATECALL and fixed critical issues.
-        HOMESTEAD,
-        /// Emergency fork for DAO hack (July 2016).
-        /// No EVM changes, only state modifications.
-        DAO,
-        /// Gas repricing fork (October 2016).
-        /// EIP-150: Increased gas costs for IO-heavy operations.
-        TANGERINE_WHISTLE,
-        /// State cleaning fork (November 2016).
-        /// EIP-161: Removed empty accounts.
-        SPURIOUS_DRAGON,
-        /// Major feature fork (October 2017).
-        /// Added REVERT, RETURNDATASIZE, RETURNDATACOPY, STATICCALL.
-        BYZANTIUM,
-        /// Efficiency improvements (February 2019).
-        /// Added CREATE2, shift opcodes, EXTCODEHASH.
-        CONSTANTINOPLE,
-        /// Quick fix fork (February 2019).
-        /// Removed EIP-1283 due to reentrancy concerns.
-        PETERSBURG,
-        /// Gas optimization fork (December 2019).
-        /// EIP-2200: Rebalanced SSTORE costs.
-        /// Added CHAINID and SELFBALANCE.
-        ISTANBUL,
-        /// Difficulty bomb delay (January 2020).
-        /// No EVM changes.
-        MUIR_GLACIER,
-        /// Access list fork (April 2021).
-        /// EIP-2929: Gas cost for cold/warm access.
-        /// EIP-2930: Optional access lists.
-        BERLIN,
-        /// Fee market reform (August 2021).
-        /// EIP-1559: Base fee and new transaction types.
-        /// Added BASEFEE opcode.
-        LONDON,
-        /// Difficulty bomb delay (December 2021).
-        /// No EVM changes.
-        ARROW_GLACIER,
-        /// Difficulty bomb delay (June 2022).
-        /// No EVM changes.
-        GRAY_GLACIER,
-        /// Proof of Stake transition (September 2022).
-        /// Replaced DIFFICULTY with PREVRANDAO.
-        MERGE,
-        /// Withdrawal enabling fork (April 2023).
-        /// EIP-3855: PUSH0 opcode.
-        SHANGHAI,
-        /// Proto-danksharding fork (March 2024).
-        /// EIP-4844: Blob transactions.
-        /// EIP-1153: Transient storage (TLOAD/TSTORE).
-        /// EIP-5656: MCOPY opcode.
-        CANCUN,
-        /// Default hardfork for new chains.
-        /// Set to latest stable fork (currently CANCUN).
-        pub const DEFAULT = Hardfork.CANCUN;
-
-        /// Convert hardfork to its numeric representation for version comparisons
-        pub fn toInt(self: Hardfork) u32 {
-            return @intFromEnum(self);
+    /// EIP-3529: Reduction in refunds & gas refunds for SELFDESTRUCT
+    /// London hardfork changed gas refund behavior
+    /// - Sets refund counter to gas_used / 5
+    /// - No longer fully refunds SELFDESTRUCT
+    /// Returns the refund amount to be applied
+    pub fn eip_3529_gas_refund_cap(self: Self, gas_used: u64, refund_counter: u64) u64 {
+        if (!self.hardfork.isAtLeast(.LONDON)) {
+            // Pre-London: refund up to half of gas used
+            return @min(refund_counter, gas_used / 2);
         }
+        
+        // Post-London: refund up to one fifth of gas used
+        return @min(refund_counter, gas_used / 5);
+    }
 
-        /// Check if this hardfork is at least the specified version
-        pub fn isAtLeast(self: Hardfork, target: Hardfork) bool {
-            return self.toInt() >= target.toInt();
-        }
-
-        /// Check if this hardfork is before the specified version
-        pub fn isBefore(self: Hardfork, target: Hardfork) bool {
-            return self.toInt() < target.toInt();
-        }
-    };
 
     const std = @import("std");
 

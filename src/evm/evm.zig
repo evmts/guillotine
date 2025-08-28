@@ -188,6 +188,8 @@ pub fn Evm(comptime config: EvmConfig) type {
         current_input: []const u8,
         /// Current return data
         return_data: []const u8,
+        /// Gas refund counter for SSTORE operations
+        gas_refund_counter: u64,
 
         // CACHE LINE 3 - TRANSACTION CONTEXT
         /// Block information
@@ -236,6 +238,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .context = context,
                 .current_input = &.{},
                 .return_data = &.{},
+                .gas_refund_counter = 0,
                 .gas_price = gas_price,
                 .origin = origin,
                 .hardfork_config = hardfork_config,
@@ -282,7 +285,11 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// on the operation type (CALL, CREATE, etc). Manages transaction-level
         /// state including logs and ensures proper cleanup.
         pub fn call(self: *Self, params: CallParams) CallResult {
-            params.validate() catch return CallResult.failure(0);
+            std.debug.print("EVM.CALL: Starting call with params type: {s}\n", .{@tagName(params)});
+            params.validate() catch {
+                std.debug.print("EVM.CALL: params.validate() failed\n", .{});
+                return CallResult.failure(0);
+            };
             defer self.depth = 0;
             defer _ = self.call_arena.reset(.retain_capacity);
             defer self.logs.clearRetainingCapacity();
@@ -291,8 +298,18 @@ pub fn Evm(comptime config: EvmConfig) type {
             const gas = switch (params) {
                 inline else => |p| p.gas,
             };
-            if (!self.disable_gas_checking and gas == 0) return CallResult.failure(0);
-            if (self.depth >= config.max_call_depth) return CallResult.failure(0);
+            std.debug.print("EVM.CALL: Gas={}, depth={}, disable_gas_checking={}\n", .{gas, self.depth, self.disable_gas_checking});
+            if (!self.disable_gas_checking and gas == 0) {
+                std.debug.print("EVM.CALL: Failing due to zero gas\n", .{});
+                return CallResult.failure(0);
+            }
+            if (self.depth >= config.max_call_depth) {
+                std.debug.print("EVM.CALL: Failing due to max call depth\n", .{});
+                return CallResult.failure(0);
+            }
+            
+            // Store initial gas for EIP-3529 calculations
+            const initial_gas = gas;
             
             // Route to appropriate handler
             var result = switch (params) {
@@ -303,6 +320,19 @@ pub fn Evm(comptime config: EvmConfig) type {
                 .create => |p| self.executeCreate(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .gas = p.gas }) catch CallResult.failure(0),
                 .create2 => |p| self.executeCreate2(.{ .caller = p.caller, .value = p.value, .init_code = p.init_code, .salt = p.salt, .gas = p.gas }) catch CallResult.failure(0),
             };
+            
+            // Apply EIP-3529 gas refund cap if transaction succeeded
+            if (result.success and self.depth == 0) {
+                const gas_used = initial_gas - result.gas_left;
+                const eips_instance = @import("eips.zig").Eips{ .hardfork = self.hardfork_config };
+                const capped_refund = eips_instance.eip_3529_gas_refund_cap(gas_used, self.gas_refund_counter);
+                
+                // Apply the refund, ensuring we don't exceed the gas used
+                result.gas_left = @min(initial_gas, result.gas_left + capped_refund);
+                
+                // Reset refund counter for next transaction
+                self.gas_refund_counter = 0;
+            }
             
             result.logs = self.takeLogs();
             result.selfdestructs = self.takeSelfDestructs() catch &.{};
@@ -341,13 +371,17 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
 
             // Get contract code
+            std.debug.print("EXECUTE_CALL: Getting code for address {any}\n", .{params.to});
             const code = self.database.get_code_by_address(params.to.bytes) catch |err| {
                 log.debug("Error getting code for {any}: {}", .{params.to, err});
+                std.debug.print("EXECUTE_CALL ERROR: Failed to get code: {}\n", .{err});
                 return CallResult.failure(0);
             };
             log.debug("Call to {any}: code_len={}", .{params.to, code.len});
+            std.debug.print("EXECUTE_CALL: Got code, len={}\n", .{code.len});
             if (code.len == 0) {
                 log.debug("Call to empty account: {any}", .{params.to});
+                std.debug.print("EXECUTE_CALL: Empty code, returning success\n", .{});
                 return CallResult.success_empty(params.gas);
             }
             // Execute frame
@@ -1195,6 +1229,12 @@ pub fn Evm(comptime config: EvmConfig) type {
             return self.context.blob_base_fee;
         }
 
+        /// Add gas refund amount for SSTORE operations
+        /// This is called by SSTORE when it needs to add refunds
+        pub fn add_gas_refund(self: *Self, amount: u64) void {
+            self.gas_refund_counter += amount;
+        }
+        
         // TODO: remove this this is a duplciate and this version is unused
         /// Transfer value between accounts with proper journaling
         /// This method ensures balance changes are recorded in the journal for potential reverts
