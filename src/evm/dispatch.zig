@@ -381,8 +381,9 @@ pub fn Dispatch(comptime FrameType: type) type {
                     // Handle fusion operations
                     .push_add_fusion, .push_mul_fusion, .push_sub_fusion, .push_div_fusion,
                     .push_and_fusion, .push_or_fusion, .push_xor_fusion,
-                    .push_jump_fusion, .push_jumpi_fusion => |_, tag| {
-                        const synthetic_opcode: u8 = switch (tag) {
+                    .push_jump_fusion, .push_jumpi_fusion => |data| {
+                        _ = data;
+                        const synthetic_opcode: u8 = switch (op_data) {
                             .push_add_fusion => @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE),
                             .push_mul_fusion => @intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE),
                             .push_sub_fusion => @intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE),
