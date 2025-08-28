@@ -1180,35 +1180,36 @@ pub fn build(b: *std.Build) void {
     bytecode_simd_comparison_step.dependOn(&run_bytecode_simd_comparison_cmd.step);
 
     // StackFrame benchmark vs REVM
-    const stack_frame_bench_exe = b.addExecutable(.{
-        .name = "stack-frame-bench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/evm/stack_frame_bench.zig"),
-            .target = target,
-            .optimize = .ReleaseFast,
-        }),
-    });
-    stack_frame_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
-    stack_frame_bench_exe.root_module.addImport("primitives", primitives_mod);
-    stack_frame_bench_exe.root_module.addImport("evm", evm_mod);
-    stack_frame_bench_exe.root_module.addImport("crypto", crypto_mod);
-    stack_frame_bench_exe.root_module.addImport("build_options", build_options_mod);
-    stack_frame_bench_exe.root_module.addImport("revm", revm_mod);
-    stack_frame_bench_exe.linkLibrary(c_kzg_lib);
-    stack_frame_bench_exe.linkLibrary(blst_lib);
-    if (revm_lib) |revm| {
-        stack_frame_bench_exe.linkLibrary(revm);
-    }
-    stack_frame_bench_exe.linkLibC();
+    // TODO: Update stack_frame_bench.zig to work without Host
+    // const stack_frame_bench_exe = b.addExecutable(.{
+    //     .name = "stack-frame-bench",
+    //     .root_module = b.createModule(.{
+    //         .root_source_file = b.path("src/evm/stack_frame_bench.zig"),
+    //         .target = target,
+    //         .optimize = .ReleaseFast,
+    //     }),
+    // });
+    // stack_frame_bench_exe.root_module.addImport("zbench", zbench_dep.module("zbench"));
+    // stack_frame_bench_exe.root_module.addImport("primitives", primitives_mod);
+    // stack_frame_bench_exe.root_module.addImport("evm", evm_mod);
+    // stack_frame_bench_exe.root_module.addImport("crypto", crypto_mod);
+    // stack_frame_bench_exe.root_module.addImport("build_options", build_options_mod);
+    // stack_frame_bench_exe.root_module.addImport("revm", revm_mod);
+    // stack_frame_bench_exe.linkLibrary(c_kzg_lib);
+    // stack_frame_bench_exe.linkLibrary(blst_lib);
+    // if (revm_lib) |revm| {
+    //     stack_frame_bench_exe.linkLibrary(revm);
+    // }
+    // stack_frame_bench_exe.linkLibC();
 
-    b.installArtifact(stack_frame_bench_exe);
+    // b.installArtifact(stack_frame_bench_exe);
 
-    const run_stack_frame_bench_cmd = b.addRunArtifact(stack_frame_bench_exe);
-    const stack_frame_bench_step = b.step("stack-frame-bench", "Run StackFrame vs REVM benchmarks");
-    stack_frame_bench_step.dependOn(&run_stack_frame_bench_cmd.step);
+    // const run_stack_frame_bench_cmd = b.addRunArtifact(stack_frame_bench_exe);
+    // const stack_frame_bench_step = b.step("stack-frame-bench", "Run StackFrame vs REVM benchmarks");
+    // stack_frame_bench_step.dependOn(&run_stack_frame_bench_cmd.step);
 
-    const build_stack_frame_bench_step = b.step("build-stack-frame-bench", "Build StackFrame vs REVM benchmarks");
-    build_stack_frame_bench_step.dependOn(&b.addInstallArtifact(stack_frame_bench_exe, .{}).step);
+    // const build_stack_frame_bench_step = b.step("build-stack-frame-bench", "Build StackFrame vs REVM benchmarks");
+    // build_stack_frame_bench_step.dependOn(&b.addInstallArtifact(stack_frame_bench_exe, .{}).step);
 
     const cli_cmd = blk: {
         const exe_name = if (target.result.os.tag == .windows) "evm-debugger.exe" else "evm-debugger";
