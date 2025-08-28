@@ -22,6 +22,17 @@ is_completed: bool,
 tx_started: bool = false,
 tx_ended: bool = false,
 available_breakpoints: []u32 = &.{},
+/// Tracer configuration applied on interpreter (re)initialization
+tracer_cfg: Evm.DebuggingTracer.Config = .{
+    .throw_on_error = false,
+    .step_mode = false,
+    .max_history = 10000,
+    .enable_prestate = true,
+    .prestate_diff_mode = true,
+    .prestate_disable_storage = false,
+    .prestate_disable_code = false,
+    .prestate_include_empty = false,
+},
 
 pub const DebugStepResult = struct {
     gas_before: u64,
@@ -47,6 +58,8 @@ pub fn init(allocator: std.mem.Allocator) !DevtoolEvm {
 
 pub fn deinit(self: *DevtoolEvm) void {
     if (self.interpreter) |interp| {
+        // Ensure tracer resources are freed (including composed prestate tracer)
+        interp.frame.tracer.deinit();
         interp.deinit(self.allocator);
         self.allocator.destroy(interp);
     }
@@ -124,7 +137,13 @@ fn aggregateAvailableBreakpoints(self: *DevtoolEvm) !void {
 }
 
 pub fn resetExecution(self: *DevtoolEvm) !void {
+    // Preserve the existing tracer instance (to keep breakpoints/config),
+    // then recreate the interpreter and attach it back. This lets us reset
+    // EVM execution while keeping tracer state we care about.
+    var preserved_tracer: ?Evm.DebuggingTracer = null;
     if (self.interpreter) |interp| {
+        preserved_tracer = interp.frame.tracer;
+        // Do NOT deinit the tracer here; we're reusing it.
         interp.deinit(self.allocator);
         self.allocator.destroy(interp);
         self.interpreter = null;
@@ -135,10 +154,19 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
         return;
     }
     var interp_val = try Interpreter.init(self.allocator, self.bytecode, 1_000_000, {}, self.host);
-    // ensure tracer is clean and enable prestate tracing
-    interp_val.frame.tracer.reset();
-    // Enable prestate tracing in diff mode; do not include empty accounts
-    interp_val.frame.tracer.configure(.{ .enable_prestate = true, .prestate_diff_mode = true });
+    // If we preserved a tracer, attach it and reset its runtime state
+    if (preserved_tracer) |t| {
+        // Clean up the default-initialized tracer in the new interpreter
+        // before replacing it to avoid potential resource leaks.
+        interp_val.frame.tracer.deinit();
+        // Move the preserved tracer into the new interpreter
+        interp_val.frame.tracer = t;
+        // Reset runtime state while keeping things like breakpoints intact
+        interp_val.frame.tracer.reset();
+    } else {
+        // First init: configure tracer (includes enabling prestate tracer)
+        interp_val.frame.tracer.configure(self.tracer_cfg);
+    }
     const ptr = try self.allocator.create(Interpreter);
     ptr.* = interp_val;
     self.interpreter = ptr;
