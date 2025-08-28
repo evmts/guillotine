@@ -73,6 +73,8 @@ pub const DebuggingTracer = struct {
 
     // Control state
     step_mode: bool = false, // true = step through each instruction
+    /// If true, propagate interpreter errors. If false, pause and record them.
+    throw_on_error: bool = true,
     paused: bool = false, // true = execution is paused
     breakpoints: std.AutoHashMap(u32, void), // Set of PC values to break on
     resume_idx: ?u32 = null, // Resume index for paused execution (instruction stream index)
@@ -129,6 +131,22 @@ pub const DebuggingTracer = struct {
         };
     }
 
+    pub const Config = struct {
+        throw_on_error: bool = true,
+        step_mode: bool = false,
+        max_history: usize = 10000,
+    };
+
+    /// Configure tracer behavior. Safe to call at any time.
+    pub fn configure(self: *Self, cfg: Config) void {
+        self.throw_on_error = cfg.throw_on_error;
+        self.step_mode = cfg.step_mode;
+        if (cfg.max_history != self.max_history) {
+            self.max_history = cfg.max_history;
+            self.prune_to_max_history();
+        }
+    }
+
     pub fn deinit(self: *Self) void {
         // Free execution step memory
         for (self.steps.items) |*step| {
@@ -160,7 +178,17 @@ pub const DebuggingTracer = struct {
         interpreter.interpret() catch |err| switch (err) {
             error.ExecutionPaused => return .Paused,
             error.STOP => return .Completed,
-            else => return err,
+            else => {
+                // Call error hook, then either propagate or pause.
+                const pc_opt = interpreter.getCurrentPc();
+                const pc_u32: u32 = @intCast(pc_opt orelse 0);
+                self.onError(pc_u32, err, InterpreterType.Frame, &interpreter.frame);
+                if (self.throw_on_error) {
+                    return err;
+                } else {
+                    return .Paused;
+                }
+            },
         };
         // If interpret returns cleanly, treat as Completed
         return .Completed;
@@ -409,6 +437,21 @@ pub const DebuggingTracer = struct {
 
         // Keep breakpoints but reset execution state
         self.paused = false;
+    }
+
+    fn prune_to_max_history(self: *Self) void {
+        // Steps
+        while (self.steps.items.len > self.max_history) {
+            const old = self.steps.orderedRemove(0);
+            self.allocator.free(old.stack_before);
+            self.allocator.free(old.stack_after);
+            if (old.error_msg) |m| self.allocator.free(m);
+        }
+        // Snapshots
+        while (self.state_snapshots.items.len > self.max_history) {
+            const old = self.state_snapshots.orderedRemove(0);
+            self.allocator.free(old.stack);
+        }
     }
 
     /// Get debugging statistics
@@ -1393,4 +1436,157 @@ test "DebuggingTracer breakpoint: pause at STOP, then complete" {
     // Resume: should execute STOP -> Completed
     res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
     try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Completed, res);
+}
+
+test "DebuggingTracer configure and throw_on_error=false pauses on error" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    var interpreter = try Interpreter.init(std.heap.page_allocator, &[_]u8{ 0xFE }, 100000, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    // Ensure error recorded on the step
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    try std.testing.expect(tracer.steps.items[tracer.steps.items.len - 1].error_occurred);
+}
+
+test "DebuggingTracer throw_on_error=false: invalid opcode" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    var interpreter = try Interpreter.init(std.heap.page_allocator, &[_]u8{ 0xFE }, 100000, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    const last = tracer.steps.items[tracer.steps.items.len - 1];
+    try std.testing.expect(last.error_occurred);
+    try std.testing.expect(last.error_msg != null);
+    try std.testing.expect(std.mem.eql(u8, last.error_msg.?, "InvalidOpcode"));
+}
+
+test "DebuggingTracer throw_on_error=false: stack underflow" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    // POP with empty stack
+    var interpreter = try Interpreter.init(std.heap.page_allocator, &[_]u8{ 0x50 }, 100000, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    const last = tracer.steps.items[tracer.steps.items.len - 1];
+    try std.testing.expect(last.error_occurred);
+    try std.testing.expect(last.error_msg != null);
+    try std.testing.expect(std.mem.eql(u8, last.error_msg.?, "StackUnderflow"));
+}
+
+test "DebuggingTracer throw_on_error=false: invalid jump" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    // PUSH1 0x10; JUMP; STOP (no JUMPDEST at 0x10)
+    const code = [_]u8{ 0x60, 0x10, 0x56, 0x00 };
+    var interpreter = try Interpreter.init(std.heap.page_allocator, &code, 100000, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    const last = tracer.steps.items[tracer.steps.items.len - 1];
+    try std.testing.expect(last.error_occurred);
+    try std.testing.expect(last.error_msg != null);
+    try std.testing.expect(std.mem.eql(u8, last.error_msg.?, "InvalidJump"));
+}
+
+test "DebuggingTracer throw_on_error=false: stack overflow" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    // Build bytecode with 1025 PUSH1 0x01 to overflow stack (default stack size 1024)
+    var buf = std.ArrayList(u8).init(std.heap.page_allocator);
+    defer buf.deinit();
+    var i: usize = 0;
+    while (i < 1025) : (i += 1) {
+        try buf.append(0x60); // PUSH1
+        try buf.append(0x01);
+    }
+    var interpreter = try Interpreter.init(std.heap.page_allocator, buf.items, 100000, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    const last = tracer.steps.items[tracer.steps.items.len - 1];
+    try std.testing.expect(last.error_occurred);
+    try std.testing.expect(last.error_msg != null);
+    try std.testing.expect(std.mem.eql(u8, last.error_msg.?, "StackOverflow"));
+}
+
+test "DebuggingTracer throw_on_error=false: out of gas at STOP" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    // POP; STOP with zero gas. POP consumes gas unchecked; STOP then checks and errors OutOfGas
+    const code = [_]u8{ 0x50, 0x00 };
+    var interpreter = try Interpreter.init(std.heap.page_allocator, &code, 0, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    const last = tracer.steps.items[tracer.steps.items.len - 1];
+    try std.testing.expect(last.error_occurred);
+    try std.testing.expect(last.error_msg != null);
+    try std.testing.expect(std.mem.eql(u8, last.error_msg.?, "OutOfGas"));
+}
+
+test "DebuggingTracer throw_on_error=false: revert" {
+    const frame_interpreter_mod = @import("frame_interpreter.zig");
+    const Interpreter = frame_interpreter_mod.FrameInterpreter(.{ .TracerType = DebuggingTracer });
+
+    const host = createTestHost();
+    // PUSH1 0x00 (offset); PUSH1 0x00 (size); REVERT
+    const code = [_]u8{ 0x60, 0x00, 0x60, 0x00, 0xfd };
+    var interpreter = try Interpreter.init(std.heap.page_allocator, &code, 100000, null, host);
+    defer interpreter.deinit(std.heap.page_allocator);
+
+    var tracer = &interpreter.frame.tracer;
+    tracer.configure(.{ .throw_on_error = false });
+
+    const res = try tracer.runUntilPauseOrStop(Interpreter, &interpreter);
+    try std.testing.expectEqual(DebuggingTracer.ExecutionResult.Paused, res);
+    try std.testing.expect(tracer.steps.items.len >= 1);
+    const last = tracer.steps.items[tracer.steps.items.len - 1];
+    try std.testing.expect(last.error_occurred);
+    try std.testing.expect(last.error_msg != null);
+    try std.testing.expect(std.mem.eql(u8, last.error_msg.?, "REVERT"));
 }

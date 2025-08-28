@@ -164,12 +164,6 @@ pub fn Frame(comptime config: FrameConfig) type {
                 self.tracer.afterOp(pc, opcode, Self, self);
             }
         }
-        /// Helper function to call tracer onError if tracer is configured
-        pub inline fn traceOnError(self: *Self, pc: u32, err: anyerror) void {
-            if (comptime config.TracerType != null) {
-                self.tracer.onError(pc, err, Self, self);
-            }
-        }
         /// Create a deep copy of the frame.
         /// This is used by DebugPlan to create a sidecar frame for validation.
         pub fn copy(self: *const Self, allocator: std.mem.Allocator) Error!Self {
