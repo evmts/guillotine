@@ -34,8 +34,8 @@ pub fn Stack(comptime config: StackConfig) type {
 
         const Self = @This();
 
-        // Ownership: exact aligned slice returned by alignedAlloc
-        buf: []align(64) WordType,
+        // Ownership: pointer to aligned memory returned by alignedAlloc
+        buf_ptr: [*]align(64) WordType,
 
         // Downward stack growth: stack_ptr points to next empty slot
         // Push: *stack_ptr = value; stack_ptr -= 1;
@@ -51,24 +51,25 @@ pub fn Stack(comptime config: StackConfig) type {
             errdefer allocator.free(memory);
             @memset(memory, 0);
 
-            const base_ptr: [*]WordType = memory.ptr;
+            const base_ptr: [*]align(64) WordType = memory.ptr;
 
             return Self{
-                .buf = memory,
-                .stack_ptr = base_ptr + memory.len,
+                .buf_ptr = base_ptr,
+                .stack_ptr = base_ptr + stack_capacity,
             };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            allocator.free(self.buf);
+            const memory_slice = self.buf_ptr[0..stack_capacity];
+            allocator.free(memory_slice);
         }
 
         inline fn stack_base(self: *const Self) [*]WordType {
-            return self.buf.ptr + self.buf.len;
+            return self.buf_ptr + stack_capacity;
         }
         
         inline fn stack_limit(self: *const Self) [*]WordType {
-            return self.buf.ptr;
+            return self.buf_ptr;
         }
 
         pub inline fn push_unsafe(self: *Self, value: WordType) void {
@@ -930,11 +931,11 @@ test "Zero values and boundary values" {
 }
 
 test "Stack struct size optimization" {
-    // Verify that removing stack_limit field reduces struct size
+    // Verify struct size with pointer-only design
     const StackType = Stack(.{});
     const stack_size = @sizeOf(StackType);
-    // With buf (slice = ptr + len = 16 bytes) + stack_ptr (8 bytes) = 24 bytes
-    try std.testing.expectEqual(@as(usize, 24), stack_size);
+    // With buf_ptr (8 bytes) + stack_ptr (8 bytes) = 16 bytes
+    try std.testing.expectEqual(@as(usize, 16), stack_size);
 }
 
 test "Unsafe operations at exact boundaries" {
