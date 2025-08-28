@@ -27,12 +27,12 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
             
             // Access the storage slot for warm/cold accounting (EIP-2929)
-            _ = self.host.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            _ = self.getEvm().access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
             // Load value from storage
-            const value = self.host.get_storage(contract_addr, slot);
+            const value = self.getEvm().get_storage(contract_addr, slot);
             try self.stack.push(value);
             
             const next = dispatch.getNext();
@@ -57,12 +57,12 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
             
             // Access the storage slot for warm/cold accounting (EIP-2929)
-            _ = self.host.access_storage_slot(contract_addr, slot) catch |err| switch (err) {
+            _ = self.getEvm().access_storage_slot(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
             // Get current value for gas calculation
-            const current_value = self.host.get_storage(contract_addr, slot);
+            const current_value = self.getEvm().get_storage(contract_addr, slot);
             
             // Calculate gas cost based on EIP-2200
             // This is simplified - actual implementation would need to consider:
@@ -85,7 +85,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(gas_cost);
             
             // Store the value
-            self.host.set_storage(contract_addr, slot, value) catch |err| switch (err) {
+            self.getEvm().set_storage(contract_addr, slot, value) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
@@ -106,7 +106,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const contract_addr = self.contract_address;
             
             // Load value from transient storage
-            const value = self.host.get_transient_storage(contract_addr, slot) catch |err| switch (err) {
+            const value = self.getEvm().get_transient_storage(contract_addr, slot) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
@@ -139,7 +139,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(gas_cost);
             
             // Store the value in transient storage
-            self.host.set_transient_storage(contract_addr, slot, value) catch |err| switch (err) {
+            self.getEvm().set_transient_storage(contract_addr, slot, value) catch |err| switch (err) {
                 else => return Error.AllocationError,
             };
             
@@ -156,7 +156,7 @@ const StackFrame = @import("stack_frame.zig").StackFrame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
-const Host = @import("host.zig").Host;
+// const Host = @import("evm.zig").Host;
 
 // Test configuration with database enabled
 const test_config = FrameConfig{
@@ -173,8 +173,8 @@ const test_config = FrameConfig{
 const TestFrame = StackFrame(test_config);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
 
-// Mock host for testing
-const MockHost = struct {
+// Mock EVM for testing
+const MockEvm = struct {
     storage: std.AutoHashMap(StorageKey, u256),
     transient_storage: std.AutoHashMap(StorageKey, u256),
     accessed_slots: std.AutoHashMap(StorageKey, void),
@@ -185,7 +185,7 @@ const MockHost = struct {
         slot: u256,
     };
 
-    pub fn init(allocator: std.mem.Allocator) MockHost {
+    pub fn init(allocator: std.mem.Allocator) MockEvm {
         return .{
             .storage = std.AutoHashMap(StorageKey, u256).init(allocator),
             .transient_storage = std.AutoHashMap(StorageKey, u256).init(allocator),
@@ -193,56 +193,49 @@ const MockHost = struct {
         };
     }
 
-    pub fn deinit(self: *MockHost) void {
+    pub fn deinit(self: *MockEvm) void {
         self.storage.deinit();
         self.transient_storage.deinit();
         self.accessed_slots.deinit();
     }
 
-    pub fn access_storage_slot(self: *MockHost, address: Address, slot: u256) !void {
+    pub fn access_storage_slot(self: *MockEvm, address: Address, slot: u256) !u64 {
         const key = StorageKey{ .address = address, .slot = slot };
         try self.accessed_slots.put(key, {});
+        return 0; // Return 0 gas cost for testing
     }
 
-    pub fn get_storage(self: *MockHost, address: Address, slot: u256) u256 {
+    pub fn get_storage(self: *MockEvm, address: Address, slot: u256) u256 {
         const key = StorageKey{ .address = address, .slot = slot };
         return self.storage.get(key) orelse 0;
     }
 
-    pub fn set_storage(self: *MockHost, address: Address, slot: u256, value: u256) !void {
+    pub fn set_storage(self: *MockEvm, address: Address, slot: u256, value: u256) !void {
         const key = StorageKey{ .address = address, .slot = slot };
         try self.storage.put(key, value);
     }
 
-    pub fn get_transient_storage(self: *MockHost, address: Address, slot: u256) !u256 {
+    pub fn get_transient_storage(self: *MockEvm, address: Address, slot: u256) u256 {
         const key = StorageKey{ .address = address, .slot = slot };
         return self.transient_storage.get(key) orelse 0;
     }
 
-    pub fn set_transient_storage(self: *MockHost, address: Address, slot: u256, value: u256) !void {
+    pub fn set_transient_storage(self: *MockEvm, address: Address, slot: u256, value: u256) !void {
         const key = StorageKey{ .address = address, .slot = slot };
         try self.transient_storage.put(key, value);
     }
 
-    pub fn get_is_static(self: *const MockHost) bool {
+    pub fn get_is_static(self: *const MockEvm) bool {
         return self.is_static;
     }
 };
 
-fn createTestFrame(allocator: std.mem.Allocator, host: *MockHost) !TestFrame {
-    const bytecode = TestBytecode.initEmpty();
-    const host_interface = Host{
-        .ptr = host,
-        .vtable = &.{
-            .access_storage_slot = @ptrCast(&MockHost.access_storage_slot),
-            .get_storage = @ptrCast(&MockHost.get_storage),
-            .set_storage = @ptrCast(&MockHost.set_storage),
-            .get_transient_storage = @ptrCast(&MockHost.get_transient_storage),
-            .set_transient_storage = @ptrCast(&MockHost.set_transient_storage),
-            .get_is_static = @ptrCast(&MockHost.get_is_static),
-        },
-    };
-    return try TestFrame.init(allocator, bytecode, 1_000_000, null, host_interface);
+fn createTestFrame(allocator: std.mem.Allocator, evm: *MockEvm) !TestFrame {
+    const gas_remaining: TestFrame.GasType = 1_000_000;
+    const database = null; // No database needed for these tests
+    const evm_ptr = @as(*anyopaque, @ptrCast(evm));
+    const self_destruct = null; // No self-destruct needed for storage tests
+    return try TestFrame.init(allocator, gas_remaining, database, evm_ptr, self_destruct);
 }
 
 // Mock dispatch that simulates successful execution flow
@@ -265,10 +258,10 @@ fn createMockDispatch() TestFrame.Dispatch {
 }
 
 test "SLOAD opcode - load from empty slot" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Load from slot 0 (empty, should return 0)
@@ -281,14 +274,14 @@ test "SLOAD opcode - load from empty slot" {
 }
 
 test "SLOAD opcode - load existing value" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Pre-store a value
     const contract_addr = Address{ .bytes = .{0} ** 20 };
-    try host.set_storage(contract_addr, 42, 0xDEADBEEF);
+    try evm.set_storage(contract_addr, 42, 0xDEADBEEF);
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = contract_addr;
 
@@ -302,12 +295,12 @@ test "SLOAD opcode - load existing value" {
 }
 
 test "SSTORE opcode - basic store" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false; // Ensure not in static context
+    evm.is_static = false; // Ensure not in static context
 
     // Store value 0x1234 at slot 100
     try frame.stack.push(100);   // slot
@@ -317,17 +310,17 @@ test "SSTORE opcode - basic store" {
     _ = try TestFrame.StorageHandlers.sstore(frame, dispatch);
     
     // Verify the value was stored
-    const stored_value = host.get_storage(frame.contract_address, 100);
+    const stored_value = evm.get_storage(frame.contract_address, 100);
     try testing.expectEqual(@as(u256, 0x1234), stored_value);
 }
 
 test "SSTORE opcode - write protection in static call" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = true; // Set static context
+    evm.is_static = true; // Set static context
 
     // Try to store in static context
     try frame.stack.push(0);    // slot
@@ -340,14 +333,14 @@ test "SSTORE opcode - write protection in static call" {
 }
 
 test "TLOAD opcode - transient storage load" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Pre-store a transient value
     const contract_addr = Address{ .bytes = .{0} ** 20 };
-    try host.set_transient_storage(contract_addr, 5, 0xABCD);
+    try evm.set_transient_storage(contract_addr, 5, 0xABCD);
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = contract_addr;
 
@@ -361,12 +354,12 @@ test "TLOAD opcode - transient storage load" {
 }
 
 test "TSTORE opcode - transient storage store" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
 
     // Store value 0x5678 at transient slot 10
     try frame.stack.push(10);     // slot
@@ -376,17 +369,17 @@ test "TSTORE opcode - transient storage store" {
     _ = try TestFrame.StorageHandlers.tstore(frame, dispatch);
     
     // Verify the value was stored
-    const stored_value = try host.get_transient_storage(frame.contract_address, 10);
+    const stored_value = try evm.get_transient_storage(frame.contract_address, 10);
     try testing.expectEqual(@as(u256, 0x5678), stored_value);
 }
 
 test "TSTORE opcode - write protection in static call" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = true; // Set static context
+    evm.is_static = true; // Set static context
 
     // Try to store in static context
     try frame.stack.push(0);    // slot
@@ -399,12 +392,12 @@ test "TSTORE opcode - write protection in static call" {
 }
 
 test "storage operations - gas consumption" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
 
     // Set initial gas
     frame.gas_remaining = 100_000;
@@ -434,12 +427,12 @@ test "storage operations - gas consumption" {
 }
 
 test "SLOAD/SSTORE - multiple operations" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
 
     // Store multiple values
     const test_data = [_]struct { slot: u256, value: u256 }{
@@ -468,10 +461,10 @@ test "SLOAD/SSTORE - multiple operations" {
 
 // SLOAD edge cases
 test "SLOAD opcode - boundary values" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     
     // Test loading from various slot numbers
@@ -487,7 +480,7 @@ test "SLOAD opcode - boundary values" {
     
     // Store unique values in each slot
     for (test_slots, 0..) |slot, i| {
-        try host.set_storage(frame.contract_address, slot, @as(u256, i + 1000));
+        try evm.set_storage(frame.contract_address, slot, @as(u256, i + 1000));
     }
     
     // Load and verify each
@@ -503,10 +496,10 @@ test "SLOAD opcode - boundary values" {
 }
 
 test "SLOAD opcode - access tracking" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     
     // Load from slot should mark it as accessed
@@ -516,23 +509,23 @@ test "SLOAD opcode - access tracking" {
     _ = try TestFrame.StorageHandlers.sload(frame, dispatch);
     
     // Verify slot was marked as accessed
-    const key = MockHost.StorageKey{ 
+    const key = MockEvm.StorageKey{ 
         .address = frame.contract_address, 
         .slot = 42 
     };
-    try testing.expect(host.accessed_slots.contains(key));
+    try testing.expect(evm.accessed_slots.contains(key));
     
     _ = try frame.stack.pop(); // Clear result
 }
 
 // SSTORE comprehensive tests
 test "SSTORE opcode - overwrite patterns" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     // Test various overwrite scenarios
     const slot: u256 = 100;
@@ -556,17 +549,17 @@ test "SSTORE opcode - overwrite patterns" {
     _ = try TestFrame.StorageHandlers.sstore(frame, dispatch);
     
     // Verify final state
-    const final_value = host.get_storage(frame.contract_address, slot);
+    const final_value = evm.get_storage(frame.contract_address, slot);
     try testing.expectEqual(@as(u256, 0), final_value);
 }
 
 test "SSTORE opcode - gas edge cases" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     // Test different gas scenarios
     
@@ -615,12 +608,12 @@ test "SSTORE opcode - gas edge cases" {
 }
 
 test "SSTORE opcode - out of gas" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     // Set very low gas
     frame.gas_remaining = 1;
@@ -636,10 +629,10 @@ test "SSTORE opcode - out of gas" {
 
 // TLOAD/TSTORE comprehensive tests
 test "TLOAD opcode - empty transient storage" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     
     // Load from empty transient slot
@@ -653,12 +646,12 @@ test "TLOAD opcode - empty transient storage" {
 }
 
 test "TSTORE opcode - transient storage patterns" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     // Store various patterns in transient storage
     const patterns = [_]struct { slot: u256, value: u256 }{
@@ -688,12 +681,12 @@ test "TSTORE opcode - transient storage patterns" {
 }
 
 test "TSTORE opcode - fixed gas cost" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     // TSTORE should always cost the same (100 gas)
     const test_cases = [_]struct { slot: u256, value: u256 }{
@@ -720,19 +713,19 @@ test "TSTORE opcode - fixed gas cost" {
 
 // Cross-contract storage tests
 test "storage operations - different addresses" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Create two frames with different contract addresses
     const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
     const addr2 = Address{ .bytes = [_]u8{2} ** 20 };
     
-    var frame1 = try createTestFrame(testing.allocator, &host);
+    var frame1 = try createTestFrame(testing.allocator, &evm);
     defer frame1.deinit(testing.allocator);
     frame1.contract_address = addr1;
     frame1.is_static = false;
     
-    var frame2 = try createTestFrame(testing.allocator, &host);
+    var frame2 = try createTestFrame(testing.allocator, &evm);
     defer frame2.deinit(testing.allocator);
     frame2.contract_address = addr2;
     frame2.is_static = false;
@@ -766,10 +759,10 @@ test "storage operations - different addresses" {
 
 // Stack underflow tests
 test "storage operations - stack underflow" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     
     const dispatch = createMockDispatch();
@@ -798,12 +791,12 @@ test "storage operations - stack underflow" {
 
 // Transient vs persistent storage interaction
 test "transient vs persistent storage" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     const slot: u256 = 100;
     
@@ -834,12 +827,12 @@ test "transient vs persistent storage" {
 
 // Maximum value tests
 test "storage operations - max values" {
-    var host = MockHost.init(testing.allocator);
-    defer host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    var frame = try createTestFrame(testing.allocator, &host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
-    host.is_static = false;
+    evm.is_static = false;
     
     const max_slot = std.math.maxInt(u256);
     const max_value = std.math.maxInt(u256);

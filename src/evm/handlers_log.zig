@@ -78,7 +78,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     };
                     
                     // Add log to logs list via host  
-                    self.host.emit_log(self.contract_address, topics_array, data_copy);
+                    self.getEvm().emit_log(self.contract_address, topics_array, data_copy);
                     
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });

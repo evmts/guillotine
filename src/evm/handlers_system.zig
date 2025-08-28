@@ -118,7 +118,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            const result = self.host.inner_call(params) catch |err| switch (err) {
+            const result = self.getEvm().inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
@@ -229,7 +229,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            const result = self.host.inner_call(params) catch |err| switch (err) {
+            const result = self.getEvm().inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
@@ -339,7 +339,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = gas_u64,
                 },
             };
-            const result = self.host.inner_call(params) catch |err| switch (err) {
+            const result = self.getEvm().inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
@@ -420,7 +420,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            const result = self.host.inner_call(params) catch |err| switch (err) {
+            const result = self.getEvm().inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
@@ -498,7 +498,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     .gas = @as(u64, @intCast(self.gas_remaining)),
                 },
             };
-            const result = self.host.inner_call(params) catch |err| switch (err) {
+            const result = self.getEvm().inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
@@ -622,7 +622,7 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Mark contract for destruction via host interface
-            self.host.mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
+            self.getEvm().mark_for_destruction(self.contract_address, recipient) catch |err| switch (err) {
                 else => {
                     @branchHint(.unlikely);
                     return Error.OutOfGas;
@@ -656,7 +656,7 @@ const StackFrame = @import("stack_frame.zig").StackFrame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
-const host_mod = @import("host.zig");
+// const host_mod = @import("host.zig");
 const call_params_mod = @import("call_params.zig");
 
 // Test configuration
@@ -675,13 +675,13 @@ const TestFrame = StackFrame(test_config);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
 
 // Mock host for testing
-const MockHost = struct {
+const MockEvm = struct {
     allocator: std.mem.Allocator,
     is_static: bool = false,
     call_result: call_params_mod.CallResult,
     create_result: call_params_mod.CreateResult,
 
-    pub fn init(allocator: std.mem.Allocator) MockHost {
+    pub fn init(allocator: std.mem.Allocator) MockEvm {
         return .{
             .allocator = allocator,
             .call_result = .{
@@ -697,65 +697,41 @@ const MockHost = struct {
         };
     }
 
-    pub fn get_is_static(self: *const MockHost) bool {
+    pub fn get_is_static(self: *const MockEvm) bool {
         return self.is_static;
     }
 
-    pub fn call(
-        self: *MockHost,
-        _: Address,
-        _: Address,
-        _: u256,
-        _: []const u8,
-        _: u64,
-        _: bool,
-    ) !call_params_mod.CallResult {
+    pub fn inner_call(self: *MockEvm, params: call_params_mod.CallParams) !call_params_mod.CallResult {
+        _ = params;
         return self.call_result;
     }
 
-    pub fn delegatecall(
-        self: *MockHost,
-        _: Address,
-        _: Address,
-        _: []const u8,
-        _: u64,
-    ) !call_params_mod.CallResult {
-        return self.call_result;
-    }
-
-    pub fn create(
-        self: *MockHost,
-        _: Address,
-        _: u256,
-        _: []const u8,
-        _: i64,
-        _: ?u256,
-    ) !call_params_mod.CreateResult {
-        return self.create_result;
-    }
-
-    pub fn mark_for_destruction(self: *MockHost, _: Address, _: Address) !void {
+    pub fn mark_for_destruction(self: *MockEvm, _: Address, _: Address) !void {
         _ = self;
     }
 
-    pub fn to_host(self: *MockHost) host_mod.Host {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .get_is_static = @ptrCast(&get_is_static),
-                .call = @ptrCast(&call),
-                .delegatecall = @ptrCast(&delegatecall),
-                .create = @ptrCast(&create),
-                .mark_for_destruction = @ptrCast(&mark_for_destruction),
-                // Add other required vtable entries...
-            },
-        };
-    }
+    // TODO: Update to work without Host
+    // pub fn to_host(self: *MockEvm) host_mod.Host {
+    //     return .{
+    //         .ptr = self,
+    //         .vtable = &.{
+    //             .get_is_static = @ptrCast(&get_is_static),
+    //             .call = @ptrCast(&call),
+    //             .delegatecall = @ptrCast(&delegatecall),
+    //             .create = @ptrCast(&create),
+    //             .mark_for_destruction = @ptrCast(&mark_for_destruction),
+    //             // Add other required vtable entries...
+    //         },
+    //     };
+    // }
 };
 
-fn createTestFrame(allocator: std.mem.Allocator, host: ?host_mod.Host) !TestFrame {
-    const bytecode = TestBytecode.initEmpty();
-    return try TestFrame.init(allocator, bytecode, 1_000_000, null, host);
+fn createTestFrame(allocator: std.mem.Allocator, evm: ?*MockEvm) !TestFrame {
+    const gas_remaining: TestFrame.GasType = 1_000_000;
+    const database = null; // No database needed for these tests
+    const evm_ptr = if (evm) |e| @as(*anyopaque, @ptrCast(e)) else @as(*anyopaque, @ptrFromInt(0x1000)); // Use a dummy pointer for tests without EVM
+    const self_destruct = null; // No self-destruct needed for most system tests
+    return try TestFrame.init(allocator, gas_remaining, database, evm_ptr, self_destruct);
 }
 
 // Mock dispatch that simulates successful execution flow
@@ -855,8 +831,8 @@ test "REVERT opcode - with error data" {
 }
 
 test "SELFDESTRUCT opcode - normal execution" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -871,9 +847,9 @@ test "SELFDESTRUCT opcode - normal execution" {
 }
 
 test "SELFDESTRUCT opcode - static context error" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.is_static = true;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.is_static = true;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -892,8 +868,8 @@ test "SELFDESTRUCT opcode - static context error" {
 // for basic validation.
 
 test "CALL opcode - basic structure" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -914,9 +890,9 @@ test "CALL opcode - basic structure" {
 }
 
 test "CREATE opcode - static context error" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.is_static = true;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.is_static = true;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1077,8 +1053,8 @@ test "REVERT opcode - max size revert data" {
 
 // SELFDESTRUCT opcode tests
 test "SELFDESTRUCT opcode - to self" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1093,8 +1069,8 @@ test "SELFDESTRUCT opcode - to self" {
 }
 
 test "SELFDESTRUCT opcode - to max address" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1159,9 +1135,9 @@ test "Address conversion - to_u256 edge cases" {
 
 // CALL opcode comprehensive tests
 test "CALL opcode - with value in static context" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.is_static = true;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.is_static = true;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1181,9 +1157,9 @@ test "CALL opcode - with value in static context" {
 }
 
 test "CALL opcode - zero value in static context" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.is_static = true;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.is_static = true;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1204,8 +1180,8 @@ test "CALL opcode - zero value in static context" {
 }
 
 test "CALL opcode - max gas" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1226,8 +1202,8 @@ test "CALL opcode - max gas" {
 }
 
 test "CALL opcode - gas overflow" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1249,9 +1225,9 @@ test "CALL opcode - gas overflow" {
 }
 
 test "CALL opcode - with input and output data" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output = "Hello World!";
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.output = "Hello World!";
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1282,9 +1258,9 @@ test "CALL opcode - with input and output data" {
 }
 
 test "CALL opcode - output size limiting" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output = "Very long output data that exceeds requested size";
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.output = "Very long output data that exceeds requested size";
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1303,7 +1279,7 @@ test "CALL opcode - output size limiting" {
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
     
     // Full return data should be stored
-    try testing.expectEqualSlices(u8, mock_host.call_result.output, frame.return_data.items);
+    try testing.expectEqualSlices(u8, evm.call_result.output, frame.return_data.items);
     
     // But only requested size written to memory
     const output = frame.memory.get_slice(0, 10) catch unreachable;
@@ -1311,10 +1287,10 @@ test "CALL opcode - output size limiting" {
 }
 
 test "CALL opcode - failed call" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.success = false;
-    mock_host.call_result.output = "Revert reason";
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.success = false;
+    evm.call_result.output = "Revert reason";
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1338,8 +1314,8 @@ test "CALL opcode - failed call" {
 
 // DELEGATECALL tests
 test "DELEGATECALL opcode - basic" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1358,9 +1334,9 @@ test "DELEGATECALL opcode - basic" {
 }
 
 test "DELEGATECALL opcode - preserves context" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output = "delegated output";
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.output = "delegated output";
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1387,8 +1363,8 @@ test "DELEGATECALL opcode - preserves context" {
 
 // STATICCALL tests
 test "STATICCALL opcode - basic" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1407,9 +1383,9 @@ test "STATICCALL opcode - basic" {
 }
 
 test "STATICCALL opcode - enforces no value" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output = "static result";
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.output = "static result";
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1432,9 +1408,9 @@ test "STATICCALL opcode - enforces no value" {
 
 // CREATE tests
 test "CREATE opcode - empty init code" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.create_result.created_address = Address.fromBytes([_]u8{0x42} ** 20) catch unreachable;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.create_result.created_address = Address.fromBytes([_]u8{0x42} ** 20) catch unreachable;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1451,9 +1427,9 @@ test "CREATE opcode - empty init code" {
 }
 
 test "CREATE opcode - with init code" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.create_result.created_address = Address.fromBytes([_]u8{0x11} ** 20) catch unreachable;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.create_result.created_address = Address.fromBytes([_]u8{0x11} ** 20) catch unreachable;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1474,9 +1450,9 @@ test "CREATE opcode - with init code" {
 }
 
 test "CREATE opcode - failed creation" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.create_result.success = false;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.create_result.success = false;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1492,8 +1468,8 @@ test "CREATE opcode - failed creation" {
 }
 
 test "CREATE opcode - out of bounds" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1510,9 +1486,9 @@ test "CREATE opcode - out of bounds" {
 
 // CREATE2 tests
 test "CREATE2 opcode - deterministic address" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.create_result.created_address = Address.fromBytes([_]u8{0x22} ** 20) catch unreachable;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.create_result.created_address = Address.fromBytes([_]u8{0x22} ** 20) catch unreachable;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1530,8 +1506,8 @@ test "CREATE2 opcode - deterministic address" {
 }
 
 test "CREATE2 opcode - different salts" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1539,7 +1515,7 @@ test "CREATE2 opcode - different salts" {
     const salts = [_]u256{ 0, 1, std.math.maxInt(u256), 0x123456789ABCDEF };
     
     for (salts) |salt| {
-        mock_host.create_result.created_address = Address.fromBytes([_]u8{@truncate(salt)} ** 20) catch unreachable;
+        evm.create_result.created_address = Address.fromBytes([_]u8{@truncate(salt)} ** 20) catch unreachable;
         
         try frame.stack.push(0); // value
         try frame.stack.push(0); // offset
@@ -1555,9 +1531,9 @@ test "CREATE2 opcode - different salts" {
 }
 
 test "CREATE2 opcode - static context" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.is_static = true;
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.is_static = true;
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1574,8 +1550,8 @@ test "CREATE2 opcode - static context" {
 
 // Edge case tests
 test "System opcodes - stack underflow" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1604,9 +1580,9 @@ test "System opcodes - stack underflow" {
 }
 
 test "System opcodes - gas consumption" {
-    var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.gas_left = 50000; // Simulate gas consumption
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    evm.call_result.gas_left = 50000; // Simulate gas consumption
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
@@ -1632,8 +1608,8 @@ test "System opcodes - gas consumption" {
 }
 
 test "System opcodes - memory boundary checks" {
-    var mock_host = MockHost.init(testing.allocator);
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    const host = evm.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
