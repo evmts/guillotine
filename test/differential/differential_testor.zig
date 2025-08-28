@@ -87,6 +87,7 @@ pub const ExecutionDiff = struct {
     success_diff: ?struct { revm: bool, guillotine: bool },
     gas_diff: ?struct { revm: u64, guillotine: u64 },
     output_diff: ?struct { revm: []const u8, guillotine: []const u8 },
+    error_diff: ?struct { revm: ?[]const u8, guillotine: ?[]const u8 },
     
     // Trace differences
     step_count_diff: ?struct { revm: usize, guillotine: usize },
@@ -107,6 +108,10 @@ pub const ExecutionDiff = struct {
         if (self.output_diff) |diff| {
             self.allocator.free(diff.revm);
             self.allocator.free(diff.guillotine);
+        }
+        if (self.error_diff) |diff| {
+            if (diff.revm) |r| self.allocator.free(r);
+            if (diff.guillotine) |g| self.allocator.free(g);
         }
         for (self.trace_diffs) |*step_diff| {
             if (step_diff.stack_diff) |stack| {
@@ -203,17 +208,31 @@ pub const DifferentialTestor = struct {
         try self.revm_instance.setCode(self.contract, bytecode);
         
         const code_hash = try self.guillotine_db.set_code(bytecode);
+        const log = std.log.scoped(.differential_testor);
+        log.debug("Set code with hash: {x}", .{code_hash});
+        
         try self.guillotine_db.set_account(self.contract.bytes, .{
             .balance = 0,
             .nonce = 1,
             .code_hash = code_hash,
             .storage_root = [_]u8{0} ** 32,
         });
+        log.debug("Set account for address: {x}", .{self.contract.bytes});
         
         // Verify deployment
         const deployed_code = try self.guillotine_db.get_code_by_address(self.contract.bytes);
-        const log = std.log.scoped(.differential_testor);
         log.debug("Deployed bytecode to {any}: len={} vs deployed_len={}", .{self.contract, bytecode.len, deployed_code.len});
+        if (deployed_code.len == 0) {
+            log.err("WARNING: Deployed code has zero length!", .{});
+        }
+        
+        // Also check if account exists
+        const account_check = try self.guillotine_db.get_account(self.contract.bytes);
+        if (account_check) |acc| {
+            log.debug("Account found: balance={}, nonce={}, code_hash={x}", .{acc.balance, acc.nonce, acc.code_hash});
+        } else {
+            log.err("WARNING: Account not found after deployment!", .{});
+        }
         
         // Execute and diff
         var diff = try self.executeAndDiff(self.caller, self.contract, 0, &.{}, 100000);
@@ -225,11 +244,19 @@ pub const DifferentialTestor = struct {
         }
         
         // Unhappy path - collect and report errors
-        var error_messages: [4][]const u8 = undefined;
+        var error_messages: [5][]const u8 = undefined;
         var error_count: usize = 0;
         
         if (diff.success_diff) |success| {
-            error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Success mismatch: REVM={} vs Guillotine={}", .{ success.revm, success.guillotine });
+            if (diff.error_diff) |err_info| {
+                if (err_info.guillotine) |g_err| {
+                    error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Success mismatch: REVM={} vs Guillotine={} (Error: {s})", .{ success.revm, success.guillotine, g_err });
+                } else {
+                    error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Success mismatch: REVM={} vs Guillotine={}", .{ success.revm, success.guillotine });
+                }
+            } else {
+                error_messages[error_count] = try std.fmt.allocPrint(self.allocator, "Success mismatch: REVM={} vs Guillotine={}", .{ success.revm, success.guillotine });
+            }
             error_count += 1;
         }
         
@@ -348,6 +375,9 @@ pub const DifferentialTestor = struct {
             log.err("  Gas left: {}", .{result.gas_left});
             log.err("  Gas used: {}", .{gas_used});
             log.err("  Output: {x}", .{result.output});
+            if (result.error_info) |error_info| {
+                log.err("  ERROR TYPE: {s}", .{error_info});
+            }
             
             // Check if it failed immediately (gas_left == 0 suggests immediate failure)
             if (result.gas_left == 0) {
@@ -444,6 +474,7 @@ pub const DifferentialTestor = struct {
             .success_diff = null,
             .gas_diff = null,
             .output_diff = null,
+            .error_diff = null,
             .step_count_diff = null,
             .first_divergence_step = null,
             .trace_diffs = &.{},
