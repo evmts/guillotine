@@ -371,7 +371,7 @@ test "Memory gas expansion cost" {
     try std.testing.expectEqual(@as(u64, 0), cost);
     cost = memory.get_expansion_cost(32);
     try std.testing.expectEqual(@as(u64, 3), cost); 
-    try memory.ensure_capacity(32);
+    try memory.ensure_capacity(allocator, 32);
     cost = memory.get_expansion_cost(64);
     const expected = (3 * 2 + (2 * 2) / 512) - (3 * 1 + (1 * 1) / 512);
     try std.testing.expectEqual(expected, cost);
@@ -428,34 +428,34 @@ test "Memory sequential child memories" {
     const allocator = std.testing.allocator;
     const Mem = Memory(.{ .owned = true });
     var parent = try Mem.init(allocator);
-    defer parent.deinit();
+    defer parent.deinit(allocator);
     
     // Add data to parent
     const parent_data = [_]u8{0x01, 0x02, 0x03};
-    try parent.set_data(0, &parent_data);
+    try parent.set_data(allocator, 0, &parent_data);
     try std.testing.expectEqual(@as(usize, 3), parent.size());
     
     // Create first child memory and add data
     var child1 = try parent.init_child();
-    defer child1.deinit();
+    defer child1.deinit(allocator);
     
     try std.testing.expectEqual(@as(usize, 0), child1.size());
     try std.testing.expectEqual(@as(usize, 3), child1.checkpoint);
     
     const child1_data = [_]u8{0x11, 0x22};
-    try child1.set_data(0, &child1_data);
+    try child1.set_data(allocator, 0, &child1_data);
     try std.testing.expectEqual(@as(usize, 2), child1.size());
     
     // Create second child from updated parent (checkpoint now at 5)
     var child2 = try parent.init_child();
-    defer child2.deinit();
+    defer child2.deinit(allocator);
     
     try std.testing.expectEqual(@as(usize, 0), child2.size());
     try std.testing.expectEqual(@as(usize, 5), child2.checkpoint);
     
     // Add data to second child
     const child2_data = [_]u8{0x33, 0x44, 0x55, 0x66};
-    try child2.set_data(0, &child2_data);
+    try child2.set_data(allocator, 0, &child2_data);
     
     // After child2 writes, both children see the full buffer size from their checkpoint
     // child1: total(9) - checkpoint(3) = 6
