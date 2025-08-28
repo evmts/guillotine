@@ -638,27 +638,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// STOP opcode (0x00) - Halt execution.
         /// Stack: [] → []
         pub fn stop(self: *FrameType, dispatch: Dispatch) Error!Success {
+            _ = self;
             _ = dispatch;
             
-            // Apply EIP-3529 gas refund cap: at most 1/5th of gas used
-            // Note: In a complete implementation, gas refunds would be tracked separately
-            // and applied here. For now, we ensure the gas_remaining respects the cap.
-            
-            // Calculate gas used
-            const gas_used = if (self.initial_gas > self.gas_remaining)
-                self.initial_gas - self.gas_remaining
-            else
-                0;
-            
-            // EIP-3529: Maximum refund is 1/5th of gas used
-            // In a full implementation, we would:
-            // 1. Track refunds separately during SSTORE operations
-            // 2. Cap the refund here: refund = @min(refund, gas_used / 5)
-            // 3. Add the capped refund back to gas_remaining
-            //
-            // Since refund tracking is not yet implemented, this serves as a
-            // placeholder for when the full refund mechanism is added.
-            _ = gas_used;
+            // EIP-3529 gas refund is applied at the transaction level in evm.zig,
+            // not within individual frames. The frame just stops execution.
             
             return Success.Stop;
         }
@@ -1626,7 +1610,7 @@ test "System opcodes - gas consumption" {
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
 
-    const initial_gas = frame.gas_remaining;
+    const initial_gas_value = frame.gas_remaining;
     
     try frame.stack.push(100000); // gas
     try frame.stack.push(0x1234); // address
@@ -1643,7 +1627,7 @@ test "System opcodes - gas consumption" {
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
     
     // Gas should have been consumed
-    try testing.expect(frame.gas_remaining < initial_gas);
+    try testing.expect(frame.gas_remaining < initial_gas_value);
     try testing.expectEqual(@as(i64, 50000), frame.gas_remaining);
 }
 

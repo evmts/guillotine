@@ -114,8 +114,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Offset 0-63: Primary cacheline (64 bytes)
         //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
         //   ├── bytecode: Bytecode              // ~40 bytes (slices + metadata)
-        //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
-        //   └── initial_gas: GasType            // 4-8 bytes
+        //   └── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
         // 
         //   Secondary Components (Cacheline 2)
         // 
@@ -166,12 +165,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Memory Layout Visualization
         // 
         // Cache Line 1 (0-63):    [Stack(24)][Bytecode(~40)]
-        // Cache Line 2 (64-127):  [Gas][InitGas][Memory][Database][Address]
+        // Cache Line 2 (64-127):  [Gas][Memory][Database][Address]
         // Cache Line 3 (128-191): [Host][Logs][Output][SelfDest*][Alloc]
         stack: Stack,
         bytecode: Bytecode, 
         gas_remaining: GasType, 
-        initial_gas: GasType = 0,
         memory: Memory,
         database: if (config.has_database) ?DatabaseInterface else void,
         contract_address: Address = Address.ZERO_ADDRESS,
@@ -225,7 +223,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .stack = stack,
                 .bytecode = bytecode,
                 .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
-                .initial_gas = @as(GasType, @intCast(@max(gas_remaining, 0))),
                 .memory = memory,
                 .database = database,
                 .logs = frame_logs,
@@ -331,7 +328,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             };
             
-            log.debug("Execution result: {any}, output size: {}, gas used: {}", .{result, self.output_data.items.len, self.initial_gas - self.gas_remaining});
+            log.debug("Execution result: {any}, output size: {}", .{result, self.output_data.items.len});
             
             // Call afterExecute hook if tracer is configured
             if (TracerType) |T| {
@@ -401,7 +398,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .stack = new_stack,
                 .bytecode = self.bytecode, // Note: Bytecode is shared, not copied
                 .gas_remaining = self.gas_remaining,
-                .initial_gas = self.initial_gas,
                 .memory = new_memory,
                 .database = self.database,
                 .contract_address = self.contract_address,
