@@ -33,7 +33,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(GasConstants.GasFastestStep + memory_expansion_cost);
             
             // Read 32 bytes from memory
-            const value_u256 = self.memory.get_u256_evm(offset_usize) catch |err| switch (err) {
+            const value_u256 = self.memory.get_u256_evm(self.allocator, offset_usize) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -65,7 +65,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(GasConstants.GasFastestStep + memory_expansion_cost);
             
             // Read 32 bytes from memory
-            const value_u256 = self.memory.get_u256_evm(offset_usize) catch |err| switch (err) {
+            const value_u256 = self.memory.get_u256_evm(self.allocator, offset_usize) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -102,7 +102,7 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Store 32 bytes to memory
             const value_u256 = @as(u256, value);
-            self.memory.set_u256_evm(offset_usize, value_u256) catch |err| switch (err) {
+            self.memory.set_u256_evm(self.allocator, offset_usize, value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -135,7 +135,7 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Store 32 bytes to memory
             const value_u256 = @as(u256, value);
-            self.memory.set_u256_evm(offset_usize, value_u256) catch |err| switch (err) {
+            self.memory.set_u256_evm(self.allocator, offset_usize, value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -169,7 +169,7 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(offset_usize, byte_value) catch |err| switch (err) {
+            self.memory.set_byte_evm(self.allocator, offset_usize, byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -202,7 +202,7 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(offset_usize, byte_value) catch |err| switch (err) {
+            self.memory.set_byte_evm(self.allocator, offset_usize, byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -291,7 +291,7 @@ test "PUSH_MLOAD_INLINE - load from memory" {
     defer frame.deinit(testing.allocator);
 
     // Pre-store a value at offset 32
-    frame.memory.set_u256_evm(32, 0xDEADBEEF) catch unreachable;
+    frame.memory.set_u256_evm(testing.allocator, 32, 0xDEADBEEF) catch unreachable;
     
     // PUSH 32 + MLOAD
     const dispatch = createInlineDispatch(32);
