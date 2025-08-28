@@ -136,7 +136,7 @@ pub fn resetExecution(self: *DevtoolEvm) !void {
     // ensure tracer is clean and enable prestate tracing
     interp_val.frame.tracer.reset();
     // Enable prestate tracing in diff mode; do not include empty accounts
-    interp_val.frame.tracer.enable_prestate_tracing(true, false, false, false) catch {};
+    interp_val.frame.tracer.configure(.{ .enable_prestate = true, .prestate_diff_mode = true });
     const ptr = try self.allocator.create(Interpreter);
     ptr.* = interp_val;
     self.interpreter = ptr;
