@@ -46,9 +46,10 @@ pub const NoOpTracer = struct {
         // FrameType is used in the function signature, no need to discard
     }
     
-    pub fn onError(self: *NoOpTracer, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+    pub fn onError(self: *NoOpTracer, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
         _ = self;
         _ = pc;
+        _ = opcode;
         _ = frame;
         std.debug.assert(err != error.OutOfMemory); // Suppress error set discard warning
         // FrameType is comptime, no need to discard
@@ -263,9 +264,10 @@ pub const DebuggingTracer = struct {
     }
     
     /// Required tracer interface: called when an error occurs
-    pub fn onError(self: *Self, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+    pub fn onError(self: *Self, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
         _ = frame;
         _ = pc;
+        _ = opcode;
         
         // Record error in current step if we have one
         if (self.steps.items.len > 0) {
@@ -379,6 +381,184 @@ pub const DebuggingTracer = struct {
             .history_size = self.steps.items.len,
             .snapshot_count = self.state_snapshots.items.len,
         };
+    }
+};
+
+// ============================================================================
+// JSON-RPC TRACING
+// ============================================================================
+
+/// JSON-RPC compatible tracer that produces geth-style debug_traceTransaction output
+/// Collects execution traces and produces them in a format compatible with Ethereum JSON-RPC
+pub const JSONRPCTracer = struct {
+    const Self = @This();
+    
+    allocator: std.mem.Allocator,
+    trace_steps: std.ArrayList(JSONRPCStep),
+    current_depth: u32 = 0,
+    gas_used: u64 = 0,
+    
+    pub const JSONRPCStep = struct {
+        op: []const u8,
+        pc: u64,
+        gas: u64,
+        gasCost: u64,
+        depth: u32,
+        stack: []const u256,
+        memory: ?[]const u8 = null,
+        memSize: u32 = 0,
+        storage: ?std.HashMap(u256, u256) = null,
+        
+        pub fn deinit(self: *JSONRPCStep, allocator: std.mem.Allocator) void {
+            allocator.free(self.op);
+            allocator.free(self.stack);
+            if (self.memory) |mem| {
+                allocator.free(mem);
+            }
+            if (self.storage) |*storage| {
+                storage.deinit();
+            }
+        }
+    };
+    
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .allocator = allocator,
+            .trace_steps = std.ArrayList(JSONRPCStep).init(allocator),
+        };
+    }
+    
+    pub fn deinit(self: *Self) void {
+        for (self.trace_steps.items) |*step| {
+            step.deinit(self.allocator);
+        }
+        self.trace_steps.deinit();
+    }
+    
+    /// Called before frame execution begins
+    pub fn beforeExecute(self: *Self, comptime FrameType: type, frame: *const FrameType) void {
+        _ = self;
+        _ = frame;
+        // Initialize any execution-level state
+    }
+    
+    /// Called after frame execution completes
+    pub fn afterExecute(self: *Self, comptime FrameType: type, frame: *const FrameType) void {
+        _ = self;
+        _ = frame;
+        // Finalize any execution-level state
+    }
+    
+    /// Called before each opcode operation
+    pub fn beforeOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
+        // Capture pre-execution state for the step
+        const gas_before: u64 = @max(frame.gas_remaining, 0);
+        
+        // Create stack copy
+        const stack_size = frame.stack.size();
+        const stack_copy = self.allocator.alloc(u256, stack_size) catch return; // Return on allocation failure
+        const stack_slice = frame.stack.get_slice();
+        @memcpy(stack_copy, stack_slice);
+        
+        const op_name = getOpcodeName(opcode);
+        const op_name_copy = self.allocator.dupe(u8, op_name) catch {
+            self.allocator.free(stack_copy);
+            return;
+        };
+        
+        // Get depth if available
+        const depth_val: u32 = if (comptime @hasField(FrameType, "depth")) @intCast(frame.depth) else self.current_depth;
+        
+        // Create the step (gas cost will be calculated in afterOp)
+        const step = JSONRPCStep{
+            .op = op_name_copy,
+            .pc = @intCast(pc),
+            .gas = gas_before,
+            .gasCost = 0, // Will be updated in afterOp
+            .depth = depth_val,
+            .stack = stack_copy,
+            .memSize = if (comptime @hasField(FrameType, "memory")) @intCast(frame.memory.size()) else 0,
+        };
+        
+        self.trace_steps.append(step) catch return; // Return on allocation failure
+    }
+    
+    /// Called after each opcode operation
+    pub fn afterOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
+        _ = pc;
+        _ = opcode;
+        
+        // Update the last step with post-execution state
+        if (self.trace_steps.items.len == 0) return;
+        
+        const current_step = &self.trace_steps.items[self.trace_steps.items.len - 1];
+        const gas_after: u64 = @max(frame.gas_remaining, 0);
+        
+        // Calculate gas cost
+        current_step.gasCost = if (current_step.gas >= gas_after) 
+            current_step.gas - gas_after 
+        else 
+            0;
+            
+        // Update memory size if available
+        if (comptime @hasField(FrameType, "memory")) {
+            current_step.memSize = @intCast(frame.memory.size());
+        }
+    }
+    
+    /// Called when an error occurs during execution
+    pub fn onError(self: *Self, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+        _ = self;
+        _ = pc;
+        _ = opcode;
+        _ = err;
+        _ = frame;
+        // Could add error information to the current step if needed
+    }
+    
+    /// Get the collected trace steps
+    pub fn getTraceSteps(self: *const Self) []const JSONRPCStep {
+        return self.trace_steps.items;
+    }
+    
+    /// Export trace in JSON format compatible with geth debug_traceTransaction
+    pub fn toJSON(self: *const Self, writer: anytype) !void {
+        try writer.writeAll("{\"structLogs\":[");
+        
+        for (self.trace_steps.items, 0..) |step, i| {
+            if (i > 0) try writer.writeAll(",");
+            
+            try writer.writeAll("{");
+            try writer.print("\"pc\":{},", .{step.pc});
+            try writer.print("\"op\":\"{s}\",", .{step.op});
+            try writer.print("\"gas\":{},", .{step.gas});
+            try writer.print("\"gasCost\":{},", .{step.gasCost});
+            try writer.print("\"depth\":{},", .{step.depth});
+            
+            // Write stack
+            try writer.writeAll("\"stack\":[");
+            for (step.stack, 0..) |val, j| {
+                if (j > 0) try writer.writeAll(",");
+                try writer.print("\"0x{x}\"", .{val});
+            }
+            try writer.writeAll("],");
+            
+            try writer.print("\"memSize\":{}", .{step.memSize});
+            
+            // Write memory if present
+            if (step.memory) |mem| {
+                try writer.writeAll(",\"memory\":[");
+                for (mem, 0..) |b, k| {
+                    if (k > 0) try writer.writeAll(",");
+                    try writer.print("\"0x{x:0>2}\"", .{b});
+                }
+                try writer.writeAll("]");
+            }
+            
+            try writer.writeAll("}");
+        }
+        
+        try writer.writeAll("]}");
     }
 };
 
@@ -520,9 +700,10 @@ pub fn Tracer(comptime Writer: type) type {
             }
         }
         
-        pub fn onError(self: *Self, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+        pub fn onError(self: *Self, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
             _ = self;
             _ = pc;
+            _ = opcode;
             _ = err;
             _ = frame;
             // Generic tracer doesn't do anything on error by default
@@ -626,8 +807,8 @@ pub const LoggingTracer = struct {
         self.base.afterOp(pc, opcode, FrameType, frame);
     }
     
-    pub fn onError(self: *LoggingTracer, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.onError(pc, err, FrameType, frame);
+    pub fn onError(self: *LoggingTracer, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+        self.base.onError(pc, opcode, err, FrameType, frame);
     }
 };
 
@@ -672,8 +853,8 @@ pub const FileTracer = struct {
         self.base.afterOp(pc, opcode, FrameType, frame);
     }
     
-    pub fn onError(self: *FileTracer, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        self.base.onError(pc, err, FrameType, frame);
+    pub fn onError(self: *FileTracer, pc: u32, opcode: u8, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+        self.base.onError(pc, opcode, err, FrameType, frame);
     }
 };
 
