@@ -29,7 +29,7 @@ export interface InstructionJson {
 }
 
 export interface ErrorInfo {
-	kind: 'ExecutionError' | 'Panic' | 'BytecodeError'
+	kind: 'ExecutionError' | 'Revert' | 'BytecodeError'
 	message: string
 }
 

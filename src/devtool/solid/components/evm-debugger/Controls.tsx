@@ -39,10 +39,10 @@ const Controls: Component<ControlsProps> = (props) => {
 		switch (props.error.kind) {
 			case 'ExecutionError':
 				return `Execution error: ${props.error.message}`
+			case 'Revert':
+				return `Revert: ${props.error.message}`
 			case 'BytecodeError':
 				return `Bytecode error: ${props.error.message}`
-			case 'Panic':
-				return `Warning: ${props.error.message} - Continuing may crash`
 			default:
 				return props.error.message
 		}

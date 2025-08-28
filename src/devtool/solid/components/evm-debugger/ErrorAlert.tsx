@@ -1,5 +1,4 @@
 import AlertCircleIcon from 'lucide-solid/icons/alert-circle'
-import AlertTriangleIcon from 'lucide-solid/icons/alert-triangle'
 import XIcon from 'lucide-solid/icons/x'
 import { type Component, createEffect, createSignal, Show } from 'solid-js'
 import { Button } from '~/components/ui/button'
@@ -42,8 +41,8 @@ const ErrorAlert: Component<ErrorAlertProps> = (props) => {
 			case 'ExecutionError':
 				// Red for execution errors - these are fatal
 				return 'border-red-100 bg-red-50 text-red-800 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300'
-			case 'Panic':
-				// Orange for panic - execution was paused before crash
+			case 'Revert':
+				// Orange for reverts - these are controlled failures
 				return 'border-orange-100 bg-orange-50 text-orange-800 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-orange-300'
 			case 'BytecodeError':
 				// Yellow/amber for bytecode loading errors
@@ -59,7 +58,7 @@ const ErrorAlert: Component<ErrorAlertProps> = (props) => {
 		switch (props.state.error.kind) {
 			case 'ExecutionError':
 				return 'text-red-500 dark:text-red-400'
-			case 'Panic':
+			case 'Revert':
 				return 'text-orange-500 dark:text-orange-400'
 			case 'BytecodeError':
 				return 'text-yellow-500 dark:text-yellow-400'
@@ -74,7 +73,7 @@ const ErrorAlert: Component<ErrorAlertProps> = (props) => {
 		switch (props.state.error.kind) {
 			case 'ExecutionError':
 				return 'text-red-500 hover:bg-red-100 hover:text-red-600 dark:text-red-400 dark:hover:bg-red-500/20 dark:hover:text-red-300'
-			case 'Panic':
+			case 'Revert':
 				return 'text-orange-500 hover:bg-orange-100 hover:text-orange-600 dark:text-orange-400 dark:hover:bg-orange-500/20 dark:hover:text-orange-300'
 			case 'BytecodeError':
 				return 'text-yellow-500 hover:bg-yellow-100 hover:text-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-500/20 dark:hover:text-yellow-300'
@@ -89,8 +88,8 @@ const ErrorAlert: Component<ErrorAlertProps> = (props) => {
 		switch (props.state.error.kind) {
 			case 'ExecutionError':
 				return 'Execution Error: '
-			case 'Panic':
-				return 'Execution Paused (Panic Prevention): '
+			case 'Revert':
+				return 'Revert: '
 			case 'BytecodeError':
 				return 'Bytecode Error: '
 			default:
@@ -100,10 +99,6 @@ const ErrorAlert: Component<ErrorAlertProps> = (props) => {
 
 	const getErrorDescription = () => {
 		if (!props.state.error) return ''
-
-		if (props.state.error.kind === 'Panic') {
-			return ' - Execution was paused before this operation would cause a crash.'
-		}
 		return ''
 	}
 
@@ -112,11 +107,7 @@ const ErrorAlert: Component<ErrorAlertProps> = (props) => {
 			<Card class={getErrorStyles()}>
 				<div class="flex items-center justify-between p-4">
 					<div class="flex items-start">
-						{props.state.error?.kind === 'Panic' ? (
-							<AlertTriangleIcon class={`mt-0.5 mr-3 h-5 w-5 flex-shrink-0 ${getIconColor()}`} />
-						) : (
-							<AlertCircleIcon class={`mt-0.5 mr-3 h-5 w-5 flex-shrink-0 ${getIconColor()}`} />
-						)}
+						<AlertCircleIcon class={`mt-0.5 mr-3 h-5 w-5 flex-shrink-0 ${getIconColor()}`} />
 						<div class="flex-1">
 							<span class="font-medium">{getErrorTitle()}</span>
 							<span>{props.state.error?.message}</span>

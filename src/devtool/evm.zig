@@ -32,7 +32,6 @@ tracer_cfg: Evm.DebuggingTracer.Config = .{
     .prestate_disable_storage = false,
     .prestate_disable_code = false,
     .prestate_include_empty = false,
-    .preflight_checks = true,  // Enable preflight checks to catch issues before they crash
 },
 
 pub const DebugStepResult = struct {
@@ -221,7 +220,7 @@ pub fn singleStep(self: *DevtoolEvm) !DebugStepResult {
     const recent = f.tracer.getRecentSteps(1);
     const error_info: ?debug_state.ErrorInfo = if (recent.len == 1 and recent[0].@"error" != null) 
         .{ 
-            .kind = if (recent[0].@"error".?.kind == .Panic) "Panic" else "ExecutionError",
+            .kind = if (recent[0].@"error".?.kind == .Revert) "Revert" else "ExecutionError",
             .message = recent[0].@"error".?.message,
         } 
     else 
@@ -534,7 +533,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
         const st = recent_steps[0];
         if (st.@"error") |e| {
             error_info = .{
-                .kind = try self.allocator.dupe(u8, if (e.kind == .Panic) "Panic" else "ExecutionError"),
+                .kind = try self.allocator.dupe(u8, if (e.kind == .Revert) "Revert" else "ExecutionError"),
                 .message = try self.allocator.dupe(u8, e.message),
             };
         }
@@ -697,27 +696,6 @@ test "DevtoolEvm error tracking - invalid jump destination and revert" {
                               std.mem.indexOf(u8, json2, "Revert") != null);
         try std.testing.expect(std.mem.indexOf(u8, json2, "\"kind\":\"ExecutionError\"") != null);
     }
-}
-
-test "DevtoolEvm preflight panic stack underflow" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const a = gpa.allocator();
-    var dv = try DevtoolEvm.init(a);
-    defer dv.deinit();
-
-    // This would cause a stack underflow if executed; preflight should catch and pause.
-    try dv.loadBytecodeHex("0x01"); // ADD with empty stack
-    try std.testing.expect(dv.is_initialized);
-
-    const r = try dv.runUntilHalt();
-    try std.testing.expect(r == .paused);
-
-    const json = try dv.serializeEvmState();
-    defer dv.allocator.free(json);
-    // Check for Panic error kind and StackUnderflow message
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"Panic\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "StackUnderflow") != null);
 }
 
 test "DevtoolEvm available breakpoints extraction" {
