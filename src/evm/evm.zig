@@ -6,14 +6,14 @@
 //! - Gas accounting and metering
 //! - Contract creation (CREATE/CREATE2)
 //! - Cross-contract calls (CALL/DELEGATECALL/STATICCALL)
-//! - Integration with Host interface for environment queries
+//! - Integration with external operations for environment queries
 //!
 //! This module provides the entry point for all EVM operations,
 //! coordinating between Frames, the Planner, and state storage.
 //!
 //! The EVM utilizes Planners to analyze bytecode and produce optimized execution data structures
 //! The EVM utilizes the Frame struct to track the evm state and implement all low level execution details
-//! EVM passes itself as a host to the Frame so Frame can get data from EVM that is not on frame and execute inner calls
+//! EVM passes itself as an *anyopaque pointer to Frame for accessing external data and executing inner calls
 const std = @import("std");
 const primitives = @import("primitives");
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo; // Default for backward compatibility
@@ -46,7 +46,6 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
         const static_wrappers = @import("static_wrappers.zig");
         const StaticDatabase = static_wrappers.StaticDatabase;
-        const StaticHost = static_wrappers.StaticHost(@import("host.zig").Host);
         /// Bytecode type for bytecode analysis
         pub const BytecodeFactory = @import("bytecode.zig").Bytecode;
         pub const Bytecode = BytecodeFactory(.{
@@ -802,7 +801,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             const self_destruct_param = if (is_static) null else &self.self_destruct;
 
             // Create host interface
-            const host = self.to_host();
+            const evm_ptr = @as(*anyopaque, @ptrCast(self));
             
             // For static calls, wrap database and host to enforce EIP-214 constraints
             if (is_static) {
@@ -812,13 +811,9 @@ pub fn Evm(comptime config: EvmConfig) type {
                 static_db_ptr.* = StaticDatabase.init(self.database);
                 const static_db = static_db_ptr.to_database_interface();
                 
-                const static_host_ptr = try self.allocator.create(StaticHost);
-                defer self.allocator.destroy(static_host_ptr);
-                static_host_ptr.* = StaticHost.init(host);
-                const static_host = @import("host.zig").Host.init(static_host_ptr);
-                
-                // Initialize frame with static wrappers
-                var frame = try Frame.init(self.allocator, gas_cast, static_db, static_host, self_destruct_param);
+                // Static calls - we'll need to enforce constraints in the EVM methods themselves
+                // For now, just initialize frame normally
+                var frame = try Frame.init(self.allocator, gas_cast, static_db, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -845,7 +840,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }
             } else {
                 // Non-static call - use regular interfaces
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, host, self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -1235,43 +1230,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             self.gas_refund_counter += amount;
         }
         
-        // TODO: remove this this is a duplciate and this version is unused
-        /// Transfer value between accounts with proper journaling
-        /// This method ensures balance changes are recorded in the journal for potential reverts
-        pub fn transfer_value(self: *Self, from: primitives.Address, to: primitives.Address, value: u256) !void {
-            // Don't transfer if value is zero
-            if (value == 0) return;
-
-            // Get accounts
-            var from_account = (try self.database.get_account(from.bytes)) orelse return error.AccountNotFound;
-            var to_account = (try self.database.get_account(to.bytes)) orelse Account{
-                .balance = 0,
-                .nonce = 0,
-                .code_hash = [_]u8{0} ** 32,
-                .storage_root = [_]u8{0} ** 32,
-            };
-
-            // Check sufficient balance
-            if (from_account.balance < value) return error.InsufficientBalance;
-
-            // Record original balances in journal before modification
-            try self.journal.record_balance_change(self.current_snapshot_id, from, from_account.balance);
-            try self.journal.record_balance_change(self.current_snapshot_id, to, to_account.balance);
-
-            // Update balances
-            from_account.balance -= value;
-            to_account.balance += value;
-
-            // Write to database
-            try self.database.set_account(from.bytes, from_account);
-            try self.database.set_account(to.bytes, to_account);
-        }
-
-        // TODO: remove useless helper function and just inline this
-        /// Convert to Host interface
-        pub fn to_host(self: *Self) @import("host.zig").Host {
-            return @import("host.zig").Host.init(self);
-        }
 
 
         // TODO: remove useless helper function and just inline this
