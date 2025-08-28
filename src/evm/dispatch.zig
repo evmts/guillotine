@@ -543,7 +543,6 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// Get the correct synthetic opcode index for a fusion operation
         fn getSyntheticOpcode(fusion_type: FusionType, is_inline: bool) u8 {
-            const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
             return switch (fusion_type) {
                 .push_add => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER),
                 .push_mul => if (is_inline) @intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE) else @intFromEnum(OpcodeSynthetic.PUSH_MUL_POINTER),
