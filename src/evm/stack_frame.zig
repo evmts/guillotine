@@ -60,26 +60,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
     comptime config.validate();
 
     return struct {
-        const Dispatch = dispatch_mod.Dispatch(Self);
-
-        pub const WordType = config.WordType;
-        pub const GasType = config.GasType();
-        pub const PcType = config.PcType();
-        pub const Memory = memory_mod.Memory(.{
-            .initial_capacity = config.memory_initial_capacity,
-            .memory_limit = config.memory_limit,
-        });
-        pub const Stack = stack_mod.Stack(.{
-            .stack_size = config.stack_size,
-            .WordType = config.WordType,
-        });
-        pub const Bytecode = bytecode_mod.Bytecode(.{
-            .max_bytecode_size = config.max_bytecode_size,
-
-            .vector_length = config.vector_length,
-            .max_initcode_size = config.max_initcode_size,
-        });
-
         pub const Success = enum {
             Stop,
             Return,
@@ -99,11 +79,40 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             InvalidAmount,
             WriteProtection,
         };
+        pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!Success;
+        pub const Dispatch = dispatch_mod.Dispatch(Self);
+
+        pub const frame_config = config;
+        pub const WordType = config.WordType;
+        pub const GasType = config.GasType();
+        pub const PcType = config.PcType();
+        pub const Memory = memory_mod.Memory(.{
+            .initial_capacity = config.memory_initial_capacity,
+            .memory_limit = config.memory_limit,
+        });
+        pub const Stack = stack_mod.Stack(.{
+            .stack_size = config.stack_size,
+            .WordType = config.WordType,
+        });
+        pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig{
+            .max_bytecode_size = config.max_bytecode_size,
+            .max_initcode_size = config.max_initcode_size,
+            .vector_length = config.vector_length,
+            .fusions_enabled = false,
+        };
+        pub const Bytecode = bytecode_mod.Bytecode(Self.BytecodeConfig);
+
+        pub fn invalid(frame: *Self, dispatch: Dispatch) Error!Success {
+            _ = frame;
+            _ = dispatch;
+            return Error.InvalidOpcode;
+        }
 
         pub const opcode_handlers = blk: {
             @setEvalBranchQuota(10000);
-            var h: [256]*const Dispatch.OpcodeHandler = undefined;
-            for (&h) |*handler| handler.* = &invalid;
+            var h: [256]OpcodeHandler = undefined;
+            const invalid_handler: OpcodeHandler = &invalid;
+            for (&h) |*handler| handler.* = invalid_handler;
             h[@intFromEnum(Opcode.STOP)] = &SystemHandlers.stop;
             h[@intFromEnum(Opcode.ADD)] = &ArithmeticHandlers.add;
             h[@intFromEnum(Opcode.MUL)] = &ArithmeticHandlers.mul;
@@ -130,7 +139,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             h[@intFromEnum(Opcode.SHL)] = &BitwiseHandlers.shl;
             h[@intFromEnum(Opcode.SHR)] = &BitwiseHandlers.shr;
             h[@intFromEnum(Opcode.SAR)] = &BitwiseHandlers.sar;
-            h[@intFromEnum(Opcode.KECCAK256)] = &KeccakHandlers.keccak256;
+            h[@intFromEnum(Opcode.KECCAK256)] = &KeccakHandlers.keccak;
             h[@intFromEnum(Opcode.ADDRESS)] = &ContextHandlers.address;
             h[@intFromEnum(Opcode.BALANCE)] = &ContextHandlers.balance;
             h[@intFromEnum(Opcode.ORIGIN)] = &ContextHandlers.origin;
@@ -170,8 +179,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             h[@intFromEnum(Opcode.MSIZE)] = &MemoryHandlers.msize;
             h[@intFromEnum(Opcode.GAS)] = &ContextHandlers.gas;
             h[@intFromEnum(Opcode.JUMPDEST)] = &JumpHandlers.jumpdest;
-            h[@intFromEnum(Opcode.TLOAD)] = &StorageHandlers.tload;
-            h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
+            // TODO: Enable when EVM implementation has transient storage support
+            // h[@intFromEnum(Opcode.TLOAD)] = &StorageHandlers.tload;
+            // h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
             h[@intFromEnum(Opcode.MCOPY)] = &MemoryHandlers.mcopy;
             // PUSH
             h[@intFromEnum(Opcode.PUSH0)] = &StackHandlers.push0;
@@ -192,15 +202,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.SWAP1) + swap_n - 1));
                 h[@intFromEnum(opcode)] = StackHandlers.generateSwapHandler(swap_n);
             }
-            h[@intFromEnum(Opcode.LOG0)] = &LogHandlers.log0;
-            h[@intFromEnum(Opcode.LOG1)] = &LogHandlers.log1;
-            h[@intFromEnum(Opcode.LOG2)] = &LogHandlers.log2;
-            h[@intFromEnum(Opcode.LOG3)] = &LogHandlers.log3;
-            h[@intFromEnum(Opcode.LOG4)] = &LogHandlers.log4;
+            h[@intFromEnum(Opcode.LOG0)] = LogHandlers.log0;
+            h[@intFromEnum(Opcode.LOG1)] = LogHandlers.log1;
+            h[@intFromEnum(Opcode.LOG2)] = LogHandlers.log2;
+            h[@intFromEnum(Opcode.LOG3)] = LogHandlers.log3;
+            h[@intFromEnum(Opcode.LOG4)] = LogHandlers.log4;
             h[@intFromEnum(Opcode.CREATE)] = &SystemHandlers.create;
             h[@intFromEnum(Opcode.CALL)] = &SystemHandlers.call;
             h[@intFromEnum(Opcode.CREATE2)] = &SystemHandlers.create2;
-            h[@intFromEnum(Opcode.CALLCODE)] = &invalid; // Deprecated
+            h[@intFromEnum(Opcode.CALLCODE)] = &invalid; // Deprecated (kept as invalid)
             h[@intFromEnum(Opcode.RETURN)] = &SystemHandlers.@"return";
             h[@intFromEnum(Opcode.DELEGATECALL)] = &SystemHandlers.delegatecall;
             h[@intFromEnum(Opcode.STATICCALL)] = &SystemHandlers.staticcall;
@@ -266,6 +276,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         database: if (config.has_database) ?DatabaseInterface else void,
         // Contract execution context
         contract_address: Address = Address.ZERO_ADDRESS,
+        is_static: bool = false,
         self_destruct: ?*SelfDestruct = null,
         host: Host,
         // Cold data - less frequently accessed during execution
@@ -334,24 +345,37 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             self.logs.deinit(allocator);
             self.output_data.deinit(allocator);
         }
-        /// Helper function to call tracer beforeOp if tracer is configured
-        pub inline fn traceBeforeOp(self: *Self, pc_val: u32, opcode: u8) void {
-            if (comptime config.TracerType != null) {
-                self.tracer.beforeOp(pc_val, opcode, Self, self);
+
+        /// Execute this frame by building a dispatch schedule and jumping to the first handler.
+        /// Performs a one-time static gas charge for the first basic block before execution.
+        pub fn interpret(self: *Self) Error!Success {
+            const handlers = &Self.opcode_handlers;
+
+            // Build dispatch cursor and jump table
+            const cursor_items = Dispatch.init(self.allocator, &self.bytecode, handlers) catch return Error.AllocationError;
+            defer Dispatch.deinitSchedule(self.allocator, cursor_items);
+            std.debug.assert(cursor_items.len > 3);
+
+            var jump_table = Dispatch.createJumpTable(self.allocator, cursor_items, &self.bytecode) catch return Error.AllocationError;
+            defer self.allocator.free(jump_table.entries);
+
+            // Pre-charge static gas stored as first item
+            var start_index: usize = 0;
+            if (cursor_items.len > 0) {
+                switch (cursor_items[0]) {
+                    .first_block_gas => |meta| {
+                        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        start_index = 1;
+                    },
+                    else => unreachable,
+                }
             }
+
+            // Start dispatching at the first opcode handler
+            const cursor = Self.Dispatch{ .cursor = cursor_items.ptr + start_index, .jump_table = &jump_table };
+            return cursor.cursor[0].opcode_handler(self, cursor);
         }
-        /// Helper function to call tracer afterOp if tracer is configured
-        pub inline fn traceAfterOp(self: *Self, pc_val: u32, opcode: u8) void {
-            if (comptime config.TracerType != null) {
-                self.tracer.afterOp(pc_val, opcode, Self, self);
-            }
-        }
-        /// Helper function to call tracer onError if tracer is configured
-        pub inline fn traceOnError(self: *Self, pc_val: u32, err: anyerror) void {
-            if (comptime config.TracerType != null) {
-                self.tracer.onError(pc_val, err, Self, self);
-            }
-        }
+
         /// Create a deep copy of the frame.
         /// This is used by DebugPlan to create a sidecar frame for validation.
         pub fn copy(self: *const Self, allocator: std.mem.Allocator) Error!Self {
@@ -381,16 +405,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 try new_memory.set_data(0, bytes);
             }
 
-            // Copy logs
             var new_logs = std.ArrayList(Log){};
             errdefer new_logs.deinit(allocator);
             for (self.logs.items) |log_entry| {
-                // Allocate and copy topics
-                const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch {
-                    return Error.AllocationError;
-                };
+                const topics_copy = allocator.alloc(u256, log_entry.topics.len) catch return Error.AllocationError;
                 @memcpy(topics_copy, log_entry.topics);
-                // Allocate and copy data
                 const data_copy = allocator.alloc(u8, log_entry.data.len) catch {
                     allocator.free(topics_copy);
                     return Error.AllocationError;
@@ -407,12 +426,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 };
             }
 
-            // Copy output data buffer
             var new_output_data = std.ArrayList(u8){};
             errdefer new_output_data.deinit(allocator);
-            new_output_data.appendSlice(allocator, self.output_data.items) catch {
-                return Error.AllocationError;
-            };
+            new_output_data.appendSlice(allocator, self.output_data.items) catch return Error.AllocationError;
 
             return Self{
                 .stack = new_stack,
@@ -436,163 +452,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             self.gas_remaining -= @as(GasType, @intCast(amount));
         }
 
-/// Consume gas with bounds checking and safe casting
+        /// Consume gas with bounds checking and safe casting
         pub fn consumeGasChecked(self: *Self, amount: u64) Error!void {
             const amt = std.math.cast(GasType, amount) orelse return Error.OutOfGas;
             self.gas_remaining -= amt;
             if (self.gas_remaining < 0) return Error.OutOfGas;
         }
-
-        /// Check if we're out of gas at end of execution
-        pub fn checkGas(self: *Self) Error!void {
-            if (self.gas_remaining <= 0) {
-                @branchHint(.cold);
-                return Error.OutOfGas;
-            }
-        }
-
-        pub fn gas(self: *Self) Error!void {
-            const gas_value = @as(WordType, @max(self.gas_remaining, 0));
-            return self.stack.push(gas_value);
-        }
-
-/// Test helper: KECCAK256 hash function for direct data hashing
-        /// Pushes the hash result onto the stack.
-        pub fn keccak256_data(self: *Self, data: []const u8) Error!void {
-            var hash_bytes: [32]u8 = undefined;
-            keccak_asm.keccak256(data, &hash_bytes) catch |err| switch (err) {
-                keccak_asm.KeccakError.InvalidInput => return Error.OutOfBounds,
-                keccak_asm.KeccakError.MemoryError => return Error.AllocationError,
-                else => return Error.AllocationError,
-            };
-            var hash_u256: u256 = 0;
-            for (hash_bytes) |b| {
-                hash_u256 = (hash_u256 << 8) | @as(u256, b);
-            }
-            try self.stack.push(@as(WordType, @truncate(hash_u256)));
-        }
-
-        // Helper function to validate if a PC position contains a valid JUMPDEST
-        pub fn is_valid_jump_dest(self: *Self, pc_value: usize) bool {
-            // Use the optimized bitmap lookup from Bytecode
-            return self.bytecode.isValidJumpDest(@intCast(pc_value));
-        }
-
-        pub fn invalid(self: *Self) Error!void {
-            _ = self;
-            return Error.InvalidOpcode;
-        }
-
-        fn dup_bulk_simd(self: *Self, comptime L: comptime_int, indices: []const u8) Error!void {
-            if (config.vector_length == 0 or L == 0) {
-                // Fallback to scalar operations
-                for (indices) |n| {
-                    try self.stack.dup_n(n);
-                }
-                return;
-            }
-            // Bounds check: ensure we have enough stack items for all operations
-            const stack_slice = self.stack.get_slice();
-            for (indices) |n| {
-                if (n == 0 or n > stack_slice.len) {
-                    return Error.StackUnderflow;
-                }
-            }
-            // Check if we have room for all the new items
-            if (stack_slice.len + indices.len > Stack.stack_capacity) {
-                return Error.StackOverflow;
-            }
-            // Perform SIMD-optimized bulk duplication
-            // Process in chunks of L
-            var i: usize = 0;
-            while (i < indices.len) : (i += L) {
-                const chunk_size = @min(L, indices.len - i);
-                const chunk = indices[i .. i + chunk_size];
-                // Load vector of values to duplicate
-                var values: @Vector(L, WordType) = @splat(0);
-                for (chunk, 0..) |n, j| {
-                    values[j] = stack_slice[n - 1]; // n-1 because stack is 1-indexed for DUP
-                }
-                // Push values to stack
-                for (0..chunk_size) |j| {
-                    try self.stack.push(values[j]);
-                }
-            }
-        }
-
-/// SIMD-accelerated bulk SWAP operations for sequential exchange operations
-        ///
-        /// Optimizes execution when multiple SWAP operations are performed in sequence by using
-        /// vector operations to coordinate multiple exchanges simultaneously. This reduces the
-        /// overhead of individual stack manipulations for bytecode with many consecutive swaps.
-        ///
-        /// ## How SIMD Optimization Works
-        ///
-        /// Traditional scalar approach processes each SWAP individually:
-        /// ```
-        /// SWAP1: exchange stack[0] ↔ stack[1]
-        /// SWAP2: exchange stack[0] ↔ stack[2]
-        /// SWAP4: exchange stack[0] ↔ stack[4]
-        /// ```
-        ///
-        /// SIMD approach optimizes the coordination:
-        /// ```
-        /// Load vectors: top_vals = [stack[0], stack[0], stack[0]]
-        ///              target_vals = [stack[1], stack[2], stack[4]]
-        /// Coordinate swaps with reduced overhead and better cache usage
-        /// ```
-        ///
-        /// ## Performance Benefits
-        /// - Reduces overhead from repeated stack API calls
-        /// - Better instruction-level parallelism for swap coordination
-        /// - Improved cache locality when accessing nearby stack elements
-        /// - Automatic fallback to scalar when SIMD unavailable
-        ///
-        /// @param L: Vector length (compile-time known, from config.vector_length)
-        /// @param indices: Array of SWAP indices (1-16, positions to swap with top)
-        fn swap_bulk_simd(self: *Self, indices: []const u8, L: usize) !void {
-            if (config.vector_length == 0 or L == 0) {
-                // Fallback to scalar operations
-                for (indices) |n| {
-                    try self.stack.swap_n(n);
-                }
-                return;
-            }
-            // Bounds check: ensure we have enough stack items for all operations
-            const stack_slice = self.stack.get_slice();
-            for (indices) |n| {
-                if (n + 1 > stack_slice.len) { // SWAP needs n+1 items
-                    return Error.StackUnderflow;
-                }
-            }
-            // SIMD optimization: collect all values to swap in vectors first
-            // Process in chunks of L
-            var i: usize = 0;
-            while (i < indices.len) : (i += L) {
-                const chunk_size = @min(L, indices.len - i);
-                const chunk = indices[i .. i + chunk_size];
-                // Load vectors of values to swap using current slice state
-                var top_values: @Vector(L, WordType) = @splat(0);
-                var target_values: @Vector(L, WordType) = @splat(0);
-                for (chunk, 0..) |n, j| {
-                    const current_slice = self.stack.get_slice();
-                    top_values[j] = current_slice[0]; // Top of stack
-                    target_values[j] = current_slice[n]; // nth item from top
-                }
-                // Perform individual swaps using stack API
-                for (chunk) |n| {
-                    try self.stack.swap_n(n);
-                }
-            }
-        }
-
-
-        // Synthetic opcode handlers for optimized operations (placeholder implementations)
-
-        // Memory operation synthetic handlers
-
-        // Bitwise operation synthetic handlers
-
     };
 }
-

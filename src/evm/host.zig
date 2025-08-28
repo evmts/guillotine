@@ -86,6 +86,10 @@ pub const Host = struct {
         get_caller: *const fn (ptr: *anyopaque) Address,
         /// Get value sent with current call
         get_call_value: *const fn (ptr: *anyopaque) u256,
+        /// Get transient storage value (EIP-1153)
+        get_transient_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256) anyerror!u256,
+        /// Set transient storage value (EIP-1153)
+        set_transient_storage: *const fn (ptr: *anyopaque, address: Address, slot: u256, value: u256) anyerror!void,
     };
 
     /// Initialize a Host interface from any implementation
@@ -265,6 +269,22 @@ pub const Host = struct {
                 return self.*.get_call_value();
             }
 
+            // TODO: Enable when EVM implementation has transient storage support
+            fn vtable_get_transient_storage(ptr: *anyopaque, address: Address, slot: u256) anyerror!u256 {
+                _ = ptr;
+                _ = address;
+                _ = slot;
+                return error.NotImplemented;
+            }
+
+            fn vtable_set_transient_storage(ptr: *anyopaque, address: Address, slot: u256, value: u256) anyerror!void {
+                _ = ptr;
+                _ = address;
+                _ = slot;
+                _ = value;
+                return error.NotImplemented;
+            }
+
             const vtable = VTable{
                 .get_balance = vtable_get_balance,
                 .account_exists = vtable_account_exists,
@@ -297,6 +317,8 @@ pub const Host = struct {
                 .get_tx_origin = vtable_get_tx_origin,
                 .get_caller = vtable_get_caller,
                 .get_call_value = vtable_get_call_value,
+                .get_transient_storage = vtable_get_transient_storage,
+                .set_transient_storage = vtable_set_transient_storage,
             };
         };
 
@@ -414,6 +436,16 @@ pub const Host = struct {
     /// Set storage value
     pub inline fn set_storage(self: Host, address: Address, slot: u256, value: u256) !void {
         return self.vtable.set_storage(self.ptr, address, slot, value);
+    }
+
+    /// Get transient storage value (EIP-1153)
+    pub inline fn get_transient_storage(self: Host, address: Address, slot: u256) !u256 {
+        return self.vtable.get_transient_storage(self.ptr, address, slot);
+    }
+
+    /// Set transient storage value (EIP-1153)
+    pub inline fn set_transient_storage(self: Host, address: Address, slot: u256, value: u256) !void {
+        return self.vtable.set_transient_storage(self.ptr, address, slot, value);
     }
 
     /// Get transaction gas price
