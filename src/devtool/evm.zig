@@ -757,3 +757,210 @@ test "DevtoolEvm add/remove/clear breakpoints and pause on hit" {
     defer a.free(bps2);
     try std.testing.expectEqual(@as(usize, 0), bps2.len);
 }
+
+test "DevtoolEvm stack state population - step by step execution" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+    
+    // Use exact same bytecode as working breakpoint test
+    try dv.loadBytecodeHex("0x6001600201"); // PUSH1 1, PUSH1 2, ADD
+    
+    // Initial state - stack should be empty
+    const json_initial = try dv.serializeEvmState();
+    defer dv.allocator.free(json_initial);
+    try std.testing.expect(std.mem.indexOf(u8, json_initial, "\"stack\":[]") != null);
+    
+    // Add breakpoint at pc=2 (before PUSH1 2) 
+    try dv.addBreakpoint(2);
+    
+    // Run until pause at pc=2 (after PUSH1 1 executes)
+    const res1 = try dv.runUntilHalt();
+    try std.testing.expect(res1 == .paused);
+    const pc1_opt = dv.interpreter.?.getCurrentPc();
+    try std.testing.expect(pc1_opt != null);
+    try std.testing.expectEqual(@as(usize, 2), pc1_opt.?);
+    
+    const json_after_push1 = try dv.serializeEvmState();
+    defer dv.allocator.free(json_after_push1);
+    // Stack should now contain 1 after PUSH1 1 executed
+    try std.testing.expect(std.mem.indexOf(u8, json_after_push1, "\"0x0000000000000000000000000000000000000000000000000000000000000001\"") != null);
+    
+    // Remove breakpoint and add one at pc=4 (before ADD)
+    _ = try dv.removeBreakpoint(2);
+    try dv.addBreakpoint(4);
+    
+    // Run until pause at pc=4 (after PUSH1 2 executes)
+    const res2 = try dv.runUntilHalt();
+    try std.testing.expect(res2 == .paused);
+    const pc2_opt = dv.interpreter.?.getCurrentPc();
+    try std.testing.expect(pc2_opt != null);
+    try std.testing.expectEqual(@as(usize, 4), pc2_opt.?);
+    
+    const json_after_push2 = try dv.serializeEvmState();
+    defer dv.allocator.free(json_after_push2);
+    // Stack should now contain [2, 1] (2 on top, 1 below)
+    try std.testing.expect(std.mem.indexOf(u8, json_after_push2, "\"0x0000000000000000000000000000000000000000000000000000000000000001\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_push2, "\"0x0000000000000000000000000000000000000000000000000000000000000002\"") != null);
+    
+    // Remove breakpoint and run to completion (ADD executes)
+    _ = try dv.removeBreakpoint(4);
+    const res3 = try dv.runUntilHalt();
+    try std.testing.expect(res3 == .completed);
+    
+    const json_after_add = try dv.serializeEvmState();
+    defer dv.allocator.free(json_after_add);
+    // Stack should now contain [3] (1+2=3)
+    try std.testing.expect(std.mem.indexOf(u8, json_after_add, "\"0x0000000000000000000000000000000000000000000000000000000000000003\"") != null);
+}
+
+test "DevtoolEvm memory state population" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+    
+    const bytecode_hex = "0x602a600052"; // PUSH1 42, PUSH1 0, MSTORE
+    // Serialize initial state
+    const json_initial = try dv.serializeEvmState();
+    defer dv.allocator.free(json_initial);
+    
+    // Run until breakpoint
+    const res1 = try dv.runUntilHalt();
+    try std.testing.expect(res1 == .paused);
+    
+    // Serialize state after MSTORE
+    const json_after_mstore = try dv.serializeEvmState();
+    defer dv.allocator.free(json_after_mstore);
+    
+    // Check memory contains expected value
+    // After MSTORE, memory should contain value 42 at position 0
+    const memory_expected = "\"memory\":\"0x000000000000000000000000000000000000000000000000000000000000002a\"";
+    try std.testing.expect(std.mem.indexOf(u8, json_after_mstore, memory_expected) != null);
+}
+
+test "DevtoolEvm steps array population" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+    
+    // Use known working bytecode
+    try dv.loadBytecodeHex("0x6001600201"); // PUSH1 1, PUSH1 2, ADD
+    
+    // Initial state should have empty steps
+    const json_initial = try dv.serializeEvmState();
+    defer dv.allocator.free(json_initial);
+    try std.testing.expect(std.mem.indexOf(u8, json_initial, "\"steps\":[]") != null);
+    
+    // Add breakpoint at pc=4 (before ADD) to execute first two instructions
+    try dv.addBreakpoint(4);
+    
+    // Run until pause at pc=4 (after PUSH1 1 and PUSH1 2 execute)
+    const res1 = try dv.runUntilHalt();
+    try std.testing.expect(res1 == .paused);
+    const pc1_opt = dv.interpreter.?.getCurrentPc();
+    try std.testing.expect(pc1_opt != null);
+    try std.testing.expectEqual(@as(usize, 4), pc1_opt.?);
+    
+    const json_with_steps = try dv.serializeEvmState();
+    defer dv.allocator.free(json_with_steps);
+    
+    // Steps array should now contain execution history
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"steps\":[") != null);
+    // Should contain step information with opcodes
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"op\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"pc\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"gasBefore\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"gasAfter\":") != null);
+    // Should contain stack information
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"stackBefore\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_with_steps, "\"stackAfter\":") != null);
+    
+    // Clean up
+    _ = try dv.removeBreakpoint(4);
+}
+
+test "DevtoolEvm state diff functionality" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+    
+    // Use bytecode that modifies storage
+    // PUSH1 42, PUSH1 0, SSTORE (store value 42 at storage slot 0)
+    // PUSH1 99, PUSH1 1, SSTORE (store value 99 at storage slot 1)
+    try dv.loadBytecodeHex("0x602a60005560636001555050"); 
+    
+    // Initial state - no storage changes yet
+    const json_initial = try dv.serializeEvmState();
+    defer dv.allocator.free(json_initial);
+    // State should have empty pre and post initially
+    try std.testing.expect(std.mem.indexOf(u8, json_initial, "\"state\":{\"pre\":[],\"post\":[]}") != null);
+    
+    // Set breakpoint after first SSTORE (at PC 5)
+    try dv.addBreakpoint(5);
+    
+    // Execute up to first SSTORE
+    const res1 = try dv.runUntilHalt();
+    try std.testing.expect(res1 == .paused);
+    
+    const json_after_first_sstore = try dv.serializeEvmState();
+    defer dv.allocator.free(json_after_first_sstore);
+    
+    // After first SSTORE, we should see storage slot 0 changed from 0 to 42
+    // The state diff should show this change
+    // Note: The exact format depends on implementation, but we should see the storage key and values
+    try std.testing.expect(std.mem.indexOf(u8, json_after_first_sstore, "\"state\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_first_sstore, "\"pre\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_after_first_sstore, "\"post\":") != null);
+    // Should contain the storage key (0) and value (42) in some format
+    // The exact format may vary, so we check for the hex values
+    try std.testing.expect(std.mem.indexOf(u8, json_after_first_sstore, "0x2a") != null); // 42 in hex
+    
+    // Remove breakpoint and set new one after second SSTORE (at PC 10)
+    _ = try dv.removeBreakpoint(5);
+    try dv.addBreakpoint(10);
+    
+    // Execute up to second SSTORE
+    const res2 = try dv.runUntilHalt();
+    try std.testing.expect(res2 == .paused);
+    
+    const json_after_second_sstore = try dv.serializeEvmState();
+    defer dv.allocator.free(json_after_second_sstore);
+    
+    // After second SSTORE, we should see both storage changes
+    try std.testing.expect(std.mem.indexOf(u8, json_after_second_sstore, "\"state\":") != null);
+    // Should contain both storage values (42 and 99) in some format
+    try std.testing.expect(std.mem.indexOf(u8, json_after_second_sstore, "0x2a") != null); // 42 in hex
+    try std.testing.expect(std.mem.indexOf(u8, json_after_second_sstore, "0x63") != null); // 99 in hex
+    
+    // Clean up
+    _ = try dv.removeBreakpoint(10);
+}
+
+test "DevtoolEvm preanalyzed blocks population" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; 
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+    
+    // Bytecode with multiple instructions for block analysis
+    try dv.loadBytecodeHex("0x6005600a0160005200"); // PUSH1 5, PUSH1 10, ADD, PUSH1 0, MSTORE
+    
+    const json = try dv.serializeEvmState();
+    defer dv.allocator.free(json);
+    
+    // Should contain preanalyzed blocks information; too implementation dependent to test here
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"preanalyzedBlocks\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"currentPreanalyzedBlockStartIndex\":") != null);
+    // Blocks should have instructions with PC values
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"instructions\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"firstInstructionIndex\":") != null);
+}
