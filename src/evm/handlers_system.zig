@@ -528,8 +528,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Stack: [offset, size] → []
         pub fn @"return"(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
+            log.debug("RETURN handler called, stack size: {}", .{self.stack.size()});
             const size = try self.stack.pop();
             const offset = try self.stack.pop();
+            log.debug("RETURN: offset={}, size={}", .{offset, size});
 
             // Bounds checking for memory offset and size
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
@@ -546,6 +548,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Extract return data from memory and store it
             if (size_usize > 0) {
                 const return_data = self.memory.get_slice(offset_usize, size_usize) catch {
+                    log.err("RETURN: Failed to get memory slice at offset {} size {}", .{offset_usize, size_usize});
                     return Error.OutOfBounds;
                 };
                 // Clear any existing output data
@@ -554,9 +557,11 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.output_data.appendSlice(self.allocator, return_data) catch {
                     return Error.AllocationError;
                 };
+                log.debug("RETURN: Stored {} bytes to output_data", .{return_data.len});
             } else {
                 // Empty return data
                 self.output_data.clearRetainingCapacity();
+                log.debug("RETURN: Empty return data", .{});
             }
 
             // Return indicates successful execution

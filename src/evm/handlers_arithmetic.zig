@@ -14,9 +14,12 @@ pub fn Handlers(comptime FrameType: type) type {
         /// ADD opcode (0x01) - Addition with overflow wrapping.
         pub fn add(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Static gas consumption handled at upper layer
+            log.debug("ADD handler called, stack size: {}", .{self.stack.size()});
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
-            try self.stack.set_top(top +% top_minus_1);
+            const result = top +% top_minus_1;
+            log.debug("ADD: {} + {} = {}", .{top, top_minus_1, result});
+            try self.stack.set_top(result);
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }

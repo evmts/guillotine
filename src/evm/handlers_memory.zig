@@ -51,8 +51,10 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Pops memory offset and value from stack, stores 32 bytes at that offset.
         pub fn mstore(self: *FrameType, dispatch: Dispatch) Error!Success {
             // MSTORE stores a 32-byte word to memory
+            log.debug("MSTORE handler called, stack size: {}", .{self.stack.size()});
             const offset = try self.stack.pop();
             const value = try self.stack.pop();
+            log.debug("MSTORE: offset={}, value={}", .{offset, value});
             
             // Check if offset fits in usize
             if (offset > std.math.maxInt(usize)) {
@@ -74,6 +76,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
+            
+            log.debug("MSTORE: successfully stored value {} at offset {}", .{value_u256, offset_usize});
             
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
