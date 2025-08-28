@@ -28,22 +28,7 @@ const Address = primitives.Address.Address;
 const to_u256 = primitives.Address.to_u256;
 const from_u256 = primitives.Address.from_u256;
 const keccak_asm = @import("keccak_asm.zig");
-const stack_frame_arithmetic = @import("handlers_arithmetic.zig");
-const stack_frame_comparison = @import("handlers_comparison.zig");
-const stack_frame_bitwise = @import("handlers_bitwise.zig");
-const stack_frame_stack = @import("handlers_stack.zig");
-const stack_frame_memory = @import("handlers_memory.zig");
-const stack_frame_storage = @import("handlers_storage.zig");
-const stack_frame_jump = @import("handlers_jump.zig");
-const stack_frame_system = @import("handlers_system.zig");
-const stack_frame_context = @import("handlers_context.zig");
-const stack_frame_keccak = @import("handlers_keccak.zig");
-const stack_frame_log = @import("handlers_log.zig");
-// Synthetic handler modules
-const stack_frame_arithmetic_synthetic = @import("handlers_arithmetic_synthetic.zig");
-const stack_frame_bitwise_synthetic = @import("handlers_bitwise_synthetic.zig");
-const stack_frame_memory_synthetic = @import("handlers_memory_synthetic.zig");
-const stack_frame_jump_synthetic = @import("handlers_jump_synthetic.zig");
+const stack_frame_handlers = @import("stack_frame_handlers.zig");
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const Host = @import("host.zig").Host;
 const CallParams = @import("call_params.zig").CallParams;
@@ -60,11 +45,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
     comptime config.validate();
 
     return struct {
+        /// Status code type returned by StackFrame.interpret when stack frame executes successfully
         pub const Success = enum {
             Stop,
             Return,
             SelfDestruct,
         };
+        /// Error code type returned by StackFrame.interpret when stack frame executes unsuccessfully
         pub const Error = error{
             StackOverflow,
             StackUnderflow,
@@ -79,197 +66,53 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             InvalidAmount,
             WriteProtection,
         };
+        /// The type all opcode handlers return. 
+        /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
         pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!Success;
+        /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Dispatch(Self);
-
+        /// The config passed into StackFrame(config)
         pub const frame_config = config;
+        /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
+        /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
+        /// Lowering the word size can improve perf and bundle size
         pub const WordType = config.WordType;
+        /// The type used to measure gas. Unsigned integer for perf reasons
         pub const GasType = config.GasType();
+        /// The type used to index into bytecode or instructions. Determined by config.max_bytecode_size
         pub const PcType = config.PcType();
+        /// The struct in charge of managing Evm memory
         pub const Memory = memory_mod.Memory(.{
             .initial_capacity = config.memory_initial_capacity,
             .memory_limit = config.memory_limit,
         });
+        /// The struct in charge of managing Evm Word stack
         pub const Stack = stack_mod.Stack(.{
             .stack_size = config.stack_size,
             .WordType = config.WordType,
         });
-        pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig{
+        /// The type used to validate and analyze bytecode
+        /// Bytecode in a single pass validates the bytecode and produces an iterator 
+        /// Dispatch can use to produce the Dispatch stream
+        pub const Bytecode = bytecode_mod.Bytecode(.{
             .max_bytecode_size = config.max_bytecode_size,
             .max_initcode_size = config.max_initcode_size,
             .vector_length = config.vector_length,
             .fusions_enabled = false,
-        };
-        pub const Bytecode = bytecode_mod.Bytecode(Self.BytecodeConfig);
+        });
 
-        pub fn invalid(frame: *Self, dispatch: Dispatch) Error!Success {
-            _ = frame;
-            _ = dispatch;
-            return Error.InvalidOpcode;
-        }
+        /// A fixed size array of opcode handlers indexed by opcode number
+        pub const opcode_handlers: [256]OpcodeHandler = stack_frame_handlers.getOpcodeHandlers(Self);
 
-        pub const opcode_handlers = blk: {
-            @setEvalBranchQuota(10000);
-            var h: [256]OpcodeHandler = undefined;
-            const invalid_handler: OpcodeHandler = &invalid;
-            for (&h) |*handler| handler.* = invalid_handler;
-            h[@intFromEnum(Opcode.STOP)] = &SystemHandlers.stop;
-            h[@intFromEnum(Opcode.ADD)] = &ArithmeticHandlers.add;
-            h[@intFromEnum(Opcode.MUL)] = &ArithmeticHandlers.mul;
-            h[@intFromEnum(Opcode.SUB)] = &ArithmeticHandlers.sub;
-            h[@intFromEnum(Opcode.DIV)] = &ArithmeticHandlers.div;
-            h[@intFromEnum(Opcode.SDIV)] = &ArithmeticHandlers.sdiv;
-            h[@intFromEnum(Opcode.MOD)] = &ArithmeticHandlers.mod;
-            h[@intFromEnum(Opcode.SMOD)] = &ArithmeticHandlers.smod;
-            h[@intFromEnum(Opcode.ADDMOD)] = &ArithmeticHandlers.addmod;
-            h[@intFromEnum(Opcode.MULMOD)] = &ArithmeticHandlers.mulmod;
-            h[@intFromEnum(Opcode.EXP)] = &ArithmeticHandlers.exp;
-            h[@intFromEnum(Opcode.SIGNEXTEND)] = &ArithmeticHandlers.signextend;
-            h[@intFromEnum(Opcode.LT)] = &ComparisonHandlers.lt;
-            h[@intFromEnum(Opcode.GT)] = &ComparisonHandlers.gt;
-            h[@intFromEnum(Opcode.SLT)] = &ComparisonHandlers.slt;
-            h[@intFromEnum(Opcode.SGT)] = &ComparisonHandlers.sgt;
-            h[@intFromEnum(Opcode.EQ)] = &ComparisonHandlers.eq;
-            h[@intFromEnum(Opcode.ISZERO)] = &ComparisonHandlers.iszero;
-            h[@intFromEnum(Opcode.AND)] = &BitwiseHandlers.@"and";
-            h[@intFromEnum(Opcode.OR)] = &BitwiseHandlers.@"or";
-            h[@intFromEnum(Opcode.XOR)] = &BitwiseHandlers.xor;
-            h[@intFromEnum(Opcode.NOT)] = &BitwiseHandlers.not;
-            h[@intFromEnum(Opcode.BYTE)] = &BitwiseHandlers.byte;
-            h[@intFromEnum(Opcode.SHL)] = &BitwiseHandlers.shl;
-            h[@intFromEnum(Opcode.SHR)] = &BitwiseHandlers.shr;
-            h[@intFromEnum(Opcode.SAR)] = &BitwiseHandlers.sar;
-            h[@intFromEnum(Opcode.KECCAK256)] = &KeccakHandlers.keccak;
-            h[@intFromEnum(Opcode.ADDRESS)] = &ContextHandlers.address;
-            h[@intFromEnum(Opcode.BALANCE)] = &ContextHandlers.balance;
-            h[@intFromEnum(Opcode.ORIGIN)] = &ContextHandlers.origin;
-            h[@intFromEnum(Opcode.CALLER)] = &ContextHandlers.caller;
-            h[@intFromEnum(Opcode.CALLVALUE)] = &ContextHandlers.callvalue;
-            h[@intFromEnum(Opcode.CALLDATALOAD)] = &ContextHandlers.calldataload;
-            h[@intFromEnum(Opcode.CALLDATASIZE)] = &ContextHandlers.calldatasize;
-            h[@intFromEnum(Opcode.CALLDATACOPY)] = &ContextHandlers.calldatacopy;
-            h[@intFromEnum(Opcode.CODESIZE)] = &ContextHandlers.codesize;
-            h[@intFromEnum(Opcode.CODECOPY)] = &ContextHandlers.codecopy;
-            h[@intFromEnum(Opcode.GASPRICE)] = &ContextHandlers.gasprice;
-            h[@intFromEnum(Opcode.EXTCODESIZE)] = &ContextHandlers.extcodesize;
-            h[@intFromEnum(Opcode.EXTCODECOPY)] = &ContextHandlers.extcodecopy;
-            h[@intFromEnum(Opcode.RETURNDATASIZE)] = &ContextHandlers.returndatasize;
-            h[@intFromEnum(Opcode.RETURNDATACOPY)] = &ContextHandlers.returndatacopy;
-            h[@intFromEnum(Opcode.EXTCODEHASH)] = &ContextHandlers.extcodehash;
-            h[@intFromEnum(Opcode.BLOCKHASH)] = &ContextHandlers.blockhash;
-            h[@intFromEnum(Opcode.COINBASE)] = &ContextHandlers.coinbase;
-            h[@intFromEnum(Opcode.TIMESTAMP)] = &ContextHandlers.timestamp;
-            h[@intFromEnum(Opcode.NUMBER)] = &ContextHandlers.number;
-            h[@intFromEnum(Opcode.DIFFICULTY)] = &ContextHandlers.difficulty;
-            h[@intFromEnum(Opcode.GASLIMIT)] = &ContextHandlers.gaslimit;
-            h[@intFromEnum(Opcode.CHAINID)] = &ContextHandlers.chainid;
-            h[@intFromEnum(Opcode.SELFBALANCE)] = &ContextHandlers.selfbalance;
-            h[@intFromEnum(Opcode.BASEFEE)] = &ContextHandlers.basefee;
-            h[@intFromEnum(Opcode.BLOBHASH)] = &ContextHandlers.blobhash;
-            h[@intFromEnum(Opcode.BLOBBASEFEE)] = &ContextHandlers.blobbasefee;
-            h[@intFromEnum(Opcode.POP)] = &StackHandlers.pop;
-            h[@intFromEnum(Opcode.MLOAD)] = &MemoryHandlers.mload;
-            h[@intFromEnum(Opcode.MSTORE)] = &MemoryHandlers.mstore;
-            h[@intFromEnum(Opcode.MSTORE8)] = &MemoryHandlers.mstore8;
-            h[@intFromEnum(Opcode.SLOAD)] = &StorageHandlers.sload;
-            h[@intFromEnum(Opcode.SSTORE)] = &StorageHandlers.sstore;
-            h[@intFromEnum(Opcode.JUMP)] = &JumpHandlers.jump;
-            h[@intFromEnum(Opcode.JUMPI)] = &JumpHandlers.jumpi;
-            h[@intFromEnum(Opcode.PC)] = &JumpHandlers.pc;
-            h[@intFromEnum(Opcode.MSIZE)] = &MemoryHandlers.msize;
-            h[@intFromEnum(Opcode.GAS)] = &ContextHandlers.gas;
-            h[@intFromEnum(Opcode.JUMPDEST)] = &JumpHandlers.jumpdest;
-            // TODO: Enable when EVM implementation has transient storage support
-            // h[@intFromEnum(Opcode.TLOAD)] = &StorageHandlers.tload;
-            // h[@intFromEnum(Opcode.TSTORE)] = &StorageHandlers.tstore;
-            h[@intFromEnum(Opcode.MCOPY)] = &MemoryHandlers.mcopy;
-            // PUSH
-            h[@intFromEnum(Opcode.PUSH0)] = &StackHandlers.push0;
-            for (1..33) |i| {
-                const push_n = @as(u8, @intCast(i));
-                const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.PUSH0) + push_n));
-                h[@intFromEnum(opcode)] = StackHandlers.generatePushHandler(push_n);
-            }
-            // DUP
-            for (1..17) |i| {
-                const dup_n = @as(u8, @intCast(i));
-                const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.DUP1) + dup_n - 1));
-                h[@intFromEnum(opcode)] = StackHandlers.generateDupHandler(dup_n);
-            }
-            // SWAP
-            for (1..17) |i| {
-                const swap_n = @as(u8, @intCast(i));
-                const opcode = @as(Opcode, @enumFromInt(@intFromEnum(Opcode.SWAP1) + swap_n - 1));
-                h[@intFromEnum(opcode)] = StackHandlers.generateSwapHandler(swap_n);
-            }
-            h[@intFromEnum(Opcode.LOG0)] = LogHandlers.log0;
-            h[@intFromEnum(Opcode.LOG1)] = LogHandlers.log1;
-            h[@intFromEnum(Opcode.LOG2)] = LogHandlers.log2;
-            h[@intFromEnum(Opcode.LOG3)] = LogHandlers.log3;
-            h[@intFromEnum(Opcode.LOG4)] = LogHandlers.log4;
-            h[@intFromEnum(Opcode.CREATE)] = &SystemHandlers.create;
-            h[@intFromEnum(Opcode.CALL)] = &SystemHandlers.call;
-            h[@intFromEnum(Opcode.CREATE2)] = &SystemHandlers.create2;
-            h[@intFromEnum(Opcode.CALLCODE)] = &invalid; // Deprecated (kept as invalid)
-            h[@intFromEnum(Opcode.RETURN)] = &SystemHandlers.@"return";
-            h[@intFromEnum(Opcode.DELEGATECALL)] = &SystemHandlers.delegatecall;
-            h[@intFromEnum(Opcode.STATICCALL)] = &SystemHandlers.staticcall;
-            h[@intFromEnum(Opcode.REVERT)] = &SystemHandlers.revert;
-            h[@intFromEnum(Opcode.INVALID)] = &invalid;
-            h[@intFromEnum(Opcode.SELFDESTRUCT)] = &SystemHandlers.selfdestruct;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE)] = &ArithmeticSyntheticHandlers.push_add_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_ADD_POINTER)] = &ArithmeticSyntheticHandlers.push_add_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MUL_INLINE)] = &ArithmeticSyntheticHandlers.push_mul_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MUL_POINTER)] = &ArithmeticSyntheticHandlers.push_mul_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_DIV_INLINE)] = &ArithmeticSyntheticHandlers.push_div_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_DIV_POINTER)] = &ArithmeticSyntheticHandlers.push_div_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_SUB_INLINE)] = &ArithmeticSyntheticHandlers.push_sub_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_SUB_POINTER)] = &ArithmeticSyntheticHandlers.push_sub_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_JUMP_INLINE)] = &JumpSyntheticHandlers.push_jump_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_JUMP_POINTER)] = &JumpSyntheticHandlers.push_jump_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_JUMPI_INLINE)] = &JumpSyntheticHandlers.push_jumpi_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_JUMPI_POINTER)] = &JumpSyntheticHandlers.push_jumpi_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MLOAD_INLINE)] = &MemorySyntheticHandlers.push_mload_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MLOAD_POINTER)] = &MemorySyntheticHandlers.push_mload_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MSTORE_INLINE)] = &MemorySyntheticHandlers.push_mstore_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MSTORE_POINTER)] = &MemorySyntheticHandlers.push_mstore_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_AND_INLINE)] = &BitwiseSyntheticHandlers.push_and_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_AND_POINTER)] = &BitwiseSyntheticHandlers.push_and_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_OR_INLINE)] = &BitwiseSyntheticHandlers.push_or_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_OR_POINTER)] = &BitwiseSyntheticHandlers.push_or_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_XOR_INLINE)] = &BitwiseSyntheticHandlers.push_xor_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_XOR_POINTER)] = &BitwiseSyntheticHandlers.push_xor_pointer;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_INLINE)] = &MemorySyntheticHandlers.push_mstore8_inline;
-            h[@intFromEnum(OpcodeSynthetic.PUSH_MSTORE8_POINTER)] = &MemorySyntheticHandlers.push_mstore8_pointer;
-            break :blk h;
-        };
         pub const max_bytecode_size = config.max_bytecode_size;
 
         const Self = @This();
-        
-        // Import handler modules
-        const ArithmeticHandlers = stack_frame_arithmetic.Handlers(Self);
-        const ComparisonHandlers = stack_frame_comparison.Handlers(Self);
-        const BitwiseHandlers = stack_frame_bitwise.Handlers(Self);
-        const StackHandlers = stack_frame_stack.Handlers(Self);
-        const MemoryHandlers = stack_frame_memory.Handlers(Self);
-        const StorageHandlers = stack_frame_storage.Handlers(Self);
-        const JumpHandlers = stack_frame_jump.Handlers(Self);
-        const SystemHandlers = stack_frame_system.Handlers(Self);
-        const ContextHandlers = stack_frame_context.Handlers(Self);
-        const KeccakHandlers = stack_frame_keccak.Handlers(Self);
-        const LogHandlers = stack_frame_log.Handlers(Self);
-        // Import synthetic handler modules
-        const ArithmeticSyntheticHandlers = stack_frame_arithmetic_synthetic.Handlers(Self);
-        const BitwiseSyntheticHandlers = stack_frame_bitwise_synthetic.Handlers(Self);
-        const MemorySyntheticHandlers = stack_frame_memory_synthetic.Handlers(Self);
-        const JumpSyntheticHandlers = stack_frame_jump_synthetic.Handlers(Self);
 
         //           StackFrame Structure Layout Analysis
         //   Primary Components (Cacheline 1 - Hot Path)
         //
         //   Offset 0-63: Primary cacheline (64 bytes)
-        //   ├── stack: Stack                    // ~24 bytes (buf ptr + 2 raw ptrs)
+        //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
         //   ├── bytecode: Bytecode              // ~40 bytes (slices + metadata)
         //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
         //   └── initial_gas: GasType            // 4-8 bytes
@@ -293,11 +136,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         // 
         //  Component-Level Alignment Details
         //
-        //  Stack (stack.zig)
+        //  Stack (stack.zig) - OPTIMIZED
         //
-        //  - Buffer: 64-byte aligned via alignedAlloc (line 51)
-        //  - Pointers: 8-byte aligned raw pointers
+        //  - Structure: 24 bytes total (previously 32 bytes)
+        //    - buf: []align(64) WordType      // 16 bytes (ptr + len)
+        //    - stack_ptr: [*]WordType          // 8 bytes
+        //    - stack_limit computed from buf.ptr (saves 8 bytes)
+        //  - Buffer: 64-byte aligned via alignedAlloc
         //  - Cache optimization: Downward growth for locality
+        //  - Optimization: Removed explicit stack_limit field, computed via inline function
         //
         //  Memory (memory.zig)
         //
@@ -318,9 +165,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //
         //   Memory Layout Visualization
         // 
-        // Cache Line 1 (0-63):    [Stack Buf*][Stack Ptrs][Bytecode][Gas][InitGas]
-        // Cache Line 2 (64-127):  [Tracer][Memory][Database][Address]
-        // Cache Line 3 (128-191): [SelfDest*][Host][Logs][Output][Alloc]
+        // Cache Line 1 (0-63):    [Stack(24)][Bytecode(~40)]
+        // Cache Line 2 (64-127):  [Gas][InitGas][Memory][Database][Address]
+        // Cache Line 3 (128-191): [Host][Logs][Output][SelfDest*][Alloc]
         stack: Stack,
         bytecode: Bytecode, 
         gas_remaining: GasType, 
@@ -346,8 +193,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 return Error.BytecodeTooLarge;
             }
 
+            log.debug("Initializing bytecode with len: {}", .{bytecode_raw.len});
             var bytecode = Bytecode.init(allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
+                log.err("Bytecode init failed: {}", .{e});
                 return switch (e) {
                     error.BytecodeTooLarge => Error.BytecodeTooLarge,
                     error.InvalidOpcode => Error.InvalidOpcode,
@@ -355,6 +204,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                     else => Error.AllocationError,
                 };
             };
+            log.debug("Bytecode initialized successfully, packed_bitmap len: {}", .{bytecode.packed_bitmap.len});
             errdefer bytecode.deinit();
 
             var stack = Stack.init(allocator) catch {
@@ -402,6 +252,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// Execute this frame without tracing (backward compatibility method).
         /// Simply delegates to interpret_with_tracer with no tracer.
         pub fn interpret(self: *Self) Error!Success {
+            log.debug("StackFrame.interpret called, bytecode len: {}", .{self.bytecode.runtime_code.len});
             return self.interpret_with_tracer(null, {});
         }
         
@@ -412,40 +263,82 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
         pub fn interpret_with_tracer(self: *Self, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
             const handlers = &Self.opcode_handlers;
+            log.debug("interpret_with_tracer called, bytecode len: {}, gas: {}", .{self.bytecode.runtime_code.len, self.gas_remaining});
 
-            // Build normal dispatch schedule first
-            const schedule = Dispatch.init(self.allocator, &self.bytecode, handlers) catch return Error.AllocationError;
-            defer Dispatch.deinitSchedule(self.allocator, schedule);
-            std.debug.assert(schedule.len > 3);
-
-            var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode) catch return Error.AllocationError;
-            defer self.allocator.free(jump_table.entries);
-
-            if (TracerType) |T| if (@hasDecl(T, "beforeExecute")) tracer_instance.beforeExecute(Self, self);
-
-            // Process first block which just charges static gas for the first set of opcodes that could be statically analyzed
-            // This will be from start of bytecode up to the first jump
-            var start_index: usize = 0;
-            switch (schedule[0]) {
-                .first_block_gas => |meta| {
-                    if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
-                    start_index = 1;
-                },
-                else => unreachable,
+            // Call beforeExecute hook if tracer is configured
+            if (TracerType) |T| {
+                if (@hasDecl(T, "beforeExecute")) {
+                    tracer_instance.beforeExecute(Self, self);
+                }
             }
-            
-            const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
-            
+
             // Execute the bytecode
-            const result = if (TracerType) |_| blk: {
-                // When tracing is enabled, we need to wrap execution with tracing calls
-                // For now, we'll execute with the normal dispatch system
-                // TODO: Build PC-to-opcode mapping and wrap handlers with tracing
+            const result = if (TracerType) |T| blk: {
+                // When tracing is enabled, use the traced dispatch schedule
+                const traced_schedule = Dispatch.initWithTracing(self.allocator, &self.bytecode, handlers, T, tracer_instance) catch return Error.AllocationError;
+                defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
+                
+                // Create jump table for traced schedule
+                var traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &self.bytecode) catch return Error.AllocationError;
+                defer self.allocator.free(traced_jump_table.entries);
+                
+                // Process first block gas if needed
+                var start_index: usize = 0;
+                switch (traced_schedule[0]) {
+                    .first_block_gas => |meta| {
+                        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        start_index = 1;
+                    },
+                    else => {},
+                }
+                
+                const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
-            } else cursor.cursor[0].opcode_handler(self, cursor);
+            } else blk: {
+                // Normal execution without tracing
+                log.debug("Creating dispatch schedule...", .{});
+                const schedule = Dispatch.init(self.allocator, &self.bytecode, handlers) catch |e| {
+                    log.err("Failed to create dispatch schedule: {}", .{e});
+                    return Error.AllocationError;
+                };
+                defer Dispatch.deinitSchedule(self.allocator, schedule);
+                log.debug("Dispatch schedule created, len: {}", .{schedule.len});
+                if (schedule.len < 3) {
+                    log.err("Dispatch schedule is too short! len={}", .{schedule.len});
+                    log.err("  Bytecode len: {}", .{self.bytecode.runtime_code.len});
+                    if (self.bytecode.runtime_code.len > 0) {
+                        log.err("  First few bytes: {x}", .{self.bytecode.runtime_code[0..@min(self.bytecode.runtime_code.len, 16)]});
+                    }
+                    return Error.InvalidOpcode;
+                }
+
+                var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode) catch return Error.AllocationError;
+                defer self.allocator.free(jump_table.entries);
+
+                // Process first block gas
+                var start_index: usize = 0;
+                switch (schedule[0]) {
+                    .first_block_gas => |meta| {
+                        log.debug("First block gas: {}", .{meta.gas});
+                        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                        start_index = 1;
+                    },
+                    else => {},
+                }
+                
+                const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
+                log.debug("Executing first opcode handler...", .{});
+                break :blk cursor.cursor[0].opcode_handler(self, cursor);
+            };
+            
+            log.debug("Execution result: {any}, output size: {}, gas used: {}", .{result, self.output_data.items.len, self.initial_gas - self.gas_remaining});
             
             // Call afterExecute hook if tracer is configured
-            if (TracerType) |T| if (@hasDecl(T, "afterExecute")) tracer_instance.afterExecute(Self, self);
+            if (TracerType) |T| {
+                if (@hasDecl(T, "afterExecute")) {
+                    tracer_instance.afterExecute(Self, self);
+                }
+            }
             
             return result;
         }

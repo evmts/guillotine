@@ -41,7 +41,6 @@ pub fn Stack(comptime config: StackConfig) type {
         // Push: *stack_ptr = value; stack_ptr -= 1;
         // Pop: stack_ptr += 1; return *stack_ptr;
         stack_ptr: [*]WordType,
-        stack_limit: [*]WordType,
 
         /// Initialize a new stack with allocated memory.
         ///
@@ -57,7 +56,6 @@ pub fn Stack(comptime config: StackConfig) type {
             return Self{
                 .buf = memory,
                 .stack_ptr = base_ptr + memory.len,
-                .stack_limit = base_ptr,
             };
         }
 
@@ -68,16 +66,20 @@ pub fn Stack(comptime config: StackConfig) type {
         inline fn stack_base(self: *const Self) [*]WordType {
             return self.buf.ptr + self.buf.len;
         }
+        
+        inline fn stack_limit(self: *const Self) [*]WordType {
+            return self.buf.ptr;
+        }
 
         pub inline fn push_unsafe(self: *Self, value: WordType) void {
             @branchHint(.likely);
-            std.debug.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit));
+            std.debug.assert(@intFromPtr(self.stack_ptr) > @intFromPtr(self.stack_limit()));
             self.stack_ptr -= 1;
             self.stack_ptr[0] = value;
         }
 
         pub inline fn push(self: *Self, value: WordType) Error!void {
-            if (@intFromPtr(self.stack_ptr) <= @intFromPtr(self.stack_limit)) {
+            if (@intFromPtr(self.stack_ptr) <= @intFromPtr(self.stack_limit())) {
                 @branchHint(.cold);
                 return Error.StackOverflow;
             }
@@ -138,7 +140,7 @@ pub fn Stack(comptime config: StackConfig) type {
                 return Error.StackUnderflow;
             }
             // Check if we have room for one more
-            if (@intFromPtr(self.stack_ptr) <= @intFromPtr(self.stack_limit)) {
+            if (@intFromPtr(self.stack_ptr) <= @intFromPtr(self.stack_limit())) {
                 @branchHint(.cold);
                 return Error.StackOverflow;
             }
@@ -925,6 +927,14 @@ test "Zero values and boundary values" {
     try std.testing.expectError(error.StackOverflow, stack_min.push(99));
     try std.testing.expectError(error.StackOverflow, stack_min.dup1());
     try std.testing.expectError(error.StackUnderflow, stack_min.swap1()); // Needs 2 items
+}
+
+test "Stack struct size optimization" {
+    // Verify that removing stack_limit field reduces struct size
+    const StackType = Stack(.{});
+    const stack_size = @sizeOf(StackType);
+    // With buf (slice = ptr + len = 16 bytes) + stack_ptr (8 bytes) = 24 bytes
+    try std.testing.expectEqual(@as(usize, 24), stack_size);
 }
 
 test "Unsafe operations at exact boundaries" {
