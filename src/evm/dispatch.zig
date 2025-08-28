@@ -1335,7 +1335,6 @@ fn createTestHandlersWithSynthetic() [256]*const TestFrame.OpcodeHandler {
 
 test "Dispatch - fusion operations now use correct synthetic handlers" {
     // Test that fusion operations correctly map to synthetic opcode handlers
-    const OpcodeSynthetic = @import("opcode_synthetic.zig").OpcodeSynthetic;
     
     // Test getSyntheticOpcode function returns correct values
     try testing.expect(TestDispatch.getSyntheticOpcode(.push_add, true) == @intFromEnum(OpcodeSynthetic.PUSH_ADD_INLINE));
