@@ -182,10 +182,11 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
         /// Stack: [] → [size]
         pub fn codesize(self: *FrameType, dispatch: Dispatch) Error!Success {
-            const bytecode_len = @as(WordType, @truncate(@as(u256, @intCast(self.bytecode.len()))));
+            // Get codesize from dispatch metadata
+            const op_data = dispatch.getOpData(.CODESIZE);
+            const bytecode_len = @as(WordType, @truncate(@as(u256, @intCast(op_data.metadata.size))));
             try self.stack.push(bytecode_len);
-            const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
@@ -207,9 +208,11 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             const length_usize = @as(usize, @intCast(length));
 
+            // Get codecopy metadata from dispatch
+            const op_data = dispatch.getOpData(.CODECOPY);
+
             if (length_usize == 0) {
-                const next = dispatch.getNext();
-                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+                return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
             }
 
             // Ensure memory capacity
@@ -219,7 +222,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const code_data = self.bytecode.rawWithoutMetadata();
+            const code_data = op_data.metadata.bytecode_ptr.*;
 
             // Copy code to memory with proper zero-padding
             var i: usize = 0;
@@ -229,8 +232,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(dest_offset_usize + i, byte_val) catch return Error.OutOfBounds;
             }
 
-            const next = dispatch.getNext();
-            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
+            return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
