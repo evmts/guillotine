@@ -421,12 +421,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode) catch return Error.AllocationError;
             defer self.allocator.free(jump_table.entries);
 
-            // Call beforeExecute hook if tracer is configured
-            if (TracerType) |T| {
-                if (@hasDecl(T, "beforeExecute")) {
-                    tracer_instance.beforeExecute(Self, self);
-                }
-            }
+            if (TracerType) |T| if (@hasDecl(T, "beforeExecute")) tracer_instance.beforeExecute(Self, self);
 
             // Process first block which just charges static gas for the first set of opcodes that could be statically analyzed
             // This will be from start of bytecode up to the first jump
@@ -450,11 +445,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             } else cursor.cursor[0].opcode_handler(self, cursor);
             
             // Call afterExecute hook if tracer is configured
-            if (TracerType) |T| {
-                if (@hasDecl(T, "afterExecute")) {
-                    tracer_instance.afterExecute(Self, self);
-                }
-            }
+            if (TracerType) |T| if (@hasDecl(T, "afterExecute")) tracer_instance.afterExecute(Self, self);
             
             return result;
         }
