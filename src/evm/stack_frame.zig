@@ -35,6 +35,7 @@ const CallParams = @import("call_params.zig").CallParams;
 const CallResult = @import("call_result.zig").CallResult;
 const logs = @import("logs.zig");
 const Log = logs.Log;
+const LogList = @import("log_list.zig").LogList;
 const dispatch_mod = @import("dispatch.zig");
 
 /// Creates a configured StackFrame type for EVM execution.
@@ -110,6 +111,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         const Self = @This();
 
         //           StackFrame Structure Layout Analysis
+        //
+        //   Total Size: ~120-136 bytes (varies by config.has_database)
+        //   Alignment: 8 bytes (pointer alignment)
+        //
         //   Primary Components (Cacheline 1 - Hot Path)
         //
         //   Offset 0-63: Primary cacheline (64 bytes)
@@ -180,7 +185,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         database: if (config.has_database) ?DatabaseInterface else void,
         contract_address: Address = Address.ZERO_ADDRESS,
         evm_ptr: *anyopaque,
-        logs: std.ArrayList(Log),
+        logs: LogList,
         output_data: std.ArrayList(u8),
         self_destruct: ?*SelfDestruct = null,
         allocator: std.mem.Allocator,
@@ -204,8 +209,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 return Error.AllocationError;
             };
             errdefer memory.deinit();
-            var frame_logs = std.ArrayList(Log){};
-            errdefer frame_logs.deinit(allocator);
+            var frame_logs = LogList.init(allocator);
+            errdefer frame_logs.deinit();
             var output_data = std.ArrayList(u8){};
             errdefer output_data.deinit();
             return Self{
@@ -224,12 +229,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.stack.deinit(allocator);
             self.memory.deinit(allocator);
-            // Free log data
-            for (self.logs.items) |log_entry| {
-                allocator.free(log_entry.topics);
-                allocator.free(log_entry.data);
-            }
-            self.logs.deinit(allocator);
+            self.logs.deinit();
             self.output_data.deinit(allocator);
         }
 
