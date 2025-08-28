@@ -18,8 +18,11 @@ const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
 const Account = @import("database_interface.zig").Account;
 const logs = @import("logs.zig");
 const Log = logs.Log;
+const CallParams = @import("call_params.zig").CallParams;
+const CallResult = @import("call_result.zig").CallResult;
+const Hardfork = @import("hardfork.zig").Hardfork;
 
-/// Static database wrapper that throws WriteProtection errors for state modifications.
+/// Static database wrapper that throws PermissionDenied errors for state modifications.
 /// Implements EIP-214 constraint: STATICCALL cannot modify blockchain state.
 pub const StaticDatabase = struct {
     /// Underlying database for read operations
@@ -44,15 +47,15 @@ pub const StaticDatabase = struct {
         return self.inner.get_storage(address, key);
     }
 
-    pub fn get_code(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![]const u8 {
-        return self.inner.get_code(address);
+    pub fn get_code(self: *StaticDatabase, code_hash: [32]u8) DatabaseInterface.Error![]const u8 {
+        return self.inner.get_code(code_hash);
     }
 
     pub fn get_code_by_address(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![]const u8 {
         return self.inner.get_code_by_address(address);
     }
 
-    pub fn account_exists(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!bool {
+    pub fn account_exists(self: *StaticDatabase, address: [20]u8) bool {
         return self.inner.account_exists(address);
     }
 
@@ -72,51 +75,119 @@ pub const StaticDatabase = struct {
         return self.inner.get_code_hash(address);
     }
 
-    // Write operations - all throw WriteProtection errors per EIP-214
-    pub fn set_account(self: *StaticDatabase, address: Address, account: Account) DatabaseInterface.Error!void {
+    // Write operations - all throw PermissionDenied errors per EIP-214
+    pub fn set_account(self: *StaticDatabase, address: [20]u8, account: Account) DatabaseInterface.Error!void {
         _ = self;
         _ = address;
         _ = account;
-        return DatabaseInterface.Error.WriteProtection;
+        return DatabaseInterface.Error.PermissionDenied;
     }
 
-    pub fn set_storage(self: *StaticDatabase, address: Address, key: u256, value: u256) DatabaseInterface.Error!void {
+    pub fn set_storage(self: *StaticDatabase, address: [20]u8, key: u256, value: u256) DatabaseInterface.Error!void {
         _ = self;
         _ = address;
         _ = key;
         _ = value;
-        return DatabaseInterface.Error.WriteProtection;
+        return DatabaseInterface.Error.PermissionDenied;
     }
 
-    pub fn set_code(self: *StaticDatabase, address: Address, code: []const u8) DatabaseInterface.Error!void {
+    pub fn set_code(self: *StaticDatabase, code: []const u8) DatabaseInterface.Error![32]u8 {
         _ = self;
-        _ = address;
         _ = code;
-        return DatabaseInterface.Error.WriteProtection;
+        return DatabaseInterface.Error.PermissionDenied;
     }
 
-    pub fn set_balance(self: *StaticDatabase, address: Address, balance: u256) DatabaseInterface.Error!void {
+    pub fn set_balance(self: *StaticDatabase, address: [20]u8, balance: u256) DatabaseInterface.Error!void {
         _ = self;
         _ = address;
         _ = balance;
-        return DatabaseInterface.Error.WriteProtection;
+        return DatabaseInterface.Error.PermissionDenied;
     }
 
-    pub fn set_nonce(self: *StaticDatabase, address: Address, nonce: u64) DatabaseInterface.Error!void {
+    pub fn set_nonce(self: *StaticDatabase, address: [20]u8, nonce: u64) DatabaseInterface.Error!void {
         _ = self;
         _ = address;
         _ = nonce;
-        return DatabaseInterface.Error.WriteProtection;
+        return DatabaseInterface.Error.PermissionDenied;
     }
 
-    pub fn delete_account(self: *StaticDatabase, address: Address) DatabaseInterface.Error!void {
+    pub fn delete_account(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!void {
         _ = self;
         _ = address;
-        return DatabaseInterface.Error.WriteProtection;
+        return DatabaseInterface.Error.PermissionDenied;
+    }
+
+    // Transient storage operations - also throw PermissionDenied for writes
+    pub fn get_transient_storage(self: *StaticDatabase, address: [20]u8, key: u256) DatabaseInterface.Error!u256 {
+        return self.inner.get_transient_storage(address, key);
+    }
+
+    pub fn set_transient_storage(self: *StaticDatabase, address: [20]u8, key: u256, value: u256) DatabaseInterface.Error!void {
+        _ = self;
+        _ = address;
+        _ = key;
+        _ = value;
+        return DatabaseInterface.Error.PermissionDenied;
+    }
+    
+    // Read operations - forward to underlying database
+    pub fn get_state_root(self: *StaticDatabase) DatabaseInterface.Error![32]u8 {
+        return self.inner.get_state_root();
+    }
+    
+    // Write operations - throw PermissionDenied
+    pub fn commit_changes(self: *StaticDatabase) DatabaseInterface.Error![32]u8 {
+        _ = self;
+        return DatabaseInterface.Error.PermissionDenied;
+    }
+    
+    pub fn create_snapshot(self: *StaticDatabase) DatabaseInterface.Error!u64 {
+        return self.inner.create_snapshot();
+    }
+    
+    pub fn revert_to_snapshot(self: *StaticDatabase, snapshot_id: u64) DatabaseInterface.Error!void {
+        return self.inner.revert_to_snapshot(snapshot_id);
+    }
+    
+    pub fn commit_snapshot(self: *StaticDatabase, snapshot_id: u64) DatabaseInterface.Error!void {
+        _ = self;
+        _ = snapshot_id;
+        return DatabaseInterface.Error.PermissionDenied;
+    }
+    
+    pub fn begin_batch(self: *StaticDatabase) DatabaseInterface.Error!void {
+        return self.inner.begin_batch();
+    }
+    
+    pub fn commit_batch(self: *StaticDatabase) DatabaseInterface.Error!void {
+        _ = self;
+        return DatabaseInterface.Error.PermissionDenied;
+    }
+    
+    pub fn rollback_batch(self: *StaticDatabase) DatabaseInterface.Error!void {
+        return self.inner.rollback_batch();
+    }
+
+    // Transaction tracking - not relevant but required by interface
+    pub fn begin_transaction(self: *StaticDatabase) DatabaseInterface.Error!u32 {
+        return self.inner.begin_transaction();
+    }
+
+    pub fn commit_transaction(self: *StaticDatabase, id: u32) DatabaseInterface.Error!void {
+        return self.inner.commit_transaction(id);
+    }
+
+    pub fn rollback_transaction(self: *StaticDatabase, id: u32) DatabaseInterface.Error!void {
+        return self.inner.rollback_transaction(id);
+    }
+
+    pub fn deinit(self: *StaticDatabase) void {
+        _ = self;
+        // Nothing to do - inner database is owned by caller
     }
 };
 
-/// Static host implementation that throws WriteProtection errors for state modifications.
+/// Static host implementation that blocks state modifications.
 /// Implements EIP-214 constraint: STATICCALL cannot emit logs or modify state.
 pub fn StaticHost(comptime HostType: type) type {
     return struct {
@@ -200,11 +271,11 @@ pub fn StaticHost(comptime HostType: type) type {
             return self.inner.get_input();
         }
 
-        pub fn is_hardfork_at_least(self: *Self, target: @TypeOf(self.inner.is_hardfork_at_least(undefined))) bool {
+        pub fn is_hardfork_at_least(self: *Self, target: Hardfork) bool {
             return self.inner.is_hardfork_at_least(target);
         }
 
-        pub fn get_hardfork(self: *Self) @TypeOf(self.inner.get_hardfork()) {
+        pub fn get_hardfork(self: *Self) Hardfork {
             return self.inner.get_hardfork();
         }
 
@@ -284,12 +355,12 @@ pub fn StaticHost(comptime HostType: type) type {
         }
 
         /// EIP-214: STATICCALL cannot make state-modifying calls (only STATICCALL allowed)
-        pub fn inner_call(self: *Self, params: @TypeOf(self.inner.inner_call(undefined))) anyerror!@TypeOf(self.inner.inner_call(undefined) catch unreachable) {
+        pub fn inner_call(self: *Self, params: CallParams) anyerror!CallResult {
             // Only allow STATICCALL - other call types would allow state modification
-            // This should be handled at the opcode level, but this is a backup check
-            _ = self;
-            _ = params;
-            return error.WriteProtection;
+            switch (params) {
+                .staticcall => return self.inner.inner_call(params),
+                else => return error.WriteProtection,
+            }
         }
     };
 }
@@ -305,13 +376,13 @@ test "StaticDatabase blocks write operations" {
     const static_interface = static_db.to_database_interface();
     
     // Read operations should work
-    const balance = try static_interface.get_balance(Address.ZERO_ADDRESS);
+    const balance = try static_interface.get_balance(Address.ZERO_ADDRESS.bytes);
     try std.testing.expectEqual(@as(u256, 0), balance);
     
-    // Write operations should throw WriteProtection error
-    try std.testing.expectError(DatabaseInterface.Error.WriteProtection, 
-        static_interface.set_balance(Address.ZERO_ADDRESS, 100));
+    // Write operations should throw PermissionDenied error
+    try std.testing.expectError(DatabaseInterface.Error.PermissionDenied, 
+        static_interface.set_balance(Address.ZERO_ADDRESS.bytes, 100));
     
-    try std.testing.expectError(DatabaseInterface.Error.WriteProtection, 
-        static_interface.set_storage(Address.ZERO_ADDRESS, 0, 42));
+    try std.testing.expectError(DatabaseInterface.Error.PermissionDenied, 
+        static_interface.set_storage(Address.ZERO_ADDRESS.bytes, 0, 42));
 }
