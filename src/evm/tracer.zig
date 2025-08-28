@@ -556,6 +556,11 @@ pub const DebuggingTracer = struct {
         self.paused = false;
         self.step_mode = false;
         self.resume_idx = null;
+
+        // Reset composed prestate tracer if present
+        if (self.prestate_tracer) |pt| {
+            pt.reset();
+        }
     }
 
     fn prune_to_max_history(self: *Self) void {

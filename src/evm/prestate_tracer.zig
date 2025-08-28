@@ -180,6 +180,35 @@ pub const PrestateTracer = struct {
         self.buildFinalStates() catch {};
     }
 
+    /// Reset tracer state efficiently while preserving configuration.
+    /// Clears tracked accounts, states, and modifications, and resets counters.
+    pub fn reset(self: *Self) void {
+        // Clear interaction sets
+        self.created_accounts.clearRetainingCapacity();
+        self.deleted_accounts.clearRetainingCapacity();
+        self.modified_accounts.clearRetainingCapacity();
+        self.accessed_accounts.clearRetainingCapacity();
+
+        // Free account state allocations and clear maps
+        var it1 = self.prestate.iterator();
+        while (it1.next()) |entry| entry.value_ptr.deinit(self.allocator);
+        self.prestate.clearRetainingCapacity();
+
+        var it2 = self.poststate.iterator();
+        while (it2.next()) |entry| entry.value_ptr.deinit(self.allocator);
+        self.poststate.clearRetainingCapacity();
+
+        // Deinit inner storage modification maps, then clear
+        var storage_iter = self.storage_modifications.iterator();
+        while (storage_iter.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        self.storage_modifications.clearRetainingCapacity();
+
+        // Counters
+        self.total_instructions = 0;
+    }
+
     // ===== Storage operations =====
     pub fn onStorageRead(self: *Self, address: Address, slot: u256, value: u256, is_warm: bool) void {
         _ = is_warm;
