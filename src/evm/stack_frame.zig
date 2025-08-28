@@ -85,6 +85,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         pub const Memory = memory_mod.Memory(.{
             .initial_capacity = config.memory_initial_capacity,
             .memory_limit = config.memory_limit,
+            .owned = true,
         });
         /// The struct in charge of managing Evm Word stack
         pub const Stack = stack_mod.Stack(.{
@@ -114,13 +115,12 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Offset 0-63: Primary cacheline (64 bytes)
         //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
         //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
-        //   └── memory: Memory (partial)        // ~32 bytes start
+        //   └── memory: Memory (partial)        // ~32 bytes of 44 total
         // 
         //   Secondary Components (Cacheline 2)
         // 
         //   Offset 64-127: Execution context
-        //   ├── tracer: TracerType              // 0 or configurable size
-        //   ├── memory: Memory                  // ~32 bytes (checkpoint + ptr + flags + cache)
+        //   ├── memory: Memory (continued)      // remaining 12 bytes of 44 total
         //   ├── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable)
         //   └── contract_address: Address       // 20 bytes
         // 
@@ -145,11 +145,19 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //  - Cache optimization: Downward growth for locality
         //  - Optimization: Removed explicit stack_limit field, computed via inline function
         //
-        //  Memory (memory.zig)
+        //  Memory (memory.zig) - 44 bytes total
         //
-        //  - Packed cache struct: 12 bytes total for expansion cache
-        //  - Buffer: Standard ArrayList alignment
+        //  - Structure:
+        //    - checkpoint: usize              // 8 bytes - tracks parent memory boundary
+        //    - buffer_ptr: *ArrayList(u8)     // 8 bytes - pointer to actual memory buffer
+        //    - allocator: std.mem.Allocator   // 16 bytes - allocator for memory operations
+        //    - cached_expansion: packed struct // 12 bytes - gas cost cache
+        //      - last_size: u32   (4 bytes)
+        //      - last_words: u32  (4 bytes)  
+        //      - last_cost: u64   (8 bytes)
         //  - Fast path: Optimized for ≤32 byte expansions (common EVM word size)
+        //  - Zero initialization: Guaranteed on expansion
+        //  - Child memory: Shares buffer with parent, different checkpoint
         //
         //  Bytecode (bytecode.zig)
         //
@@ -167,6 +175,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         // Cache Line 1 (0-63):    [Stack(24)][Gas][Memory(start)]
         // Cache Line 2 (64-127):  [Memory(cont)][Database][Address]
         // Cache Line 3 (128-191): [Host][Logs][Output][SelfDest*][Alloc]
+        // Note: Tracer is not stored in the struct - it's a compile-time parameter
         stack: Stack,
         gas_remaining: GasType, 
         memory: Memory,
