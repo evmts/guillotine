@@ -17,6 +17,8 @@ pub const MemoryConfig = struct {
     initial_capacity: usize = 4096,
     // The maximum memory limit
     memory_limit: u64 = 0xFFFFFF,
+    // Whether this memory instance owns its buffer
+    owned: bool = true,
     
     pub fn validate(comptime self: Self) void {
         if (self.memory_limit > std.math.maxInt(u32)) @compileError("memory_limit cannot exceed u32 max");
