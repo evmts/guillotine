@@ -11,7 +11,7 @@ import InfoTooltip from '~/components/InfoTooltip'
 import { Button } from '~/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
 import { cn } from '~/lib/cn'
-import { type AccountJson, type EvmState, formatHex } from '~/lib/types'
+import { type EvmState, formatHex } from '~/lib/types'
 import { copyToClipboard } from '~/lib/utils'
 
 interface StateDiffProps {
@@ -48,140 +48,6 @@ const hexToDecimal = (hex?: string): string => {
 	}
 }
 
-// Demo state covering all scenarios for easier visual testing
-const DEMO_STATE: EvmState = {
-	gasLeft: 0,
-	depth: 0,
-	stack: [],
-	memory: '0x',
-	logs: [],
-	returnData: '0x',
-	completed: true,
-	currentInstructionIndex: 0,
-	pc: 0,
-	steps: [],
-	preanalyzedBlocks: [],
-	currentPreanalyzedBlockStartIndex: 0,
-	state: {
-		pre: [
-			// read-only (identical pre/post)
-			{
-				address: '0x1111111111111111111111111111111111111111',
-				balance: '0x64', // 100
-				nonce: 1,
-				code: '0x60016000',
-				storage: [
-					{ key: '0x00', value: '0x01' },
-					{ key: '0x01', value: '0x02' },
-				],
-			},
-			// modified: balance only
-			{
-				address: '0x2222222222222222222222222222222222222222',
-				balance: '0x10',
-				nonce: 0,
-				code: '0x',
-				storage: [],
-			},
-			// modified: nonce only
-			{
-				address: '0x3333333333333333333333333333333333333333',
-				balance: '0x0',
-				nonce: 3,
-				code: '0x',
-				storage: [],
-			},
-			// modified: code only
-			{
-				address: '0x4444444444444444444444444444444444444444',
-				balance: '0x0',
-				nonce: 0,
-				code: '0x6001',
-				storage: [],
-			},
-			// storage modified: created, deleted, modified, zero omitted
-			{
-				address: '0x5555555555555555555555555555555555555555',
-				balance: '0x0',
-				nonce: 0,
-				code: '0x',
-				storage: [
-					{ key: '0x10', value: '0xaa' }, // modified -> cc
-					{ key: '0x11', value: '0xbb' }, // deleted
-					{ key: '0x12', value: '0x00' }, // zero -> omitted post
-				],
-			},
-			// deleted account (pre only)
-			{
-				address: '0x7777777777777777777777777777777777777777',
-				balance: '0x2a',
-				nonce: 7,
-				code: '0x6002',
-				storage: [{ key: '0x00', value: '0x01' }],
-			},
-		],
-		post: [
-			// read-only (same as pre)
-			{
-				address: '0x1111111111111111111111111111111111111111',
-				balance: '0x64',
-				nonce: 1,
-				code: '0x60016000',
-				storage: [
-					{ key: '0x00', value: '0x01' },
-					{ key: '0x01', value: '0x02' },
-				],
-			},
-			// modified: balance only
-			{
-				address: '0x2222222222222222222222222222222222222222',
-				balance: '0x20',
-				nonce: 0,
-				code: '0x',
-				storage: [],
-			},
-			// modified: nonce only
-			{
-				address: '0x3333333333333333333333333333333333333333',
-				balance: '0x0',
-				nonce: 4,
-				code: '0x',
-				storage: [],
-			},
-			// modified: code only
-			{
-				address: '0x4444444444444444444444444444444444444444',
-				balance: '0x0',
-				nonce: 0,
-				code: '0x60016001',
-				storage: [],
-			},
-			// storage modified: 0x10 modified, 0x11 deleted (omit), 0x12 zero omitted, 0x13 created
-			{
-				address: '0x5555555555555555555555555555555555555555',
-				balance: '0x0',
-				nonce: 0,
-				code: '0x',
-				storage: [
-					{ key: '0x10', value: '0xcc' }, // modified
-					{ key: '0x13', value: '0xdd' }, // created
-				],
-			},
-			// created account (post only)
-			{
-				address: '0x6666666666666666666666666666666666666666',
-				balance: '0x3e8', // 1000
-				nonce: 1,
-				code: '0x6001600201',
-				storage: [
-					{ key: '0x00', value: '0x01' },
-					{ key: '0x20', value: '0xff' },
-				],
-			},
-		],
-	},
-}
-
 const StateDiff: Component<StateDiffProps> = ({ state }) => {
 	const handleCopy = (value: string, label: string) => {
 		copyToClipboard(value)
@@ -195,12 +61,8 @@ const StateDiff: Component<StateDiffProps> = ({ state }) => {
 	const accountDiffs = createMemo(() => {
 		const diffs: AccountDiff[] = []
 
-		// Merge real state with demo examples for complete coverage
-		const combinedPre: AccountJson[] = [...(state?.state.pre ?? []), ...DEMO_STATE.state.pre]
-		const combinedPost: AccountJson[] = [...(state?.state.post ?? []), ...DEMO_STATE.state.post]
-
-		const preMap = new Map(combinedPre.map((a) => [a.address, a]))
-		const postMap = new Map(combinedPost.map((a) => [a.address, a]))
+		const preMap = new Map(state.state.pre.map((a) => [a.address, a]))
+		const postMap = new Map(state.state.post.map((a) => [a.address, a]))
 		const allAddresses = new Set([...preMap.keys(), ...postMap.keys()])
 
 		for (const address of allAddresses) {
