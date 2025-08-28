@@ -77,13 +77,13 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             // Ensure memory is available
-            self.memory.ensure_capacity(self.allocator, end) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(end))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
             
             // Get data from memory
-            const data = self.memory.get_slice(offset_usize, size_usize) catch return Error.OutOfBounds;
+            const data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch return Error.OutOfBounds;
             
             // Compute hash using appropriate Keccak variant based on WordType
             const result_word = switch (@bitSizeOf(WordType)) {
@@ -301,7 +301,7 @@ test "KECCAK256 opcode - single byte" {
     defer frame.deinit(testing.allocator);
 
     // Store single byte 'a' at offset 0
-    try frame.memory.set_byte(0, 'a');
+    try frame.memory.set_byte(testing.allocator, 0, 'a');
     
     // Push offset and size
     try frame.stack.push(0); // offset
@@ -321,7 +321,7 @@ test "KECCAK256 opcode - hello world" {
 
     // Store "Hello, World!" at offset 0
     const data = "Hello, World!";
-    try frame.memory.set_data_evm(0, data);
+    try frame.memory.set_data_evm(testing.allocator, 0, data);
     
     // Push offset and size
     try frame.stack.push(0); // offset
@@ -341,7 +341,7 @@ test "KECCAK256 opcode - 32 bytes" {
 
     // Store 32 bytes (a full word) at offset 0
     const word: u256 = 0x0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF;
-    try frame.memory.set_u256_evm(0, word);
+    try frame.memory.set_u256_evm(testing.allocator, 0, word);
     
     // Push offset and size
     try frame.stack.push(0); // offset
@@ -365,7 +365,7 @@ test "KECCAK256 opcode - large data" {
     // Store 1KB of data
     const data_size = 1024;
     for (0..data_size) |i| {
-        try frame.memory.set_byte(i, @as(u8, @truncate(i & 0xFF)));
+        try frame.memory.set_byte(testing.allocator, i, @as(u8, @truncate(i & 0xFF)));
     }
     
     // Push offset and size
@@ -387,7 +387,7 @@ test "KECCAK256 opcode - offset data" {
     // Store data at offset 100
     const offset = 100;
     const data = "test data";
-    try frame.memory.set_data_evm(offset, data);
+    try frame.memory.set_data_evm(testing.allocator, offset, data);
     
     // Push offset and size
     try frame.stack.push(offset); // offset
@@ -435,7 +435,7 @@ test "KECCAK256 opcode - patterns" {
 
     // Test pattern: all zeros
     const zeros = [_]u8{0} ** 64;
-    try frame.memory.set_data_evm(0, &zeros);
+    try frame.memory.set_data_evm(testing.allocator, 0, &zeros);
     
     try frame.stack.push(0); // offset
     try frame.stack.push(64); // size
@@ -447,7 +447,7 @@ test "KECCAK256 opcode - patterns" {
     
     // Test pattern: all ones
     const ones = [_]u8{0xFF} ** 64;
-    try frame.memory.set_data_evm(0, &ones);
+    try frame.memory.set_data_evm(testing.allocator, 0, &ones);
     
     try frame.stack.push(0); // offset
     try frame.stack.push(64); // size
@@ -471,7 +471,7 @@ test "KECCAK256 opcode - incremental data" {
     for (1..33) |size| {
         // Fill memory with incrementing bytes
         for (0..size) |i| {
-            try frame.memory.set_byte(i, @as(u8, @truncate(i)));
+            try frame.memory.set_byte(testing.allocator, i, @as(u8, @truncate(i)));
         }
         
         try frame.stack.push(0); // offset
@@ -499,7 +499,7 @@ test "KECCAK256 opcode - memory expansion" {
     const data = "expand memory";
     
     // This should trigger memory expansion
-    try frame.memory.set_data_evm(offset, data);
+    try frame.memory.set_data_evm(testing.allocator, offset, data);
     
     try frame.stack.push(offset); // offset
     try frame.stack.push(data.len); // size
@@ -521,7 +521,7 @@ test "KECCAK256 opcode - known test vectors" {
 
     // Test vector 1: "abc"
     const test1 = "abc";
-    try frame.memory.set_data_evm(0, test1);
+    try frame.memory.set_data_evm(testing.allocator, 0, test1);
     
     try frame.stack.push(0);
     try frame.stack.push(test1.len);
@@ -535,7 +535,7 @@ test "KECCAK256 opcode - known test vectors" {
     
     // Test vector 2: "The quick brown fox jumps over the lazy dog"
     const test2 = "The quick brown fox jumps over the lazy dog";
-    try frame.memory.set_data_evm(0, test2);
+    try frame.memory.set_data_evm(testing.allocator, 0, test2);
     
     try frame.stack.push(0);
     try frame.stack.push(test2.len);
@@ -563,9 +563,9 @@ test "KECCAK256 opcode - alignment and boundaries" {
     for (offsets, 0..) |offset, i| {
         // Clear memory and set data at offset
         for (0..100) |j| {
-            try frame.memory.set_byte(j, 0);
+            try frame.memory.set_byte(testing.allocator, j, 0);
         }
-        try frame.memory.set_data_evm(offset, test_data);
+        try frame.memory.set_data_evm(testing.allocator, offset, test_data);
         
         try frame.stack.push(offset);
         try frame.stack.push(test_data.len);
@@ -591,9 +591,9 @@ test "KECCAK256 opcode - consecutive hashes" {
     const data2 = "second";
     const data3 = "third";
     
-    try frame.memory.set_data_evm(0, data1);
-    try frame.memory.set_data_evm(100, data2);
-    try frame.memory.set_data_evm(200, data3);
+    try frame.memory.set_data_evm(testing.allocator, 0, data1);
+    try frame.memory.set_data_evm(testing.allocator, 100, data2);
+    try frame.memory.set_data_evm(testing.allocator, 200, data3);
     
     // Hash first data
     try frame.stack.push(0);
@@ -646,7 +646,7 @@ test "KECCAK with u64 WordType - test data" {
 
     // Store test data
     const data = "test";
-    try frame.memory.set_data_evm(0, data);
+    try frame.memory.set_data_evm(testing.allocator, 0, data);
     
     // Push offset and size
     try frame.stack.push(0);
@@ -682,7 +682,7 @@ test "KECCAK with u32 WordType - test data" {
 
     // Store test data
     const data = "Hello";
-    try frame.memory.set_data_evm(0, data);
+    try frame.memory.set_data_evm(testing.allocator, 0, data);
     
     // Push offset and size
     try frame.stack.push(0);
@@ -703,7 +703,7 @@ test "KECCAK different word sizes - same input different outputs" {
     // U256 test
     var frame_u256 = try createTestFrame(testing.allocator);
     defer frame_u256.deinit(testing.allocator);
-    try frame_u256.memory.set_data_evm(0, test_data);
+    try frame_u256.memory.set_data_evm(testing.allocator, 0, test_data);
     try frame_u256.stack.push(0);
     try frame_u256.stack.push(test_data.len);
     const dispatch_u256 = createMockDispatch();
@@ -713,7 +713,7 @@ test "KECCAK different word sizes - same input different outputs" {
     // U64 test
     var frame_u64 = try createTestFrameU64(testing.allocator);
     defer frame_u64.deinit(testing.allocator);
-    try frame_u64.memory.set_data_evm(0, test_data);
+    try frame_u64.memory.set_data_evm(testing.allocator, 0, test_data);
     try frame_u64.stack.push(0);
     try frame_u64.stack.push(test_data.len);
     const dispatch_u64 = createMockDispatchU64();
@@ -723,7 +723,7 @@ test "KECCAK different word sizes - same input different outputs" {
     // U32 test
     var frame_u32 = try createTestFrameU32(testing.allocator);
     defer frame_u32.deinit(testing.allocator);
-    try frame_u32.memory.set_data_evm(0, test_data);
+    try frame_u32.memory.set_data_evm(testing.allocator, 0, test_data);
     try frame_u32.stack.push(0);
     try frame_u32.stack.push(test_data.len);
     const dispatch_u32 = createMockDispatchU32();

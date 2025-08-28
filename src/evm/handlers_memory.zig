@@ -26,14 +26,14 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(offset_usize + 32)));
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
             self.gas_remaining -= @intCast(GasConstants.GasFastestStep + memory_expansion_cost);
             
             // Read 32 bytes from memory (EVM-compliant with automatic expansion)
-            const value_u256 = self.memory.get_u256_evm(self.allocator, offset_usize) catch |err| switch (err) {
+            const value_u256 = self.memory.get_u256_evm(self.allocator, @as(u24, @intCast(offset_usize))) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -63,7 +63,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(offset_usize + 32)));
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -71,7 +71,7 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Convert to u256 if necessary and store
             const value_u256 = @as(u256, value);
-            self.memory.set_u256_evm(self.allocator, offset_usize, value_u256) catch |err| switch (err) {
+            self.memory.set_u256_evm(self.allocator, @as(u24, @intCast(offset_usize)), value_u256) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -96,7 +96,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 1);
+            const memory_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(offset_usize + 1)));
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -104,7 +104,7 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Store the least significant byte
             const byte_value = @as(u8, @truncate(value));
-            self.memory.set_byte_evm(self.allocator, offset_usize, byte_value) catch |err| switch (err) {
+            self.memory.set_byte_evm(self.allocator, @as(u24, @intCast(offset_usize)), byte_value) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
@@ -153,8 +153,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const copy_gas_cost = GasConstants.GasFastestStep + words * GasConstants.CopyGas;
             
             // Calculate memory expansion cost for both source and destination
-            const src_expansion_cost = self.memory.get_expansion_cost(src_usize + size_usize);
-            const dest_expansion_cost = self.memory.get_expansion_cost(dest_usize + size_usize);
+            const src_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(src_usize + size_usize)));
+            const dest_expansion_cost = self.memory.get_expansion_cost(@as(u24, @intCast(dest_usize + size_usize)));
             const memory_expansion_cost = @max(src_expansion_cost, dest_expansion_cost);
             
             const total_gas_cost = copy_gas_cost + memory_expansion_cost;
@@ -165,13 +165,13 @@ pub fn Handlers(comptime FrameType: type) type {
             
             // Perform the memory copy
             // Get source data
-            const src_data = self.memory.get_slice(src_usize, size_usize) catch |err| switch (err) {
+            const src_data = self.memory.get_slice(@as(u24, @intCast(src_usize)), @as(u24, @intCast(size_usize))) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
             
             // Copy to destination
-            self.memory.set_data_evm(dest_usize, src_data) catch |err| switch (err) {
+            self.memory.set_data_evm(self.allocator, @as(u24, @intCast(dest_usize)), src_data) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
@@ -300,14 +300,14 @@ test "MSIZE opcode - memory size tracking" {
     try testing.expectEqual(@as(u256, 0), try frame.stack.pop());
     
     // Store at offset 31 - should expand memory to 32 bytes
-    frame.memory.set_byte_evm(31, 0xFF) catch unreachable;
+    frame.memory.set_byte_evm(testing.allocator, 31, 0xFF) catch unreachable;
     
     dispatch = createMockDispatch();
     _ = try TestFrame.MemoryHandlers.msize(frame, dispatch);
     try testing.expectEqual(@as(u256, 32), try frame.stack.pop());
     
     // Store at offset 63 - should expand memory to 64 bytes
-    frame.memory.set_byte_evm(63, 0xFF) catch unreachable;
+    frame.memory.set_byte_evm(testing.allocator, 63, 0xFF) catch unreachable;
     
     dispatch = createMockDispatch();
     _ = try TestFrame.MemoryHandlers.msize(frame, dispatch);
@@ -453,7 +453,7 @@ test "MLOAD opcode - cross-boundary reads" {
 
     // Set up memory with pattern
     for (0..64) |i| {
-        frame.memory.set_byte_evm(i, @as(u8, @truncate(i))) catch unreachable;
+        frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), @as(u8, @truncate(i))) catch unreachable;
     }
 
     // Load from offset 5 (not aligned to word boundary)
@@ -585,7 +585,7 @@ test "MSTORE8 opcode - all byte values" {
         const dispatch = createMockDispatch();
         _ = try TestFrame.MemoryHandlers.mstore8(frame, dispatch);
         
-        const stored = frame.memory.get_byte(i) catch unreachable;
+        const stored = frame.memory.get_byte(@as(u24, @intCast(i))) catch unreachable;
         try testing.expectEqual(@as(u8, @truncate(i)), stored);
     }
 }
@@ -609,7 +609,7 @@ test "MSTORE8 opcode - truncation" {
         const dispatch = createMockDispatch();
         _ = try TestFrame.MemoryHandlers.mstore8(frame, dispatch);
         
-        const stored = frame.memory.get_byte(i * 4) catch unreachable;
+        const stored = frame.memory.get_byte(@as(u24, @intCast(i * 4))) catch unreachable;
         try testing.expectEqual(@as(u8, @truncate(value)), stored);
     }
 }
@@ -649,7 +649,7 @@ test "MSTORE8 opcode - consecutive writes" {
     
     // Read back and verify
     for (hello, 0..) |expected_char, i| {
-        const stored = frame.memory.get_byte(i) catch unreachable;
+        const stored = frame.memory.get_byte(@as(u24, @intCast(i))) catch unreachable;
         try testing.expectEqual(expected_char, stored);
     }
 }
@@ -707,7 +707,7 @@ test "MSIZE opcode - no spurious growth" {
     defer frame.deinit(testing.allocator);
 
     // Access memory at offset 31 (should grow to 32)
-    frame.memory.set_byte_evm(31, 0xFF) catch unreachable;
+    frame.memory.set_byte_evm(testing.allocator, 31, 0xFF) catch unreachable;
     
     // Check size multiple times - should remain constant
     for (0..5) |_| {
@@ -729,7 +729,7 @@ test "MCOPY opcode - various sizes" {
     for (sizes) |size| {
         // Fill source with pattern
         for (0..size) |i| {
-            frame.memory.set_byte_evm(i, @as(u8, @truncate(i & 0xFF))) catch unreachable;
+            frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), @as(u8, @truncate(i & 0xFF))) catch unreachable;
         }
         
         // Copy to destination at offset 2000
@@ -742,8 +742,8 @@ test "MCOPY opcode - various sizes" {
         
         // Verify all bytes copied correctly
         for (0..size) |i| {
-            const src_byte = frame.memory.get_byte(i) catch unreachable;
-            const dst_byte = frame.memory.get_byte(2000 + i) catch unreachable;
+            const src_byte = frame.memory.get_byte(@as(u24, @intCast(i))) catch unreachable;
+            const dst_byte = frame.memory.get_byte(@as(u24, @intCast(2000 + i))) catch unreachable;
             try testing.expectEqual(src_byte, dst_byte);
         }
     }
@@ -832,7 +832,7 @@ test "MCOPY opcode - large copy" {
     // Fill source with pattern
     for (0..size) |i| {
         const byte = @as(u8, @truncate((i * 7 + 3) % 256));
-        frame.memory.set_byte_evm(i, byte) catch unreachable;
+        frame.memory.set_byte_evm(testing.allocator, @as(u24, @intCast(i)), byte) catch unreachable;
     }
     
     // Copy to high offset
@@ -845,8 +845,8 @@ test "MCOPY opcode - large copy" {
     
     // Verify first and last few bytes
     for ([_]usize{ 0, 1, 2, size - 3, size - 2, size - 1 }) |offset| {
-        const src = frame.memory.get_byte(offset) catch unreachable;
-        const dst = frame.memory.get_byte(50000 + offset) catch unreachable;
+        const src = frame.memory.get_byte(@as(u24, @intCast(offset))) catch unreachable;
+        const dst = frame.memory.get_byte(@as(u24, @intCast(50000 + offset))) catch unreachable;
         try testing.expectEqual(src, dst);
     }
 }

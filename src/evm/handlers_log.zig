@@ -47,12 +47,12 @@ pub fn Handlers(comptime FrameType: type) type {
                     // Ensure memory capacity
                     if (length_usize > 0) {
                         const memory_end = offset_usize + length_usize;
-                        self.memory.ensure_capacity(self.allocator, memory_end) catch return Error.OutOfBounds;
+                        self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
                     }
                     
                     // Get data from memory
                     const data = if (length_usize > 0) 
-                        self.memory.get_slice(offset_usize, length_usize) catch return Error.OutOfBounds
+                        self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(length_usize))) catch return Error.OutOfBounds
                     else 
                         &[_]u8{};
                     
@@ -229,7 +229,7 @@ test "LOG0 opcode - with data" {
 
     // Write test data to memory
     const test_data = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
-    try frame.memory.set_data(0, &test_data);
+    try frame.memory.set_data(testing.allocator, 0, &test_data);
 
     // LOG0 with data
     try frame.stack.push(0); // offset
@@ -255,7 +255,7 @@ test "LOG1 opcode - with topic" {
 
     // Write test data to memory
     const test_data = [_]u8{ 0x11, 0x22 };
-    try frame.memory.set_data(0, &test_data);
+    try frame.memory.set_data(testing.allocator, 0, &test_data);
 
     // LOG1 with one topic
     try frame.stack.push(0);     // offset
@@ -402,7 +402,7 @@ test "LOG opcodes - large data" {
     for (&large_data, 0..) |*byte, i| {
         byte.* = @intCast(i & 0xFF);
     }
-    try frame.memory.set_data(0, &large_data);
+    try frame.memory.set_data(testing.allocator, 0, &large_data);
 
     // LOG1 with large data
     try frame.stack.push(0);           // offset
@@ -477,9 +477,9 @@ test "LOG opcodes - memory boundary access" {
     defer frame.deinit(testing.allocator);
 
     // Write data at various memory locations
-    try frame.memory.set_byte(31, 0xAA);  // Last byte of first word
-    try frame.memory.set_byte(32, 0xBB);  // First byte of second word
-    try frame.memory.set_byte(33, 0xCC);  // Second byte of second word
+    try frame.memory.set_byte(testing.allocator, 31, 0xAA);  // Last byte of first word
+    try frame.memory.set_byte(testing.allocator, 32, 0xBB);  // First byte of second word
+    try frame.memory.set_byte(testing.allocator, 33, 0xCC);  // Second byte of second word
 
     // LOG0 crossing word boundary
     try frame.stack.push(31); // offset
@@ -543,9 +543,9 @@ test "LOG opcodes - maximum data sizes" {
     
     for (sizes) |size| {
         // Ensure memory capacity and fill with test pattern
-        try frame.memory.ensure_capacity(size);
+        try frame.memory.ensure_capacity(testing.allocator, size);
         for (0..size) |i| {
-            try frame.memory.set_byte(i, @intCast((i * 17) & 0xFF)); // Test pattern
+            try frame.memory.set_byte(testing.allocator, i, @intCast((i * 17) & 0xFF)); // Test pattern
         }
         
         try frame.stack.push(0);    // offset
@@ -633,9 +633,9 @@ test "LOG opcodes - multiple logs in sequence" {
     defer frame.deinit(testing.allocator);
 
     // Write different data patterns
-    try frame.memory.set_data(0, &[_]u8{0x11, 0x11});
-    try frame.memory.set_data(10, &[_]u8{0x22, 0x22});
-    try frame.memory.set_data(20, &[_]u8{0x33, 0x33});
+    try frame.memory.set_data(testing.allocator, 0, &[_]u8{0x11, 0x11});
+    try frame.memory.set_data(testing.allocator, 10, &[_]u8{0x22, 0x22});
+    try frame.memory.set_data(testing.allocator, 20, &[_]u8{0x33, 0x33});
     
     const dispatch = createMockDispatch();
     

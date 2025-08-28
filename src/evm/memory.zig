@@ -34,13 +34,8 @@ pub fn Memory(comptime config: MemoryConfig) type {
         pub const MEMORY_LIMIT = config.memory_limit;
         pub const is_owned = config.owned;
         
-        checkpoint: usize,
+        checkpoint: u24,
         buffer_ptr: *std.ArrayList(u8),
-        cached_expansion: packed struct {
-            last_size: u32,  // Reduced from u64 - EVM memory limit is 2^24 bytes
-            last_words: u32, // Reduced from u64 - matches last_size / 32
-            last_cost: u64,
-        } = .{ .last_size = 0, .last_words = 0, .last_cost = 0 },
         
         pub fn init(allocator: std.mem.Allocator) !Self {
             if (is_owned) {
@@ -58,7 +53,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             }
         }
         
-        pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: usize) !Self {
+        pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: u24) !Self {
             // For backward compatibility on owned memory types, we just ignore ownership and return borrowed-like behavior
             return Self{
                 .checkpoint = checkpoint,
@@ -78,7 +73,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             // Children are always borrowed memory types
             const BorrowedMemType = Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false });
             return BorrowedMemType{
-                .checkpoint = self.buffer_ptr.items.len,
+                .checkpoint = @as(u24, @intCast(self.buffer_ptr.items.len)),
                 .buffer_ptr = self.buffer_ptr,
             };
         }
@@ -86,12 +81,15 @@ pub fn Memory(comptime config: MemoryConfig) type {
         // Common methods that work on the inner Self type
         pub fn size(self: *const Self) usize {
             const total = self.buffer_ptr.items.len;
-            if (total <= self.checkpoint) return 0;
-            return total - self.checkpoint;
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            if (total <= checkpoint_usize) return 0;
+            return total - checkpoint_usize;
         }
         
-        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: usize) !void {
-            const required_total = self.checkpoint + new_size;
+        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u24) !void {
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            const new_size_usize = @as(usize, new_size);
+            const required_total = checkpoint_usize + new_size_usize;
             if (required_total > MEMORY_LIMIT) return MemoryError.MemoryOverflow;
             
             const current_len = self.buffer_ptr.items.len;
@@ -120,16 +118,18 @@ pub fn Memory(comptime config: MemoryConfig) type {
         }
         
         // EVM-compliant memory operations that expand to word boundaries
-        pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, data: []const u8) !void {
-            const end = offset + data.len;
+        pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
+            const offset_usize = @as(usize, offset);
+            const end = offset_usize + data.len;
             // Round up to next 32-byte word boundary for EVM compliance
             const word_aligned_end = ((end + 31) >> 5) << 5;
-            try self.ensure_capacity(allocator, word_aligned_end);
-            const start_idx = self.checkpoint + offset;
+            try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            const start_idx = checkpoint_usize + offset_usize;
             @memcpy(self.buffer_ptr.items[start_idx..start_idx + data.len], data);
         }
         
-        pub fn set_byte_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u8) !void {
+        pub fn set_byte_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, value: u8) !void {
             const bytes = [_]u8{value};
             try self.set_data_evm(allocator, offset, &bytes);
         }
@@ -146,22 +146,27 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return bytes;
         }
 
-        pub fn set_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u256) !void {
+        pub fn set_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, value: u256) !void {
             const bytes = u256_to_bytes(value);
             try self.set_data_evm(allocator, offset, &bytes);
         }
         
-        pub fn get_slice(self: *const Self, offset: usize, len: usize) MemoryError![]const u8 {
-            const end = offset + len;
+        pub fn get_slice(self: *const Self, offset: u24, len: u24) MemoryError![]const u8 {
+            const offset_usize = @as(usize, offset);
+            const len_usize = @as(usize, len);
+            const end = offset_usize + len_usize;
             if (end > self.size()) return MemoryError.OutOfBounds;
-            const start_idx = self.checkpoint + offset;
-            return self.buffer_ptr.items[start_idx..start_idx + len];
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            const start_idx = checkpoint_usize + offset_usize;
+            return self.buffer_ptr.items[start_idx..start_idx + len_usize];
         }
         
-        pub fn set_data(self: *Self, allocator: std.mem.Allocator, offset: usize, data: []const u8) !void {
-            const end = offset + data.len;
-            try self.ensure_capacity(allocator, end);
-            const start_idx = self.checkpoint + offset;
+        pub fn set_data(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
+            const offset_usize = @as(usize, offset);
+            const end = offset_usize + data.len;
+            try self.ensure_capacity(allocator, @as(u24, @intCast(end)));
+            const checkpoint_usize = @as(usize, self.checkpoint);
+            const start_idx = checkpoint_usize + offset_usize;
             @memcpy(self.buffer_ptr.items[start_idx..start_idx + data.len], data);
         }
         
@@ -170,9 +175,8 @@ pub fn Memory(comptime config: MemoryConfig) type {
                 self.buffer_ptr.items.len = 0;
                 self.checkpoint = 0;
             } else {
-                self.checkpoint = self.buffer_ptr.items.len;
+                self.checkpoint = @as(u24, @intCast(self.buffer_ptr.items.len));
             }
-            self.cached_expansion = .{ .last_size = 0, .last_words = 0, .last_cost = 0 };
         }
         
         fn bytes_to_u256(bytes: []const u8) u256 {
@@ -181,30 +185,31 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return result;
         }
 
-        pub fn get_u256(self: *const Self, offset: usize) !u256 {
+        pub fn get_u256(self: *const Self, offset: u24) !u256 {
             const slice = try self.get_slice(offset, 32);
             return bytes_to_u256(slice);
         }
         
         // EVM-compliant read that expands memory if needed
-        pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: usize) !u256 {
-            const word_aligned_end = ((offset + 32 + 31) >> 5) << 5;
-            try self.ensure_capacity(allocator, word_aligned_end);
+        pub fn get_u256_evm(self: *Self, allocator: std.mem.Allocator, offset: u24) !u256 {
+            const offset_usize = @as(usize, offset);
+            const word_aligned_end = ((offset_usize + 32 + 31) >> 5) << 5;
+            try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
             const slice = try self.get_slice(offset, 32);
             return bytes_to_u256(slice);
         }
         
-        pub fn set_u256(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u256) !void {
+        pub fn set_u256(self: *Self, allocator: std.mem.Allocator, offset: u24, value: u256) !void {
             const bytes = u256_to_bytes(value);
             try self.set_data(allocator, offset, &bytes);
         }
         
-        pub fn get_byte(self: *const Self, offset: usize) !u8 {
+        pub fn get_byte(self: *const Self, offset: u24) !u8 {
             const slice = try self.get_slice(offset, 1);
             return slice[0];
         }
         
-        pub fn set_byte(self: *Self, allocator: std.mem.Allocator, offset: usize, value: u8) !void {
+        pub fn set_byte(self: *Self, allocator: std.mem.Allocator, offset: u24, value: u8) !void {
             const bytes = [_]u8{value};
             try self.set_data(allocator, offset, &bytes);
         }
@@ -212,19 +217,15 @@ pub fn Memory(comptime config: MemoryConfig) type {
         fn calculate_memory_cost(words: u64) u64 {
             return 3 * words + ((words * words) >> 9);  // Bit shift instead of / 512
         }
-        pub fn get_expansion_cost(self: *Self, new_size: u64) u64 {
+        pub fn get_expansion_cost(self: *const Self, new_size: u24) u64 {
+            const new_size_u64 = @as(u64, new_size);
             const current_size = @as(u64, @intCast(self.size()));
-            if (new_size <= current_size) return 0;
-            const new_words = (new_size + 31) >> 5;  // Bit shift instead of / 32
+            if (new_size_u64 <= current_size) return 0;
+            const new_words = (new_size_u64 + 31) >> 5;  // Bit shift instead of / 32
             const current_words = (current_size + 31) >> 5;  // Bit shift instead of / 32
-            if (new_size <= self.cached_expansion.last_size) return 0;
             const new_cost = calculate_memory_cost(new_words);
             const current_cost = calculate_memory_cost(current_words);
-            const expansion_cost = new_cost - current_cost;
-            self.cached_expansion.last_size = @intCast(new_size);
-            self.cached_expansion.last_words = @intCast(new_words);
-            self.cached_expansion.last_cost = new_cost;
-            return expansion_cost;
+            return new_cost - current_cost;
         }
         
         pub fn get_buffer_ref(self: *Self) *std.ArrayList(u8) {
@@ -583,16 +584,11 @@ test "Memory struct size verification" {
     // Both owned and borrowed should have the same size
     try std.testing.expectEqual(@sizeOf(OwnedMem), @sizeOf(BorrowedMem));
     
-    // Check the actual size - 32 bytes on 64-bit systems
-    // checkpoint (8) + buffer_ptr (8) + cached_expansion (12) + padding (4) = 32 bytes
-    try std.testing.expectEqual(@as(usize, 32), @sizeOf(OwnedMem));
+    // Check the actual size - 16 bytes on 64-bit systems
+    // checkpoint (3) + padding (5) + buffer_ptr (8) = 16 bytes
+    try std.testing.expectEqual(@as(usize, 16), @sizeOf(OwnedMem));
     
     // Verify field offsets
     try std.testing.expectEqual(@as(usize, 0), @offsetOf(OwnedMem, "checkpoint"));
     try std.testing.expectEqual(@as(usize, 8), @offsetOf(OwnedMem, "buffer_ptr"));
-    try std.testing.expectEqual(@as(usize, 16), @offsetOf(OwnedMem, "cached_expansion"));
-    
-    // The packed struct is 12 bytes but struct has 4 bytes padding for 8-byte alignment
-    const dummy = OwnedMem{ .checkpoint = 0, .buffer_ptr = undefined };
-    try std.testing.expectEqual(@as(usize, 12), @sizeOf(@TypeOf(dummy.cached_expansion)));
 }

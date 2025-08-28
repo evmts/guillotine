@@ -81,7 +81,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.allocator, input_end) catch {
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(input_end))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -91,7 +91,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.allocator, output_end) catch {
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(output_end))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -101,7 +101,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Extract input data
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(input_offset_usize, input_size_usize) catch {
+                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -129,7 +129,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.allocator, output_offset_usize, result.output[0..copy_size]) catch {
+                self.memory.set_data(self.allocator, @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -192,7 +192,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.allocator, input_end) catch {
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(input_end))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -202,7 +202,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.allocator, output_end) catch {
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(output_end))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -212,7 +212,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Extract input data
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(input_offset_usize, input_size_usize) catch {
+                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -240,7 +240,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.allocator, output_offset_usize, result.output[0..copy_size]) catch {
+                self.memory.set_data(self.allocator, @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -303,7 +303,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(self.allocator, input_end) catch {
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(input_end))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -313,7 +313,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(self.allocator, output_end) catch {
+                self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(output_end))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -323,7 +323,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Extract input data
             var input_data: []const u8 = &.{};
             if (input_size_usize > 0) {
-                input_data = self.memory.get_slice(input_offset_usize, input_size_usize) catch {
+                input_data = self.memory.get_slice(@as(u24, @intCast(input_offset_usize)), @as(u24, @intCast(input_size_usize))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -350,7 +350,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(self.allocator, output_offset_usize, result.output[0..copy_size]) catch {
+                self.memory.set_data(self.allocator, @as(u24, @intCast(output_offset_usize)), result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -395,7 +395,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(self.allocator, memory_end) catch {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
                 return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -404,7 +404,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Extract initialization code
             var init_code: []const u8 = &.{};
             if (size_usize > 0) {
-                init_code = self.memory.get_slice(offset_usize, size_usize) catch {
+                init_code = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -469,7 +469,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(self.allocator, memory_end) catch {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
                 return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -478,7 +478,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Extract initialization code
             var init_code: []const u8 = &.{};
             if (size_usize > 0) {
-                init_code = self.memory.get_slice(offset_usize, size_usize) catch {
+                init_code = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -543,11 +543,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(self.allocator, memory_end) catch return Error.OutOfBounds;
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
 
             // Extract return data from memory and store it
             if (size_usize > 0) {
-                const return_data = self.memory.get_slice(offset_usize, size_usize) catch {
+                const return_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     log.err("RETURN: Failed to get memory slice at offset {} size {}", .{offset_usize, size_usize});
                     return Error.OutOfBounds;
                 };
@@ -585,11 +585,11 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(self.allocator, memory_end) catch return Error.OutOfBounds;
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(memory_end))) catch return Error.OutOfBounds;
 
             // Extract revert data from memory and store it
             if (size_usize > 0) {
-                const revert_data = self.memory.get_slice(offset_usize, size_usize) catch {
+                const revert_data = self.memory.get_slice(@as(u24, @intCast(offset_usize)), @as(u24, @intCast(size_usize))) catch {
                     return Error.OutOfBounds;
                 };
                 // Clear any existing output data
@@ -964,7 +964,7 @@ test "RETURN opcode - offset at memory boundary" {
     // Write data at different offsets
     const test_data = [_]u8{ 0xAA, 0xBB, 0xCC, 0xDD };
     const offset = 100;
-    try frame.memory.set_data(offset, &test_data);
+    try frame.memory.set_data(testing.allocator, @as(u24, @intCast(offset)), &test_data);
 
     try frame.stack.push(offset); // offset
     try frame.stack.push(test_data.len); // size
@@ -1365,7 +1365,7 @@ test "DELEGATECALL opcode - preserves context" {
     defer frame.deinit(testing.allocator);
 
     const input = "delegate input";
-    try frame.memory.set_data(0, input);
+    try frame.memory.set_data(testing.allocator, 0, input);
 
     try frame.stack.push(50000); // gas
     try frame.stack.push(0xDEADBEEF); // address

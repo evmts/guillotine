@@ -160,7 +160,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const new_size = dest_offset_usize + length_usize;
-            self.memory.ensure_capacity(new_size) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
@@ -172,7 +172,7 @@ pub fn Handlers(comptime FrameType: type) type {
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < calldata.len) calldata[src_index] else 0;
-                self.memory.set_byte(dest_offset_usize + i, byte_val) catch return Error.OutOfBounds;
+                self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
             const next = dispatch.getNext();
@@ -217,7 +217,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const new_size = dest_offset_usize + length_usize;
-            self.memory.ensure_capacity(new_size) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
@@ -229,7 +229,7 @@ pub fn Handlers(comptime FrameType: type) type {
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < code_data.len) code_data[src_index] else 0;
-                self.memory.set_byte(dest_offset_usize + i, byte_val) catch return Error.OutOfBounds;
+                self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
             return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
@@ -285,7 +285,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const new_size = dest_offset_usize + length_usize;
-            self.memory.ensure_capacity(new_size) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
@@ -297,7 +297,7 @@ pub fn Handlers(comptime FrameType: type) type {
             while (i < length_usize) : (i += 1) {
                 const src_index = offset_usize + i;
                 const byte_val = if (src_index < code.len) code[src_index] else 0;
-                self.memory.set_byte(dest_offset_usize + i, byte_val) catch return Error.OutOfBounds;
+                self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
             const next = dispatch.getNext();
@@ -388,14 +388,14 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const new_size = dest_offset_usize + length_usize;
-            self.memory.ensure_capacity(new_size) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.allocator, @as(u24, @intCast(new_size))) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
 
             // Copy return data to memory (no zero-padding needed since bounds are checked)
             const src_slice = return_data[offset_usize..][0..length_usize];
-            self.memory.set_data(dest_offset_usize, src_slice) catch return Error.OutOfBounds;
+            self.memory.set_data(self.allocator, @as(u24, @intCast(dest_offset_usize)), src_slice) catch return Error.OutOfBounds;
 
             const next = dispatch.getNext();
             return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });

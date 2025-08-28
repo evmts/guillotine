@@ -115,19 +115,20 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Offset 0-63: Primary cacheline (64 bytes)
         //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
         //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
-        //   └── memory: Memory                  // 32 bytes (28 + 4 padding)
+        //   ├── memory: Memory                  // 16 bytes
+        //   ├── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable)
+        //   └── contract_address: Address       // 20 bytes (fits if no database)
         // 
         //   Secondary Components (Cacheline 2)
         // 
         //   Offset 64-127: Execution context
-        //   ├── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable)
-        //   ├── contract_address: Address       // 20 bytes
-        //   └── host: Host (partial)            // varies in size
+        //   ├── contract_address: Address       // 20 bytes (if database enabled)
+        //   ├── host: Host                      // 16 bytes (ptr + vtable)
+        //   └── logs: ArrayList(Log)            // 24 bytes
         // 
         //   Tertiary Components (Cacheline 3+)
         // 
         //   Offset 128+: Cold data
-        //   ├── host: Host                      // size varies
         //   ├── logs: ArrayList(Log)            // 24 bytes
         //   ├── output_data: ArrayList(u8)      // 24 bytes
         //   ├── self_destruct: ?*SelfDestruct   // 8 bytes
@@ -145,16 +146,15 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //  - Cache optimization: Downward growth for locality
         //  - Optimization: Removed explicit stack_limit field, computed via inline function
         //
-        //  Memory (memory.zig) - 28 bytes total (32 with padding)
+        //  Memory (memory.zig) - 16 bytes total
         //
         //  - Structure:
-        //    - checkpoint: usize              // 8 bytes - tracks parent memory boundary
+        //    - checkpoint: u24                // 3 bytes - tracks parent memory boundary
+        //    - padding                        // 5 bytes for alignment
         //    - buffer_ptr: *ArrayList(u8)     // 8 bytes - pointer to actual memory buffer
-        //    - cached_expansion: packed struct // 12 bytes - gas cost cache
-        //      - last_size: u32   (4 bytes)
-        //      - last_words: u32  (4 bytes)  
-        //      - last_cost: u64   (8 bytes)
+        //  - Gas caching removed: Direct calculation is fast enough
         //  - Allocator removed: Now passed as parameter to methods instead of stored
+        //  - All offsets/sizes use u24: Matches EVM's 16MB (2^24) memory limit
         //  - Fast path: Optimized for ≤32 byte expansions (common EVM word size)
         //  - Zero initialization: Guaranteed on expansion
         //  - Child memory: Shares buffer with parent, different checkpoint
@@ -172,9 +172,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //
         //   Memory Layout Visualization
         // 
-        // Cache Line 1 (0-63):    [Stack(24)][Gas(4-8)][Memory(32)]
-        // Cache Line 2 (64-127):  [Database(0-16)][Address(20)][Host(partial)]
-        // Cache Line 3 (128-191): [Host(cont)][Logs(24)][Output(24)][SelfDest*(8)][Alloc(16)]
+        // Cache Line 1 (0-63):    [Stack(24)][Gas(4-8)][Memory(16)][Database(0-16)][Address?(20)]
+        // Cache Line 2 (64-127):  [Address?(20)][Host(16)][Logs(24)][Output(start)]
+        // Cache Line 3 (128-191): [Output(cont,24)][SelfDest*(8)][Alloc(16)]
         // Note: Tracer is not stored in the struct - it's a compile-time parameter
         stack: Stack,
         gas_remaining: GasType, 
