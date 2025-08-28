@@ -42,7 +42,7 @@ test "diffMode: account read but not modified excluded" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false); // diffMode = true
+    tracer.configure(.{ .diff_mode = true }); // diffMode = true
     tracer.onTransactionStart();
 
     // Only read account
@@ -65,7 +65,7 @@ test "diffMode: account modified appears in both" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -92,7 +92,7 @@ test "diffMode: account created only in post" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onAccountCreated(addr(2), 500, 1, &[_]u8{});
@@ -114,7 +114,7 @@ test "diffMode: account deleted only in pre" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(3), 1000);
@@ -137,7 +137,7 @@ test "nonDiffMode: all accessed accounts in prestate only" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false); // diffMode = false
+    tracer.configure(.{}); // diffMode = false
     tracer.onTransactionStart();
 
     // Read-only access
@@ -170,7 +170,7 @@ test "storage: read-only excluded in diffMode" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onStorageRead(addr(1), 0x42, 100, false);
@@ -186,7 +186,7 @@ test "storage: modified appears in both with correct values" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000); // Need to access account
@@ -211,7 +211,7 @@ test "storage: zero to non-zero transition" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -233,7 +233,7 @@ test "storage: non-zero to zero (deletion)" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -259,7 +259,7 @@ test "config: disableStorage omits storage field" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, true, false, false); // disableStorage = true
+    tracer.configure(.{ .diff_mode = true, .disable_storage = true }); // disableStorage = true
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -281,7 +281,7 @@ test "config: disableCode omits code field" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, true, false); // disableCode = true
+    tracer.configure(.{ .diff_mode = true, .disable_code = true }); // disableCode = true
     tracer.onTransactionStart();
 
     const code = [_]u8{ 0x60, 0x60, 0x60, 0x40 }; // PUSH1 PUSH1 PUSH1 PUSH1
@@ -303,7 +303,7 @@ test "config: includeEmpty shows empty accounts" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, true); // includeEmpty = true
+    tracer.configure(.{ .include_empty = true }); // includeEmpty = true
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 0);
@@ -326,7 +326,7 @@ test "config: excludeEmpty removes empty accounts" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false); // includeEmpty = false
+    tracer.configure(.{}); // includeEmpty = false
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 0);
@@ -349,7 +349,7 @@ test "fields: balance only modification" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceChange(addr(1), 1000, 2000);
@@ -380,7 +380,7 @@ test "fields: nonce only modification" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -409,7 +409,7 @@ test "complex: multiple accounts with different operations" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     // Account 1: Read only (should be excluded)
@@ -444,7 +444,7 @@ test "complex: mixed storage operations on same account" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -490,7 +490,7 @@ test "json: correct structure for diffMode" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
     tracer.onBalanceChange(addr(1), 100, 200);
     tracer.onTransactionEnd();
@@ -514,7 +514,7 @@ test "json: correct structure for non-diffMode" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false);
+    tracer.configure(.{});
     tracer.onTransactionStart();
     tracer.onBalanceRead(addr(1), 100);
     tracer.onTransactionEnd();
@@ -534,7 +534,7 @@ test "json: address format validation" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false);
+    tracer.configure(.{});
     tracer.onTransactionStart();
     tracer.onBalanceRead(Address{ .bytes = [_]u8{ 0x12, 0x34 } ++ ([_]u8{0} ** 18) }, 100);
     tracer.onTransactionEnd();
@@ -551,7 +551,7 @@ test "json: numeric format validation" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false);
+    tracer.configure(.{});
     tracer.onTransactionStart();
     tracer.onBalanceRead(addr(1), 0x123456789abcdef);
     tracer.onNonceRead(addr(1), 42);
@@ -572,7 +572,7 @@ test "json: code format validation" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false);
+    tracer.configure(.{});
     tracer.onTransactionStart();
     const code = [_]u8{ 0x60, 0x80, 0x60, 0x40 };
     tracer.onCodeRead(addr(1), &code);
@@ -593,7 +593,7 @@ test "edge: multiple writes to same storage slot" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false);
+    tracer.configure(.{ .diff_mode = true });
     tracer.onTransactionStart();
 
     tracer.onBalanceRead(addr(1), 1000);
@@ -624,7 +624,7 @@ test "edge: empty account becomes non-empty" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false); // includeEmpty = false
+    tracer.configure(.{ .diff_mode = true }); // includeEmpty = false
     tracer.onTransactionStart();
 
     // Start with empty account
@@ -646,7 +646,7 @@ test "edge: all configuration options combined" {
     defer tracer.deinit();
 
     // All options enabled
-    tracer.configure(true, true, true, true); // diff, no storage, no code, include empty
+    tracer.configure(.{ .diff_mode = true, .disable_storage = true, .disable_code = true, .include_empty = true }); // diff, no storage, no code, include empty
     tracer.onTransactionStart();
 
     const code = [_]u8{ 0x60, 0x60 };

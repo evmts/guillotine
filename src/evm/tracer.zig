@@ -211,6 +211,12 @@ pub const DebuggingTracer = struct {
         throw_on_error: bool = true,
         step_mode: bool = false,
         max_history: usize = 10000,
+        // Prestate tracer composition
+        enable_prestate: bool = false,
+        prestate_diff_mode: bool = false,
+        prestate_disable_storage: bool = false,
+        prestate_disable_code: bool = false,
+        prestate_include_empty: bool = false,
     };
 
     /// Configure tracer behavior. Safe to call at any time.
@@ -220,6 +226,29 @@ pub const DebuggingTracer = struct {
         if (cfg.max_history != self.max_history) {
             self.max_history = cfg.max_history;
             self.prune_to_max_history();
+        }
+
+        // Manage prestate tracer composition dynamically
+        if (cfg.enable_prestate) {
+            if (self.prestate_tracer == null) {
+                const pt = self.allocator.create(PrestateTracer) catch return;
+                pt.* = PrestateTracer.init(self.allocator);
+                self.prestate_tracer = pt;
+                self.prestate_enabled = true;
+            }
+            if (self.prestate_tracer) |ptc| {
+                ptc.configure(.{
+                    .diff_mode = cfg.prestate_diff_mode,
+                    .disable_storage = cfg.prestate_disable_storage,
+                    .disable_code = cfg.prestate_disable_code,
+                    .include_empty = cfg.prestate_include_empty,
+                });
+            }
+        } else if (self.prestate_tracer) |pt| {
+            pt.deinit();
+            self.allocator.destroy(pt);
+            self.prestate_tracer = null;
+            self.prestate_enabled = false;
         }
     }
 
@@ -419,6 +448,8 @@ pub const DebuggingTracer = struct {
 
     /// Required tracer interface: called when an error occurs
     pub fn onError(self: *Self, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
+        _ = pc;
+        _ = frame;
         // Record error in current step if we have one
         if (self.steps.items.len > 0) {
             const current_step = &self.steps.items[self.steps.items.len - 1];
@@ -433,9 +464,6 @@ pub const DebuggingTracer = struct {
         self.paused = true;
 
         std.log.debug("DebuggingTracer: Error occurred in frame type {s}: {}", .{ @typeName(FrameType), err });
-        if (self.prestate_tracer) |pt| {
-            pt.onError(pc, err, FrameType, frame);
-        }
     }
 
     /// Helper function to capture state for step recording
@@ -561,27 +589,7 @@ pub const DebuggingTracer = struct {
             .snapshot_count = self.state_snapshots.items.len,
         };
     }
-
-    // ===== Prestate composition API =====
-    pub fn enable_prestate_tracing(self: *Self, diff_mode: bool, disable_storage: bool, disable_code: bool, include_empty: bool) !void {
-        if (!self.prestate_enabled) {
-            const pt = try self.allocator.create(PrestateTracer);
-            pt.* = PrestateTracer.init(self.allocator);
-            pt.configure(diff_mode, disable_storage, disable_code, include_empty);
-            self.prestate_tracer = pt;
-            self.prestate_enabled = true;
-        }
-    }
-
-    pub fn disable_prestate_tracing(self: *Self) void {
-        if (self.prestate_tracer) |pt| {
-            pt.deinit();
-            self.allocator.destroy(pt);
-            self.prestate_tracer = null;
-            self.prestate_enabled = false;
-        }
-    }
-
+    
     pub fn getPrestateTracer(self: *Self) ?*PrestateTracer {
         return self.prestate_tracer;
     }
@@ -1167,7 +1175,7 @@ test "DebuggingTracer with prestate mode" {
     var debug_tracer = DebuggingTracer.init();
     defer debug_tracer.deinit();
 
-    try debug_tracer.enable_prestate_tracing(true, false, false, false);
+    debug_tracer.configure(.{ .enable_prestate = true, .prestate_diff_mode = true });
     debug_tracer.onTransactionStart();
 
     const addr: Address = [_]u8{1} ** 20;

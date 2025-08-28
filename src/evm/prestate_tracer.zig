@@ -120,11 +120,18 @@ pub const PrestateTracer = struct {
         self.storage_modifications.deinit();
     }
 
-    pub fn configure(self: *Self, diff_mode: bool, disable_storage: bool, disable_code: bool, include_empty: bool) void {
-        self.diff_mode = diff_mode;
-        self.disable_storage = disable_storage;
-        self.disable_code = disable_code;
-        self.include_empty = include_empty;
+    pub const Config = struct {
+        diff_mode: bool = false,
+        disable_storage: bool = false,
+        disable_code: bool = false,
+        include_empty: bool = false,
+    };
+
+    pub fn configure(self: *Self, cfg: Config) void {
+        self.diff_mode = cfg.diff_mode;
+        self.disable_storage = cfg.disable_storage;
+        self.disable_code = cfg.disable_code;
+        self.include_empty = cfg.include_empty;
     }
 
     // Tracer interface compatibility (Frame.traceBefore/After/OnError)
@@ -140,13 +147,6 @@ pub const PrestateTracer = struct {
         _ = pc;
         _ = opcode;
         _ = frame;
-    }
-
-    pub fn onError(self: *Self, pc: u32, err: anyerror, comptime FrameType: type, frame: *const FrameType) void {
-        _ = pc;
-        _ = err;
-        _ = frame;
-        _ = self;
     }
 
     // ===== Transaction lifecycle =====
@@ -728,7 +728,7 @@ test "PrestateTracer diff mode correctly handles modifications" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false); // diff_mode = true
+    tracer.configure(.{ .diff_mode = true }); // diff_mode = true
     tracer.onTransactionStart();
 
     const addr1 = Address{ .bytes = [_]u8{1} ** 20 };
@@ -769,7 +769,7 @@ test "PrestateTracer non-diff mode only shows prestate" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(false, false, false, false); // diff_mode = false
+    tracer.configure(.{}); // diff_mode = false
     tracer.onTransactionStart();
 
     const addr = Address{ .bytes = [_]u8{3} ** 20 };
@@ -797,7 +797,7 @@ test "PrestateTracer handles account creation and deletion" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false); // diff_mode = true
+    tracer.configure(.{ .diff_mode = true }); // diff_mode = true
     tracer.onTransactionStart();
 
     const created_addr = Address{ .bytes = [_]u8{4} ** 20 };
@@ -827,7 +827,7 @@ test "prestate tracer handles empty accounts correctly" {
     defer tracer.deinit();
 
     // Test with include_empty = false (default)
-    tracer.configure(false, false, false, false);
+    tracer.configure(.{});
     tracer.onTransactionStart();
 
     const empty_addr = Address{ .bytes = [_]u8{6} ** 20 };
@@ -854,7 +854,7 @@ test "prestate tracer with include_empty shows all accounts" {
     defer tracer.deinit();
 
     // Test with include_empty = true
-    tracer.configure(false, false, false, true);
+    tracer.configure(.{ .include_empty = true });
     tracer.onTransactionStart();
 
     const empty_addr = Address{ .bytes = [_]u8{8} ** 20 };
@@ -874,7 +874,7 @@ test "prestate tracer diff mode read-only accounts excluded" {
     var tracer = PrestateTracer.init(allocator);
     defer tracer.deinit();
 
-    tracer.configure(true, false, false, false); // diff_mode = true
+    tracer.configure(.{ .diff_mode = true }); // diff_mode = true
     tracer.onTransactionStart();
 
     const read_only_addr = Address{ .bytes = [_]u8{9} ** 20 };
