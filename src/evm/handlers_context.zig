@@ -579,7 +579,6 @@ const StackFrame = @import("stack_frame.zig").StackFrame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
-// const host_mod = @import("host.zig");
 const block_info_mod = @import("block_info.zig");
 const memory_mod = @import("memory.zig");
 
@@ -599,7 +598,7 @@ const TestFrame = StackFrame(test_config);
 const TestBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = test_config.max_bytecode_size });
 
 // Mock host for testing
-const MockHost = struct {
+const MockEvm = struct {
     allocator: std.mem.Allocator,
     contract_address: Address,
     caller_address: Address,
@@ -612,7 +611,7 @@ const MockHost = struct {
     block_info: block_info_mod.BlockInfo,
     code_map: std.AutoHashMap(Address, []const u8),
 
-    pub fn init(allocator: std.mem.Allocator) MockHost {
+    pub fn init(allocator: std.mem.Allocator) MockEvm {
         return .{
             .allocator = allocator,
             .contract_address = Address.zero(),
@@ -635,57 +634,57 @@ const MockHost = struct {
         };
     }
 
-    pub fn deinit(self: *MockHost) void {
+    pub fn deinit(self: *MockEvm) void {
         self.code_map.deinit();
     }
 
-    pub fn get_tx_origin(self: *const MockHost) Address {
+    pub fn get_tx_origin(self: *const MockEvm) Address {
         return self.origin_address;
     }
 
-    pub fn get_caller(self: *const MockHost) Address {
+    pub fn get_caller(self: *const MockEvm) Address {
         return self.caller_address;
     }
 
-    pub fn get_call_value(self: *const MockHost) u256 {
+    pub fn get_call_value(self: *const MockEvm) u256 {
         return self.call_value;
     }
 
-    pub fn get_input(self: *const MockHost) []const u8 {
+    pub fn get_input(self: *const MockEvm) []const u8 {
         return self.input_data;
     }
 
-    pub fn get_gas_price(self: *const MockHost) u256 {
+    pub fn get_gas_price(self: *const MockEvm) u256 {
         return self.gas_price;
     }
 
-    pub fn get_balance(self: *const MockHost, address: Address) u256 {
+    pub fn get_balance(self: *const MockEvm, address: Address) u256 {
         _ = self;
         _ = address;
         return 1_000_000_000_000_000_000; // 1 ETH
     }
 
-    pub fn access_address(self: *const MockHost, _: Address) !u64 {
+    pub fn access_address(self: *const MockEvm, _: Address) !u64 {
         _ = self;
         return 100; // Mock gas cost
     }
 
-    pub fn get_code(self: *const MockHost, address: Address) []const u8 {
+    pub fn get_code(self: *const MockEvm, address: Address) []const u8 {
         return self.code_map.get(address) orelse &.{};
     }
 
-    pub fn account_exists(self: *const MockHost, address: Address) bool {
+    pub fn account_exists(self: *const MockEvm, address: Address) bool {
         _ = self;
         // Mock: all addresses exist except 0xFFFF...
         const all_f = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable;
         return !address.eql(all_f);
     }
 
-    pub fn get_return_data(self: *const MockHost) []const u8 {
+    pub fn get_return_data(self: *const MockEvm) []const u8 {
         return self.return_data;
     }
 
-    pub fn get_block_hash(self: *const MockHost, block_number: u256) ?[32]u8 {
+    pub fn get_block_hash(self: *const MockEvm, block_number: u256) ?[32]u8 {
         _ = self;
         // Mock: return a hash for blocks within 256 of current
         const current_block = 12345678;
@@ -697,15 +696,15 @@ const MockHost = struct {
         return null;
     }
 
-    pub fn get_block_info(self: *const MockHost) block_info_mod.BlockInfo {
+    pub fn get_block_info(self: *const MockEvm) block_info_mod.BlockInfo {
         return self.block_info;
     }
 
-    pub fn get_chain_id(self: *const MockHost) u64 {
+    pub fn get_chain_id(self: *const MockEvm) u64 {
         return self.chain_id;
     }
 
-    pub fn get_blob_hash(self: *const MockHost, index: u256) ?[32]u8 {
+    pub fn get_blob_hash(self: *const MockEvm, index: u256) ?[32]u8 {
         _ = self;
         // Mock: return hash for first 3 blob indices
         if (index < 3) {
@@ -716,39 +715,17 @@ const MockHost = struct {
         return null;
     }
 
-    pub fn get_blob_base_fee(self: *const MockHost) u256 {
+    pub fn get_blob_base_fee(self: *const MockEvm) u256 {
         _ = self;
         return 1; // Mock blob base fee
     }
 
-    pub fn to_host(self: *MockHost) host_mod.Host {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .get_tx_origin = @ptrCast(&get_tx_origin),
-                .get_caller = @ptrCast(&get_caller),
-                .get_call_value = @ptrCast(&get_call_value),
-                .get_input = @ptrCast(&get_input),
-                .get_gas_price = @ptrCast(&get_gas_price),
-                .get_balance = @ptrCast(&get_balance),
-                .access_address = @ptrCast(&access_address),
-                .get_code = @ptrCast(&get_code),
-                .account_exists = @ptrCast(&account_exists),
-                .get_return_data = @ptrCast(&get_return_data),
-                .get_block_hash = @ptrCast(&get_block_hash),
-                .get_block_info = @ptrCast(&get_block_info),
-                .get_chain_id = @ptrCast(&get_chain_id),
-                .get_blob_hash = @ptrCast(&get_blob_hash),
-                .get_blob_base_fee = @ptrCast(&get_blob_base_fee),
-                // Add other required vtable entries...
-            },
-        };
-    }
 };
 
-fn createTestFrame(allocator: std.mem.Allocator, host: ?host_mod.Host) !TestFrame {
+fn createTestFrame(allocator: std.mem.Allocator, evm: ?*MockEvm) !TestFrame {
     const bytecode = TestBytecode.initEmpty();
-    return try TestFrame.init(allocator, bytecode, 1_000_000, null, host);
+    const evm_ptr = if (evm) |e| @as(*anyopaque, @ptrCast(e)) else @as(*anyopaque, @ptrFromInt(0x1000)); // Use a dummy pointer for tests without EVM
+    return try TestFrame.init(allocator, bytecode, 1_000_000, null, evm_ptr);
 }
 
 // Mock dispatch that simulates successful execution flow
@@ -791,14 +768,13 @@ fn createMockDispatchWithPc(pc_value: u256) TestFrame.Dispatch {
 }
 
 test "ADDRESS opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_address = Address.fromBytes([_]u8{0x12} ++ [_]u8{0} ** 19) catch unreachable;
-    mock_host.contract_address = test_address;
+    evm.contract_address = test_address;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     frame.contract_address = test_address;
 
@@ -810,10 +786,9 @@ test "ADDRESS opcode" {
 }
 
 test "BALANCE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test: get balance of address 0x1234
@@ -827,14 +802,13 @@ test "BALANCE opcode" {
 }
 
 test "ORIGIN opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const origin = Address.fromBytes([_]u8{0xAB} ++ [_]u8{0} ** 19) catch unreachable;
-    mock_host.origin_address = origin;
+    evm.origin_address = origin;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -845,14 +819,13 @@ test "ORIGIN opcode" {
 }
 
 test "CALLER opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const caller = Address.fromBytes([_]u8{0xCD} ++ [_]u8{0} ** 19) catch unreachable;
-    mock_host.caller_address = caller;
+    evm.caller_address = caller;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -863,12 +836,11 @@ test "CALLER opcode" {
 }
 
 test "CALLVALUE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    mock_host.call_value = 123456789;
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    evm.call_value = 123456789;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -879,14 +851,13 @@ test "CALLVALUE opcode" {
 }
 
 test "CALLDATALOAD opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const calldata = [_]u8{0xFF, 0xEE, 0xDD, 0xCC} ++ [_]u8{0} ** 28;
-    mock_host.input_data = &calldata;
+    evm.input_data = &calldata;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Load from offset 0
@@ -902,14 +873,13 @@ test "CALLDATALOAD opcode" {
 }
 
 test "CALLDATASIZE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const calldata = [_]u8{1, 2, 3, 4, 5, 6, 7, 8};
-    mock_host.input_data = &calldata;
+    evm.input_data = &calldata;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -920,14 +890,13 @@ test "CALLDATASIZE opcode" {
 }
 
 test "CALLDATACOPY opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var mock_evm = MockEvm.init(testing.allocator);
+    defer mock_evm.deinit();
     
     const calldata = [_]u8{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-    mock_host.input_data = &calldata;
+    mock_evm.input_data = &calldata;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &mock_evm);
     defer frame.deinit(testing.allocator);
 
     // Copy 4 bytes from offset 1 to memory offset 0
@@ -944,15 +913,15 @@ test "CALLDATACOPY opcode" {
 }
 
 test "CODESIZE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Create bytecode with some data
     var bytecode = TestBytecode.initEmpty();
     try bytecode.appendSlice(&[_]u8{0x60, 0x00, 0x60, 0x00});
     
-    var frame = try TestFrame.init(testing.allocator, bytecode, 1_000_000, null, host);
+    const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+    var frame = try TestFrame.init(testing.allocator, bytecode, 1_000_000, null, evm_ptr);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -963,16 +932,16 @@ test "CODESIZE opcode" {
 }
 
 test "CODECOPY opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Create bytecode with some data
     var bytecode = TestBytecode.initEmpty();
     const code_data = [_]u8{0x60, 0x40, 0x60, 0x80};
     try bytecode.appendSlice(&code_data);
     
-    var frame = try TestFrame.init(testing.allocator, bytecode, 1_000_000, null, host);
+    const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+    var frame = try TestFrame.init(testing.allocator, bytecode, 1_000_000, null, evm_ptr);
     defer frame.deinit(testing.allocator);
 
     // Copy all 4 bytes to memory offset 0
@@ -989,12 +958,11 @@ test "CODECOPY opcode" {
 }
 
 test "GASPRICE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    mock_host.gas_price = 25_000_000_000; // 25 gwei
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    evm.gas_price = 25_000_000_000; // 25 gwei
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1005,15 +973,14 @@ test "GASPRICE opcode" {
 }
 
 test "EXTCODESIZE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_code = [_]u8{0x60, 0x00, 0x60, 0x00, 0x50};
     const test_address = Address.fromBytes([_]u8{0x99} ++ [_]u8{0} ** 19) catch unreachable;
-    try mock_host.code_map.put(test_address, &test_code);
+    try evm.code_map.put(test_address, &test_code);
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Get code size of test address
@@ -1027,15 +994,14 @@ test "EXTCODESIZE opcode" {
 }
 
 test "EXTCODECOPY opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_code = [_]u8{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE};
     const test_address = Address.fromBytes([_]u8{0x88} ++ [_]u8{0} ** 19) catch unreachable;
-    try mock_host.code_map.put(test_address, &test_code);
+    try evm.code_map.put(test_address, &test_code);
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Copy 4 bytes from offset 1 of external code to memory offset 0
@@ -1053,15 +1019,14 @@ test "EXTCODECOPY opcode" {
 }
 
 test "EXTCODEHASH opcode - existing account with code" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_code = [_]u8{0x60, 0x00}; // PUSH1 0x00
     const test_address = Address.fromBytes([_]u8{0x77} ++ [_]u8{0} ** 19) catch unreachable;
-    try mock_host.code_map.put(test_address, &test_code);
+    try evm.code_map.put(test_address, &test_code);
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Get code hash of test address
@@ -1083,11 +1048,10 @@ test "EXTCODEHASH opcode - existing account with code" {
 }
 
 test "EXTCODEHASH opcode - existing account without code" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Get code hash of account without code (EOA)
@@ -1103,11 +1067,10 @@ test "EXTCODEHASH opcode - existing account without code" {
 }
 
 test "EXTCODEHASH opcode - non-existent account" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Get code hash of non-existent account (mocked as 0xFFFF...)
@@ -1123,14 +1086,13 @@ test "EXTCODEHASH opcode - non-existent account" {
 }
 
 test "RETURNDATASIZE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const return_data = [_]u8{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    mock_host.return_data = &return_data;
+    evm.return_data = &return_data;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1141,14 +1103,13 @@ test "RETURNDATASIZE opcode" {
 }
 
 test "RETURNDATACOPY opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const return_data = [_]u8{0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
-    mock_host.return_data = &return_data;
+    evm.return_data = &return_data;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Copy 3 bytes from offset 2 to memory offset 0
@@ -1165,10 +1126,9 @@ test "RETURNDATACOPY opcode" {
 }
 
 test "BLOCKHASH opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test: get hash of recent block
@@ -1189,14 +1149,13 @@ test "BLOCKHASH opcode" {
 }
 
 test "COINBASE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const coinbase = Address.fromBytes([_]u8{0xF0} ++ [_]u8{0} ** 19) catch unreachable;
-    mock_host.block_info.coinbase = coinbase;
+    evm.block_info.coinbase = coinbase;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1207,12 +1166,11 @@ test "COINBASE opcode" {
 }
 
 test "TIMESTAMP opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    mock_host.block_info.timestamp = 1234567890;
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    evm.block_info.timestamp = 1234567890;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1223,10 +1181,9 @@ test "TIMESTAMP opcode" {
 }
 
 test "NUMBER opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1237,12 +1194,11 @@ test "NUMBER opcode" {
 }
 
 test "DIFFICULTY opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    mock_host.block_info.difficulty = 999999999;
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    evm.block_info.difficulty = 999999999;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1253,10 +1209,9 @@ test "DIFFICULTY opcode" {
 }
 
 test "GASLIMIT opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1267,12 +1222,11 @@ test "GASLIMIT opcode" {
 }
 
 test "CHAINID opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    mock_host.chain_id = 56; // BSC mainnet
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    evm.chain_id = 56; // BSC mainnet
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1283,10 +1237,9 @@ test "CHAINID opcode" {
 }
 
 test "SELFBALANCE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1297,12 +1250,11 @@ test "SELFBALANCE opcode" {
 }
 
 test "BASEFEE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    mock_host.block_info.base_fee = 15_000_000_000; // 15 gwei
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    evm.block_info.base_fee = 15_000_000_000; // 15 gwei
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1313,10 +1265,9 @@ test "BASEFEE opcode" {
 }
 
 test "BLOBHASH opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test: get blob hash at index 1
@@ -1337,10 +1288,9 @@ test "BLOBHASH opcode" {
 }
 
 test "BLOBBASEFEE opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatch();
@@ -1351,10 +1301,9 @@ test "BLOBBASEFEE opcode" {
 }
 
 test "GAS opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     
     frame.gas_remaining = 500000;
@@ -1367,10 +1316,9 @@ test "GAS opcode" {
 }
 
 test "PC opcode" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const dispatch = createMockDispatchWithPc(42);
@@ -1400,8 +1348,8 @@ test "Address conversion helpers - boundary values" {
 }
 
 test "ADDRESS opcode - various contract addresses" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_cases = [_]Address{
         Address.zero(),
@@ -1411,7 +1359,7 @@ test "ADDRESS opcode - various contract addresses" {
         Address.fromBytes([_]u8{0xDE, 0xAD, 0xBE, 0xEF} ++ [_]u8{0} ** 16) catch unreachable,
     };
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     
     for (test_cases) |test_addr| {
         var frame = try createTestFrame(testing.allocator, host);
@@ -1429,10 +1377,9 @@ test "ADDRESS opcode - various contract addresses" {
 }
 
 test "BALANCE opcode - address overflow handling" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test with maximum u256 value (should truncate to valid address)
@@ -1447,13 +1394,13 @@ test "BALANCE opcode - address overflow handling" {
 }
 
 test "CALLDATALOAD opcode - edge cases" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const calldata = [_]u8{0x01, 0x02, 0x03, 0x04, 0x05};
-    mock_host.input_data = &calldata;
+    evm.input_data = &calldata;
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     
     // Test cases: offset, expected result description
     const test_cases = [_]struct { offset: u256, check: fn(u256) anyerror!void }{
@@ -1506,13 +1453,13 @@ test "CALLDATALOAD opcode - edge cases" {
 }
 
 test "CALLDATACOPY opcode - boundary conditions" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const calldata = [_]u8{0xAA, 0xBB, 0xCC, 0xDD, 0xEE};
-    mock_host.input_data = &calldata;
+    evm.input_data = &calldata;
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     
     // Test zero length copy
     {
@@ -1563,9 +1510,9 @@ test "CALLDATACOPY opcode - boundary conditions" {
 }
 
 test "CODECOPY opcode - edge cases" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    const host = evm.to_host();
     
     // Create bytecode
     var bytecode = TestBytecode.initEmpty();
@@ -1609,14 +1556,14 @@ test "CODECOPY opcode - edge cases" {
 }
 
 test "EXTCODECOPY opcode - boundary conditions" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_code = [_]u8{0x11, 0x22, 0x33};
     const test_address = Address.fromBytes([_]u8{0x99} ++ [_]u8{0} ** 19) catch unreachable;
-    try mock_host.code_map.put(test_address, &test_code);
+    try evm.code_map.put(test_address, &test_code);
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     
     // Test copy with zero-padding
     {
@@ -1655,13 +1602,13 @@ test "EXTCODECOPY opcode - boundary conditions" {
 }
 
 test "RETURNDATACOPY opcode - strict bounds checking" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const return_data = [_]u8{0xAA, 0xBB, 0xCC, 0xDD};
-    mock_host.return_data = &return_data;
+    evm.return_data = &return_data;
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     
     // Test exact boundary read
     {
@@ -1711,10 +1658,9 @@ test "RETURNDATACOPY opcode - strict bounds checking" {
 }
 
 test "BLOCKHASH opcode - edge cases" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Current block number is 12345678 in mock
@@ -1756,11 +1702,11 @@ test "BLOCKHASH opcode - edge cases" {
 }
 
 test "Block info opcodes - various values" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Set extreme values
-    mock_host.block_info = .{
+    evm.block_info = .{
         .coinbase = Address.fromBytes([_]u8{0xFF} ** 20) catch unreachable,
         .timestamp = std.math.maxInt(u64),
         .number = std.math.maxInt(u64),
@@ -1769,8 +1715,7 @@ test "Block info opcodes - various values" {
         .base_fee = std.math.maxInt(u256),
     };
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test COINBASE with max address
@@ -1800,10 +1745,9 @@ test "Block info opcodes - various values" {
 }
 
 test "BLOBHASH opcode - index boundaries" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test valid indices (0, 1, 2)
@@ -1840,10 +1784,9 @@ test "BLOBHASH opcode - index boundaries" {
 }
 
 test "GAS opcode - negative gas handling" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
     
     // Test with positive gas
@@ -1869,9 +1812,9 @@ test "GAS opcode - negative gas handling" {
 }
 
 test "PC opcode - various program counter values" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    const host = evm.to_host();
     
     const pc_values = [_]u256{
         0,                      // Start of code
@@ -1898,10 +1841,9 @@ test "PC opcode - various program counter values" {
 }
 
 test "Context opcodes - stack underflow" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Opcodes that require stack items
@@ -1929,10 +1871,9 @@ test "Context opcodes - stack underflow" {
 }
 
 test "Context opcodes - stack overflow" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Fill stack to maximum
@@ -1950,14 +1891,13 @@ test "Context opcodes - stack overflow" {
 }
 
 test "Memory copy operations - large offsets" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     const test_data = [_]u8{0x11, 0x22, 0x33, 0x44};
-    mock_host.input_data = &test_data;
+    evm.input_data = &test_data;
     
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test memory limit with CALLDATACOPY
@@ -1973,10 +1913,9 @@ test "Memory copy operations - large offsets" {
 }
 
 test "EXTCODEHASH opcode - empty code hash constant" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
-    const host = mock_host.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Verify the empty code hash constant is correct
@@ -1997,8 +1936,8 @@ test "EXTCODEHASH opcode - empty code hash constant" {
 }
 
 test "Chain ID values" {
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Test various chain IDs
     const chain_ids = [_]u64{
@@ -2009,10 +1948,10 @@ test "Chain ID values" {
         std.math.maxInt(u64),  // Maximum chain ID
     };
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     
     for (chain_ids) |chain_id| {
-        mock_host.chain_id = chain_id;
+        evm.chain_id = chain_id;
         
         var frame = try createTestFrame(testing.allocator, host);
         defer frame.deinit(testing.allocator);
@@ -2041,14 +1980,14 @@ test "WordType truncation behavior" {
     const SmallFrame = StackFrame(SmallWordConfig);
     const SmallBytecode = bytecode_mod.Bytecode(.{ .max_bytecode_size = SmallWordConfig.max_bytecode_size });
     
-    var mock_host = MockHost.init(testing.allocator);
-    defer mock_host.deinit();
+    var evm = MockEvm.init(testing.allocator);
+    defer evm.deinit();
     
     // Set values that exceed u64
-    mock_host.block_info.difficulty = std.math.maxInt(u256);
-    mock_host.block_info.base_fee = std.math.maxInt(u256);
+    evm.block_info.difficulty = std.math.maxInt(u256);
+    evm.block_info.base_fee = std.math.maxInt(u256);
     
-    const host = mock_host.to_host();
+    const host = evm.to_host();
     const bytecode = SmallBytecode.initEmpty();
     var frame = try SmallFrame.init(testing.allocator, bytecode, 1_000_000, null, host);
     defer frame.deinit(testing.allocator);

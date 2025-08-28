@@ -110,7 +110,7 @@ const StackFrame = @import("stack_frame.zig").StackFrame;
 const dispatch_mod = @import("dispatch.zig");
 const NoOpTracer = @import("tracer.zig").NoOpTracer;
 const bytecode_mod = @import("bytecode.zig");
-const host_mod = @import("host.zig");
+// const host_mod = @import("host.zig");
 
 // Test configuration
 const test_config = FrameConfig{
