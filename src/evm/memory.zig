@@ -556,17 +556,17 @@ test "Memory fast-path edge case at 32 bytes" {
     defer memory.deinit(allocator);
     
     // Pre-allocate exact capacity for test
-    try memory.buffer_ptr.ensureTotalCapacity(memory.allocator, 64);
+    try memory.buffer_ptr.ensureTotalCapacity(allocator, 64);
     const initial_capacity = memory.buffer_ptr.capacity;
     
     // Growth of exactly 32 bytes should use fast path
-    try memory.ensure_capacity(32);
+    try memory.ensure_capacity(allocator, 32);
     try std.testing.expectEqual(@as(usize, 32), memory.buffer_ptr.items.len);
     try std.testing.expectEqual(initial_capacity, memory.buffer_ptr.capacity);
     
     // Growth of 33 bytes from empty should use standard path
     memory.clear();
-    try memory.ensure_capacity(33);
+    try memory.ensure_capacity(allocator, 33);
     try std.testing.expectEqual(@as(usize, 33), memory.buffer_ptr.items.len);
     
     // Verify zero initialization
