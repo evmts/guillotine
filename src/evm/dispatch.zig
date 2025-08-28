@@ -1,6 +1,7 @@
 const std = @import("std");
 const Opcode = @import("opcode_data.zig").Opcode;
 const bytecode_mod = @import("bytecode.zig");
+const ArrayList = std.ArrayListAligned;
 
 
 /// Dispatch manages the execution flow of EVM opcodes through an optimized instruction stream.
@@ -14,14 +15,17 @@ const bytecode_mod = @import("bytecode.zig");
 /// @return A struct type containing dispatch functionality for the given frame type
 pub fn Dispatch(comptime FrameType: type) type {
     return struct {
+        const Self = @This();
+        // We define opcodehandler locally rather than using StackFrame.OpcodeHandler to avoid circular dependency
+        const OpcodeHandler = *const fn (frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success;
         /// The optimized instruction stream containing opcode handlers and their metadata.
         /// Each item is exactly 64 bits for optimal cache line usage.
         /// 
         /// Layout example: [handler_ptr, metadata, handler_ptr, metadata, ...]
         /// 
-        /// Safety: Always terminated with 2 STOP handlers so accessing schedule[n+1] 
-        /// or schedule[n+2] is safe without bounds checking.
-        schedule: [*]const Item,
+        /// Safety: Always terminated with 2 STOP handlers so accessing cursor[n+1] 
+        /// or cursor[n+2] is safe without bounds checking.
+        cursor: [*]const Item,
         
         /// Jump table for efficient JUMP/JUMPI lookups
         /// Contains sorted JUMPDEST locations for binary search
@@ -47,17 +51,14 @@ pub fn Dispatch(comptime FrameType: type) type {
         pub const PushPointerMetadata = packed struct(u64) { value: *u256 };
         /// Metadata for PC opcode containing the program counter value.
         pub const PcMetadata = packed struct { value: FrameType.PcType };
-        /// Function pointer type for opcode handlers.
-        /// Each handler receives the frame and current dispatch position.
-        /// Using opaque pointer to break dependency loop.
-        pub const OpcodeHandler = *const fn (frame: FrameType, dispatch: *const anyopaque) FrameType.Error!FrameType.Success;
         /// A single item in the dispatch array, either a handler or metadata.
-        pub const Item = union {
+        pub const Item = union(enum) {
             jump_dest: JumpDestMetadata,
             push_inline: PushInlineMetadata,
             push_pointer: PushPointerMetadata,
             pc: PcMetadata,
             opcode_handler: OpcodeHandler,
+            first_block_gas: struct { gas: u32 },
         };
         /// Jump table entry for dynamic jumps
         pub const JumpTableEntry = struct {
@@ -92,7 +93,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             }
         };
 
-        const Self = @This();
+        
 
         // ========================
         // Metadata Access Methods
@@ -109,23 +110,23 @@ pub fn Dispatch(comptime FrameType: type) type {
         } {
             return switch (opcode) {
                 .PC => .{
-                    .metadata = self.schedule[0].pc,
-                    .next = Self{ .schedule = self.schedule + 2, .jump_table = self.jump_table },
+                    .metadata = self.cursor[0].pc,
+                    .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
                 },
                 .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => .{
-                    .metadata = self.schedule[0].push_inline,
-                    .next = Self{ .schedule = self.schedule + 2, .jump_table = self.jump_table },
+                    .metadata = self.cursor[0].push_inline,
+                    .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
                 },
                 .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => .{
-                    .metadata = self.schedule[0].push_pointer,
-                    .next = Self{ .schedule = self.schedule + 2, .jump_table = self.jump_table },
+                    .metadata = self.cursor[0].push_pointer,
+                    .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
                 },
                 .JUMPDEST => .{
-                    .metadata = self.schedule[0].jump_dest,
-                    .next = Self{ .schedule = self.schedule + 2, .jump_table = self.jump_table },
+                    .metadata = self.cursor[0].jump_dest,
+                    .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
                 },
                 else => .{
-                    .next = Self{ .schedule = self.schedule + 1, .jump_table = self.jump_table },
+                    .next = Self{ .cursor = self.cursor + 1, .jump_table = self.jump_table },
                 },
             };
         }
@@ -134,7 +135,7 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Used for opcodes without metadata.
         pub fn getNext(self: Self) Self {
             return Self{ 
-                .schedule = self.schedule + 1,
+                .cursor = self.cursor + 1,
                 .jump_table = self.jump_table,
             };
         }
@@ -143,7 +144,7 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Used for opcodes that have associated metadata.
         pub fn skipMetadata(self: Self) Self {
             return Self{ 
-                .schedule = self.schedule + 2,
+                .cursor = self.cursor + 2,
                 .jump_table = self.jump_table,
             };
         }
@@ -160,25 +161,25 @@ pub fn Dispatch(comptime FrameType: type) type {
         /// Get inline push metadata from the next position.
         /// Assumes the caller verified this is a push with inline metadata.
         pub fn getInlineMetadata(self: Self) PushInlineMetadata {
-            return self.schedule[1].push_inline;
+            return self.cursor[1].push_inline;
         }
 
         /// Get pointer push metadata from the next position.
         /// Assumes the caller verified this is a push with pointer metadata.
         pub fn getPointerMetadata(self: Self) PushPointerMetadata {
-            return self.schedule[1].push_pointer;
+            return self.cursor[1].push_pointer;
         }
 
         /// Get PC metadata from the next position.
         /// Assumes the caller verified this is a PC opcode.
         pub fn getPcMetadata(self: Self) PcMetadata {
-            return self.schedule[1].pc;
+            return self.cursor[1].pc;
         }
 
         /// Get JUMPDEST metadata from the next position.
         /// Assumes the caller verified this is a JUMPDEST opcode.
         pub fn getJumpDestMetadata(self: Self) JumpDestMetadata {
-            return self.schedule[1].jump_dest;
+            return self.cursor[1].jump_dest;
         }
 
         // ========================
@@ -197,10 +198,10 @@ pub fn Dispatch(comptime FrameType: type) type {
         pub fn init(
             allocator: std.mem.Allocator,
             bytecode: *const bytecode_mod.Bytecode(FrameType.BytecodeConfig),
-            opcode_handlers: *const [256]*const OpcodeHandler,
-        ) ![]Item {
-            var schedule_items = std.ArrayList(Item).init(allocator);
-            errdefer schedule_items.deinit();
+            opcode_handlers: *const [256]OpcodeHandler,
+        ) ![]Self.Item {
+            var schedule_items = ArrayList(Self.Item, null){};
+            errdefer schedule_items.deinit(allocator);
 
             // Create iterator to traverse bytecode
             var iter = bytecode.createIterator();
@@ -214,30 +215,30 @@ pub fn Dispatch(comptime FrameType: type) type {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC
                         const handler = opcode_handlers.*[data.opcode];
-                        try schedule_items.append(.{ .opcode_handler = handler });
+                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
                         if (data.opcode == @intFromEnum(Opcode.PC)) {
-                            try schedule_items.append(.{ .pc = .{ .value = @intCast(instr_pc) } });
+                            try schedule_items.append(allocator, .{ .pc = .{ .value = @intCast(instr_pc) } });
                         }
                     },
                     .push => |data| {
                         // PUSH operation - add handler first, then metadata
                         const push_opcode = 0x60 + data.size - 1; // PUSH1 = 0x60, PUSH2 = 0x61, etc.
-                        try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[push_opcode] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
                         if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
                             // Inline value for small pushes that fit in u64
                             const inline_value: u64 = @intCast(data.value);
-                            try schedule_items.append(.{ .push_inline = .{ .value = inline_value } });
+                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
                         } else {
                             // Pointer to value for large pushes
                             const value_ptr = try allocator.create(FrameType.WordType);
                             value_ptr.* = data.value;
-                            try schedule_items.append(.{ .push_pointer = .{ .value = value_ptr } });
+                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
                         }
                     },
                     .jumpdest => |data| {
                         // JUMPDEST - add handler first, then metadata
-                        try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.JUMPDEST)] });
-                        try schedule_items.append(.{ .jump_dest = .{ .gas = data.gas_cost } });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.JUMPDEST)] });
+                        try schedule_items.append(allocator, .{ .jump_dest = .{ .gas = data.gas_cost } });
                     },
                     .push_add_fusion => |data| {
                         try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_add);
@@ -267,10 +268,10 @@ pub fn Dispatch(comptime FrameType: type) type {
                         try Self.handleFusionOperation(&schedule_items, allocator, opcode_handlers, data.value, .push_jumpi);
                     },
                     .stop => {
-                        try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
                     },
                     .invalid => {
-                        try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
+                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.INVALID)] });
                     },
                 }
             }
@@ -278,32 +279,32 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Safety: Append two STOP handlers as terminators.
             // This ensures accessing schedule[n+1] or schedule[n+2] is always safe
             // without bounds checking, improving performance.
-            try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
-            try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[@intFromEnum(Opcode.STOP)] });
 
-            return schedule_items.toOwnedSlice();
+            return schedule_items.toOwnedSlice(allocator);
         }
 
         /// Helper function to handle fusion operations consistently.
         /// This reduces code duplication and centralizes fusion logic.
         fn handleFusionOperation(
-            schedule_items: *std.ArrayList(Item),
+            schedule_items: *ArrayList(Self.Item, null),
             allocator: std.mem.Allocator,
-            opcode_handlers: *const [256]*const OpcodeHandler,
+            opcode_handlers: *const [256]OpcodeHandler,
             value: FrameType.WordType,
             fusion_type: FusionType,
         ) !void {
             // Use proper synthetic opcode handler based on value size and fusion type
             const synthetic_opcode = getSyntheticOpcode(fusion_type, value <= std.math.maxInt(u64));
-            try schedule_items.append(.{ .opcode_handler = opcode_handlers.*[synthetic_opcode] });
+            try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[synthetic_opcode] });
             
             if (value <= std.math.maxInt(u64)) {
                 const inline_val: u64 = @intCast(value);
-                try schedule_items.append(.{ .push_inline = .{ .value = inline_val } });
+                try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_val } });
             } else {
                 const value_ptr = try allocator.create(FrameType.WordType);
                 value_ptr.* = value;
-                try schedule_items.append(.{ .push_pointer = .{ .value = value_ptr } });
+                try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
             }
         }
 
@@ -349,8 +350,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             schedule: []const Item,
             bytecode: *const bytecode_mod.Bytecode(FrameType.BytecodeConfig),
         ) !JumpTable {
-            var jump_entries = std.ArrayList(JumpTableEntry).init(allocator);
-            errdefer jump_entries.deinit();
+            var jump_entries = ArrayList(JumpTableEntry, null){};
+            errdefer jump_entries.deinit(allocator);
 
             // Create iterator to traverse bytecode and find JUMPDEST locations
             var iter = bytecode.createIterator();
@@ -365,8 +366,11 @@ pub fn Dispatch(comptime FrameType: type) type {
                 switch (op_data) {
                     .jumpdest => {
                         // Found a JUMPDEST - create jump table entry
-                        const dispatch = Self{ .schedule = schedule.ptr + schedule_index };
-                        try jump_entries.append(.{
+                        const dispatch = Self{ 
+                            .cursor = schedule.ptr + schedule_index,
+                            .jump_table = null,
+                        };
+                        try jump_entries.append(allocator, .{
                             .pc = @intCast(instr_pc),
                             .dispatch = dispatch,
                         });
@@ -404,7 +408,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             }
 
             // Sort jump table entries by PC for binary search
-            const entries = try jump_entries.toOwnedSlice();
+            const entries = try jump_entries.toOwnedSlice(allocator);
             std.sort.block(JumpTableEntry, entries, {}, struct {
                 pub fn lessThan(context: void, a: JumpTableEntry, b: JumpTableEntry) bool {
                     _ = context;
@@ -422,6 +426,17 @@ pub fn Dispatch(comptime FrameType: type) type {
             }
 
             return JumpTable{ .entries = entries };
+        }
+        
+        /// Clean up heap-allocated push pointer values in the schedule
+        pub fn deinitSchedule(allocator: std.mem.Allocator, schedule: []const Item) void {
+            for (schedule) |item| {
+                switch (item) {
+                    .push_pointer => |ptr_meta| allocator.destroy(ptr_meta.value),
+                    else => {},
+                }
+            }
+            allocator.free(schedule);
         }
     };
 }
@@ -450,50 +465,53 @@ const TestFrame = struct {
         Stop,
         Return,
     };
+    
+    // Add OpcodeHandler type for testing
+    pub const OpcodeHandler = *const fn (frame: *TestFrame, dispatch: TestDispatch) Error!Success;
 };
 
 const TestDispatch = Dispatch(TestFrame);
 
 // Mock opcode handlers for testing
-fn mockStop(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockStop(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
     _ = frame;
     _ = dispatch;
     return TestFrame.Success.Stop;
 }
 
-fn mockAdd(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockAdd(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
     _ = frame;
     _ = dispatch;
     return TestFrame.Success.Stop;
 }
 
-fn mockPush1(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockPush1(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
     _ = frame;
     _ = dispatch;
     return TestFrame.Success.Stop;
 }
 
-fn mockJumpdest(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockJumpdest(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
     _ = frame;
     _ = dispatch;
     return TestFrame.Success.Stop;
 }
 
-fn mockPc(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockPc(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
     _ = frame;
     _ = dispatch;
     return TestFrame.Success.Stop;
 }
 
-fn mockInvalid(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Error!TestFrame.Success {
+fn mockInvalid(frame: *TestFrame, dispatch: TestDispatch) TestFrame.Error!TestFrame.Success {
     _ = frame;
     _ = dispatch;
     return TestFrame.Error.TestError;
 }
 
 // Create test opcode handler array
-fn createTestHandlers() [256]*const TestDispatch.OpcodeHandler {
-    var handlers: [256]*const TestDispatch.OpcodeHandler = undefined;
+fn createTestHandlers() [256]*const TestFrame.OpcodeHandler {
+    var handlers: [256]*const TestFrame.OpcodeHandler = undefined;
     
     // Initialize all to invalid
     for (&handlers) |*handler| {
@@ -592,11 +610,11 @@ test "Dispatch - getNext advances by 1" {
         .{ .opcode_handler = mockStop },
         .{ .opcode_handler = mockStop },
     };
-    const dispatch = TestDispatch{ .schedule = &dummy_items, .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = &dummy_items, .jump_table = null };
     const next = dispatch.getNext();
     
     // Verify pointer arithmetic
-    const diff = @intFromPtr(next.schedule) - @intFromPtr(dispatch.schedule);
+    const diff = @intFromPtr(next.cursor) - @intFromPtr(dispatch.cursor);
     try testing.expect(diff == @sizeOf(TestDispatch.Item));
 }
 
@@ -606,11 +624,11 @@ test "Dispatch - skipMetadata advances by 2" {
         .{ .opcode_handler = mockStop },
         .{ .opcode_handler = mockStop },
     };
-    const dispatch = TestDispatch{ .schedule = &dummy_items, .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = &dummy_items, .jump_table = null };
     const next = dispatch.skipMetadata();
     
     // Verify pointer arithmetic
-    const diff = @intFromPtr(next.schedule) - @intFromPtr(dispatch.schedule);
+    const diff = @intFromPtr(next.cursor) - @intFromPtr(dispatch.cursor);
     try testing.expect(diff == 2 * @sizeOf(TestDispatch.Item));
 }
 
@@ -621,7 +639,7 @@ test "Dispatch - getInlineMetadata accesses correct position" {
         .{ .opcode_handler = mockStop },
     };
     
-    const dispatch = TestDispatch{ .schedule = &items };
+    const dispatch = TestDispatch{ .cursor = &items };
     const metadata = dispatch.getInlineMetadata();
     
     try testing.expect(metadata.value == 123);
@@ -635,7 +653,7 @@ test "Dispatch - getPointerMetadata accesses correct position" {
         .{ .opcode_handler = mockStop },
     };
     
-    const dispatch = TestDispatch{ .schedule = &items };
+    const dispatch = TestDispatch{ .cursor = &items };
     const metadata = dispatch.getPointerMetadata();
     
     try testing.expect(metadata.value.* == 456);
@@ -648,7 +666,7 @@ test "Dispatch - getPcMetadata accesses correct position" {
         .{ .opcode_handler = mockStop },
     };
     
-    const dispatch = TestDispatch{ .schedule = &items };
+    const dispatch = TestDispatch{ .cursor = &items };
     const metadata = dispatch.getPcMetadata();
     
     try testing.expect(metadata.value == 789);
@@ -661,7 +679,7 @@ test "Dispatch - getJumpDestMetadata accesses correct position" {
         .{ .opcode_handler = mockStop },
     };
     
-    const dispatch = TestDispatch{ .schedule = &items };
+    const dispatch = TestDispatch{ .cursor = &items };
     const metadata = dispatch.getJumpDestMetadata();
     
     try testing.expect(metadata.gas == 100);
@@ -676,11 +694,11 @@ test "Dispatch - getOpData for PC returns correct metadata and next" {
         .{ .opcode_handler = mockStop },
     };
     
-    const dispatch = TestDispatch{ .schedule = @ptrCast(&items[0]), .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]), .jump_table = null };
     const op_data = dispatch.getOpData(.PC);
     
     try testing.expect(op_data.metadata.value == 42);
-    try testing.expect(op_data.next.schedule == dispatch.schedule + 2);
+    try testing.expect(op_data.next.cursor == dispatch.cursor + 2);
 }
 
 test "Dispatch - getOpData for regular opcode returns only next" {
@@ -689,10 +707,10 @@ test "Dispatch - getOpData for regular opcode returns only next" {
         .{ .opcode_handler = mockStop },
     };
     
-    const dispatch = TestDispatch{ .schedule = @ptrCast(&items[0]), .jump_table = null };
+    const dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]), .jump_table = null };
     const op_data = dispatch.getOpData(.ADD);
     
-    try testing.expect(op_data.next.schedule == dispatch.schedule + 1);
+    try testing.expect(op_data.next.cursor == dispatch.cursor + 1);
 }
 
 test "Dispatch - complex bytecode sequence" {
@@ -1006,11 +1024,11 @@ test "JumpTable - multiple entries sorted order" {
 test "JumpTable - binary search edge cases" {
     // Create manual jump table with edge case PCs
     const entries = [_]TestDispatch.JumpTableEntry{
-        .{ .pc = 0, .dispatch = TestDispatch{ .schedule = undefined } },
-        .{ .pc = 1, .dispatch = TestDispatch{ .schedule = undefined } },
-        .{ .pc = 100, .dispatch = TestDispatch{ .schedule = undefined } },
-        .{ .pc = 0xFFFE, .dispatch = TestDispatch{ .schedule = undefined } },
-        .{ .pc = 0xFFFF, .dispatch = TestDispatch{ .schedule = undefined } },
+        .{ .pc = 0, .dispatch = TestDispatch{ .cursor = undefined } },
+        .{ .pc = 1, .dispatch = TestDispatch{ .cursor = undefined } },
+        .{ .pc = 100, .dispatch = TestDispatch{ .cursor = undefined } },
+        .{ .pc = 0xFFFE, .dispatch = TestDispatch{ .cursor = undefined } },
+        .{ .pc = 0xFFFF, .dispatch = TestDispatch{ .cursor = undefined } },
     };
     
     const jump_table = TestDispatch.JumpTable{ .entries = &entries };
@@ -1040,7 +1058,7 @@ test "JumpTable - large jump table performance" {
     for (entries, 0..) |*entry, i| {
         entry.* = .{
             .pc = @intCast(i * 10),
-            .dispatch = TestDispatch{ .schedule = undefined },
+            .dispatch = TestDispatch{ .cursor = undefined },
         };
     }
     
@@ -1073,8 +1091,8 @@ fn mockPushMulFusion(frame: TestFrame, dispatch: *const anyopaque) TestFrame.Err
 }
 
 // Create test opcode handler array with synthetic opcodes
-fn createTestHandlersWithSynthetic() [256]*const TestDispatch.OpcodeHandler {
-    var handlers: [256]*const TestDispatch.OpcodeHandler = undefined;
+fn createTestHandlersWithSynthetic() [256]*const TestFrame.OpcodeHandler {
+    var handlers: [256]*const TestFrame.OpcodeHandler = undefined;
     
     // Initialize all to invalid
     for (&handlers) |*handler| {
@@ -1187,11 +1205,11 @@ test "Dispatch - edge case empty bytecode safety" {
     try testing.expect(dispatch_items[1].opcode_handler == &mockStop);
     
     // Create dispatch wrapper and test safety
-    const dispatch = TestDispatch{ .schedule = dispatch_items.ptr };
+    const dispatch = TestDispatch{ .cursor = dispatch_items.ptr };
     const next = dispatch.getNext();
     
     // Should be able to access next safely (second STOP)
-    const ptr_diff = @intFromPtr(next.schedule) - @intFromPtr(dispatch.schedule);
+    const ptr_diff = @intFromPtr(next.cursor) - @intFromPtr(dispatch.cursor);
     try testing.expect(ptr_diff == @sizeOf(TestDispatch.Item));
 }
 
@@ -1211,30 +1229,30 @@ test "Dispatch - getOpData compilation and type safety" {
     };
     
     // Test PC opcode
-    const pc_dispatch = TestDispatch{ .schedule = @ptrCast(&items[0]) };
+    const pc_dispatch = TestDispatch{ .cursor = @ptrCast(&items[0]) };
     const pc_data = pc_dispatch.getOpData(.PC);
     try testing.expect(@TypeOf(pc_data.metadata) == TestDispatch.PcMetadata);
     try testing.expect(pc_data.metadata.value == 42);
     
     // Test PUSH1 (inline)
-    const push1_dispatch = TestDispatch{ .schedule = @ptrCast(&items[2]) };
+    const push1_dispatch = TestDispatch{ .cursor = @ptrCast(&items[2]) };
     const push1_data = push1_dispatch.getOpData(.PUSH1);
     try testing.expect(@TypeOf(push1_data.metadata) == TestDispatch.PushInlineMetadata);
     try testing.expect(push1_data.metadata.value == 123);
     
     // Test PUSH32 (pointer)
-    const push32_dispatch = TestDispatch{ .schedule = @ptrCast(&items[4]) };
+    const push32_dispatch = TestDispatch{ .cursor = @ptrCast(&items[4]) };
     const push32_data = push32_dispatch.getOpData(.PUSH32);
     try testing.expect(@TypeOf(push32_data.metadata) == TestDispatch.PushPointerMetadata);
     
     // Test JUMPDEST
-    const jd_dispatch = TestDispatch{ .schedule = @ptrCast(&items[6]) };
+    const jd_dispatch = TestDispatch{ .cursor = @ptrCast(&items[6]) };
     const jd_data = jd_dispatch.getOpData(.JUMPDEST);
     try testing.expect(@TypeOf(jd_data.metadata) == TestDispatch.JumpDestMetadata);
     try testing.expect(jd_data.metadata.gas == 100);
     
     // Test regular opcode (no metadata)
-    const add_dispatch = TestDispatch{ .schedule = @ptrCast(&items[1]) };
+    const add_dispatch = TestDispatch{ .cursor = @ptrCast(&items[1]) };
     const add_data = add_dispatch.getOpData(.ADD);
     try testing.expect(!@hasField(@TypeOf(add_data), "metadata"));
 }
@@ -1247,9 +1265,9 @@ test "JumpTable - sorting validation catches unsorted entries" {
     var entries = try allocator.alloc(TestDispatch.JumpTableEntry, 3);
     defer allocator.free(entries);
     
-    entries[0] = .{ .pc = 100, .dispatch = TestDispatch{ .schedule = undefined } };
-    entries[1] = .{ .pc = 10, .dispatch = TestDispatch{ .schedule = undefined } };
-    entries[2] = .{ .pc = 50, .dispatch = TestDispatch{ .schedule = undefined } };
+    entries[0] = .{ .pc = 100, .dispatch = TestDispatch{ .cursor = undefined } };
+    entries[1] = .{ .pc = 10, .dispatch = TestDispatch{ .cursor = undefined } };
+    entries[2] = .{ .pc = 50, .dispatch = TestDispatch{ .cursor = undefined } };
     
     // Sort them manually using the same algorithm
     std.sort.block(TestDispatch.JumpTableEntry, entries, {}, struct {
@@ -1268,4 +1286,11 @@ test "JumpTable - sorting validation catches unsorted entries" {
     for (entries[0..entries.len -| 1], entries[1..]) |current, next| {
         try testing.expect(current.pc < next.pc);
     }
+}
+
+/// Helper type for tests that represents a scheduled element
+/// This is exported for test files to use
+pub fn ScheduleElement(comptime FrameType: type) type {
+    const DispatchType = Dispatch(FrameType);
+    return DispatchType.Item;
 }
