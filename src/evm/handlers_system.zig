@@ -81,7 +81,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(input_end) catch {
+                self.memory.ensure_capacity(self.allocator, input_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -91,7 +91,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(output_end) catch {
+                self.memory.ensure_capacity(self.allocator, output_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -129,7 +129,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(output_offset_usize, result.output[0..copy_size]) catch {
+                self.memory.set_data(self.allocator, output_offset_usize, result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -192,7 +192,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(input_end) catch {
+                self.memory.ensure_capacity(self.allocator, input_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -202,7 +202,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(output_end) catch {
+                self.memory.ensure_capacity(self.allocator, output_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -240,7 +240,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(output_offset_usize, result.output[0..copy_size]) catch {
+                self.memory.set_data(self.allocator, output_offset_usize, result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -303,7 +303,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for input
             if (input_size_usize > 0) {
                 const input_end = input_offset_usize + input_size_usize;
-                self.memory.ensure_capacity(input_end) catch {
+                self.memory.ensure_capacity(self.allocator, input_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -313,7 +313,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Ensure memory capacity for output
             if (output_size_usize > 0) {
                 const output_end = output_offset_usize + output_size_usize;
-                self.memory.ensure_capacity(output_end) catch {
+                self.memory.ensure_capacity(self.allocator, output_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -350,7 +350,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Write return data to memory if successful and output size > 0
             if (result.success and output_size_usize > 0 and result.output.len > 0) {
                 const copy_size = @min(output_size_usize, result.output.len);
-                self.memory.set_data(output_offset_usize, result.output[0..copy_size]) catch {
+                self.memory.set_data(self.allocator, output_offset_usize, result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
                     return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -395,7 +395,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(memory_end) catch {
+            self.memory.ensure_capacity(self.allocator, memory_end) catch {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
                 return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -469,7 +469,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(memory_end) catch {
+            self.memory.ensure_capacity(self.allocator, memory_end) catch {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
                 return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
@@ -543,7 +543,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(memory_end) catch return Error.OutOfBounds;
+            self.memory.ensure_capacity(self.allocator, memory_end) catch return Error.OutOfBounds;
 
             // Extract return data from memory and store it
             if (size_usize > 0) {
@@ -585,7 +585,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Ensure memory capacity
             const memory_end = offset_usize + size_usize;
-            self.memory.ensure_capacity(memory_end) catch return Error.OutOfBounds;
+            self.memory.ensure_capacity(self.allocator, memory_end) catch return Error.OutOfBounds;
 
             // Extract revert data from memory and store it
             if (size_usize > 0) {

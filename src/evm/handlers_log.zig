@@ -47,7 +47,7 @@ pub fn Handlers(comptime FrameType: type) type {
                     // Ensure memory capacity
                     if (length_usize > 0) {
                         const memory_end = offset_usize + length_usize;
-                        self.memory.ensure_capacity(memory_end) catch return Error.OutOfBounds;
+                        self.memory.ensure_capacity(self.allocator, memory_end) catch return Error.OutOfBounds;
                     }
                     
                     // Get data from memory

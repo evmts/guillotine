@@ -77,7 +77,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             // Ensure memory is available
-            self.memory.ensure_capacity(end) catch |err| switch (err) {
+            self.memory.ensure_capacity(self.allocator, end) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };

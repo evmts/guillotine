@@ -115,14 +115,14 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Offset 0-63: Primary cacheline (64 bytes)
         //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
         //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
-        //   └── memory: Memory (partial)        // ~32 bytes of 44 total
+        //   └── memory: Memory                  // 32 bytes (28 + 4 padding)
         // 
         //   Secondary Components (Cacheline 2)
         // 
         //   Offset 64-127: Execution context
-        //   ├── memory: Memory (continued)      // remaining 12 bytes of 44 total
         //   ├── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable)
-        //   └── contract_address: Address       // 20 bytes
+        //   ├── contract_address: Address       // 20 bytes
+        //   └── host: Host (partial)            // varies in size
         // 
         //   Tertiary Components (Cacheline 3+)
         // 
@@ -145,16 +145,16 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //  - Cache optimization: Downward growth for locality
         //  - Optimization: Removed explicit stack_limit field, computed via inline function
         //
-        //  Memory (memory.zig) - 44 bytes total
+        //  Memory (memory.zig) - 28 bytes total (32 with padding)
         //
         //  - Structure:
         //    - checkpoint: usize              // 8 bytes - tracks parent memory boundary
         //    - buffer_ptr: *ArrayList(u8)     // 8 bytes - pointer to actual memory buffer
-        //    - allocator: std.mem.Allocator   // 16 bytes - allocator for memory operations
         //    - cached_expansion: packed struct // 12 bytes - gas cost cache
         //      - last_size: u32   (4 bytes)
         //      - last_words: u32  (4 bytes)  
         //      - last_cost: u64   (8 bytes)
+        //  - Allocator removed: Now passed as parameter to methods instead of stored
         //  - Fast path: Optimized for ≤32 byte expansions (common EVM word size)
         //  - Zero initialization: Guaranteed on expansion
         //  - Child memory: Shares buffer with parent, different checkpoint
@@ -172,9 +172,9 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //
         //   Memory Layout Visualization
         // 
-        // Cache Line 1 (0-63):    [Stack(24)][Gas][Memory(start)]
-        // Cache Line 2 (64-127):  [Memory(cont)][Database][Address]
-        // Cache Line 3 (128-191): [Host][Logs][Output][SelfDest*][Alloc]
+        // Cache Line 1 (0-63):    [Stack(24)][Gas(4-8)][Memory(32)]
+        // Cache Line 2 (64-127):  [Database(0-16)][Address(20)][Host(partial)]
+        // Cache Line 3 (128-191): [Host(cont)][Logs(24)][Output(24)][SelfDest*(8)][Alloc(16)]
         // Note: Tracer is not stored in the struct - it's a compile-time parameter
         stack: Stack,
         gas_remaining: GasType, 
@@ -225,7 +225,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// Clean up all frame resources.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.stack.deinit(allocator);
-            self.memory.deinit();
+            self.memory.deinit(allocator);
             // Free log data
             for (self.logs.items) |log_entry| {
                 allocator.free(log_entry.topics);
