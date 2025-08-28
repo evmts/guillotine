@@ -323,7 +323,7 @@ test "PUSH_MSTORE_INLINE - store to memory" {
     _ = try TestFrame.MemorySyntheticHandlers.push_mstore_inline(frame, dispatch);
     
     // Verify the value was stored
-    const stored = frame.memory.get_u256_evm(64) catch unreachable;
+    const stored = frame.memory.get_u256_evm(testing.allocator, 64) catch unreachable;
     try testing.expectEqual(@as(u256, 0x1234567890ABCDEF), stored);
 }
 
