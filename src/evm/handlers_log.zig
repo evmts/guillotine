@@ -157,21 +157,12 @@ const MockHost = struct {
         try self.logs.append(log_entry);
     }
 
-    pub fn to_host(self: *MockHost) host_mod.Host {
-        return .{
-            .ptr = self,
-            .vtable = &.{
-                .get_is_static = @ptrCast(&get_is_static),
-                .emit_log = @ptrCast(&emit_log),
-                // Add other required vtable entries...
-            },
-        };
-    }
 };
 
-fn createTestFrame(allocator: std.mem.Allocator, host: ?host_mod.Host) !TestFrame {
+fn createTestFrame(allocator: std.mem.Allocator, evm: ?*MockHost) !TestFrame {
     const bytecode = TestBytecode.initEmpty();
-    return try TestFrame.init(allocator, bytecode, 1_000_000, null, host);
+    const evm_ptr = if (evm) |e| @as(*anyopaque, @ptrCast(e)) else @as(*anyopaque, @ptrFromInt(0x1000));
+    return try TestFrame.init(allocator, bytecode, 1_000_000, null, evm_ptr);
 }
 
 // Mock dispatch that simulates successful execution flow
