@@ -360,13 +360,28 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
 
             // Get contract code
+            log.debug("EXECUTE_CALL: Getting code for address {any}", .{params.to});
             const code = self.database.get_code_by_address(params.to.bytes) catch |err| {
-                log.debug("Error getting code for {any}: {}", .{params.to, err});
-                return CallResult.failure(0);
+                log.err("EXECUTE_CALL ERROR: Failed to get code: {}", .{err});
+                log.err("EXECUTE_CALL ERROR: Address bytes: {x}", .{params.to.bytes});
+                const error_str = switch (err) {
+                    DatabaseInterface.Error.CodeNotFound => "CodeNotFound",
+                    DatabaseInterface.Error.AccountNotFound => "AccountNotFound",
+                    DatabaseInterface.Error.StorageNotFound => "StorageNotFound",
+                    DatabaseInterface.Error.InvalidAddress => "InvalidAddress",
+                    DatabaseInterface.Error.DatabaseCorrupted => "DatabaseCorrupted",
+                    DatabaseInterface.Error.NetworkError => "NetworkError",
+                    DatabaseInterface.Error.PermissionDenied => "PermissionDenied",
+                    DatabaseInterface.Error.OutOfMemory => "OutOfMemory",
+                    DatabaseInterface.Error.InvalidSnapshot => "InvalidSnapshot",
+                    DatabaseInterface.Error.NoBatchInProgress => "NoBatchInProgress",
+                    DatabaseInterface.Error.SnapshotNotFound => "SnapshotNotFound",
+                };
+                return CallResult.failure_with_error(0, error_str);
             };
-            log.debug("Call to {any}: code_len={}", .{params.to, code.len});
+            log.debug("EXECUTE_CALL: Got code for address {any}: code_len={}", .{params.to, code.len});
             if (code.len == 0) {
-                log.debug("Call to empty account: {any}", .{params.to});
+                log.debug("EXECUTE_CALL: Call to empty account: {any}", .{params.to});
                 return CallResult.success_empty(params.gas);
             }
             // Execute frame
@@ -803,12 +818,12 @@ pub fn Evm(comptime config: EvmConfig) type {
                 const static_host = @import("host.zig").Host.init(static_host_ptr);
                 
                 // Initialize frame with static wrappers
-                var frame = try Frame.init(self.allocator, code, gas_cast, static_db, static_host, self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, static_db, static_host, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
                 log.debug("Executing frame: code_len={}, gas={}, address={any}, is_static={}", .{code.len, gas_cast, address, is_static});
-                const outcome = frame.interpret() catch |err| {
+                const outcome = frame.interpret(code) catch |err| {
                     log.debug("Frame.interpret() failed (static): {}", .{err});
                     return CallResult.failure(0);
                 };
@@ -830,14 +845,14 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }
             } else {
                 // Non-static call - use regular interfaces
-                var frame = try Frame.init(self.allocator, code, gas_cast, self.database, host, self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, host, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
                 log.debug("Executing frame (non-static): code_len={}, gas={}, address={any}", .{code.len, gas_cast, address});
                 
                 // Wrap in a more detailed error handler
-                const outcome = frame.interpret() catch |err| {
+                const outcome = frame.interpret(code) catch |err| {
                     log.err("Frame.interpret() failed (non-static): {}", .{err});
                     log.err("  Code length: {}", .{code.len});
                     log.err("  Gas: {}", .{gas_cast});
