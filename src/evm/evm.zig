@@ -285,11 +285,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// on the operation type (CALL, CREATE, etc). Manages transaction-level
         /// state including logs and ensures proper cleanup.
         pub fn call(self: *Self, params: CallParams) CallResult {
-            std.debug.print("EVM.CALL: Starting call with params type: {s}\n", .{@tagName(params)});
-            params.validate() catch {
-                std.debug.print("EVM.CALL: params.validate() failed\n", .{});
-                return CallResult.failure(0);
-            };
+            params.validate() catch return CallResult.failure(0);
             defer self.depth = 0;
             defer _ = self.call_arena.reset(.retain_capacity);
             defer self.logs.clearRetainingCapacity();
@@ -298,15 +294,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             const gas = switch (params) {
                 inline else => |p| p.gas,
             };
-            std.debug.print("EVM.CALL: Gas={}, depth={}, disable_gas_checking={}\n", .{gas, self.depth, self.disable_gas_checking});
-            if (!self.disable_gas_checking and gas == 0) {
-                std.debug.print("EVM.CALL: Failing due to zero gas\n", .{});
-                return CallResult.failure(0);
-            }
-            if (self.depth >= config.max_call_depth) {
-                std.debug.print("EVM.CALL: Failing due to max call depth\n", .{});
-                return CallResult.failure(0);
-            }
+            if (!self.disable_gas_checking and gas == 0) return CallResult.failure(0);
+            if (self.depth >= config.max_call_depth) return CallResult.failure(0);
             
             // Store initial gas for EIP-3529 calculations
             const initial_gas = gas;
@@ -371,17 +360,13 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
 
             // Get contract code
-            std.debug.print("EXECUTE_CALL: Getting code for address {any}\n", .{params.to});
             const code = self.database.get_code_by_address(params.to.bytes) catch |err| {
                 log.debug("Error getting code for {any}: {}", .{params.to, err});
-                std.debug.print("EXECUTE_CALL ERROR: Failed to get code: {}\n", .{err});
                 return CallResult.failure(0);
             };
             log.debug("Call to {any}: code_len={}", .{params.to, code.len});
-            std.debug.print("EXECUTE_CALL: Got code, len={}\n", .{code.len});
             if (code.len == 0) {
                 log.debug("Call to empty account: {any}", .{params.to});
-                std.debug.print("EXECUTE_CALL: Empty code, returning success\n", .{});
                 return CallResult.success_empty(params.gas);
             }
             // Execute frame
