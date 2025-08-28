@@ -85,7 +85,7 @@ export fn zigEvmCreate() ?*anyopaque {
         .chain_id = 1,
     };
     
-    const db_as_database = @as(DefaultEvm.Database, db_interface.*);
+    const db_as_database = @as(@import("evm").Database, db_interface.*);
     evm.* = DefaultEvm.init(allocator, db_as_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN) catch {
         memory_db.deinit();
         allocator.destroy(memory_db);

@@ -813,7 +813,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 
                 // Static calls - we'll need to enforce constraints in the EVM methods themselves
                 // For now, just initialize frame normally
-                var frame = try Frame.init(self.allocator, gas_cast, static_db, self.tx_context, evm_ptr, self_destruct_param);
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, self.tx_context, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 

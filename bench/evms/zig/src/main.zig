@@ -159,7 +159,7 @@ pub fn main() !void {
         .chain_id = 1,
     };
 
-    const db_as_database = @as(evm.Database, db_interface.*);
+    const db_as_database = @as(evm.Database, db_interface);
     var evm_instance = try evm.DefaultEvm.init(allocator, db_as_database, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm_instance.deinit();
 
