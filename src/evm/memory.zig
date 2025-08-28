@@ -412,7 +412,7 @@ test "Memory large data operations" {
     for (&large_data, 0..) |*byte, i| {
         byte.* = @truncate(i);
     }
-    try memory.set_data(0, &large_data);
+    try memory.set_data(allocator, 0, &large_data);
     try std.testing.expectEqual(@as(usize, 1024), memory.size());
     const chunk1 = try memory.get_slice(0, 256);
     const chunk2 = try memory.get_slice(256, 256);
@@ -485,17 +485,17 @@ test "Memory fast-path optimization for small growth" {
     defer memory.deinit(allocator);
     
     // Pre-allocate some capacity
-    try memory.buffer_ptr.ensureTotalCapacity(memory.allocator, 128);
+    try memory.buffer_ptr.ensureTotalCapacity(allocator, 128);
     const initial_capacity = memory.buffer_ptr.capacity;
     try std.testing.expect(initial_capacity >= 128);
     
     // Small growth (32 bytes) should use existing capacity without reallocation
-    try memory.ensure_capacity(32);
+    try memory.ensure_capacity(allocator, 32);
     try std.testing.expectEqual(@as(usize, 32), memory.buffer_ptr.items.len);
     try std.testing.expectEqual(initial_capacity, memory.buffer_ptr.capacity);
     
     // Another small growth should still use existing capacity
-    try memory.ensure_capacity(64);
+    try memory.ensure_capacity(allocator, 64);
     try std.testing.expectEqual(@as(usize, 64), memory.buffer_ptr.items.len);
     try std.testing.expectEqual(initial_capacity, memory.buffer_ptr.capacity);
     
@@ -513,11 +513,11 @@ test "Memory growth beyond fast-path threshold" {
     defer memory.deinit(allocator);
     
     // Start with small size
-    try memory.ensure_capacity(16);
+    try memory.ensure_capacity(allocator, 16);
     try std.testing.expectEqual(@as(usize, 16), memory.buffer_ptr.items.len);
     
     // Growth larger than 32 bytes should use standard path
-    try memory.ensure_capacity(100);
+    try memory.ensure_capacity(allocator, 100);
     try std.testing.expectEqual(@as(usize, 100), memory.buffer_ptr.items.len);
     
     // Verify zero initialization
@@ -534,11 +534,11 @@ test "Memory fast-path with insufficient capacity" {
     defer memory.deinit(allocator);
     
     // Force small initial capacity
-    memory.buffer_ptr.shrinkAndFree(memory.allocator, 0);
+    memory.buffer_ptr.shrinkAndFree(allocator, 0);
     try std.testing.expectEqual(@as(usize, 0), memory.buffer_ptr.capacity);
     
     // Small growth should still work but will need allocation
-    try memory.ensure_capacity(20);
+    try memory.ensure_capacity(allocator, 20);
     try std.testing.expectEqual(@as(usize, 20), memory.buffer_ptr.items.len);
     try std.testing.expect(memory.buffer_ptr.capacity >= 20);
     
