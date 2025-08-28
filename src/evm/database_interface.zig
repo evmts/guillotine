@@ -91,6 +91,16 @@ pub const DatabaseInterface = struct {
         deinit: *const fn (ptr: *anyopaque) void,
     };
 
+    /// Convert this database interface to a static version that blocks writes
+    /// This implements EIP-214 (STATICCALL) constraints
+    /// IMPORTANT: The returned interface is only valid as long as this database is valid
+    pub fn as_static(self: DatabaseInterface) DatabaseInterface {
+        const StaticDatabase = @import("static_wrappers.zig").StaticDatabase;
+        // We'll create a static wrapper that re-uses the existing database interface
+        // This is a bit of a hack but works because the StaticDatabase just forwards or blocks calls
+        return StaticDatabase.init(self).to_database_interface();
+    }
+
     /// Initialize a database interface from any implementation
     ///
     /// This function uses Zig's compile-time type introspection to generate
