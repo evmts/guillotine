@@ -809,11 +809,25 @@ pub fn Evm(comptime config: EvmConfig) type {
                 const static_db_ptr = try self.allocator.create(StaticDatabase);
                 defer self.allocator.destroy(static_db_ptr);
                 static_db_ptr.* = StaticDatabase.init(self.database);
-                const static_db = static_db_ptr.to_database_interface();
+                _ = static_db_ptr.to_database_interface(); // TODO: Use static database wrapper
                 
                 // Static calls - we'll need to enforce constraints in the EVM methods themselves
-                // For now, just initialize frame normally
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, self.tx_context, evm_ptr, self_destruct_param);
+                // Convert TransactionContext to Context for Frame
+                const frame_context = @import("context.zig").Context{
+                    .origin = self.origin,
+                    .gas_price = self.gas_price,
+                    .chain_id = self.block_info.chain_id,
+                    .timestamp = self.block_info.timestamp,
+                    .block_number = self.block_info.number,
+                    .gas_limit = self.block_info.gas_limit,
+                    .base_fee = self.block_info.base_fee,
+                    .coinbase = self.block_info.coinbase,
+                    .difficulty = self.block_info.difficulty,
+                    .prevrandao = self.block_info.prevrandao,
+                    .blob_base_fee = self.block_info.blob_base_fee,
+                    .is_static = is_static,
+                };
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, frame_context, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -840,7 +854,22 @@ pub fn Evm(comptime config: EvmConfig) type {
                 }
             } else {
                 // Non-static call - use regular interfaces
-                var frame = try Frame.init(self.allocator, gas_cast, self.database, self.tx_context, evm_ptr, self_destruct_param);
+                // Convert TransactionContext to Context for Frame
+                const frame_context = @import("context.zig").Context{
+                    .origin = self.origin,
+                    .gas_price = self.gas_price,
+                    .chain_id = self.block_info.chain_id,
+                    .timestamp = self.block_info.timestamp,
+                    .block_number = self.block_info.number,
+                    .gas_limit = self.block_info.gas_limit,
+                    .base_fee = self.block_info.base_fee,
+                    .coinbase = self.block_info.coinbase,
+                    .difficulty = self.block_info.difficulty,
+                    .prevrandao = self.block_info.prevrandao,
+                    .blob_base_fee = self.block_info.blob_base_fee,
+                    .is_static = false,
+                };
+                var frame = try Frame.init(self.allocator, gas_cast, self.database, frame_context, evm_ptr, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 

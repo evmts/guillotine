@@ -35,7 +35,8 @@ const CallParams = @import("call_params.zig").CallParams;
 const CallResult = @import("call_result.zig").CallResult;
 const logs = @import("logs.zig");
 const Log = logs.Log;
-const Context = @import("context.zig").Context;
+const block_info_mod = @import("block_info.zig");
+const block_info_config_mod = @import("block_info_config.zig");
 // LogList functionality is inlined into StackFrame for optimal packing
 const dispatch_mod = @import("dispatch.zig");
 
@@ -103,6 +104,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             .vector_length = config.vector_length,
             .fusions_enabled = false,
         });
+        /// The BlockInfo type configured for this frame
+        pub const BlockInfo = block_info_mod.BlockInfo(config.block_info_config);
 
         /// A fixed size array of opcode handlers indexed by opcode number
         pub const opcode_handlers: [256]OpcodeHandler = stack_frame_handlers.getOpcodeHandlers(Self);
@@ -221,7 +224,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// 
         /// EIP-214: For static calls, self_destruct should be null to prevent 
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
+        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: config.DatabaseType, context: Context, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
 
             var stack = Stack.init(allocator) catch {
                 @branchHint(.cold);
@@ -244,12 +247,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
                 .memory = memory,
                 .database = database,
+                .context = context,
                 .log_items = frame_log_items,
                 .log_len = frame_log_len,
+                .allocator = allocator,
                 .output_data = output_data,
                 .evm_ptr = evm_ptr,
                 .self_destruct = self_destruct,
-                .allocator = allocator,
             };
         }
         /// Clean up all frame resources.
@@ -442,13 +446,14 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .gas_remaining = self.gas_remaining,
                 .memory = new_memory,
                 .database = self.database,
+                .context = self.context,
                 .contract_address = self.contract_address,
-                .self_destruct = self.self_destruct,
                 .log_items = new_log_items,
                 .log_len = self.log_len,
+                .allocator = allocator,
                 .output_data = new_output_data,
                 .evm_ptr = self.evm_ptr,
-                .allocator = allocator,
+                .self_destruct = self.self_destruct,
             };
         }
 
