@@ -265,29 +265,82 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         const MemorySyntheticHandlers = stack_frame_memory_synthetic.Handlers(Self);
         const JumpSyntheticHandlers = stack_frame_jump_synthetic.Handlers(Self);
 
-        // Cacheline 1
+        //           StackFrame Structure Layout Analysis
+        //   Primary Components (Cacheline 1 - Hot Path)
+        //
+        //   Offset 0-63: Primary cacheline (64 bytes)
+        //   ├── stack: Stack                    // ~24 bytes (buf ptr + 2 raw ptrs)
+        //   ├── bytecode: Bytecode              // ~40 bytes (slices + metadata)
+        //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
+        //   └── initial_gas: GasType            // 4-8 bytes
+        // 
+        //   Secondary Components (Cacheline 2)
+        // 
+        //   Offset 64-127: Execution context
+        //   ├── tracer: TracerType              // 0 or configurable size
+        //   ├── memory: Memory                  // ~32 bytes (checkpoint + ptr + flags + cache)
+        //   ├── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable)
+        //   └── contract_address: Address       // 20 bytes
+        // 
+        //   Tertiary Components (Cacheline 3+)
+        // 
+        //   Offset 128+: Cold data
+        //   ├── host: Host                      // size varies
+        //   ├── logs: ArrayList(Log)            // 24 bytes
+        //   ├── output_data: ArrayList(u8)      // 24 bytes
+        //   ├── self_destruct: ?*SelfDestruct   // 8 bytes
+        //   └── allocator: Allocator            // 16 bytes
+        // 
+        //  Component-Level Alignment Details
+        //
+        //  Stack (stack.zig)
+        //
+        //  - Buffer: 64-byte aligned via alignedAlloc (line 51)
+        //  - Pointers: 8-byte aligned raw pointers
+        //  - Cache optimization: Downward growth for locality
+        //
+        //  Memory (memory.zig)
+        //
+        //  - Packed cache struct: 12 bytes total for expansion cache
+        //  - Buffer: Standard ArrayList alignment
+        //  - Fast path: Optimized for ≤32 byte expansions (common EVM word size)
+        //
+        //  Bytecode (bytecode.zig)
+        //
+        //  - Bitmaps: Cache-aligned when not in test mode (64-byte boundaries)
+        //  - Packed bits: 4-bit structures for dense storage
+        //  - Prefetch: 256-byte lookahead during processing
+        //
+        // Database Interface (database_interface.zig)
+        //
+        //  - VTable: Function pointer alignment (8 bytes)
+        //  - Implementation ptr: 8-byte aligned void pointer
+        //
+        //   Memory Layout Visualization
+        // 
+        // Cache Line 1 (0-63):    [Stack Buf*][Stack Ptrs][Bytecode][Gas][InitGas]
+        // Cache Line 2 (64-127):  [Tracer][Memory][Database][Address]
+        // Cache Line 3 (128-191): [SelfDest*][Host][Logs][Output][Alloc]
         stack: Stack,
-        bytecode: Bytecode, // Use Bytecode type for optimized access
-        gas_remaining: GasType, // Direct gas tracking
-        /// Initial gas at frame start for refund cap calculation
+        bytecode: Bytecode, 
+        gas_remaining: GasType, 
         initial_gas: GasType = 0,
-        tracer: if (config.TracerType) |T| T else void,
         memory: Memory,
         database: if (config.has_database) ?DatabaseInterface else void,
-        // Contract execution context
         contract_address: Address = Address.ZERO_ADDRESS,
-        is_static: bool = false,
-        self_destruct: ?*SelfDestruct = null,
         host: Host,
-        // Cold data - less frequently accessed during execution
         logs: std.ArrayList(Log),
         output_data: std.ArrayList(u8),
+        self_destruct: ?*SelfDestruct = null,
         allocator: std.mem.Allocator,
         /// Initialize a new execution frame.
         ///
         /// Creates stack, memory, and other execution components. Validates
         /// bytecode size and allocates resources with proper cleanup on failure.
-        pub fn init(allocator: std.mem.Allocator, bytecode_raw: []const u8, gas_remaining: GasType, database: if (config.has_database) ?DatabaseInterface else void, host: Host) Error!Self {
+        /// 
+        /// EIP-214: For static calls, self_destruct should be null to prevent 
+        /// SELFDESTRUCT operations which modify blockchain state.
+        pub fn init(allocator: std.mem.Allocator, bytecode_raw: []const u8, gas_remaining: GasType, database: if (config.has_database) ?DatabaseInterface else void, host: Host, self_destruct: ?*SelfDestruct) Error!Self {
             if (bytecode_raw.len > max_bytecode_size) {
                 @branchHint(.unlikely);
                 return Error.BytecodeTooLarge;
@@ -323,12 +376,12 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .bytecode = bytecode,
                 .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
                 .initial_gas = @as(GasType, @intCast(@max(gas_remaining, 0))),
-                .tracer = if (config.TracerType) |T| T.init() else {},
                 .memory = memory,
                 .database = database,
                 .logs = frame_logs,
                 .output_data = output_data,
                 .host = host,
+                .self_destruct = self_destruct,
                 .allocator = allocator,
             };
         }
@@ -346,34 +399,61 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             self.output_data.deinit(allocator);
         }
 
+        /// Execute this frame without tracing (backward compatibility method).
+        /// Simply delegates to interpret_with_tracer with no tracer.
+        pub fn interpret(self: *Self) Error!Success {
+            return self.interpret_with_tracer(null, {});
+        }
+        
         /// Execute this frame by building a dispatch schedule and jumping to the first handler.
         /// Performs a one-time static gas charge for the first basic block before execution.
-        pub fn interpret(self: *Self) Error!Success {
+        /// 
+        /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
+        /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
+        pub fn interpret_with_tracer(self: *Self, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
+            // Call beforeExecute hook if tracer is configured
+            if (TracerType) |T| {
+                if (@hasDecl(T, "beforeExecute")) {
+                    tracer_instance.beforeExecute(Self, self);
+                }
+            }
+            
             const handlers = &Self.opcode_handlers;
 
-            // Build dispatch cursor and jump table
-            const cursor_items = Dispatch.init(self.allocator, &self.bytecode, handlers) catch return Error.AllocationError;
-            defer Dispatch.deinitSchedule(self.allocator, cursor_items);
-            std.debug.assert(cursor_items.len > 3);
+            // Build dispatch schedule - with tracing injection if tracer provided
+            const schedule = if (TracerType != null) 
+                Dispatch.initWithTracing(self.allocator, &self.bytecode, handlers, TracerType.?, tracer_instance) catch return Error.AllocationError
+            else 
+                Dispatch.init(self.allocator, &self.bytecode, handlers) catch return Error.AllocationError;
+            defer Dispatch.deinitSchedule(self.allocator, schedule);
+            std.debug.assert(schedule.len > 3);
 
-            var jump_table = Dispatch.createJumpTable(self.allocator, cursor_items, &self.bytecode) catch return Error.AllocationError;
+            var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode) catch return Error.AllocationError;
             defer self.allocator.free(jump_table.entries);
 
-            // Pre-charge static gas stored as first item
+            // Process first block which just charges static gas for the first set of opcodes that could be statically analyzed
+            // This will be from start of bytecode up to the first jump
             var start_index: usize = 0;
-            if (cursor_items.len > 0) {
-                switch (cursor_items[0]) {
+                switch (schedule[0]) {
                     .first_block_gas => |meta| {
                         if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
                         start_index = 1;
                     },
                     else => unreachable,
                 }
+            const cursor = Self.Dispatch{ .cursor = schedule.ptr + 1, .jump_table = &jump_table };
+            
+            // Execute the bytecode
+            const result = cursor.cursor[0].opcode_handler(self, cursor);
+            
+            // Call afterExecute hook if tracer is configured
+            if (TracerType) |T| {
+                if (@hasDecl(T, "afterExecute")) {
+                    tracer_instance.afterExecute(Self, self);
+                }
             }
-
-            // Start dispatching at the first opcode handler
-            const cursor = Self.Dispatch{ .cursor = cursor_items.ptr + start_index, .jump_table = &jump_table };
-            return cursor.cursor[0].opcode_handler(self, cursor);
+            
+            return result;
         }
 
         /// Create a deep copy of the frame.
@@ -435,7 +515,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .bytecode = self.bytecode, // Note: Bytecode is shared, not copied
                 .gas_remaining = self.gas_remaining,
                 .initial_gas = self.initial_gas,
-                .tracer = if (config.TracerType) |_| self.tracer else {},
                 .memory = new_memory,
                 .database = self.database,
                 .contract_address = self.contract_address,

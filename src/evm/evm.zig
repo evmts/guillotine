@@ -43,6 +43,10 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// StackFrame type for the evm
         pub const Frame = @import("frame.zig").Frame(config.frame_config);
+        /// Static wrappers for EIP-214 (STATICCALL) constraint enforcement
+        const static_wrappers = @import("static_wrappers.zig");
+        const StaticDatabase = static_wrappers.StaticDatabase;
+        const StaticHost = static_wrappers.StaticHost(@import("host.zig").Host);
         /// Bytecode type for bytecode analysis
         pub const BytecodeFactory = @import("bytecode.zig").Bytecode;
         pub const Bytecode = BytecodeFactory(.{
@@ -204,8 +208,6 @@ pub fn Evm(comptime config: EvmConfig) type {
         // CACHE LINE 4+ - COLD PATH (less frequently accessed)
         /// Logs emitted during the current call
         logs: std.ArrayList(@import("call_result.zig").Log),
-        /// Static context stack - tracks if each call depth is static
-        static_stack: [config.max_call_depth]bool,
         /// Call stack - tracks caller and value for each call depth
         call_stack: [config.max_call_depth]CallStackEntry,
         /// Arena allocator for per-call temporary allocations
@@ -223,7 +225,6 @@ pub fn Evm(comptime config: EvmConfig) type {
             errdefer access_list.deinit();
             return Self{
                 .depth = 0,
-                .static_stack = [_]bool{false} ** config.max_call_depth,
                 .call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0 }} ** config.max_call_depth,
                 .allocator = allocator,
                 .database = database,
@@ -753,36 +754,71 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Store caller and value in call stack for this depth
             self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value };
 
-            // Track static context for this frame
-            self.static_stack[self.depth - 1] = is_static;
-
-            // Create host interface for the frame
-            const host = self.to_host();
-
             // Convert gas to the frame's GasType
             const gas_cast = @as(Frame.GasType, @intCast(@min(gas, @as(u64, @intCast(std.math.maxInt(Frame.GasType))))));
 
-            // Initialize frame and execute via Dispatch interpreter
-            var frame = try Frame.init(self.allocator, code, gas_cast, self.database, host);
-            frame.contract_address = address;
-            defer frame.deinit(self.allocator);
+            // EIP-214: Data-oriented design - encode static constraints in dependencies
+            // Static calls use null self_destruct to prevent SELFDESTRUCT operations
+            const self_destruct_param = if (is_static) null else &self.self_destruct;
 
-            const outcome = frame.interpret() catch return CallResult.failure(0);
+            // Use static wrappers for static calls to enforce EIP-214 constraints at the type level
+            if (is_static) {
+                // Create static database and host wrappers
+                var static_db = StaticDatabase.init(self.database);
+                const static_db_interface = static_db.to_database_interface();
+                
+                const host = self.to_host();
+                var static_host = StaticHost.init(host);
+                const static_host_interface = @import("host.zig").Host.init(&static_host);
 
-            // Map frame outcome to CallResult
-            const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
-            const out_items = frame.output_data.items;
-            const out_buf = if (out_items.len > 0) blk: {
-                const b = try self.allocator.alloc(u8, out_items.len);
-                @memcpy(b, out_items);
-                break :blk b;
-            } else &.{};
-            self.return_data = out_buf;
+                // Initialize frame with static wrappers
+                var frame = try Frame.init(self.allocator, code, gas_cast, static_db_interface, static_host_interface, self_destruct_param);
+                frame.contract_address = address;
+                defer frame.deinit(self.allocator);
 
-            switch (outcome) {
-                .Stop => return CallResult.success_with_output(gas_left, out_buf),
-                .Return => return CallResult.success_with_output(gas_left, out_buf),
-                .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
+                const outcome = frame.interpret() catch return CallResult.failure(0);
+
+                // Map frame outcome to CallResult
+                const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
+                const out_items = frame.output_data.items;
+                const out_buf = if (out_items.len > 0) blk: {
+                    const b = try self.allocator.alloc(u8, out_items.len);
+                    @memcpy(b, out_items);
+                    break :blk b;
+                } else &.{};
+                self.return_data = out_buf;
+
+                switch (outcome) {
+                    .Stop => return CallResult.success_with_output(gas_left, out_buf),
+                    .Return => return CallResult.success_with_output(gas_left, out_buf),
+                    .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
+                }
+            } else {
+                // Non-static call - use regular database and host
+                const host = self.to_host();
+
+                // Initialize frame with regular interfaces
+                var frame = try Frame.init(self.allocator, code, gas_cast, self.database, host, self_destruct_param);
+                frame.contract_address = address;
+                defer frame.deinit(self.allocator);
+
+                const outcome = frame.interpret() catch return CallResult.failure(0);
+
+                // Map frame outcome to CallResult
+                const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
+                const out_items = frame.output_data.items;
+                const out_buf = if (out_items.len > 0) blk: {
+                    const b = try self.allocator.alloc(u8, out_items.len);
+                    @memcpy(b, out_items);
+                    break :blk b;
+                } else &.{};
+                self.return_data = out_buf;
+
+                switch (outcome) {
+                    .Stop => return CallResult.success_with_output(gas_left, out_buf),
+                    .Return => return CallResult.success_with_output(gas_left, out_buf),
+                    .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
+                }
             }
         }
 
@@ -1036,12 +1072,6 @@ pub fn Evm(comptime config: EvmConfig) type {
         pub fn get_hardfork(self: *Self) Hardfork {
             _ = self;
             return .CANCUN; // Default to latest
-        }
-
-        /// Get whether the current frame is static
-        pub fn get_is_static(self: *Self) bool {
-            if (self.depth == 0) return false;
-            return self.static_stack[self.depth - 1];
         }
 
         /// Get the call depth for the current frame

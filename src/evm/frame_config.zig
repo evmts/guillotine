@@ -25,8 +25,6 @@ pub const FrameConfig = struct {
     max_initcode_size: u32 = 49152,
     /// The maximum gas limit for a block
     block_gas_limit: u64 = 30_000_000,
-    /// Optional tracer type for execution tracing. When null, tracing is disabled with zero overhead
-    TracerType: ?type = null,
     /// Memory configuration
     memory_initial_capacity: usize = 4096,
     memory_limit: u64 = 0xFFFFFF,

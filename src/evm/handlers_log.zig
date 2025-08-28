@@ -21,10 +21,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
             return &struct {
                 pub fn logHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
-                    // Check if we're in static context
-                    if (self.host.get_is_static()) {
-                        return Error.WriteProtection;
-                    }
+                    // EIP-214: WriteProtection is handled by host interface for static calls
 
                     // Pop topics in reverse order
                     var topics: [4]WordType = undefined;

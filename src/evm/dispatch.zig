@@ -435,28 +435,46 @@ pub fn Dispatch(comptime FrameType: type) type {
 
         /// Create a trace_before_op handler that captures tracer instance at comptime
         fn createTraceBeforeHandler(comptime TracerType: type, tracer_instance: *TracerType) OpcodeHandler {
-            return struct {
-                fn handler(frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success {
+            // We need to create a struct that holds the tracer instance
+            const Handler = struct {
+                tracer: *TracerType,
+                
+                fn handle(self: *@This(), frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success {
                     const metadata = dispatch.cursor[0].trace_before;
                     if (@hasDecl(TracerType, "beforeOp")) {
-                        tracer_instance.beforeOp(metadata.pc, metadata.opcode, FrameType, frame);
+                        self.tracer.beforeOp(metadata.pc, metadata.opcode, FrameType, frame);
                     }
-                    return dispatch.getNext().cursor[0].opcode_handler(frame, dispatch.getNext());
+                    // Skip metadata and continue with next handler
+                    const next_dispatch = dispatch.skipMetadata();
+                    return next_dispatch.cursor[0].opcode_handler(frame, next_dispatch);
                 }
-            }.handler;
+            };
+            
+            // Create handler instance and return bound method
+            const handler_instance = Handler{ .tracer = tracer_instance };
+            return handler_instance.handle;
         }
 
         /// Create a trace_after_op handler that captures tracer instance at comptime  
         fn createTraceAfterHandler(comptime TracerType: type, tracer_instance: *TracerType) OpcodeHandler {
-            return struct {
-                fn handler(frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success {
+            // We need to create a struct that holds the tracer instance
+            const Handler = struct {
+                tracer: *TracerType,
+                
+                fn handle(self: *@This(), frame: *FrameType, dispatch: Self) FrameType.Error!FrameType.Success {
                     const metadata = dispatch.cursor[0].trace_after;
                     if (@hasDecl(TracerType, "afterOp")) {
-                        tracer_instance.afterOp(metadata.pc, metadata.opcode, FrameType, frame);
+                        self.tracer.afterOp(metadata.pc, metadata.opcode, FrameType, frame);
                     }
-                    return dispatch.getNext().cursor[0].opcode_handler(frame, dispatch.getNext());
+                    // Skip metadata and continue with next handler
+                    const next_dispatch = dispatch.skipMetadata();
+                    return next_dispatch.cursor[0].opcode_handler(frame, next_dispatch);
                 }
-            }.handler;
+            };
+            
+            // Create handler instance and return bound method
+            const handler_instance = Handler{ .tracer = tracer_instance };
+            return handler_instance.handle;
         }
 
         /// Helper function to handle fusion operations with tracing support.

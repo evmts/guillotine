@@ -41,16 +41,14 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SSTORE opcode (0x55) - Store to storage.
         /// Stores value to storage slot. Subject to gas refunds and write protection checks.
+        /// EIP-214: Static calls use database that throws WriteProtection errors
         pub fn sstore(self: *FrameType, dispatch: Dispatch) Error!Success {
             // SSTORE stores a value to storage
             if (comptime !FrameType.frame_config.has_database) {
                 return Error.InvalidOpcode;
             }
 
-            // Check for write protection (static call context)
-            if (self.is_static) {
-                return Error.WriteProtection;
-            }
+            // EIP-214: WriteProtection is handled by database interface for static calls
 
             const slot = try self.stack.pop();
             const value = try self.stack.pop();
@@ -125,10 +123,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.InvalidOpcode;
             }
 
-            // Check for write protection (static call context)
-            if (self.is_static) {
-                return Error.WriteProtection;
-            }
+            // EIP-214: WriteProtection is handled by host interface for static calls
 
             const slot = try self.stack.pop();
             const value = try self.stack.pop();
@@ -183,6 +178,7 @@ const MockHost = struct {
     storage: std.AutoHashMap(StorageKey, u256),
     transient_storage: std.AutoHashMap(StorageKey, u256),
     accessed_slots: std.AutoHashMap(StorageKey, void),
+    is_static: bool = false,
 
     const StorageKey = struct {
         address: Address,
@@ -227,6 +223,10 @@ const MockHost = struct {
         const key = StorageKey{ .address = address, .slot = slot };
         try self.transient_storage.put(key, value);
     }
+
+    pub fn get_is_static(self: *const MockHost) bool {
+        return self.is_static;
+    }
 };
 
 fn createTestFrame(allocator: std.mem.Allocator, host: *MockHost) !TestFrame {
@@ -239,6 +239,7 @@ fn createTestFrame(allocator: std.mem.Allocator, host: *MockHost) !TestFrame {
             .set_storage = @ptrCast(&MockHost.set_storage),
             .get_transient_storage = @ptrCast(&MockHost.get_transient_storage),
             .set_transient_storage = @ptrCast(&MockHost.set_transient_storage),
+            .get_is_static = @ptrCast(&MockHost.get_is_static),
         },
     };
     return try TestFrame.init(allocator, bytecode, 1_000_000, null, host_interface);
@@ -306,7 +307,7 @@ test "SSTORE opcode - basic store" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false; // Ensure not in static context
+    host.is_static = false; // Ensure not in static context
 
     // Store value 0x1234 at slot 100
     try frame.stack.push(100);   // slot
@@ -326,7 +327,7 @@ test "SSTORE opcode - write protection in static call" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = true; // Set static context
+    host.is_static = true; // Set static context
 
     // Try to store in static context
     try frame.stack.push(0);    // slot
@@ -365,7 +366,7 @@ test "TSTORE opcode - transient storage store" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
 
     // Store value 0x5678 at transient slot 10
     try frame.stack.push(10);     // slot
@@ -385,7 +386,7 @@ test "TSTORE opcode - write protection in static call" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = true; // Set static context
+    host.is_static = true; // Set static context
 
     // Try to store in static context
     try frame.stack.push(0);    // slot
@@ -403,7 +404,7 @@ test "storage operations - gas consumption" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
 
     // Set initial gas
     frame.gas_remaining = 100_000;
@@ -438,7 +439,7 @@ test "SLOAD/SSTORE - multiple operations" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
 
     // Store multiple values
     const test_data = [_]struct { slot: u256, value: u256 }{
@@ -531,7 +532,7 @@ test "SSTORE opcode - overwrite patterns" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     // Test various overwrite scenarios
     const slot: u256 = 100;
@@ -565,7 +566,7 @@ test "SSTORE opcode - gas edge cases" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     // Test different gas scenarios
     
@@ -619,7 +620,7 @@ test "SSTORE opcode - out of gas" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     // Set very low gas
     frame.gas_remaining = 1;
@@ -657,7 +658,7 @@ test "TSTORE opcode - transient storage patterns" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     // Store various patterns in transient storage
     const patterns = [_]struct { slot: u256, value: u256 }{
@@ -692,7 +693,7 @@ test "TSTORE opcode - fixed gas cost" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     // TSTORE should always cost the same (100 gas)
     const test_cases = [_]struct { slot: u256, value: u256 }{
@@ -802,7 +803,7 @@ test "transient vs persistent storage" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     const slot: u256 = 100;
     
@@ -838,7 +839,7 @@ test "storage operations - max values" {
     
     var frame = try createTestFrame(testing.allocator, &host);
     defer frame.deinit(testing.allocator);
-    frame.is_static = false;
+    host.is_static = false;
     
     const max_slot = std.math.maxInt(u256);
     const max_value = std.math.maxInt(u256);

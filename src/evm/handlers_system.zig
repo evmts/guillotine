@@ -48,9 +48,8 @@ pub fn Handlers(comptime FrameType: type) type {
             const address_u256 = try self.stack.pop();
             const gas_param = try self.stack.pop();
 
-            if (self.host.get_is_static() and value > 0) {
-                return Error.WriteProtection;
-            }
+            // EIP-214: Static calls with value > 0 will fail in host.inner_call()
+            // Data-oriented design: constraint is encoded in host implementation
 
             // Convert address from u256
             const addr = from_u256(address_u256);
@@ -376,11 +375,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CREATE opcode (0xf0) - Create a new account with associated code.
         /// Stack: [value, offset, size] → [address]
+        /// EIP-214: CREATE not allowed in static context - handled by host implementation
         pub fn create(self: *FrameType, dispatch: Dispatch) Error!Success {
-            // Check static context - CREATE is not allowed in static context
-            if (self.host.get_is_static()) {
-                return Error.WriteProtection;
-            }
+            // EIP-214: Static constraint encoded in host - will throw WriteProtection
 
             const size = try self.stack.pop();
             const offset = try self.stack.pop();
@@ -451,11 +448,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CREATE2 opcode (0xf5) - Create a new account with deterministic address.
         /// Stack: [value, offset, size, salt] → [address]
+        /// EIP-214: CREATE2 not allowed in static context - handled by host implementation
         pub fn create2(self: *FrameType, dispatch: Dispatch) Error!Success {
-            // Check static context - CREATE2 is not allowed in static context
-            if (self.host.get_is_static()) {
-                return Error.WriteProtection;
-            }
+            // EIP-214: Static constraint encoded in host - will throw WriteProtection
 
             const salt = try self.stack.pop();
             const size = try self.stack.pop();
@@ -609,13 +604,14 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SELFDESTRUCT opcode (0xff) - Halt execution and mark account for later deletion.
         /// Stack: [recipient] → []
+        /// EIP-214: STATICCALL prevents SELFDESTRUCT via null self_destruct and static host
         pub fn selfdestruct(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
             const recipient_u256 = try self.stack.pop();
             const recipient = from_u256(recipient_u256);
 
-            // Check static context and mark for destruction if host available
-            if (self.host.get_is_static()) {
+            // EIP-214: Data-oriented design - self_destruct is null for static calls
+            if (self.self_destruct == null) {
                 @branchHint(.unlikely);
                 return Error.WriteProtection;
             }

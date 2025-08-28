@@ -291,7 +291,7 @@ fn benchmarkStackFrameERC20(allocator: std.mem.Allocator) void {
     const db_interface = db.to_database_interface();
 
     // Initialize frame directly from raw bytecode
-    var frame = F.init(allocator, erc20_bytecode, 1000000, db_interface, host) catch unreachable;
+    var frame = F.init(allocator, erc20_bytecode, 1000000, db_interface, host, null) catch unreachable;
     defer frame.deinit(allocator);
 
     // Just initialization for now - actual execution would require planner/interpreter
@@ -305,7 +305,7 @@ fn benchmarkStackFrameSnailtracer(allocator: std.mem.Allocator) void {
     defer db.deinit();
     const db_interface = db.to_database_interface();
 
-    var frame = F.init(allocator, snailtracer_bytecode, 10000000, db_interface, host) catch unreachable;
+    var frame = F.init(allocator, snailtracer_bytecode, 10000000, db_interface, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 
@@ -313,7 +313,7 @@ fn benchmarkStackFrameTenKHashes(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{});
 
     const host = createBenchHost();
-    var frame = F.init(allocator, ten_k_hashes_bytecode, 100000000, {}, host) catch unreachable;
+    var frame = F.init(allocator, ten_k_hashes_bytecode, 100000000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 
@@ -321,7 +321,7 @@ fn benchmarkStackFrameArithmetic(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{});
 
     const host = createBenchHost();
-    var frame = F.init(allocator, arithmetic_bytecode, 100000, {}, host) catch unreachable;
+    var frame = F.init(allocator, arithmetic_bytecode, 100000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 
@@ -329,7 +329,7 @@ fn benchmarkStackFrameJumps(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{});
 
     const host = createBenchHost();
-    var frame = F.init(allocator, jump_bytecode, 100000, {}, host) catch unreachable;
+    var frame = F.init(allocator, jump_bytecode, 100000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 }
 
@@ -401,7 +401,7 @@ fn benchmarkScheduleGenERC20(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{});
 
     const host = createBenchHost();
-    var frame = F.init(allocator, erc20_bytecode, 1000000, {}, host) catch unreachable;
+    var frame = F.init(allocator, erc20_bytecode, 1000000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 
     const schedule = F.Schedule.init(allocator, &frame.bytecode) catch unreachable;
@@ -412,7 +412,7 @@ fn benchmarkScheduleGenSnailtracer(allocator: std.mem.Allocator) void {
     const F = StackFrame(.{});
 
     const host = createBenchHost();
-    var frame = F.init(allocator, snailtracer_bytecode, 10000000, {}, host) catch unreachable;
+    var frame = F.init(allocator, snailtracer_bytecode, 10000000, {}, host, null) catch unreachable;
     defer frame.deinit(allocator);
 
     const schedule = F.Schedule.init(allocator, &frame.bytecode) catch unreachable;
@@ -499,7 +499,7 @@ test "benchmark StackFrame initialization" {
     const F = StackFrame(.{});
     const host = createBenchHost();
 
-    var frame = try F.init(allocator, bytecode, 100000, {}, host);
+    var frame = try F.init(allocator, bytecode, 100000, {}, host, null);
     defer frame.deinit(allocator);
 
     try std.testing.expect(frame.bytecode.len() > 0);

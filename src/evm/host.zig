@@ -66,7 +66,6 @@ pub const Host = struct {
         is_hardfork_at_least: *const fn (ptr: *anyopaque, target: Hardfork) bool,
         get_hardfork: *const fn (ptr: *anyopaque) Hardfork,
         /// Get metadata for the current frame
-        get_is_static: *const fn (ptr: *anyopaque) bool,
         get_depth: *const fn (ptr: *anyopaque) u11,
         /// Get transaction gas price
         get_gas_price: *const fn (ptr: *anyopaque) u256,
@@ -204,11 +203,6 @@ pub const Host = struct {
                 return self.get_hardfork();
             }
 
-            fn vtable_get_is_static(ptr: *anyopaque) bool {
-                const self: Impl = @ptrCast(@alignCast(ptr));
-                return self.get_is_static();
-            }
-
             fn vtable_get_depth(ptr: *anyopaque) u11 {
                 const self: Impl = @ptrCast(@alignCast(ptr));
                 return self.get_depth();
@@ -304,7 +298,6 @@ pub const Host = struct {
                 .get_input = vtable_get_input,
                 .is_hardfork_at_least = vtable_is_hardfork_at_least,
                 .get_hardfork = vtable_get_hardfork,
-                .get_is_static = vtable_get_is_static,
                 .get_depth = vtable_get_depth,
                 .get_storage = vtable_get_storage,
                 .set_storage = vtable_set_storage,
@@ -416,11 +409,6 @@ pub const Host = struct {
 
     pub fn get_hardfork(self: Host) Hardfork {
         return self.vtable.get_hardfork(self.ptr);
-    }
-
-    /// Get whether the current frame is static (read-only)
-    pub inline fn get_is_static(self: Host) bool {
-        return self.vtable.get_is_static(self.ptr);
     }
 
     /// Get the call depth for the current frame
