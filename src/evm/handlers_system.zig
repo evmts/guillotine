@@ -832,8 +832,7 @@ test "REVERT opcode - with error data" {
 
 test "SELFDESTRUCT opcode - normal execution" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test: selfdestruct sending balance to address 0x1234...
@@ -849,8 +848,7 @@ test "SELFDESTRUCT opcode - normal execution" {
 test "SELFDESTRUCT opcode - static context error" {
     var evm = MockEvm.init(testing.allocator);
     evm.is_static = true;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test: selfdestruct in static context should fail
@@ -869,8 +867,7 @@ test "SELFDESTRUCT opcode - static context error" {
 
 test "CALL opcode - basic structure" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Stack: [gas, address, value, input_offset, input_size, output_offset, output_size]
@@ -892,8 +889,7 @@ test "CALL opcode - basic structure" {
 test "CREATE opcode - static context error" {
     var evm = MockEvm.init(testing.allocator);
     evm.is_static = true;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Stack: [value, offset, size]
@@ -1054,8 +1050,7 @@ test "REVERT opcode - max size revert data" {
 // SELFDESTRUCT opcode tests
 test "SELFDESTRUCT opcode - to self" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Self-destruct to self (edge case)
@@ -1070,8 +1065,7 @@ test "SELFDESTRUCT opcode - to self" {
 
 test "SELFDESTRUCT opcode - to max address" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Self-destruct to max address
@@ -1137,8 +1131,7 @@ test "Address conversion - to_u256 edge cases" {
 test "CALL opcode - with value in static context" {
     var evm = MockEvm.init(testing.allocator);
     evm.is_static = true;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Try CALL with value in static context (should fail)
@@ -1159,8 +1152,7 @@ test "CALL opcode - with value in static context" {
 test "CALL opcode - zero value in static context" {
     var evm = MockEvm.init(testing.allocator);
     evm.is_static = true;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // CALL with zero value in static context should work
@@ -1181,8 +1173,7 @@ test "CALL opcode - zero value in static context" {
 
 test "CALL opcode - max gas" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test with max u64 gas
@@ -1203,8 +1194,7 @@ test "CALL opcode - max gas" {
 
 test "CALL opcode - gas overflow" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test with gas > max u64 (should fail gracefully)
@@ -1227,8 +1217,7 @@ test "CALL opcode - gas overflow" {
 test "CALL opcode - with input and output data" {
     var evm = MockEvm.init(testing.allocator);
     evm.call_result.output = "Hello World!";
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Prepare input data
@@ -1260,8 +1249,7 @@ test "CALL opcode - with input and output data" {
 test "CALL opcode - output size limiting" {
     var evm = MockEvm.init(testing.allocator);
     evm.call_result.output = "Very long output data that exceeds requested size";
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(100000); // gas
@@ -1290,8 +1278,7 @@ test "CALL opcode - failed call" {
     var evm = MockEvm.init(testing.allocator);
     evm.call_result.success = false;
     evm.call_result.output = "Revert reason";
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(100000); // gas
@@ -1315,8 +1302,7 @@ test "CALL opcode - failed call" {
 // DELEGATECALL tests
 test "DELEGATECALL opcode - basic" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(100000); // gas
@@ -1336,8 +1322,7 @@ test "DELEGATECALL opcode - basic" {
 test "DELEGATECALL opcode - preserves context" {
     var evm = MockEvm.init(testing.allocator);
     evm.call_result.output = "delegated output";
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const input = "delegate input";
@@ -1364,8 +1349,7 @@ test "DELEGATECALL opcode - preserves context" {
 // STATICCALL tests
 test "STATICCALL opcode - basic" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(100000); // gas
@@ -1385,8 +1369,7 @@ test "STATICCALL opcode - basic" {
 test "STATICCALL opcode - enforces no value" {
     var evm = MockEvm.init(testing.allocator);
     evm.call_result.output = "static result";
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(75000); // gas
@@ -1410,8 +1393,7 @@ test "STATICCALL opcode - enforces no value" {
 test "CREATE opcode - empty init code" {
     var evm = MockEvm.init(testing.allocator);
     evm.create_result.created_address = Address.fromBytes([_]u8{0x42} ** 20) catch unreachable;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(0); // value
@@ -1429,8 +1411,7 @@ test "CREATE opcode - empty init code" {
 test "CREATE opcode - with init code" {
     var evm = MockEvm.init(testing.allocator);
     evm.create_result.created_address = Address.fromBytes([_]u8{0x11} ** 20) catch unreachable;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Simple init code
@@ -1452,8 +1433,7 @@ test "CREATE opcode - with init code" {
 test "CREATE opcode - failed creation" {
     var evm = MockEvm.init(testing.allocator);
     evm.create_result.success = false;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(0); // value
@@ -1469,8 +1449,7 @@ test "CREATE opcode - failed creation" {
 
 test "CREATE opcode - out of bounds" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(0); // value
@@ -1488,8 +1467,7 @@ test "CREATE opcode - out of bounds" {
 test "CREATE2 opcode - deterministic address" {
     var evm = MockEvm.init(testing.allocator);
     evm.create_result.created_address = Address.fromBytes([_]u8{0x22} ** 20) catch unreachable;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(0); // value
@@ -1507,8 +1485,7 @@ test "CREATE2 opcode - deterministic address" {
 
 test "CREATE2 opcode - different salts" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test with multiple different salts
@@ -1533,8 +1510,7 @@ test "CREATE2 opcode - different salts" {
 test "CREATE2 opcode - static context" {
     var evm = MockEvm.init(testing.allocator);
     evm.is_static = true;
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     try frame.stack.push(0); // value
@@ -1551,8 +1527,7 @@ test "CREATE2 opcode - static context" {
 // Edge case tests
 test "System opcodes - stack underflow" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test each opcode with insufficient stack items
@@ -1582,8 +1557,7 @@ test "System opcodes - stack underflow" {
 test "System opcodes - gas consumption" {
     var evm = MockEvm.init(testing.allocator);
     evm.call_result.gas_left = 50000; // Simulate gas consumption
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     const initial_gas_value = frame.gas_remaining;
@@ -1609,8 +1583,7 @@ test "System opcodes - gas consumption" {
 
 test "System opcodes - memory boundary checks" {
     var evm = MockEvm.init(testing.allocator);
-    const host = evm.to_host();
-    var frame = try createTestFrame(testing.allocator, host);
+    var frame = try createTestFrame(testing.allocator, &evm);
     defer frame.deinit(testing.allocator);
 
     // Test memory operations at various boundaries
