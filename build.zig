@@ -1437,7 +1437,7 @@ pub fn build(b: *std.Build) void {
         const differential_test = b.addTest(.{
             .name = "differential-test",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("test/differential/math_operations_test.zig"),
+                .root_source_file = b.path("test/differential/all_tests.zig"),
                 .target = target,
                 .optimize = optimize,
             }),
