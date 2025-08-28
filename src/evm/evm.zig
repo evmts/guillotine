@@ -761,18 +761,24 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Static calls use null self_destruct to prevent SELFDESTRUCT operations
             const self_destruct_param = if (is_static) null else &self.self_destruct;
 
-            // Use static wrappers for static calls to enforce EIP-214 constraints at the type level
+            // Create host interface
+            const host = self.to_host();
+            
+            // For static calls, wrap database and host to enforce EIP-214 constraints
             if (is_static) {
-                // Create static database and host wrappers
-                var static_db = StaticDatabase.init(self.database);
-                const static_db_interface = static_db.to_database_interface();
+                // Allocate static wrappers that live for the frame duration
+                const static_db_ptr = try self.allocator.create(StaticDatabase);
+                defer self.allocator.destroy(static_db_ptr);
+                static_db_ptr.* = StaticDatabase.init(self.database);
+                const static_db = static_db_ptr.to_database_interface();
                 
-                const host = self.to_host();
-                var static_host = StaticHost.init(host);
-                const static_host_interface = @import("host.zig").Host.init(&static_host);
-
+                const static_host_ptr = try self.allocator.create(StaticHost);
+                defer self.allocator.destroy(static_host_ptr);
+                static_host_ptr.* = StaticHost.init(host);
+                const static_host = @import("host.zig").Host.init(static_host_ptr);
+                
                 // Initialize frame with static wrappers
-                var frame = try Frame.init(self.allocator, code, gas_cast, static_db_interface, static_host_interface, self_destruct_param);
+                var frame = try Frame.init(self.allocator, code, gas_cast, static_db, static_host, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
@@ -794,10 +800,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                     .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
                 }
             } else {
-                // Non-static call - use regular database and host
-                const host = self.to_host();
-
-                // Initialize frame with regular interfaces
+                // Non-static call - use regular interfaces
                 var frame = try Frame.init(self.allocator, code, gas_cast, self.database, host, self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
