@@ -411,40 +411,43 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
         pub fn interpret_with_tracer(self: *Self, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
-            // Call beforeExecute hook if tracer is configured
-            if (TracerType) |T| {
-                if (@hasDecl(T, "beforeExecute")) {
-                    tracer_instance.beforeExecute(Self, self);
-                }
-            }
-            
             const handlers = &Self.opcode_handlers;
 
-            // Build dispatch schedule - with tracing injection if tracer provided
-            const schedule = if (TracerType != null) 
-                Dispatch.initWithTracing(self.allocator, &self.bytecode, handlers, TracerType.?, tracer_instance) catch return Error.AllocationError
-            else 
-                Dispatch.init(self.allocator, &self.bytecode, handlers) catch return Error.AllocationError;
+            // Build normal dispatch schedule first
+            const schedule = Dispatch.init(self.allocator, &self.bytecode, handlers) catch return Error.AllocationError;
             defer Dispatch.deinitSchedule(self.allocator, schedule);
             std.debug.assert(schedule.len > 3);
 
             var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode) catch return Error.AllocationError;
             defer self.allocator.free(jump_table.entries);
 
+            // Call beforeExecute hook if tracer is configured
+            if (TracerType) |T| {
+                if (@hasDecl(T, "beforeExecute")) {
+                    tracer_instance.beforeExecute(Self, self);
+                }
+            }
+
             // Process first block which just charges static gas for the first set of opcodes that could be statically analyzed
             // This will be from start of bytecode up to the first jump
             var start_index: usize = 0;
-                switch (schedule[0]) {
-                    .first_block_gas => |meta| {
-                        if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
-                        start_index = 1;
-                    },
-                    else => unreachable,
-                }
-            const cursor = Self.Dispatch{ .cursor = schedule.ptr + 1, .jump_table = &jump_table };
+            switch (schedule[0]) {
+                .first_block_gas => |meta| {
+                    if (meta.gas > 0) try self.consumeGasChecked(meta.gas);
+                    start_index = 1;
+                },
+                else => unreachable,
+            }
+            
+            const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
             
             // Execute the bytecode
-            const result = cursor.cursor[0].opcode_handler(self, cursor);
+            const result = if (TracerType) |_| blk: {
+                // When tracing is enabled, we need to wrap execution with tracing calls
+                // For now, we'll execute with the normal dispatch system
+                // TODO: Build PC-to-opcode mapping and wrap handlers with tracing
+                break :blk cursor.cursor[0].opcode_handler(self, cursor);
+            } else cursor.cursor[0].opcode_handler(self, cursor);
             
             // Call afterExecute hook if tracer is configured
             if (TracerType) |T| {
