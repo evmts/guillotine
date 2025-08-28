@@ -36,21 +36,20 @@ pub const Eips = struct {
 
 const std = @import("std");
 
-    test "eip_3529_gas_refund_cap pre-London" {
-        const eips = Eips{ .hardfork = Hardfork.ISTANBUL };
-        
-        // Pre-London: refund up to half of gas used
-        try std.testing.expectEqual(@as(u64, 50), eips.eip_3529_gas_refund_cap(100, 100)); // min(100, 100/2)
-        try std.testing.expectEqual(@as(u64, 50), eips.eip_3529_gas_refund_cap(100, 60)); // min(60, 100/2)
-        try std.testing.expectEqual(@as(u64, 25), eips.eip_3529_gas_refund_cap(100, 25)); // min(25, 100/2)
-    }
+test "eip_3529_gas_refund_cap pre-London" {
+    const eips = Eips{ .hardfork = Hardfork.ISTANBUL };
+    
+    // Pre-London: refund up to half of gas used
+    try std.testing.expectEqual(@as(u64, 50), eips.eip_3529_gas_refund_cap(100, 100)); // min(100, 100/2)
+    try std.testing.expectEqual(@as(u64, 50), eips.eip_3529_gas_refund_cap(100, 60)); // min(60, 100/2)
+    try std.testing.expectEqual(@as(u64, 25), eips.eip_3529_gas_refund_cap(100, 25)); // min(25, 100/2)
+}
 
-    test "eip_3529_gas_refund_cap post-London" {
-        const eips = Eips{ .hardfork = Hardfork.LONDON };
-        
-        // Post-London: refund up to one fifth of gas used
-        try std.testing.expectEqual(@as(u64, 20), eips.eip_3529_gas_refund_cap(100, 100)); // min(100, 100/5)
-        try std.testing.expectEqual(@as(u64, 20), eips.eip_3529_gas_refund_cap(100, 60)); // min(60, 100/5)
-        try std.testing.expectEqual(@as(u64, 10), eips.eip_3529_gas_refund_cap(100, 10)); // min(10, 100/5)
-    }
-};
+test "eip_3529_gas_refund_cap post-London" {
+    const eips = Eips{ .hardfork = Hardfork.LONDON };
+    
+    // Post-London: refund up to one fifth of gas used
+    try std.testing.expectEqual(@as(u64, 20), eips.eip_3529_gas_refund_cap(100, 100)); // min(100, 100/5)
+    try std.testing.expectEqual(@as(u64, 20), eips.eip_3529_gas_refund_cap(100, 60)); // min(60, 100/5)
+    try std.testing.expectEqual(@as(u64, 10), eips.eip_3529_gas_refund_cap(100, 10)); // min(10, 100/5)
+}
