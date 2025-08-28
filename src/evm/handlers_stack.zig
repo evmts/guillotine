@@ -13,60 +13,59 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// POP opcode (0x50) - Remove item from stack.
         /// Uses unsafe variant as stack bounds are pre-validated by the planner.
-        pub fn pop(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn pop(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = self.stack.pop_unsafe();
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
         /// Uses unsafe variant as stack bounds are pre-validated by the planner.
-        pub fn push0(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push0(self: *FrameType, dispatch: Dispatch) Error!Success {
             self.stack.push_unsafe(0);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// Generate a push handler for PUSH1-PUSH32
-        pub fn generatePushHandler(comptime push_n: u8) *const Dispatch.OpcodeHandler {
+        pub fn generatePushHandler(comptime push_n: u8) FrameType.OpcodeHandler {
             if (push_n > 32) @compileError("Only PUSH1 to PUSH32 is supported");
             if (push_n == 0) @compileError("PUSH0 is handled as its own opcode");
-            return struct {
-                pub fn pushHandler(self: FrameType, schedule: Dispatch) Error!Success {
+            return &struct {
+                pub fn pushHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
                     if (push_n <= 8) {
-                        const meta = schedule.getInlineMetadata();
+                        const meta = dispatch.getInlineMetadata();
                         self.stack.push_unsafe(meta.value);
                     } else {
-                        const meta = schedule.getPointerMetadata();
+                        const meta = dispatch.getPointerMetadata();
                         self.stack.push_unsafe(meta.value.*);
                     }
-                    const next = schedule.skipMetadata();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    const next = dispatch.skipMetadata();
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.pushHandler;
         }
 
         /// Generate a dup handler for DUP1-DUP16
-        pub fn generateDupHandler(comptime dup_n: u8) *const Dispatch.OpcodeHandler {
+        pub fn generateDupHandler(comptime dup_n: u8) FrameType.OpcodeHandler {
             if (dup_n == 0 or dup_n > 16) @compileError("Only DUP1 to DUP16 is supported");
-            return struct {
-                pub fn dupHandler(self: FrameType, schedule: Dispatch) Error!Success {
-                    const value = self.stack.peek_n_unsafe(dup_n);
-                    self.stack.push_unsafe(value);
-                    const next = schedule.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return &struct {
+                pub fn dupHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
+                    self.stack.dup_n_unsafe(dup_n);
+                    const next = dispatch.getNext();
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.dupHandler;
         }
 
         /// Generate a swap handler for SWAP1-SWAP16
-        pub fn generateSwapHandler(comptime swap_n: u8) *const Dispatch.OpcodeHandler {
+        pub fn generateSwapHandler(comptime swap_n: u8) FrameType.OpcodeHandler {
             if (swap_n == 0 or swap_n > 16) @compileError("Only SWAP1 to SWAP16 is supported");
-            return struct {
-                pub fn swapHandler(self: FrameType, schedule: Dispatch) Error!Success {
+            return &struct {
+                pub fn swapHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
                     self.stack.swap_n_unsafe(swap_n);
-                    const next = schedule.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    const next = dispatch.getNext();
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.swapHandler;
         }
@@ -104,19 +103,22 @@ fn createTestFrame(allocator: std.mem.Allocator) !TestFrame {
 // Mock dispatch that simulates successful execution flow
 fn createMockDispatch() TestFrame.Dispatch {
     const mock_handler = struct {
-        fn handler(frame: TestFrame, dispatch: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
+        fn handler(frame: *TestFrame, dispatch: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = frame;
             _ = dispatch;
-            return TestFrame.Success.stop;
+            return TestFrame.Success.Stop;
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    const schedule_item = dispatch_mod.ScheduleItem{
+        .opcode_handler = &mock_handler,
+        .metadata = undefined,
+    };
+    const schedule_ptr = &schedule_item;
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
-        .bytecode_length = 0,
+        .cursor = schedule_ptr,
+        .jump_table = null,
     };
 }
 
@@ -241,17 +243,17 @@ test "PUSH handler - inline metadata" {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
     var dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
     // Set inline metadata
-    dispatch.schedule[0].metadata = .{ .inline_value = 42 };
+    dispatch.cursor[0].metadata = .{ .inline_value = 42 };
     
     _ = try PushHandler(frame, dispatch);
     
@@ -276,17 +278,17 @@ test "PUSH handler - pointer metadata" {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
     var dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
     // Set pointer metadata
-    dispatch.schedule[0].metadata = .{ .pointer_value = &value };
+    dispatch.cursor[0].metadata = .{ .pointer_value = &value };
     
     _ = try PushHandler(frame, dispatch);
     
@@ -460,7 +462,7 @@ test "PUSH handlers - all sizes inline" {
         
         const value = @as(u256, (1 << (push_n * 8)) - 1); // Max value for n bytes
         
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -469,15 +471,15 @@ test "PUSH handlers - all sizes inline" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
         var dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
-        dispatch.schedule[0].metadata = .{ .inline_value = value };
+        dispatch.cursor[0].metadata = .{ .inline_value = value };
         
         _ = try PushHandler(frame, dispatch);
         
@@ -495,7 +497,7 @@ test "PUSH handlers - all sizes pointer" {
         
         const value = @as(u256, push_n * 0x0102030405060708090A0B0C0D0E0F10);
         
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -504,15 +506,15 @@ test "PUSH handlers - all sizes pointer" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
         var dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
-        dispatch.schedule[0].metadata = .{ .pointer_value = &value };
+        dispatch.cursor[0].metadata = .{ .pointer_value = &value };
         
         _ = try PushHandler(frame, dispatch);
         
@@ -705,7 +707,7 @@ test "PUSH handlers - edge values" {
     inline for (test_cases) |tc| {
         const PushHandler = TestFrame.StackHandlers.generatePushHandler(tc.push_n);
         
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -714,18 +716,18 @@ test "PUSH handlers - edge values" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
         var dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
         if (tc.push_n <= 8) {
-            dispatch.schedule[0].metadata = .{ .inline_value = tc.value };
+            dispatch.cursor[0].metadata = .{ .inline_value = tc.value };
         } else {
-            dispatch.schedule[0].metadata = .{ .pointer_value = &tc.value };
+            dispatch.cursor[0].metadata = .{ .pointer_value = &tc.value };
         }
         
         _ = try PushHandler(frame, dispatch);

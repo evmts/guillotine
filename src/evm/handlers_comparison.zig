@@ -12,27 +12,27 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// LT opcode (0x10) - Less than comparison.
-        pub fn lt(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn lt(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top < top_minus_1) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// GT opcode (0x11) - Greater than comparison.
-        pub fn gt(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn gt(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top > top_minus_1) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
-        pub fn slt(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn slt(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
@@ -40,11 +40,11 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (a_signed < b_signed) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
-        pub fn sgt(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sgt(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
@@ -52,26 +52,26 @@ pub fn Handlers(comptime FrameType: type) type {
             const result: WordType = if (a_signed > b_signed) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// EQ opcode (0x14) - Equality comparison.
-        pub fn eq(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn eq(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top == top_minus_1) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
-        pub fn iszero(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn iszero(self: *FrameType, dispatch: Dispatch) Error!Success {
             const value = try self.stack.peek();
             const result: WordType = if (value == 0) 1 else 0;
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -114,11 +114,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }

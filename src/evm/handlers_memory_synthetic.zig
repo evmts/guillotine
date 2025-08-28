@@ -15,8 +15,8 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_MLOAD_INLINE - Fused PUSH+MLOAD with inline offset (≤8 bytes).
         /// Pushes an offset and immediately loads from that memory location.
-        pub fn push_mload_inline(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getInlineMetadata();
+        pub fn push_mload_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getInlineMetadata();
             const offset = metadata.value;
             
             // Check if offset fits in usize
@@ -26,7 +26,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -42,13 +42,13 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = @as(WordType, @truncate(value_u256));
             try self.stack.push(value);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MLOAD_POINTER - Fused PUSH+MLOAD with pointer offset (>8 bytes).
-        pub fn push_mload_pointer(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getPointerMetadata();
+        pub fn push_mload_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getPointerMetadata();
             const offset = metadata.value.*;
             
             // Check if offset fits in usize
@@ -58,7 +58,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -74,14 +74,14 @@ pub fn Handlers(comptime FrameType: type) type {
             const value = @as(WordType, @truncate(value_u256));
             try self.stack.push(value);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MSTORE_INLINE - Fused PUSH+MSTORE with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores it at that offset.
-        pub fn push_mstore_inline(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getInlineMetadata();
+        pub fn push_mstore_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getInlineMetadata();
             const offset = metadata.value;
             
             // Pop the value to store
@@ -94,7 +94,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -108,13 +108,13 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MSTORE_POINTER - Fused PUSH+MSTORE with pointer offset (>8 bytes).
-        pub fn push_mstore_pointer(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getPointerMetadata();
+        pub fn push_mstore_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getPointerMetadata();
             const offset = metadata.value.*;
             
             // Pop the value to store
@@ -127,7 +127,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -141,14 +141,14 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MSTORE8_INLINE - Fused PUSH+MSTORE8 with inline offset (≤8 bytes).
         /// Pushes an offset, then pops a value and stores the least significant byte.
-        pub fn push_mstore8_inline(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getInlineMetadata();
+        pub fn push_mstore8_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getInlineMetadata();
             const offset = metadata.value;
             
             // Pop the value to store
@@ -161,7 +161,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 1);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 1);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -175,13 +175,13 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MSTORE8_POINTER - Fused PUSH+MSTORE8 with pointer offset (>8 bytes).
-        pub fn push_mstore8_pointer(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getPointerMetadata();
+        pub fn push_mstore8_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getPointerMetadata();
             const offset = metadata.value.*;
             
             // Pop the value to store
@@ -194,7 +194,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 1);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 1);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -208,8 +208,8 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -252,14 +252,14 @@ fn createInlineDispatch(value: u256) TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .inline_value = value };
+    cursor[0].metadata = .{ .inline_value = value };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -274,14 +274,14 @@ fn createPointerDispatch(value: *const u256) TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .pointer_value = value };
+    cursor[0].metadata = .{ .pointer_value = value };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }

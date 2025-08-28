@@ -3,7 +3,8 @@ const FrameConfig = @import("frame_config.zig").FrameConfig;
 const log = @import("log.zig");
 const primitives = @import("primitives");
 const Address = primitives.Address;
-const U256 = primitives.U256;
+const CallParams = @import("call_params.zig").CallParams;
+// u256 is now a built-in type in Zig 0.14+
 
 /// System opcode handlers for the EVM stack frame.
 /// These handle calls, contract creation, and execution control.
@@ -17,27 +18,27 @@ pub fn Handlers(comptime FrameType: type) type {
         /// Helper to convert WordType to Address
         fn from_u256(value: WordType) Address {
             // If WordType is smaller than u256, just zero-extend
-            const value_u256: U256 = if (@bitSizeOf(WordType) < 256) @as(U256, value) else value;
+            const value_u256: u256 = if (@bitSizeOf(WordType) < 256) @as(u256, value) else value;
             // Take the lower 160 bits (20 bytes)
             const addr_value = @as(u160, @truncate(value_u256));
             var addr_bytes: [20]u8 = undefined;
             std.mem.writeInt(u160, &addr_bytes, addr_value, .big);
-            return Address.fromBytes(addr_bytes) catch unreachable;
+            return Address{ .bytes = addr_bytes };
         }
 
         /// Helper to convert Address to WordType
         fn to_u256(addr: Address) WordType {
-            const bytes = addr.toBytes();
-            var value: U256 = 0;
+            const bytes = addr.bytes;
+            var value: u256 = 0;
             for (bytes) |byte| {
-                value = (value << 8) | @as(U256, byte);
+                value = (value << 8) | @as(u256, byte);
             }
             return @as(WordType, @truncate(value));
         }
 
         /// CALL opcode (0xf1) - Message-call into an account.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn call(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn call(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Check static context - CALL with non-zero value is not allowed in static context
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
@@ -58,7 +59,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (gas_param > std.math.maxInt(u64)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
             const gas_u64 = @as(u64, @intCast(gas_param));
 
@@ -70,7 +71,7 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -84,7 +85,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(input_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
@@ -94,7 +95,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(output_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
@@ -104,55 +105,57 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(input_offset_usize, input_size_usize) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Perform the call through the host interface
-            const result = self.host.call(
-                self.contract_address,
-                addr,
-                value,
-                input_data,
-                gas_u64,
-                false, // is_static = false for regular CALL
-            ) catch |err| switch (err) {
+            const params = CallParams{
+                .call = .{
+                    .caller = self.contract_address,
+                    .to = addr,
+                    .value = value,
+                    .input = input_data,
+                    .gas = gas_u64,
+                },
+            };
+            const result = self.host.inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 },
             };
 
             // Write return data to memory if successful and output size > 0
-            if (result.success and output_size_usize > 0 and result.output_data.len > 0) {
-                const copy_size = @min(output_size_usize, result.output_data.len);
-                self.memory.set_data(output_offset_usize, result.output_data[0..copy_size]) catch {
+            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+                const copy_size = @min(output_size_usize, result.output.len);
+                self.memory.set_data(output_offset_usize, result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Store return data for future RETURNDATASIZE/RETURNDATACOPY
-            self.return_data.clearRetainingCapacity();
-            self.return_data.appendSlice(self.allocator, result.output_data) catch {
+            self.output_data.clearRetainingCapacity();
+            self.output_data.appendSlice(self.allocator, result.output) catch {
                 return Error.AllocationError;
             };
 
             // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_remaining);
+            self.gas_remaining = @intCast(result.gas_left);
 
             // Push success status (1 for success, 0 for failure)
             try self.stack.push(if (result.success) 1 else 0);
 
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code but current values.
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn delegatecall(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn delegatecall(self: *FrameType, dispatch: Dispatch) Error!Success {
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
             const input_size = try self.stack.pop();
@@ -167,7 +170,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (gas_param > std.math.maxInt(u64)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
             const gas_u64 = @as(u64, @intCast(gas_param));
 
@@ -179,7 +182,7 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -193,7 +196,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(input_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
@@ -203,7 +206,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(output_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
@@ -213,54 +216,57 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(input_offset_usize, input_size_usize) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Perform the delegatecall through the host interface
             // DELEGATECALL preserves caller and value from current context
-            const result = self.host.delegatecall(
-                self.contract_address,
-                addr,
-                input_data,
-                gas_u64,
-            ) catch |err| switch (err) {
+            const params = CallParams{
+                .delegatecall = .{
+                    .caller = self.contract_address,
+                    .to = addr,
+                    .input = input_data,
+                    .gas = gas_u64,
+                },
+            };
+            const result = self.host.inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 },
             };
 
             // Write return data to memory if successful and output size > 0
-            if (result.success and output_size_usize > 0 and result.output_data.len > 0) {
-                const copy_size = @min(output_size_usize, result.output_data.len);
-                self.memory.set_data(output_offset_usize, result.output_data[0..copy_size]) catch {
+            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+                const copy_size = @min(output_size_usize, result.output.len);
+                self.memory.set_data(output_offset_usize, result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Store return data for future RETURNDATASIZE/RETURNDATACOPY
-            self.return_data.clearRetainingCapacity();
-            self.return_data.appendSlice(self.allocator, result.output_data) catch {
+            self.output_data.clearRetainingCapacity();
+            self.output_data.appendSlice(self.allocator, result.output) catch {
                 return Error.AllocationError;
             };
 
             // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_remaining);
+            self.gas_remaining = @intCast(result.gas_left);
 
             // Push success status (1 for success, 0 for failure)
             try self.stack.push(if (result.success) 1 else 0);
 
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// STATICCALL opcode (0xfa) - Static message-call (no state changes allowed).
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn staticcall(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn staticcall(self: *FrameType, dispatch: Dispatch) Error!Success {
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
             const input_size = try self.stack.pop();
@@ -275,7 +281,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (gas_param > std.math.maxInt(u64)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
             const gas_u64 = @as(u64, @intCast(gas_param));
 
@@ -287,7 +293,7 @@ pub fn Handlers(comptime FrameType: type) type {
             {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
             const input_offset_usize = @as(usize, @intCast(input_offset));
@@ -301,7 +307,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(input_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
@@ -311,7 +317,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.ensure_capacity(output_end) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
@@ -321,55 +327,56 @@ pub fn Handlers(comptime FrameType: type) type {
                 input_data = self.memory.get_slice(input_offset_usize, input_size_usize) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Perform the static call through the host interface
-            const result = self.host.call(
-                self.contract_address,
-                addr,
-                0, // value is always 0 for STATICCALL
-                input_data,
-                gas_u64,
-                true, // is_static = true
-            ) catch |err| switch (err) {
+            const params = CallParams{
+                .staticcall = .{
+                    .caller = self.contract_address,
+                    .to = addr,
+                    .input = input_data,
+                    .gas = gas_u64,
+                },
+            };
+            const result = self.host.inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 },
             };
 
             // Write return data to memory if successful and output size > 0
-            if (result.success and output_size_usize > 0 and result.output_data.len > 0) {
-                const copy_size = @min(output_size_usize, result.output_data.len);
-                self.memory.set_data(output_offset_usize, result.output_data[0..copy_size]) catch {
+            if (result.success and output_size_usize > 0 and result.output.len > 0) {
+                const copy_size = @min(output_size_usize, result.output.len);
+                self.memory.set_data(output_offset_usize, result.output[0..copy_size]) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Store return data for future RETURNDATASIZE/RETURNDATACOPY
-            self.return_data.clearRetainingCapacity();
-            self.return_data.appendSlice(self.allocator, result.output_data) catch {
+            self.output_data.clearRetainingCapacity();
+            self.output_data.appendSlice(self.allocator, result.output) catch {
                 return Error.AllocationError;
             };
 
             // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_remaining);
+            self.gas_remaining = @intCast(result.gas_left);
 
             // Push success status (1 for success, 0 for failure)
             try self.stack.push(if (result.success) 1 else 0);
 
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CREATE opcode (0xf0) - Create a new account with associated code.
         /// Stack: [value, offset, size] → [address]
-        pub fn create(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn create(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Check static context - CREATE is not allowed in static context
             if (self.host.get_is_static()) {
                 return Error.WriteProtection;
@@ -383,7 +390,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -394,7 +401,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.memory.ensure_capacity(memory_end) catch {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             };
 
             // Extract initialization code
@@ -403,42 +410,48 @@ pub fn Handlers(comptime FrameType: type) type {
                 init_code = self.memory.get_slice(offset_usize, size_usize) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
             // Perform the create through the host interface
-            const result = self.host.create(
-                self.contract_address,
-                value,
-                init_code,
-                self.gas_remaining,
-                null, // salt = null for CREATE
-            ) catch |err| switch (err) {
+            const params = CallParams{
+                .create = .{
+                    .caller = self.contract_address,
+                    .value = value,
+                    .init_code = init_code,
+                    .gas = @as(u64, @intCast(self.gas_remaining)),
+                },
+            };
+            const result = self.host.inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 },
             };
 
             // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_remaining);
+            self.gas_remaining = @intCast(result.gas_left);
 
             // Push created contract address or 0 on failure
-            if (result.success) {
-                try self.stack.push(to_u256(result.created_address.?));
+            if (result.success and result.output.len == 20) {
+                // Output contains the created contract address
+                var addr_bytes: [20]u8 = undefined;
+                @memcpy(&addr_bytes, result.output);
+                const created_addr = Address{ .bytes = addr_bytes };
+                try self.stack.push(to_u256(created_addr));
             } else {
                 try self.stack.push(0);
             }
 
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CREATE2 opcode (0xf5) - Create a new account with deterministic address.
         /// Stack: [value, offset, size, salt] → [address]
-        pub fn create2(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn create2(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Check static context - CREATE2 is not allowed in static context
             if (self.host.get_is_static()) {
                 return Error.WriteProtection;
@@ -453,7 +466,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (offset > std.math.maxInt(usize) or size > std.math.maxInt(usize)) {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
             const offset_usize = @as(usize, @intCast(offset));
@@ -464,7 +477,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.memory.ensure_capacity(memory_end) catch {
                 try self.stack.push(0);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             };
 
             // Extract initialization code
@@ -473,45 +486,52 @@ pub fn Handlers(comptime FrameType: type) type {
                 init_code = self.memory.get_slice(offset_usize, size_usize) catch {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 };
             }
 
-            // Convert salt to U256 if needed
-            const salt_u256: U256 = if (@bitSizeOf(WordType) < 256) @as(U256, salt) else salt;
+            // Convert salt to u256 if needed
+            const salt_u256: u256 = if (@bitSizeOf(WordType) < 256) @as(u256, salt) else salt;
 
             // Perform the create2 through the host interface
-            const result = self.host.create(
-                self.contract_address,
-                value,
-                init_code,
-                self.gas_remaining,
-                salt_u256,
-            ) catch |err| switch (err) {
+            const params = CallParams{
+                .create2 = .{
+                    .caller = self.contract_address,
+                    .value = value,
+                    .init_code = init_code,
+                    .salt = salt_u256,
+                    .gas = @as(u64, @intCast(self.gas_remaining)),
+                },
+            };
+            const result = self.host.inner_call(params) catch |err| switch (err) {
                 else => {
                     try self.stack.push(0);
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 },
             };
 
             // Update gas remaining
-            self.gas_remaining = @intCast(result.gas_remaining);
+            self.gas_remaining = @intCast(result.gas_left);
 
             // Push created contract address or 0 on failure
-            if (result.success) {
-                try self.stack.push(to_u256(result.created_address.?));
+            if (result.success and result.output.len == 20) {
+                // Output contains the created contract address
+                var addr_bytes: [20]u8 = undefined;
+                @memcpy(&addr_bytes, result.output);
+                const created_addr = Address{ .bytes = addr_bytes };
+                try self.stack.push(to_u256(created_addr));
             } else {
                 try self.stack.push(0);
             }
 
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// RETURN opcode (0xf3) - Halt execution returning output data.
         /// Stack: [offset, size] → []
-        pub fn @"return"(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn @"return"(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
             const size = try self.stack.pop();
             const offset = try self.stack.pop();
@@ -550,7 +570,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// REVERT opcode (0xfd) - Halt execution reverting state changes.
         /// Stack: [offset, size] → []
-        pub fn revert(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn revert(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
             const size = try self.stack.pop();
             const offset = try self.stack.pop();
@@ -584,12 +604,12 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Always return the Revert success type for proper handling
-            return Success.Revert;
+            return Error.REVERT;
         }
 
         /// SELFDESTRUCT opcode (0xff) - Halt execution and mark account for later deletion.
         /// Stack: [recipient] → []
-        pub fn selfdestruct(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn selfdestruct(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
             const recipient_u256 = try self.stack.pop();
             const recipient = from_u256(recipient_u256);
@@ -616,7 +636,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// STOP opcode (0x00) - Halt execution.
         /// Stack: [] → []
-        pub fn stop(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn stop(self: *FrameType, dispatch: Dispatch) Error!Success {
             _ = dispatch;
             
             // Apply EIP-3529 gas refund cap: at most 1/5th of gas used
@@ -763,11 +783,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -1245,7 +1265,7 @@ test "CALL opcode - gas overflow" {
 
 test "CALL opcode - with input and output data" {
     var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output_data = "Hello World!";
+    mock_host.call_result.output = "Hello World!";
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -1278,7 +1298,7 @@ test "CALL opcode - with input and output data" {
 
 test "CALL opcode - output size limiting" {
     var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output_data = "Very long output data that exceeds requested size";
+    mock_host.call_result.output = "Very long output data that exceeds requested size";
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -1298,7 +1318,7 @@ test "CALL opcode - output size limiting" {
     try testing.expectEqual(@as(u256, 1), try frame.stack.pop());
     
     // Full return data should be stored
-    try testing.expectEqualSlices(u8, mock_host.call_result.output_data, frame.return_data.items);
+    try testing.expectEqualSlices(u8, mock_host.call_result.output, frame.return_data.items);
     
     // But only requested size written to memory
     const output = frame.memory.get_slice(0, 10) catch unreachable;
@@ -1308,7 +1328,7 @@ test "CALL opcode - output size limiting" {
 test "CALL opcode - failed call" {
     var mock_host = MockHost.init(testing.allocator);
     mock_host.call_result.success = false;
-    mock_host.call_result.output_data = "Revert reason";
+    mock_host.call_result.output = "Revert reason";
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -1354,7 +1374,7 @@ test "DELEGATECALL opcode - basic" {
 
 test "DELEGATECALL opcode - preserves context" {
     var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output_data = "delegated output";
+    mock_host.call_result.output = "delegated output";
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -1403,7 +1423,7 @@ test "STATICCALL opcode - basic" {
 
 test "STATICCALL opcode - enforces no value" {
     var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.output_data = "static result";
+    mock_host.call_result.output = "static result";
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);
@@ -1600,7 +1620,7 @@ test "System opcodes - stack underflow" {
 
 test "System opcodes - gas consumption" {
     var mock_host = MockHost.init(testing.allocator);
-    mock_host.call_result.gas_remaining = 50000; // Simulate gas consumption
+    mock_host.call_result.gas_left = 50000; // Simulate gas consumption
     const host = mock_host.to_host();
     var frame = try createTestFrame(testing.allocator, host);
     defer frame.deinit(testing.allocator);

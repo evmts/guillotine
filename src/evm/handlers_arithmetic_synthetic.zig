@@ -13,9 +13,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_ADD_INLINE - Fused PUSH+ADD with inline value (≤8 bytes).
         /// Pushes a value and immediately adds it to the top of stack.
-        pub fn push_add_inline(self: FrameType, schedule: Dispatch) Error!Success {
+        pub fn push_add_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Extract inline value from schedule metadata
-            const metadata = schedule.getInlineMetadata();
+            const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
             // Pop top value and add the pushed value
@@ -24,14 +24,14 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             // Continue to next operation (skip metadata)
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_ADD_POINTER - Fused PUSH+ADD with pointer value (>8 bytes).
-        pub fn push_add_pointer(self: FrameType, schedule: Dispatch) Error!Success {
+        pub fn push_add_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Extract pointer value from schedule metadata
-            const metadata = schedule.getPointerMetadata();
+            const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
             // Pop top value and add the pushed value
@@ -40,86 +40,86 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(result);
 
             // Continue to next operation (skip metadata)
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MUL_INLINE - Fused PUSH+MUL with inline value (≤8 bytes).
-        pub fn push_mul_inline(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getInlineMetadata();
+        pub fn push_mul_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
             const a = try self.stack.pop();
             const result = a *% push_value;
             try self.stack.push(result);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_MUL_POINTER - Fused PUSH+MUL with pointer value (>8 bytes).
-        pub fn push_mul_pointer(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getPointerMetadata();
+        pub fn push_mul_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
             const a = try self.stack.pop();
             const result = a *% push_value;
             try self.stack.push(result);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_DIV_INLINE - Fused PUSH+DIV with inline value (≤8 bytes).
-        pub fn push_div_inline(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getInlineMetadata();
+        pub fn push_div_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getInlineMetadata();
             const divisor = metadata.value;
 
             const dividend = try self.stack.pop();
             const result = if (divisor == 0) 0 else dividend / divisor;
             try self.stack.push(result);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_DIV_POINTER - Fused PUSH+DIV with pointer value (>8 bytes).
-        pub fn push_div_pointer(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getPointerMetadata();
+        pub fn push_div_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getPointerMetadata();
             const divisor = metadata.value.*;
 
             const dividend = try self.stack.pop();
             const result = if (divisor == 0) 0 else dividend / divisor;
             try self.stack.push(result);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_SUB_INLINE - Fused PUSH+SUB with inline value (≤8 bytes).
-        pub fn push_sub_inline(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getInlineMetadata();
+        pub fn push_sub_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
             const a = try self.stack.pop();
             const result = a -% push_value;
             try self.stack.push(result);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PUSH_SUB_POINTER - Fused PUSH+SUB with pointer value (>8 bytes).
-        pub fn push_sub_pointer(self: FrameType, schedule: Dispatch) Error!Success {
-            const metadata = schedule.getPointerMetadata();
+        pub fn push_sub_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
             const a = try self.stack.pop();
             const result = a -% push_value;
             try self.stack.push(result);
 
-            const next = schedule.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -162,14 +162,14 @@ fn createInlineDispatch(value: u256) TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .inline_value = value };
+    cursor[0].metadata = .{ .inline_value = value };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -184,14 +184,14 @@ fn createPointerDispatch(value: *const u256) TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .pointer_value = value };
+    cursor[0].metadata = .{ .pointer_value = value };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }

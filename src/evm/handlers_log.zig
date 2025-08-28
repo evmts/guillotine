@@ -17,10 +17,10 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// Generate a log handler for LOG0-LOG4
-        pub fn generateLogHandler(comptime topic_count: u8) *const Dispatch.OpcodeHandler {
+        pub fn generateLogHandler(comptime topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
-            return struct {
-                pub fn logHandler(self: FrameType, dispatch: Dispatch) Error!Success {
+            return &struct {
+                pub fn logHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
                     // Check if we're in static context
                     if (self.host.get_is_static()) {
                         return Error.WriteProtection;
@@ -80,41 +80,29 @@ pub fn Handlers(comptime FrameType: type) type {
                         return Error.AllocationError;
                     };
                     
-                    const log_entry = Log{
-                        .address = self.contract_address,
-                        .topics = topics_array,
-                        .data = data_copy,
-                    };
-                    
-                    // Add log to logs list via host
-                    self.host.emit_log(log_entry) catch |err| {
-                        allocator.free(data_copy);
-                        allocator.free(topics_array);
-                        switch (err) {
-                            else => return Error.AllocationError,
-                        }
-                    };
+                    // Add log to logs list via host  
+                    self.host.emit_log(self.contract_address, topics_array, data_copy);
                     
                     const next = dispatch.getNext();
-                    return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                    return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
                 }
             }.logHandler;
         }
 
         /// LOG0 opcode (0xA0) - Emit log with no topics
-        pub const log0 = generateLogHandler(0);
+        pub const log0: FrameType.OpcodeHandler = generateLogHandler(0);
 
         /// LOG1 opcode (0xA1) - Emit log with one topic
-        pub const log1 = generateLogHandler(1);
+        pub const log1: FrameType.OpcodeHandler = generateLogHandler(1);
 
         /// LOG2 opcode (0xA2) - Emit log with two topics
-        pub const log2 = generateLogHandler(2);
+        pub const log2: FrameType.OpcodeHandler = generateLogHandler(2);
 
         /// LOG3 opcode (0xA3) - Emit log with three topics
-        pub const log3 = generateLogHandler(3);
+        pub const log3: FrameType.OpcodeHandler = generateLogHandler(3);
 
         /// LOG4 opcode (0xA4) - Emit log with four topics
-        pub const log4 = generateLogHandler(4);
+        pub const log4: FrameType.OpcodeHandler = generateLogHandler(4);
     };
 }
 
@@ -199,11 +187,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -790,7 +778,7 @@ test "LOG opcodes - static context protection for all variants" {
     
     // Test all LOG variants in static context
     const log_handlers = [_]struct {
-        handler: *const TestFrame.Dispatch.OpcodeHandler,
+        handler: *const TestFrame.OpcodeHandler,
         stack_items: u8,
     }{
         .{ .handler = TestFrame.LogHandlers.log0, .stack_items = 2 },
@@ -877,11 +865,11 @@ test "LOG opcodes - WordType smaller than u256" {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(SmallFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(SmallFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     const dispatch = SmallFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     

@@ -12,44 +12,44 @@ pub fn Handlers(comptime FrameType: type) type {
         pub const WordType = FrameType.WordType;
 
         /// AND opcode (0x16) - Bitwise AND operation.
-        pub fn @"and"(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn @"and"(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top & top_minus_1);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
-        pub fn @"or"(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn @"or"(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top | top_minus_1);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
-        pub fn xor(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn xor(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top ^ top_minus_1);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
-        pub fn not(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn not(self: *FrameType, dispatch: Dispatch) Error!Success {
             const top = try self.stack.peek();
             try self.stack.set_top(~top);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
         /// Returns the byte at that index or 0 if index >= 32.
-        pub fn byte(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn byte(self: *FrameType, dispatch: Dispatch) Error!Success {
             const byte_index = try self.stack.pop();
             const value = try self.stack.peek();
             const result = if (byte_index >= 32) 0 else blk: {
@@ -60,34 +60,34 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
-        pub fn shl(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn shl(self: *FrameType, dispatch: Dispatch) Error!Success {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const ShiftType = std.math.Log2Int(WordType);
             const result = if (shift >= @bitSizeOf(WordType)) 0 else value << @as(ShiftType, @intCast(shift));
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
-        pub fn shr(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn shr(self: *FrameType, dispatch: Dispatch) Error!Success {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const ShiftType = std.math.Log2Int(WordType);
             const result = if (shift >= @bitSizeOf(WordType)) 0 else value >> @as(ShiftType, @intCast(shift));
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
         /// Preserves the sign bit during shift.
-        pub fn sar(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sar(self: *FrameType, dispatch: Dispatch) Error!Success {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const word_bits = @bitSizeOf(WordType);
@@ -103,7 +103,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             try self.stack.set_top(result);
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -146,11 +146,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }

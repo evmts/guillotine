@@ -13,9 +13,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_JUMP_INLINE - Fused PUSH+JUMP with inline destination (≤8 bytes).
         /// Pushes a destination and immediately jumps to it.
-        pub fn push_jump_inline(self: FrameType, schedule: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(schedule)));
-            const metadata = disp.getInlineMetadata();
+        pub fn push_jump_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            
+            const metadata = dispatch.getInlineMetadata();
             const dest = metadata.value;
             
             // Validate jump destination range
@@ -23,12 +23,12 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.InvalidJump;
             }
             
-            const dest_pc: u32 = @intCast(dest);
+            const dest_pc: u16 = @intCast(dest);
             
             // Look up the destination in the jump table
-            if (disp.findJumpTarget(dest_pc)) |jump_dispatch| {
+            if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
-                return @call(.always_tail, jump_dispatch.schedule[0].opcode_handler, .{ self, jump_dispatch });
+                return @call(.auto, jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
             } else {
                 // Not a valid JUMPDEST
                 return Error.InvalidJump;
@@ -36,9 +36,9 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_JUMP_POINTER - Fused PUSH+JUMP with pointer destination (>8 bytes).
-        pub fn push_jump_pointer(self: FrameType, schedule: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(schedule)));
-            const metadata = disp.getPointerMetadata();
+        pub fn push_jump_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            
+            const metadata = dispatch.getPointerMetadata();
             const dest = metadata.value.*;
             
             // Validate jump destination range
@@ -46,12 +46,12 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.InvalidJump;
             }
             
-            const dest_pc: u32 = @intCast(dest);
+            const dest_pc: u16 = @intCast(dest);
             
             // Look up the destination in the jump table
-            if (disp.findJumpTarget(dest_pc)) |jump_dispatch| {
+            if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
-                return @call(.always_tail, jump_dispatch.schedule[0].opcode_handler, .{ self, jump_dispatch });
+                return @call(.auto, jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
             } else {
                 // Not a valid JUMPDEST
                 return Error.InvalidJump;
@@ -60,9 +60,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_JUMPI_INLINE - Fused PUSH+JUMPI with inline destination (≤8 bytes).
         /// Pushes a destination, pops condition, and conditionally jumps.
-        pub fn push_jumpi_inline(self: FrameType, schedule: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(schedule)));
-            const metadata = disp.getInlineMetadata();
+        pub fn push_jumpi_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+            
+            const metadata = dispatch.getInlineMetadata();
             const dest = metadata.value;
             
             // Pop the condition
@@ -74,27 +74,27 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
                 
-                const dest_pc: u32 = @intCast(dest);
+                const dest_pc: u16 = @intCast(dest);
                 
                 // Look up the destination in the jump table
-                if (disp.findJumpTarget(dest_pc)) |jump_dispatch| {
+                if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
-                    return @call(.always_tail, jump_dispatch.schedule[0].opcode_handler, .{ self, jump_dispatch });
+                    return @call(.auto, jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
                 } else {
                     // Not a valid JUMPDEST
                     return Error.InvalidJump;
                 }
             } else {
                 // Continue to next instruction
-                const next = disp.skipMetadata();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                const next = dispatch.skipMetadata();
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
         }
 
         /// PUSH_JUMPI_POINTER - Fused PUSH+JUMPI with pointer destination (>8 bytes).
-        pub fn push_jumpi_pointer(self: FrameType, schedule: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(schedule)));
-            const metadata = disp.getPointerMetadata();
+        pub fn push_jumpi_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+            
+            const metadata = dispatch.getPointerMetadata();
             const dest = metadata.value.*;
             
             // Pop the condition
@@ -106,20 +106,20 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
                 
-                const dest_pc: u32 = @intCast(dest);
+                const dest_pc: u16 = @intCast(dest);
                 
                 // Look up the destination in the jump table
-                if (disp.findJumpTarget(dest_pc)) |jump_dispatch| {
+                if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
-                    return @call(.always_tail, jump_dispatch.schedule[0].opcode_handler, .{ self, jump_dispatch });
+                    return @call(.auto, jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
                 } else {
                     // Not a valid JUMPDEST
                     return Error.InvalidJump;
                 }
             } else {
                 // Continue to next instruction
-                const next = disp.skipMetadata();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                const next = dispatch.skipMetadata();
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
         }
     };
@@ -163,14 +163,14 @@ fn createInlineDispatch(value: u256) TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .inline_value = value };
+    cursor[0].metadata = .{ .inline_value = value };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -185,14 +185,14 @@ fn createPointerDispatch(value: *const u256) TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .pointer_value = value };
+    cursor[0].metadata = .{ .pointer_value = value };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }

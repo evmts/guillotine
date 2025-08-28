@@ -26,7 +26,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// The actual Keccak variant used depends on WordType:
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
-        pub fn keccak256(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn keccak(self: *FrameType, dispatch: Dispatch) Error!Success {
             const size = self.stack.pop_unsafe();
             const offset = self.stack.pop_unsafe();
             
@@ -64,7 +64,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 };
                 self.stack.push_unsafe(empty_hash);
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
             
             const offset_usize = @as(usize, @intCast(offset));
@@ -154,7 +154,7 @@ pub fn Handlers(comptime FrameType: type) type {
             self.stack.push_unsafe(result_word);
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -235,11 +235,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -253,11 +253,11 @@ fn createMockDispatchU64() TestFrameU64.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrameU64) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrameU64) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrameU64.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -271,11 +271,11 @@ fn createMockDispatchU32() TestFrameU32.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrameU32) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrameU32) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrameU32.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -289,7 +289,7 @@ test "KECCAK256 opcode - empty data" {
     try frame.stack.push(0); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Expected hash of empty data
     const expected_hash: u256 = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
@@ -308,7 +308,7 @@ test "KECCAK256 opcode - single byte" {
     try frame.stack.push(1); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Expected hash of 'a' = keccak256("a")
     const expected_hash: u256 = 0x3ac225168df54212a25c1c01fd35bebfea408fdac2e31ddd6f80a4bbf9a5f1cb;
@@ -328,7 +328,7 @@ test "KECCAK256 opcode - hello world" {
     try frame.stack.push(data.len); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Expected hash of "Hello, World!"
     const expected_hash: u256 = 0xacaf3289d7b601cbd114fb36c4d29c85bbfd5e133f14cb355c3fd8d99367964f;
@@ -348,7 +348,7 @@ test "KECCAK256 opcode - 32 bytes" {
     try frame.stack.push(32); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Get the result hash
     const result_hash = try frame.stack.pop();
@@ -373,7 +373,7 @@ test "KECCAK256 opcode - large data" {
     try frame.stack.push(data_size); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Verify we get a hash result (not checking exact value as it's complex to compute)
     const result_hash = try frame.stack.pop();
@@ -394,7 +394,7 @@ test "KECCAK256 opcode - offset data" {
     try frame.stack.push(data.len); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Verify we get a hash result
     const result_hash = try frame.stack.pop();
@@ -410,7 +410,7 @@ test "KECCAK256 opcode - out of bounds offset" {
     try frame.stack.push(32); // size
     
     const dispatch = createMockDispatch();
-    const result = TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    const result = TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     try testing.expectError(TestFrame.Error.OutOfBounds, result);
 }
@@ -424,7 +424,7 @@ test "KECCAK256 opcode - overflow on size" {
     try frame.stack.push(std.math.maxInt(u256)); // huge size
     
     const dispatch = createMockDispatch();
-    const result = TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    const result = TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     try testing.expectError(TestFrame.Error.OutOfBounds, result);
 }
@@ -441,7 +441,7 @@ test "KECCAK256 opcode - patterns" {
     try frame.stack.push(64); // size
     
     var dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     const zeros_hash = try frame.stack.pop();
     
@@ -453,7 +453,7 @@ test "KECCAK256 opcode - patterns" {
     try frame.stack.push(64); // size
     
     dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     const ones_hash = try frame.stack.pop();
     
@@ -478,7 +478,7 @@ test "KECCAK256 opcode - incremental data" {
         try frame.stack.push(size); // size
         
         const dispatch = createMockDispatch();
-        _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+        _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
         
         const hash = try frame.stack.pop();
         
@@ -505,7 +505,7 @@ test "KECCAK256 opcode - memory expansion" {
     try frame.stack.push(data.len); // size
     
     const dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     // Should succeed and produce a hash
     const result_hash = try frame.stack.pop();
@@ -527,7 +527,7 @@ test "KECCAK256 opcode - known test vectors" {
     try frame.stack.push(test1.len);
     
     var dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     const hash1 = try frame.stack.pop();
     const expected1: u256 = 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45;
@@ -541,7 +541,7 @@ test "KECCAK256 opcode - known test vectors" {
     try frame.stack.push(test2.len);
     
     dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     
     const hash2 = try frame.stack.pop();
     const expected2: u256 = 0x4d741b6f1eb29cb2a9b9911c82f56fa8d73b04959d3d9d222895df6c0b28aa15;
@@ -571,7 +571,7 @@ test "KECCAK256 opcode - alignment and boundaries" {
         try frame.stack.push(test_data.len);
         
         const dispatch = createMockDispatch();
-        _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+        _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
         
         hashes[i] = try frame.stack.pop();
     }
@@ -599,21 +599,21 @@ test "KECCAK256 opcode - consecutive hashes" {
     try frame.stack.push(0);
     try frame.stack.push(data1.len);
     var dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     const hash1 = try frame.stack.pop();
     
     // Hash second data
     try frame.stack.push(100);
     try frame.stack.push(data2.len);
     dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     const hash2 = try frame.stack.pop();
     
     // Hash third data
     try frame.stack.push(200);
     try frame.stack.push(data3.len);
     dispatch = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrame.KeccakHandlers.keccak(frame, dispatch);
     const hash3 = try frame.stack.pop();
     
     // All hashes should be different
@@ -633,7 +633,7 @@ test "KECCAK with u64 WordType - empty data" {
     try frame.stack.push(0); // size
     
     const dispatch = createMockDispatchU64();
-    _ = try TestFrameU64.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrameU64.KeccakHandlers.keccak(frame, dispatch);
     
     // Expected first 64 bits of Keccak-512("")
     const expected_hash: u64 = 0x0eab42de4c3ceb92;
@@ -653,7 +653,7 @@ test "KECCAK with u64 WordType - test data" {
     try frame.stack.push(data.len);
     
     const dispatch = createMockDispatchU64();
-    _ = try TestFrameU64.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrameU64.KeccakHandlers.keccak(frame, dispatch);
     
     // Should get a non-zero hash
     const result = try frame.stack.pop();
@@ -669,7 +669,7 @@ test "KECCAK with u32 WordType - empty data" {
     try frame.stack.push(0); // size
     
     const dispatch = createMockDispatchU32();
-    _ = try TestFrameU32.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrameU32.KeccakHandlers.keccak(frame, dispatch);
     
     // Expected first 32 bits of Keccak-224("")
     const expected_hash: u32 = 0xf71837502;
@@ -689,7 +689,7 @@ test "KECCAK with u32 WordType - test data" {
     try frame.stack.push(data.len);
     
     const dispatch = createMockDispatchU32();
-    _ = try TestFrameU32.KeccakHandlers.keccak256(frame, dispatch);
+    _ = try TestFrameU32.KeccakHandlers.keccak(frame, dispatch);
     
     // Should get a non-zero hash
     const result = try frame.stack.pop();
@@ -707,7 +707,7 @@ test "KECCAK different word sizes - same input different outputs" {
     try frame_u256.stack.push(0);
     try frame_u256.stack.push(test_data.len);
     const dispatch_u256 = createMockDispatch();
-    _ = try TestFrame.KeccakHandlers.keccak256(frame_u256, dispatch_u256);
+    _ = try TestFrame.KeccakHandlers.keccak(frame_u256, dispatch_u256);
     const hash_u256 = try frame_u256.stack.pop();
     
     // U64 test
@@ -717,7 +717,7 @@ test "KECCAK different word sizes - same input different outputs" {
     try frame_u64.stack.push(0);
     try frame_u64.stack.push(test_data.len);
     const dispatch_u64 = createMockDispatchU64();
-    _ = try TestFrameU64.KeccakHandlers.keccak256(frame_u64, dispatch_u64);
+    _ = try TestFrameU64.KeccakHandlers.keccak(frame_u64, dispatch_u64);
     const hash_u64 = try frame_u64.stack.pop();
     
     // U32 test
@@ -727,7 +727,7 @@ test "KECCAK different word sizes - same input different outputs" {
     try frame_u32.stack.push(0);
     try frame_u32.stack.push(test_data.len);
     const dispatch_u32 = createMockDispatchU32();
-    _ = try TestFrameU32.KeccakHandlers.keccak256(frame_u32, dispatch_u32);
+    _ = try TestFrameU32.KeccakHandlers.keccak(frame_u32, dispatch_u32);
     const hash_u32 = try frame_u32.stack.pop();
     
     // All should be non-zero

@@ -15,7 +15,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// MLOAD opcode (0x51) - Load word from memory.
         /// Pops memory offset from stack and pushes the 32-byte word at that offset.
-        pub fn mload(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mload(self: *FrameType, dispatch: Dispatch) Error!Success {
             // MLOAD loads a 32-byte word from memory
             const offset = try self.stack.pop();
             
@@ -26,7 +26,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -44,12 +44,12 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(value);
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MSTORE opcode (0x52) - Store word to memory.
         /// Pops memory offset and value from stack, stores 32 bytes at that offset.
-        pub fn mstore(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mstore(self: *FrameType, dispatch: Dispatch) Error!Success {
             // MSTORE stores a 32-byte word to memory
             const offset = try self.stack.pop();
             const value = try self.stack.pop();
@@ -61,7 +61,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 32);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 32);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -76,12 +76,12 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MSTORE8 opcode (0x53) - Store byte to memory.
         /// Pops memory offset and value from stack, stores the least significant byte at that offset.
-        pub fn mstore8(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mstore8(self: *FrameType, dispatch: Dispatch) Error!Success {
             const offset = try self.stack.pop();
             const value = try self.stack.pop();
             
@@ -92,7 +92,7 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             
             // Calculate gas cost for memory expansion
-            const memory_expansion_cost = try self.memory.expansion_cost(offset_usize, 1);
+            const memory_expansion_cost = self.memory.get_expansion_cost(offset_usize + 1);
             if (self.gas_remaining < GasConstants.GasFastestStep + memory_expansion_cost) {
                 return Error.OutOfGas;
             }
@@ -107,22 +107,22 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MSIZE opcode (0x59) - Get size of active memory.
         /// Pushes the size of active memory in bytes onto the stack.
-        pub fn msize(self: FrameType, dispatch: Dispatch) Error!Success {
-            const size = self.memory.len();
+        pub fn msize(self: *FrameType, dispatch: Dispatch) Error!Success {
+            const size = self.memory.size();
             try self.stack.push(@as(WordType, @intCast(size)));
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// MCOPY opcode (0x5e) - Memory copy operation (EIP-5656).
         /// Copies memory from one location to another.
-        pub fn mcopy(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mcopy(self: *FrameType, dispatch: Dispatch) Error!Success {
             const dest_offset = try self.stack.pop();
             const src_offset = try self.stack.pop();
             const size = try self.stack.pop();
@@ -141,16 +141,16 @@ pub fn Handlers(comptime FrameType: type) type {
             if (size_usize == 0) {
                 // No operation for zero size
                 const next = dispatch.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
             
             // Calculate gas cost
             const words = (size_usize + 31) / 32;
-            const copy_gas_cost = GasConstants.GasFastestStep + words * GasConstants.GasCopy;
+            const copy_gas_cost = GasConstants.GasFastestStep + words * GasConstants.CopyGas;
             
             // Calculate memory expansion cost for both source and destination
-            const src_expansion_cost = try self.memory.expansion_cost(src_usize, size_usize);
-            const dest_expansion_cost = try self.memory.expansion_cost(dest_usize, size_usize);
+            const src_expansion_cost = self.memory.get_expansion_cost(src_usize + size_usize);
+            const dest_expansion_cost = self.memory.get_expansion_cost(dest_usize + size_usize);
             const memory_expansion_cost = @max(src_expansion_cost, dest_expansion_cost);
             
             const total_gas_cost = copy_gas_cost + memory_expansion_cost;
@@ -160,14 +160,20 @@ pub fn Handlers(comptime FrameType: type) type {
             self.gas_remaining -= @intCast(total_gas_cost);
             
             // Perform the memory copy
-            self.memory.copy_evm(dest_usize, src_usize, size_usize) catch |err| switch (err) {
+            // Get source data
+            const src_data = self.memory.get_slice(src_usize, size_usize) catch |err| switch (err) {
                 memory_mod.MemoryError.OutOfBounds => return Error.OutOfBounds,
+                else => return Error.AllocationError,
+            };
+            
+            // Copy to destination
+            self.memory.set_data_evm(dest_usize, src_data) catch |err| switch (err) {
                 memory_mod.MemoryError.MemoryOverflow => return Error.OutOfBounds,
                 else => return Error.AllocationError,
             };
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -210,11 +216,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -966,7 +972,7 @@ test "MCOPY opcode - gas calculation" {
         
         const gas_used = gas_before - frame.gas_remaining;
         const expected_words = (size + 31) / 32;
-        const expected_min_gas = GasConstants.GasFastestStep + expected_words * GasConstants.GasCopy;
+        const expected_min_gas = GasConstants.GasFastestStep + expected_words * GasConstants.CopyGas;
         
         // Gas used should be at least the copy cost
         try testing.expect(gas_used >= expected_min_gas);

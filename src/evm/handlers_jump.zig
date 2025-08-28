@@ -14,8 +14,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: FrameType, dispatch: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(dispatch)));
+        pub fn jump(self: *FrameType, dispatch: Dispatch) Error!Success {
             const dest = try self.stack.pop();
             
             // Validate jump destination range
@@ -23,12 +22,12 @@ pub fn Handlers(comptime FrameType: type) type {
                 return Error.InvalidJump;
             }
             
-            const dest_pc: u32 = @intCast(dest);
+            const dest_pc: u16 = @intCast(dest);
             
             // Look up the destination in the jump table
-            if (disp.findJumpTarget(dest_pc)) |jump_dispatch| {
+            if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
-                return @call(.always_tail, jump_dispatch.schedule[0].opcode_handler, .{ self, jump_dispatch });
+                return @call(.auto, jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
             } else {
                 // Not a valid JUMPDEST
                 return Error.InvalidJump;
@@ -38,8 +37,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
-        pub fn jumpi(self: FrameType, dispatch: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(dispatch)));
+        pub fn jumpi(self: *FrameType, dispatch: Dispatch) Error!Success {
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
 
@@ -49,54 +47,52 @@ pub fn Handlers(comptime FrameType: type) type {
                     return Error.InvalidJump;
                 }
                 
-                const dest_pc: u32 = @intCast(dest);
+                const dest_pc: u16 = @intCast(dest);
                 
                 // Look up the destination in the jump table
-                if (disp.findJumpTarget(dest_pc)) |jump_dispatch| {
+                if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
-                    return @call(.always_tail, jump_dispatch.schedule[0].opcode_handler, .{ self, jump_dispatch });
+                    return @call(.auto, jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
                 } else {
                     // Not a valid JUMPDEST
                     return Error.InvalidJump;
                 }
             } else {
                 // Continue to next instruction
-                const next = disp.getNext();
-                return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+                const next = dispatch.getNext();
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
         }
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
         /// This opcode marks a valid destination for JUMP and JUMPI operations.
         /// It also serves as a gas consumption point for the entire basic block.
-        pub fn jumpdest(self: FrameType, dispatch: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(dispatch)));
+        pub fn jumpdest(self: *FrameType, dispatch: Dispatch) Error!Success {
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
-            const metadata = disp.getJumpDestMetadata();
+            const metadata = dispatch.getJumpDestMetadata();
             const gas_cost = metadata.gas;
             
             // Check and consume gas for the entire basic block
             if (self.gas_remaining < gas_cost) {
                 return Error.OutOfGas;
             }
-            self.gas_remaining -= gas_cost;
+            self.gas_remaining -= @as(i32, @intCast(gas_cost));
             
             // Continue to next operation
-            const next = disp.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// PC opcode (0x58) - Get program counter.
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
-        pub fn pc(self: FrameType, dispatch: *const anyopaque) Error!Success {
-            const disp = @as(Dispatch, @ptrCast(@alignCast(dispatch)));
+        pub fn pc(self: *FrameType, dispatch: Dispatch) Error!Success {
             // Get PC value from metadata
-            const metadata = disp.getPcMetadata();
+            const metadata = dispatch.getPcMetadata();
             try self.stack.push(metadata.value);
             
-            const next = disp.skipMetadata();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -139,11 +135,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
@@ -208,7 +204,7 @@ test "JUMPDEST opcode - gas consumption" {
     const initial_gas = frame.gas_remaining;
     
     // Create dispatch with jump dest metadata
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -217,14 +213,14 @@ test "JUMPDEST opcode - gas consumption" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
     // Set jump dest metadata with gas cost for the basic block
-    schedule[0].metadata = .{ .jump_dest = .{ .gas = 500 } };
+    cursor[0].metadata = .{ .jump_dest = .{ .gas = 500 } };
     
     const dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
@@ -242,7 +238,7 @@ test "JUMPDEST opcode - out of gas" {
     frame.gas_remaining = 100;
     
     // Create dispatch with high gas cost
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -251,14 +247,14 @@ test "JUMPDEST opcode - out of gas" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
     // Set jump dest metadata with high gas cost
-    schedule[0].metadata = .{ .jump_dest = .{ .gas = 1000 } };
+    cursor[0].metadata = .{ .jump_dest = .{ .gas = 1000 } };
     
     const dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
@@ -272,7 +268,7 @@ test "PC opcode - push program counter" {
     defer frame.deinit(testing.allocator);
 
     // Create dispatch with PC metadata
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -281,14 +277,14 @@ test "PC opcode - push program counter" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
     // Set PC metadata
-    schedule[0].metadata = .{ .pc = .{ .value = 42 } };
+    cursor[0].metadata = .{ .pc = .{ .value = 42 } };
     
     const dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
@@ -373,7 +369,7 @@ test "PC opcode - different values" {
         }
         
         // Create dispatch with PC metadata
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -382,13 +378,13 @@ test "PC opcode - different values" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
-        schedule[0].metadata = .{ .pc = .{ .value = pc_val } };
+        cursor[0].metadata = .{ .pc = .{ .value = pc_val } };
         
         const dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
@@ -407,7 +403,7 @@ test "JUMPDEST opcode - zero gas cost" {
     const initial_gas = frame.gas_remaining;
     
     // Create dispatch with zero gas cost (empty basic block)
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -416,13 +412,13 @@ test "JUMPDEST opcode - zero gas cost" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .jump_dest = .{ .gas = 0 } };
+    cursor[0].metadata = .{ .jump_dest = .{ .gas = 0 } };
     
     const dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
@@ -514,7 +510,7 @@ test "Jump operations - integration test" {
     // Simulate a common pattern: PC, conditional jump based on comparison
     
     // First, get current PC
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -523,13 +519,13 @@ test "Jump operations - integration test" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .pc = .{ .value = 50 } };
+    cursor[0].metadata = .{ .pc = .{ .value = 50 } };
     
     const dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
@@ -659,7 +655,7 @@ test "JUMPDEST opcode - various gas costs" {
         frame.gas_remaining = 1_000_000;
         const initial_gas = frame.gas_remaining;
         
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -668,13 +664,13 @@ test "JUMPDEST opcode - various gas costs" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
-        schedule[0].metadata = .{ .jump_dest = .{ .gas = gas_cost } };
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = gas_cost } };
         
         const dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
@@ -706,7 +702,7 @@ test "JUMPDEST opcode - exact gas boundary" {
     for (test_cases) |tc| {
         frame.gas_remaining = tc.available_gas;
         
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -715,13 +711,13 @@ test "JUMPDEST opcode - exact gas boundary" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
-        schedule[0].metadata = .{ .jump_dest = .{ .gas = tc.required_gas } };
+        cursor[0].metadata = .{ .jump_dest = .{ .gas = tc.required_gas } };
         
         const dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
@@ -764,7 +760,7 @@ test "PC opcode - boundary values" {
             _ = try frame.stack.pop();
         }
         
-        var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+        var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
         const mock_handler = struct {
             fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
                 _ = f;
@@ -773,13 +769,13 @@ test "PC opcode - boundary values" {
             }
         }.handler;
         
-        schedule[0] = .{ .opcode_handler = &mock_handler };
-        schedule[1] = .{ .opcode_handler = &mock_handler };
+        cursor[0] = .{ .opcode_handler = &mock_handler };
+        cursor[1] = .{ .opcode_handler = &mock_handler };
         
-        schedule[0].metadata = .{ .pc = .{ .value = pc_val } };
+        cursor[0].metadata = .{ .pc = .{ .value = pc_val } };
         
         const dispatch = TestFrame.Dispatch{
-            .schedule = &schedule,
+            .cursor = &cursor,
             .bytecode_length = 0,
         };
         
@@ -826,7 +822,7 @@ test "Jump operations - gas consumption patterns" {
     try testing.expectEqual(initial_gas, frame.gas_remaining);
     
     // Test PC
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -835,13 +831,13 @@ test "Jump operations - gas consumption patterns" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .pc = .{ .value = 42 } };
+    cursor[0].metadata = .{ .pc = .{ .value = 42 } };
     
     dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     
@@ -879,7 +875,7 @@ test "Jump operations - maximum stack depth" {
     try frame.stack.push(0);
     try frame.stack.push(0);
     
-    var schedule: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    var cursor: [2]dispatch_mod.ScheduleElement(TestFrame) = undefined;
     const mock_handler = struct {
         fn handler(f: TestFrame, d: TestFrame.Dispatch) TestFrame.Error!TestFrame.Success {
             _ = f;
@@ -888,13 +884,13 @@ test "Jump operations - maximum stack depth" {
         }
     }.handler;
     
-    schedule[0] = .{ .opcode_handler = &mock_handler };
-    schedule[1] = .{ .opcode_handler = &mock_handler };
+    cursor[0] = .{ .opcode_handler = &mock_handler };
+    cursor[1] = .{ .opcode_handler = &mock_handler };
     
-    schedule[0].metadata = .{ .pc = .{ .value = 42 } };
+    cursor[0].metadata = .{ .pc = .{ .value = 42 } };
     
     dispatch = TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
     

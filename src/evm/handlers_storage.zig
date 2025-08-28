@@ -15,9 +15,9 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SLOAD opcode (0x54) - Load from storage.
         /// Loads value from storage slot and pushes it onto the stack.
-        pub fn sload(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sload(self: *FrameType, dispatch: Dispatch) Error!Success {
             // SLOAD loads a value from storage
-            if (comptime !FrameType.config.has_database) {
+            if (comptime !FrameType.frame_config.has_database) {
                 return Error.InvalidOpcode;
             }
 
@@ -36,14 +36,14 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(value);
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// SSTORE opcode (0x55) - Store to storage.
         /// Stores value to storage slot. Subject to gas refunds and write protection checks.
-        pub fn sstore(self: FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sstore(self: *FrameType, dispatch: Dispatch) Error!Success {
             // SSTORE stores a value to storage
-            if (comptime !FrameType.config.has_database) {
+            if (comptime !FrameType.frame_config.has_database) {
                 return Error.InvalidOpcode;
             }
 
@@ -71,14 +71,14 @@ pub fn Handlers(comptime FrameType: type) type {
             // - Original value (for refunds)
             // - Cold vs warm access
             // - Net gas metering
-            var gas_cost: u64 = GasConstants.GasStorageSet;
+            var gas_cost: u64 = GasConstants.SstoreSetGas;
             if (current_value != 0 and value == 0) {
                 // Clearing storage - eligible for refund
-                gas_cost = GasConstants.GasStorageClear;
+                gas_cost = GasConstants.SstoreClearGas;
                 // Note: Actual refund would be added to gas_refund field
             } else if (current_value == value) {
                 // No-op
-                gas_cost = GasConstants.GasStorageSet / 5; // Warm storage cost
+                gas_cost = GasConstants.SstoreSetGas / 5; // Warm storage cost
             }
             
             if (self.gas_remaining < gas_cost) {
@@ -92,13 +92,13 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// TLOAD opcode (0x5c) - Load from transient storage (EIP-1153).
         /// Loads value from transient storage slot and pushes it onto the stack.
-        pub fn tload(self: FrameType, dispatch: Dispatch) Error!Success {
-            if (comptime !FrameType.config.has_database) {
+        pub fn tload(self: *FrameType, dispatch: Dispatch) Error!Success {
+            if (comptime !FrameType.frame_config.has_database) {
                 return Error.InvalidOpcode;
             }
 
@@ -115,13 +115,13 @@ pub fn Handlers(comptime FrameType: type) type {
             try self.stack.push(value);
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// TSTORE opcode (0x5d) - Store to transient storage (EIP-1153).
         /// Stores value to transient storage slot (cleared after transaction).
-        pub fn tstore(self: FrameType, dispatch: Dispatch) Error!Success {
-            if (comptime !FrameType.config.has_database) {
+        pub fn tstore(self: *FrameType, dispatch: Dispatch) Error!Success {
+            if (comptime !FrameType.frame_config.has_database) {
                 return Error.InvalidOpcode;
             }
 
@@ -149,7 +149,7 @@ pub fn Handlers(comptime FrameType: type) type {
             };
             
             const next = dispatch.getNext();
-            return @call(.always_tail, next.schedule[0].opcode_handler, .{ self, next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
     };
 }
@@ -254,11 +254,11 @@ fn createMockDispatch() TestFrame.Dispatch {
         }
     }.handler;
     
-    var schedule: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
-    schedule[0] = .{ .opcode_handler = &mock_handler };
+    var cursor: [1]dispatch_mod.ScheduleElement(TestFrame) = undefined;
+    cursor[0] = .{ .opcode_handler = &mock_handler };
     
     return TestFrame.Dispatch{
-        .schedule = &schedule,
+        .cursor = &cursor,
         .bytecode_length = 0,
     };
 }
