@@ -300,24 +300,34 @@ pub fn Dispatch(comptime FrameType: type) type {
             return schedule_items.toOwnedSlice(allocator);
         }
         
-        /// Create an optimized dispatch array with tracing support from bytecode.
-        /// Injects tracing calls as instruction stream items: [trace_before] [opcode] [trace_after]
-        pub fn initWithTracing(
+        /// PC mapping entry for tracing
+        pub const PCMapEntry = struct {
+            dispatch_index: usize,
+            pc: FrameType.PcType,
+            opcode: u8,
+            is_synthetic: bool,
+        };
+        
+        /// Build a mapping from dispatch indices to PC values and opcodes for tracing
+        pub fn buildPCMapping(
             allocator: std.mem.Allocator,
+            schedule: []const Self.Item,
             bytecode: *const bytecode_mod.Bytecode(FrameType.BytecodeConfig),
-            opcode_handlers: *const [256]OpcodeHandler,
-            comptime TracerType: type,
-            tracer_instance: *TracerType,
-        ) ![]Self.Item {
-            var schedule_items = ArrayList(Self.Item, null){};
-            errdefer schedule_items.deinit(allocator);
+        ) ![]PCMapEntry {
+            var pc_map = ArrayList(PCMapEntry, null){};
+            errdefer pc_map.deinit(allocator);
 
             // Create iterator to traverse bytecode
             var iter = bytecode.createIterator();
-
-            // Create tracing handlers that capture the tracer instance
-            const trace_before_handler = Self.createTraceBeforeHandler(TracerType, tracer_instance);
-            const trace_after_handler = Self.createTraceAfterHandler(TracerType, tracer_instance);
+            var dispatch_index: usize = 0;
+            
+            // Skip first_block_gas if present
+            if (schedule.len > 0) {
+                switch (schedule[0]) {
+                    .first_block_gas => dispatch_index = 1,
+                    else => {},
+                }
+            }
 
             while (true) {
                 const instr_pc = iter.pc;
@@ -327,40 +337,19 @@ pub fn Dispatch(comptime FrameType: type) type {
                 
                 switch (op_data) {
                     .regular => |data| {
-                        // Insert tracing: [trace_before] [handler] [trace_after]
-                        try schedule_items.append(allocator, .{ .opcode_handler = trace_before_handler });
-                        try schedule_items.append(allocator, .{ .trace_before = .{ .pc = @intCast(instr_pc), .opcode = data.opcode } });
+                        // Map this regular opcode to its dispatch index
+                        try pc_map.append(allocator, .{
+                            .dispatch_index = dispatch_index,
+                            .pc = @intCast(instr_pc),
+                            .opcode = data.opcode,
+                            .is_synthetic = false,
+                        });
+                        dispatch_index += 1;
                         
-                        const handler = opcode_handlers.*[data.opcode];
-                        try schedule_items.append(allocator, .{ .opcode_handler = handler });
-                        
-                        // PC opcode has additional metadata after handler
+                        // PC opcode has additional dispatch items  
                         if (data.opcode == @intFromEnum(Opcode.PC)) {
-                            try schedule_items.append(allocator, .{ .pc = .{ .value = @intCast(instr_pc) } });
+                            dispatch_index += 1; // Account for PC metadata
                         }
-                        
-                        try schedule_items.append(allocator, .{ .opcode_handler = trace_after_handler });
-                        try schedule_items.append(allocator, .{ .trace_after = .{ .pc = @intCast(instr_pc), .opcode = data.opcode } });
-                    },
-                    .push => |data| {
-                        const push_opcode = 0x60 + data.size - 1;
-                        
-                        // Insert tracing around PUSH
-                        try schedule_items.append(allocator, .{ .opcode_handler = trace_before_handler });
-                        try schedule_items.append(allocator, .{ .trace_before = .{ .pc = @intCast(instr_pc), .opcode = push_opcode } });
-                        
-                        try schedule_items.append(allocator, .{ .opcode_handler = opcode_handlers.*[push_opcode] });
-                        if (data.size <= 8 and data.value <= std.math.maxInt(u64)) {
-                            const inline_value: u64 = @intCast(data.value);
-                            try schedule_items.append(allocator, .{ .push_inline = .{ .value = inline_value } });
-                        } else {
-                            const value_ptr = try allocator.create(FrameType.WordType);
-                            value_ptr.* = data.value;
-                            try schedule_items.append(allocator, .{ .push_pointer = .{ .value = value_ptr } });
-                        }
-                        
-                        try schedule_items.append(allocator, .{ .opcode_handler = trace_after_handler });
-                        try schedule_items.append(allocator, .{ .trace_after = .{ .pc = @intCast(instr_pc), .opcode = push_opcode } });
                     },
                     .jumpdest => |data| {
                         const jumpdest_opcode = @intFromEnum(Opcode.JUMPDEST);
