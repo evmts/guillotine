@@ -182,7 +182,8 @@ export fn guillotine_init() c_int {
         .chain_id = 1,
     };
 
-    vm.* = evm_root.DefaultEvm.init(allocator, db_interface.to_database(), block_info, tx_context, 0, // gas_price
+    const db_as_database = @as(evm_root.Database, db_interface.*);
+    vm.* = evm_root.DefaultEvm.init(allocator, db_as_database, block_info, tx_context, 0, // gas_price
         ZERO_ADDRESS, // origin
         .CANCUN // hardfork
     ) catch |err| {
@@ -354,7 +355,8 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         .chain_id = 1,
     };
 
-    state.vm.* = evm_root.DefaultEvm.init(alloc, db_interface.to_database(), block_info, tx_context, 0, // gas_price
+    const db_as_database = @as(evm_root.Database, db_interface.*);
+    state.vm.* = evm_root.DefaultEvm.init(alloc, db_as_database, block_info, tx_context, 0, // gas_price
         primitives.ZERO_ADDRESS, // origin
         .CANCUN // hardfork
     ) catch {
