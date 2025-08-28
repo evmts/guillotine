@@ -159,7 +159,7 @@ pub fn main() !void {
         .chain_id = 1,
     };
 
-    var evm_instance = try evm.DefaultEvm.init(allocator, db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm_instance = try evm.DefaultEvm.init(allocator, db_interface.to_database(), block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm_instance.deinit();
 
     // We attempt to deploy via CREATE first. If the provided bytecode is actually
