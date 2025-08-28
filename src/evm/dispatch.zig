@@ -52,6 +52,14 @@ pub fn Dispatch(comptime FrameType: type) type {
         pub const PushPointerMetadata = packed struct(u64) { value: *u256 };
         /// Metadata for PC opcode containing the program counter value.
         pub const PcMetadata = packed struct { value: FrameType.PcType };
+        /// Metadata for CODESIZE opcode containing the bytecode size.
+        pub const CodesizeMetadata = packed struct { size: u32 };
+        /// Metadata for CODECOPY opcode containing bytecode pointer and size.
+        pub const CodecopyMetadata = packed struct { 
+            bytecode_ptr: *const []const u8,
+            size: u32,
+            _padding: u16 = 0,
+        };
         /// Metadata for trace_before_op containing PC and opcode for tracing
         pub const TraceBeforeMetadata = packed struct(u64) {
             pc: u32,
@@ -70,6 +78,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             push_inline: PushInlineMetadata,
             push_pointer: PushPointerMetadata,
             pc: PcMetadata,
+            codesize: CodesizeMetadata,
+            codecopy: CodecopyMetadata,
             opcode_handler: OpcodeHandler,
             first_block_gas: struct { gas: u32 },
             trace_before: TraceBeforeMetadata,
@@ -121,6 +131,8 @@ pub fn Dispatch(comptime FrameType: type) type {
             .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8 => struct { metadata: PushInlineMetadata, next: Self },
             .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16, .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24, .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => struct { metadata: PushPointerMetadata, next: Self },
             .JUMPDEST => struct { metadata: JumpDestMetadata, next: Self },
+            .CODESIZE => struct { metadata: CodesizeMetadata, next: Self },
+            .CODECOPY => struct { metadata: CodecopyMetadata, next: Self },
             else => struct { next: Self },
         } {
             return switch (opcode) {
@@ -138,6 +150,14 @@ pub fn Dispatch(comptime FrameType: type) type {
                 },
                 .JUMPDEST => .{
                     .metadata = self.cursor[0].jump_dest,
+                    .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
+                },
+                .CODESIZE => .{
+                    .metadata = self.cursor[0].codesize,
+                    .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
+                },
+                .CODECOPY => .{
+                    .metadata = self.cursor[0].codecopy,
                     .next = Self{ .cursor = self.cursor + 2, .jump_table = self.jump_table },
                 },
                 else => .{
@@ -244,11 +264,16 @@ pub fn Dispatch(comptime FrameType: type) type {
                 log.debug("Processing opcode at PC {}: {any}", .{instr_pc, op_data});
                 switch (op_data) {
                     .regular => |data| {
-                        // Regular opcode - add handler first, then metadata for PC
+                        // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
                         const handler = opcode_handlers.*[data.opcode];
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                         if (data.opcode == @intFromEnum(Opcode.PC)) {
                             try schedule_items.append(allocator, .{ .pc = .{ .value = @intCast(instr_pc) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.CODESIZE)) {
+                            try schedule_items.append(allocator, .{ .codesize = .{ .size = @intCast(bytecode.runtime_code.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.CODECOPY)) {
+                            const bytecode_ptr = &bytecode.runtime_code;
+                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_ptr, .size = @intCast(bytecode.runtime_code.len) } });
                         }
                     },
                     .push => |data| {
@@ -368,9 +393,11 @@ pub fn Dispatch(comptime FrameType: type) type {
                         });
                         dispatch_index += 1;
                         
-                        // PC opcode has additional dispatch items  
-                        if (data.opcode == @intFromEnum(Opcode.PC)) {
-                            dispatch_index += 1; // Account for PC metadata
+                        // PC, CODESIZE, CODECOPY opcodes have additional dispatch items  
+                        if (data.opcode == @intFromEnum(Opcode.PC) or
+                            data.opcode == @intFromEnum(Opcode.CODESIZE) or
+                            data.opcode == @intFromEnum(Opcode.CODECOPY)) {
+                            dispatch_index += 1; // Account for metadata
                         }
                     },
                     .push => |data| {
@@ -486,6 +513,11 @@ pub fn Dispatch(comptime FrameType: type) type {
                         try schedule_items.append(allocator, .{ .opcode_handler = handler });
                         if (data.opcode == @intFromEnum(Opcode.PC)) {
                             try schedule_items.append(allocator, .{ .pc = .{ .value = @intCast(instr_pc) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.CODESIZE)) {
+                            try schedule_items.append(allocator, .{ .codesize = .{ .size = @intCast(bytecode.runtime_code.len) } });
+                        } else if (data.opcode == @intFromEnum(Opcode.CODECOPY)) {
+                            const bytecode_ptr = &bytecode.runtime_code;
+                            try schedule_items.append(allocator, .{ .codecopy = .{ .bytecode_ptr = bytecode_ptr, .size = @intCast(bytecode.runtime_code.len) } });
                         }
                         
                         // Insert trace_after
@@ -752,9 +784,11 @@ pub fn Dispatch(comptime FrameType: type) type {
                         schedule_index += 2;
                     },
                     .regular => |data| {
-                        // Regular opcode - advance by 1, or 2 if it has metadata (PC)
+                        // Regular opcode - advance by 1, or 2 if it has metadata (PC, CODESIZE, CODECOPY)
                         schedule_index += 1;
-                        if (data.opcode == @intFromEnum(Opcode.PC)) {
+                        if (data.opcode == @intFromEnum(Opcode.PC) or
+                            data.opcode == @intFromEnum(Opcode.CODESIZE) or
+                            data.opcode == @intFromEnum(Opcode.CODECOPY)) {
                             schedule_index += 1;
                         }
                     },
