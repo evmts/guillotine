@@ -32,7 +32,9 @@ pub const Eips = struct {
     }
 
 
-    const std = @import("std");
+};
+
+const std = @import("std");
 
     test "eip_3529_gas_refund_cap pre-London" {
         const eips = Eips{ .hardfork = Hardfork.ISTANBUL };
