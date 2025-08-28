@@ -437,6 +437,8 @@ pub const DebuggingTracer = struct {
 
         // Keep breakpoints but reset execution state
         self.paused = false;
+        self.step_mode = false;
+        self.resume_idx = null;
     }
 
     fn prune_to_max_history(self: *Self) void {
