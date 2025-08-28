@@ -219,6 +219,11 @@ pub fn Dispatch(comptime FrameType: type) type {
             const log = @import("log.zig");
             log.debug("Dispatch.init starting...", .{});
             
+            // TEMPORARY: Force output to see if this code is reached
+            if (bytecode.runtime_code.len > 0) {
+                std.debug.print("DISPATCH INIT: bytecode len={}\n", .{bytecode.runtime_code.len});
+            }
+            
             var schedule_items = ArrayList(Self.Item, null){};
             errdefer schedule_items.deinit(allocator);
 
@@ -310,6 +315,10 @@ pub fn Dispatch(comptime FrameType: type) type {
 
             const final_schedule = try schedule_items.toOwnedSlice(allocator);
             log.debug("Dispatch.init complete, schedule length: {}", .{final_schedule.len});
+            
+            // TEMPORARY: Force output
+            std.debug.print("DISPATCH INIT COMPLETE: schedule len={}, opcode_count={}\n", .{final_schedule.len, opcode_count});
+            
             return final_schedule;
         }
         
