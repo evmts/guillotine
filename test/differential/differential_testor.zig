@@ -210,6 +210,11 @@ pub const DifferentialTestor = struct {
             .storage_root = [_]u8{0} ** 32,
         });
         
+        // Verify deployment
+        const deployed_code = try self.guillotine_db.get_code_by_address(self.contract.bytes);
+        const log = std.log.scoped(.differential_testor);
+        log.debug("Deployed bytecode to {any}: len={} vs deployed_len={}", .{self.contract, bytecode.len, deployed_code.len});
+        
         // Execute and diff
         var diff = try self.executeAndDiff(self.caller, self.contract, 0, &.{}, 100000);
         defer diff.deinit();
@@ -311,7 +316,8 @@ pub const DifferentialTestor = struct {
         input: []const u8,
         gas_limit: u64,
     ) !ExecutionResultWithTrace {
-        const call_result = self.guillotine_instance.call(.{
+        // Use the actual EVM call method
+        const params = guillotine_evm.CallParams{
             .call = .{
                 .caller = caller,
                 .to = to,
@@ -319,36 +325,38 @@ pub const DifferentialTestor = struct {
                 .input = input,
                 .gas = gas_limit,
             },
-        });
-        
-        const output = try self.allocator.dupe(u8, call_result.output);
-        const gas_used = gas_limit - call_result.gas_left;
-        
-        // Now that we have tracing support, we can create real traces
-        // For now, create a placeholder trace to maintain compatibility
-        // TODO: Use frame.interpret_with_tracer() to get actual trace data
-        var trace = ExecutionTrace.init(self.allocator);
-        
-        // Create placeholder step showing we have tracing capability
-        const step = TraceStep{
-            .pc = 0,
-            .opcode = if (call_result.success) 0x00 else 0xFE, // STOP or INVALID
-            .opcode_name = try self.allocator.dupe(u8, if (call_result.success) "STOP" else "ERROR"),
-            .gas = gas_used,
-            .stack = &[_]u256{},
-            .memory = &[_]u8{},
-            .storage_reads = &[_]TraceStep.StorageRead{},
-            .storage_writes = &[_]TraceStep.StorageWrite{},
         };
         
-        const steps = try self.allocator.alloc(TraceStep, 1);
-        steps[0] = step;
-        trace.steps = steps;
+        const result = self.guillotine_instance.call(params);
+        
+        // For now, create empty trace - we'll focus on the execution result
+        const trace = ExecutionTrace.empty(self.allocator);
+        
+        // Calculate gas used
+        const gas_used = gas_limit - result.gas_left;
+        
+        // Store the execution result status for debugging
+        const log = std.log.scoped(.differential_failure);
+        log.debug("Guillotine execution completed: success={}, gas_left={}, output_len={}", .{result.success, result.gas_left, result.output.len});
+        
+        if (!result.success) {
+            // Log detailed failure information
+            log.err("Guillotine execution failed!", .{});
+            log.err("  Gas limit: {}", .{gas_limit});
+            log.err("  Gas left: {}", .{result.gas_left});
+            log.err("  Gas used: {}", .{gas_used});
+            log.err("  Output: {x}", .{result.output});
+            
+            // Check if it failed immediately (gas_left == 0 suggests immediate failure)
+            if (result.gas_left == 0) {
+                log.err("  NOTE: Gas left is 0, suggesting immediate failure or out of gas", .{});
+            }
+        }
         
         return ExecutionResultWithTrace{
-            .success = call_result.success,
+            .success = result.success,
             .gas_used = gas_used,
-            .output = output,
+            .output = try self.allocator.dupe(u8, result.output),
             .trace = trace,
             .allocator = self.allocator,
         };
@@ -389,11 +397,35 @@ pub const DifferentialTestor = struct {
             log.err("", .{});
         }
         
+        // Show trace differences if any
+        if (diff.first_divergence_step) |step| {
+            log.err("🔍 TRACE DIVERGENCE at step {}:", .{step});
+            if (diff.trace_diffs.len > 0) {
+                const first_diff = diff.trace_diffs[0];
+                if (first_diff.pc_diff) |pc| {
+                    log.err("   PC: REVM={} vs Guillotine={}", .{ pc.revm, pc.guillotine });
+                }
+                if (first_diff.opcode_diff) |op| {
+                    log.err("   Opcode: REVM={x} vs Guillotine={x}", .{ op.revm, op.guillotine });
+                }
+                if (first_diff.gas_diff) |gas| {
+                    log.err("   Gas: REVM={} vs Guillotine={}", .{ gas.revm, gas.guillotine });
+                }
+                if (first_diff.stack_diff) |stack| {
+                    log.err("   Stack size: REVM={} vs Guillotine={}", .{ stack.revm.len, stack.guillotine.len });
+                }
+            }
+            log.err("", .{});
+        }
+        
         log.err("🛠️  DEBUGGING HINTS:", .{});
         log.err("   • Check if Guillotine implements all opcodes used", .{});
         log.err("   • Verify gas calculation matches EVM specification", .{});
         log.err("   • Ensure memory and stack operations are correct", .{});
         log.err("   • Compare against EVM specification for edge cases", .{});
+        if (diff.trace_diffs.len > 0) {
+            log.err("   • Enable detailed tracing to debug execution differences", .{});
+        }
         log.err("", .{});
         log.err("=====================================", .{});
     }
@@ -455,10 +487,71 @@ pub const DifferentialTestor = struct {
                 .revm = revm_result.trace.steps.len,
                 .guillotine = guillotine_result.trace.steps.len,
             };
+        } else if (guillotine_result.trace.steps.len > 0) {
+            // Compare each step in the traces  
+            var trace_diffs_list = std.ArrayList(ExecutionDiff.TraceDiffStep){};
+            defer trace_diffs_list.deinit(self.allocator);
+            
+            for (revm_result.trace.steps, guillotine_result.trace.steps, 0..) |revm_step, guillotine_step, i| {
+                var step_diff = ExecutionDiff.TraceDiffStep{
+                    .step_index = i,
+                    .pc_diff = null,
+                    .opcode_diff = null,
+                    .gas_diff = null,
+                    .stack_diff = null,
+                };
+                
+                var has_diff = false;
+                
+                // Compare PC
+                if (revm_step.pc != guillotine_step.pc) {
+                    step_diff.pc_diff = .{
+                        .revm = revm_step.pc,
+                        .guillotine = guillotine_step.pc,
+                    };
+                    has_diff = true;
+                }
+                
+                // Compare opcode
+                if (revm_step.opcode != guillotine_step.opcode) {
+                    step_diff.opcode_diff = .{
+                        .revm = revm_step.opcode,
+                        .guillotine = guillotine_step.opcode,
+                    };
+                    has_diff = true;
+                }
+                
+                // Compare gas
+                if (revm_step.gas != guillotine_step.gas) {
+                    step_diff.gas_diff = .{
+                        .revm = revm_step.gas,
+                        .guillotine = guillotine_step.gas,
+                    };
+                    has_diff = true;
+                }
+                
+                // Compare stack
+                if (!std.mem.eql(u256, revm_step.stack, guillotine_step.stack)) {
+                    step_diff.stack_diff = .{
+                        .revm = try self.allocator.dupe(u256, revm_step.stack),
+                        .guillotine = try self.allocator.dupe(u256, guillotine_step.stack),
+                    };
+                    has_diff = true;
+                }
+                
+                if (has_diff) {
+                    try trace_diffs_list.append(self.allocator, step_diff);
+                    if (diff.first_divergence_step == null) {
+                        diff.first_divergence_step = i;
+                    }
+                    diff.trace_match = false;
+                }
+            }
+            
+            if (trace_diffs_list.items.len > 0) {
+                diff.trace_diffs = try trace_diffs_list.toOwnedSlice(self.allocator);
+            }
         }
-        
-        // For now, traces are empty, so they always match
-        // TODO: Implement actual trace comparison
         
         return diff;
     }
