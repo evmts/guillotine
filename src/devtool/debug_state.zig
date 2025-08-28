@@ -5,6 +5,11 @@ const Address = primitives.Address.Address;
 
 // Tracer-oriented helpers and JSON types for the devtool UI.
 
+pub const ErrorInfo = struct {
+    kind: []const u8,  // "ExecutionError", "Panic", or "BytecodeError"
+    message: []const u8,
+};
+
 pub const StepJson = struct {
     step: u64,
     pc: u32,
@@ -30,8 +35,7 @@ pub const DebuggerStateJson = struct {
     logs: [][]const u8,
     returnData: []const u8,
     // Execution error surfacing for UI
-    errorOccurred: bool = false,
-    errorName: []const u8 = "",
+    @"error": ?ErrorInfo = null,
     completed: bool,
     currentInstructionIndex: usize,
     pc: u32,
@@ -296,7 +300,10 @@ pub fn free_debugger_state_json(allocator: std.mem.Allocator, state: DebuggerSta
     for (state.logs) |s| allocator.free(s);
     allocator.free(state.logs);
     allocator.free(state.returnData);
-    allocator.free(state.errorName);
+    if (state.@"error") |e| {
+        allocator.free(e.message);
+        allocator.free(e.kind);
+    }
     for (state.steps) |st| free_step_json(allocator, st);
     allocator.free(state.steps);
     free_state_json(allocator, state.state);

@@ -26,7 +26,6 @@ declare global {
 function App() {
 	const [isDarkMode, setIsDarkMode] = createSignal(false)
 	const [isRunning, setIsRunning] = createSignal(false)
-	const [error, setError] = createSignal<string>('')
 	const [state, setState] = createStore<EvmState>({
 		gasLeft: 0,
 		depth: 0,
@@ -49,44 +48,41 @@ function App() {
 
 	const handleRun = async () => {
 		try {
-			setError('')
 			setIsRunning(true)
 			const newState = await runEvm()
 			setIsRunning(false)
 			setState(newState)
 		} catch (err) {
-			setError(`${err}`)
+			console.error('Run error:', err)
+			setIsRunning(false)
 		}
 	}
 
 	const handleBlock = async () => {
 		try {
-			setError('')
 			const newState = await blockEvm()
 			setState(newState)
 		} catch (err) {
-			setError(`${err}`)
+			console.error('Block error:', err)
 		}
 	}
 
 	const handleStep = async () => {
 		try {
-			setError('')
 			const newState = await stepEvm()
 			setState(newState)
 		} catch (err) {
-			setError(`${err}`)
+			console.error('Step error:', err)
 		}
 	}
 
 	const handleReset = async () => {
 		try {
-			setError('')
 			setIsRunning(false)
 			const newState = await resetEvm()
 			setState(newState)
 		} catch (err) {
-			setError(`${err}`)
+			console.error('Reset error:', err)
 		}
 	}
 
@@ -98,14 +94,28 @@ function App() {
 				const initialState = await resetEvm()
 				setState(initialState)
 			} catch (err) {
-				setError(err instanceof Error ? err.message : 'Unknown error')
+				console.error('Initial load error:', err)
 			}
 		}
 
 		const handleKeyDown = (event: KeyboardEvent) => {
-			if (event.code === 'Space') {
-				event.preventDefault()
-				handleRun()
+			switch (event.code) {
+				case 'Space':
+					event.preventDefault()
+					handleRun()
+					break
+				case 'KeyR':
+					event.preventDefault()
+					handleReset()
+					break
+				case 'KeyS':
+					event.preventDefault()
+					handleStep()
+					break
+				case 'KeyB':
+					event.preventDefault()
+					handleBlock()
+					break
 			}
 		}
 		window.addEventListener('keydown', handleKeyDown)
@@ -137,8 +147,6 @@ function App() {
 				setIsDarkMode={setIsDarkMode}
 				isRunning={isRunning}
 				setIsRunning={setIsRunning}
-				error={error}
-				setError={setError}
 				state={state}
 				setState={setState}
 				handleRun={handleRun}

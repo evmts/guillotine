@@ -20,8 +20,6 @@ interface EvmDebuggerProps {
 	setIsDarkMode: Setter<boolean>
 	isRunning: Accessor<boolean>
 	setIsRunning: Setter<boolean>
-	error: Accessor<string>
-	setError: Setter<string>
 	state: EvmState
 	setState: Setter<EvmState>
 	handleRun: () => void
@@ -67,7 +65,6 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				setActivePanel={setActivePanel}
 			/>
 			<Controls
-				setError={props.setError}
 				setState={props.setState as Setter<EvmState>}
 				handleRun={props.handleRun}
 				handleBlock={props.handleBlock}
@@ -75,17 +72,11 @@ const EvmDebugger = (props: EvmDebuggerProps) => {
 				handleReset={props.handleReset}
 				bytecode={props.state.bytecode}
 				isExecutionComplete={props.state.completed}
+				error={props.state.error}
 			/>
-			<BytecodeLoader
-				loadedBytecode={props.state.bytecode}
-				setError={props.setError}
-				setState={props.setState as Setter<EvmState>}
-			/>
+			<BytecodeLoader loadedBytecode={props.state.bytecode} setState={props.setState as Setter<EvmState>} />
 			<div class="mx-auto flex max-w-7xl flex-col gap-6 px-3 pb-6 sm:px-6">
-				<ErrorAlert
-					error={props.error() ?? (props.state.errorOccurred ? props.state.errorName ?? 'Execution error' : '')}
-					setError={props.setError}
-				/>
+				<ErrorAlert state={props.state} />
 				<StateSummary state={props.state as EvmState} isUpdating={props.isRunning()} />
 				<Breakpoints
 					bytecode={props.state.bytecode}

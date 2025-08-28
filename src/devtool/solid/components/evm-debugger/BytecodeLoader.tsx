@@ -11,7 +11,6 @@ import { loadBytecode, resetEvm } from '~/lib/utils'
 
 interface BytecodeLoaderProps {
 	loadedBytecode: string
-	setError: Setter<string>
 	setState: Setter<EvmState>
 }
 
@@ -24,14 +23,9 @@ const BytecodeLoader: Component<BytecodeLoaderProps> = (props) => {
 	})
 
 	const handleLoadBytecode = async () => {
-		try {
-			props.setError('')
-			await loadBytecode(input())
-			const state = await resetEvm()
-			props.setState(state)
-		} catch (err) {
-			props.setError(`${err}`)
-		}
+		await loadBytecode(input())
+		const state = await resetEvm()
+		props.setState(state)
 	}
 
 	const isLoaded = createMemo(() => (props.loadedBytecode ?? '').toLowerCase() === (input() ?? '').toLowerCase())

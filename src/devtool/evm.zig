@@ -22,6 +22,8 @@ is_completed: bool,
 tx_started: bool = false,
 tx_ended: bool = false,
 available_breakpoints: []u32 = &.{},
+/// Error that occurred during bytecode loading
+bytecode_error: ?debug_state.ErrorInfo = null,
 /// Tracer configuration applied on interpreter (re)initialization
 tracer_cfg: Evm.DebuggingTracer.Config = .{
     .throw_on_error = false,
@@ -38,8 +40,7 @@ pub const DebugStepResult = struct {
     gas_before: u64,
     gas_after: u64,
     completed: bool,
-    error_occurred: bool,
-    error_name: ?[]const u8 = null,
+    @"error": ?debug_state.ErrorInfo = null,
 };
 
 pub const RunResult = enum { paused, completed };
@@ -65,6 +66,10 @@ pub fn deinit(self: *DevtoolEvm) void {
     }
     if (self.bytecode.len != 0) self.allocator.free(self.bytecode);
     if (self.available_breakpoints.len != 0) self.allocator.free(self.available_breakpoints);
+    if (self.bytecode_error) |e| {
+        self.allocator.free(e.kind);
+        self.allocator.free(e.message);
+    }
 }
 
 pub fn setBytecode(self: *DevtoolEvm, bytecode: []const u8) !void {
@@ -75,17 +80,73 @@ pub fn setBytecode(self: *DevtoolEvm, bytecode: []const u8) !void {
 }
 
 pub fn loadBytecodeHex(self: *DevtoolEvm, hex_string: []const u8) !void {
-    if (hex_string.len == 0) return error.EmptyBytecode;
+    // Clear any previous bytecode error
+    if (self.bytecode_error) |e| {
+        self.allocator.free(e.kind);
+        self.allocator.free(e.message);
+        self.bytecode_error = null;
+    }
+    
+    // Validate hex input
+    if (hex_string.len == 0) {
+        self.bytecode_error = .{
+            .kind = try self.allocator.dupe(u8, "BytecodeError"),
+            .message = try self.allocator.dupe(u8, "Empty bytecode provided"),
+        };
+        return error.EmptyBytecode;
+    }
+    
     const hex_data = if (std.mem.startsWith(u8, hex_string, "0x")) hex_string[2..] else hex_string;
-    if (hex_data.len == 0) return error.EmptyBytecode;
-    if (hex_data.len % 2 != 0) return error.InvalidHexLength;
-    for (hex_data) |c| if (!std.ascii.isHex(c)) return error.InvalidHexCharacter;
+    if (hex_data.len == 0) {
+        self.bytecode_error = .{
+            .kind = try self.allocator.dupe(u8, "BytecodeError"),
+            .message = try self.allocator.dupe(u8, "Empty bytecode after removing 0x prefix"),
+        };
+        return error.EmptyBytecode;
+    }
+    
+    if (hex_data.len % 2 != 0) {
+        self.bytecode_error = .{
+            .kind = try self.allocator.dupe(u8, "BytecodeError"),
+            .message = try self.allocator.dupe(u8, "Invalid hex length - must be even number of characters"),
+        };
+        return error.InvalidHexLength;
+    }
+    
+    for (hex_data) |c| {
+        if (!std.ascii.isHex(c)) {
+            self.bytecode_error = .{
+                .kind = try self.allocator.dupe(u8, "BytecodeError"),
+                .message = try self.allocator.dupe(u8, "Invalid hex character detected"),
+            };
+            return error.InvalidHexCharacter;
+        }
+    }
+    
     const n = hex_data.len / 2;
     const tmp = try self.allocator.alloc(u8, n);
     defer self.allocator.free(tmp);
     _ = try std.fmt.hexToBytes(tmp, hex_data);
-    try self.setBytecode(tmp);
-    try self.resetExecution();
+    
+    // Try to set bytecode and catch any errors
+    self.setBytecode(tmp) catch |err| {
+        self.bytecode_error = .{
+            .kind = try self.allocator.dupe(u8, "BytecodeError"),
+            .message = try self.allocator.dupe(u8, @errorName(err)),
+        };
+        return err;
+    };
+    
+    // Try to reset execution and catch any errors (e.g., invalid jump destination)
+    self.resetExecution() catch |err| {
+        self.bytecode_error = .{
+            .kind = try self.allocator.dupe(u8, "BytecodeError"),
+            .message = try std.fmt.allocPrint(self.allocator, "Invalid bytecode: {s}", .{@errorName(err)}),
+        };
+        // Don't initialize if bytecode is invalid
+        self.is_initialized = false;
+        return err;
+    };
 }
 
 fn pushDataLen(op: u8) u8 {
@@ -181,7 +242,7 @@ pub fn singleStep(self: *DevtoolEvm) !DebugStepResult {
     if (!self.is_initialized or self.interpreter == null) return error.NotInitialized;
     if (self.is_completed) {
         const f = &self.interpreter.?.frame;
-        return .{ .gas_before = @as(u64, @intCast(@max(f.gas_remaining, 0))), .gas_after = @as(u64, @intCast(@max(f.gas_remaining, 0))), .completed = true, .error_occurred = false };
+        return .{ .gas_before = @as(u64, @intCast(@max(f.gas_remaining, 0))), .gas_after = @as(u64, @intCast(@max(f.gas_remaining, 0))), .completed = true, .@"error" = null };
     }
     const f = &self.interpreter.?.frame;
     const gas_before: u64 = @intCast(@max(f.gas_remaining, 0));
@@ -194,14 +255,18 @@ pub fn singleStep(self: *DevtoolEvm) !DebugStepResult {
         }
     }
     const recent = f.tracer.getRecentSteps(1);
-    const had_error = if (recent.len == 1) recent[0].error_occurred else false;
-    const error_name = if (recent.len == 1 and recent[0].error_msg != null) recent[0].error_msg else null;
+    const error_info: ?debug_state.ErrorInfo = if (recent.len == 1 and recent[0].@"error" != null) 
+        .{ 
+            .kind = if (recent[0].@"error".?.kind == .Panic) "Panic" else "ExecutionError",
+            .message = recent[0].@"error".?.message,
+        } 
+    else 
+        null;
     return .{
         .gas_before = gas_before,
         .gas_after = @as(u64, @intCast(@max(f.gas_remaining, 0))),
         .completed = self.is_completed,
-        .error_occurred = had_error,
-        .error_name = error_name,
+        .@"error" = error_info,
     };
 }
 
@@ -222,8 +287,6 @@ pub fn runUntilHalt(self: *DevtoolEvm) !RunResult {
     }
     return .paused;
 }
-
-// singleStep defined above
 
 /// Execute until the end of the current basic block (as determined by preanalysis)
 /// or until a breakpoint/STOP is reached. Stops before executing the first
@@ -339,17 +402,24 @@ pub fn getAvailableBreakpoints(self: *DevtoolEvm, allocator: std.mem.Allocator) 
 
 pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
     if (!self.is_initialized or self.interpreter == null) {
-        // Minimal empty payload for UI boot
+        // Minimal empty payload for UI boot - include bytecode error if present
+        var error_info: ?debug_state.ErrorInfo = null;
+        if (self.bytecode_error) |e| {
+            error_info = .{
+                .kind = try self.allocator.dupe(u8, e.kind),
+                .message = try self.allocator.dupe(u8, e.message),
+            };
+        }
+        
         const st = debug_state.DebuggerStateJson{
             .gasLeft = 0,
             .depth = 0,
             .stack = &.{},
             .memory = try self.allocator.dupe(u8, "0x"),
-            .bytecode = try self.allocator.dupe(u8, "0x"),
+            .bytecode = if (self.bytecode.len > 0) try debug_state.format_bytes_hex(self.allocator, self.bytecode) else try self.allocator.dupe(u8, "0x"),
             .logs = &.{},
             .returnData = try self.allocator.dupe(u8, "0x"),
-            .errorOccurred = false,
-            .errorName = try self.allocator.dupe(u8, ""),
+            .@"error" = error_info,
             .completed = false,
             .currentInstructionIndex = 0,
             .pc = 0,
@@ -392,10 +462,8 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
         const sa = try debug_state.format_stack_hex(self.allocator, s.stack_after);
         const op_name = try self.allocator.dupe(u8, s.opcode_name);
         var err_dup_raw: ?[]u8 = null;
-        if (s.error_occurred) {
-            if (s.error_msg) |m| {
-                err_dup_raw = try self.allocator.dupe(u8, m);
-            }
+        if (s.@"error") |e| {
+            err_dup_raw = try self.allocator.dupe(u8, e.message);
         }
         const err_dup: ?[]const u8 = if (err_dup_raw) |e| e else null;
         steps[idx] = .{
@@ -506,11 +574,16 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
 
     // Get the most recent error information
     const recent_steps = f.tracer.getRecentSteps(1);
-    const error_occurred = if (recent_steps.len > 0) recent_steps[0].error_occurred else false;
-    const error_name = if (recent_steps.len > 0 and recent_steps[0].error_msg != null) 
-        try self.allocator.dupe(u8, recent_steps[0].error_msg.?) 
-    else 
-        try self.allocator.dupe(u8, "");
+    var error_info: ?debug_state.ErrorInfo = null;
+    if (recent_steps.len > 0) {
+        const st = recent_steps[0];
+        if (st.@"error") |e| {
+            error_info = .{
+                .kind = try self.allocator.dupe(u8, if (e.kind == .Panic) "Panic" else "ExecutionError"),
+                .message = try self.allocator.dupe(u8, e.message),
+            };
+        }
+    }
 
     const st = debug_state.DebuggerStateJson{
         .gasLeft = @intCast(@max(f.gas_remaining, 0)),
@@ -520,8 +593,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
         .bytecode = code_hex,
         .logs = &.{},
         .returnData = ret_hex,
-        .errorOccurred = error_occurred,
-        .errorName = error_name,
+        .@"error" = error_info,
         .completed = self.is_completed,
         .currentInstructionIndex = ui_current_instr_idx,
         .pc = @intCast(pc_opt orelse 0),
@@ -545,15 +617,14 @@ test "DevtoolEvm init + hex load + single step" {
     try std.testing.expect(dv.is_initialized);
     const s1 = try dv.singleStep();
     try std.testing.expect(!s1.completed);
-    try std.testing.expect(!s1.error_occurred);
+    try std.testing.expect(s1.@"error" == null);
     const json = try dv.serializeEvmState();
     // serializeEvmState allocates with dv.allocator (c_allocator); free accordingly
     defer dv.allocator.free(json);
     try std.testing.expect(json.len > 0);
-    // Verify that error fields are included in JSON
-    const json_contains_error_fields = std.mem.indexOf(u8, json, "\"errorOccurred\"") != null and
-        std.mem.indexOf(u8, json, "\"errorName\"") != null;
-    try std.testing.expect(json_contains_error_fields);
+    // Verify that error field is included in JSON
+    const json_contains_error_field = std.mem.indexOf(u8, json, "\"error\"") != null;
+    try std.testing.expect(json_contains_error_field);
 }
 
 test "DevtoolEvm no error case - fields properly set" {
@@ -572,48 +643,126 @@ test "DevtoolEvm no error case - fields properly set" {
     const add_step = try dv.singleStep(); // ADD
     
     // No error should have occurred
-    try std.testing.expect(!add_step.error_occurred);
-    try std.testing.expect(add_step.error_name == null);
+    try std.testing.expect(add_step.@"error" == null);
     
     // Verify in JSON
     const json = try dv.serializeEvmState();
     defer dv.allocator.free(json);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"errorOccurred\":false") != null or
-                          std.mem.indexOf(u8, json, "\"errorOccurred\": false") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"errorName\":\"\"") != null or
-                          std.mem.indexOf(u8, json, "\"errorName\": \"\"") != null);
+    // Should have null error when no error occurred
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"error\":null") != null or
+                          std.mem.indexOf(u8, json, "\"error\": null") != null);
 }
 
-test "DevtoolEvm error tracking - stack underflow" {
+test "DevtoolEvm error tracking - out of bounds memory" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const a = gpa.allocator();
     var dv = try DevtoolEvm.init(a);
     defer dv.deinit();
     
-    // Bytecode that will cause stack underflow: ADD without pushing values first
-    try dv.loadBytecodeHex("0x01"); // ADD with empty stack
+    // Bytecode that will cause OutOfBounds via KECCAK256 with enormous size/offset
+    // PUSH32 <offset=0xffff..>
+    // PUSH32 <size=0xffff..>
+    // KECCAK256
+    const big = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    const code = try std.fmt.allocPrint(a, "0x7f{s}7f{s}20", .{ big, big });
+    defer a.free(code);
+    try dv.loadBytecodeHex(code);
     try std.testing.expect(dv.is_initialized);
     
-    // Step should capture the error
-    const s1 = try dv.singleStep();
-    try std.testing.expect(s1.error_occurred);
-    try std.testing.expect(s1.error_name != null);
-    if (s1.error_name) |err_name| {
-        // Should contain "StackUnderflow" or similar error
-        try std.testing.expect(std.mem.indexOf(u8, err_name, "Stack") != null or 
-                              std.mem.indexOf(u8, err_name, "underflow") != null);
-    }
+    // Run until pause or error (throw_on_error=false pauses on error)
+    const r = try dv.runUntilHalt();
+    try std.testing.expect(r == .paused);
     
     // Verify error is included in serialized state
     const json = try dv.serializeEvmState();
     defer dv.allocator.free(json);
     
-    // Check that errorOccurred is true in JSON
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"errorOccurred\":true") != null or
-                          std.mem.indexOf(u8, json, "\"errorOccurred\": true") != null);
-    // Check that errorName contains something
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"errorName\":\"\"") == null);
+    // Check that error is present in JSON with correct structure
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"error\":{") != null);
+    // Check that error mentions bounds
+    try std.testing.expect(std.mem.indexOf(u8, json, "OutOfBounds") != null or
+                          std.mem.indexOf(u8, json, "bounds") != null);
+    // Should be ExecutionError kind
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"ExecutionError\"") != null);
+}
+
+test "DevtoolEvm error tracking - invalid opcode" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+
+    // 0xfe (INVALID) should trigger InvalidOpcode
+    try dv.loadBytecodeHex("0xfe");
+    try std.testing.expect(dv.is_initialized);
+
+    const r = try dv.runUntilHalt();
+    try std.testing.expect(r == .paused);
+    const json = try dv.serializeEvmState();
+    defer dv.allocator.free(json);
+    // Check that error is present in JSON
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"error\":{") != null);
+    // Message should mention invalid/INVALID
+    try std.testing.expect(std.mem.indexOf(u8, json, "Invalid") != null or
+                          std.mem.indexOf(u8, json, "invalid") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"ExecutionError\"") != null);
+}
+
+test "DevtoolEvm error tracking - invalid jump destination and revert" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+
+    // Case 1: Invalid jump destination
+    {
+        var dv = try DevtoolEvm.init(a);
+        defer dv.deinit();
+        // PUSH1 0x03; JUMP; STOP (no JUMPDEST at 0x03)
+        // Invalid jump destination is detected during planning/analysis
+        try std.testing.expectError(error.InvalidJumpDestination, dv.loadBytecodeHex("0x60035600"));
+        // Devtool should remain uninitialized after failed load
+        try std.testing.expect(!dv.is_initialized);
+    }
+
+    // Case 2: REVERT
+    {
+        var dv2 = try DevtoolEvm.init(a);
+        defer dv2.deinit();
+        // PUSH1 0; PUSH1 0; REVERT
+        try dv2.loadBytecodeHex("0x60006000fd");
+        _ = try dv2.singleStep(); // PUSH1 0
+        _ = try dv2.singleStep(); // PUSH1 0
+        const rr = try dv2.runUntilHalt();
+        try std.testing.expect(rr == .paused);
+        const json2 = try dv2.serializeEvmState();
+        defer dv2.allocator.free(json2);
+        try std.testing.expect(std.mem.indexOf(u8, json2, "REVERT") != null or
+                              std.mem.indexOf(u8, json2, "Revert") != null);
+        try std.testing.expect(std.mem.indexOf(u8, json2, "\"kind\":\"ExecutionError\"") != null);
+    }
+}
+
+test "DevtoolEvm preflight panic stack underflow" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const a = gpa.allocator();
+    var dv = try DevtoolEvm.init(a);
+    defer dv.deinit();
+
+    // This would cause a stack underflow if executed; preflight should catch and pause.
+    try dv.loadBytecodeHex("0x01"); // ADD with empty stack
+    try std.testing.expect(dv.is_initialized);
+
+    const r = try dv.runUntilHalt();
+    try std.testing.expect(r == .paused);
+
+    const json = try dv.serializeEvmState();
+    defer dv.allocator.free(json);
+    // Check for Panic error kind and StackUnderflow message
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"kind\":\"Panic\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "StackUnderflow") != null);
 }
 
 test "DevtoolEvm available breakpoints extraction" {

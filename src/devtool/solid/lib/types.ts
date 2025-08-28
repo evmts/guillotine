@@ -28,6 +28,11 @@ export interface InstructionJson {
 	staticGasCost: number
 }
 
+export interface ErrorInfo {
+	kind: 'ExecutionError' | 'Panic' | 'BytecodeError'
+	message: string
+}
+
 export interface EvmState {
 	gasLeft: number
 	depth: number
@@ -36,8 +41,7 @@ export interface EvmState {
 	bytecode: string
 	logs: string[]
 	returnData: string
-	errorOccurred?: boolean
-	errorName?: string
+	error?: ErrorInfo | null
 	completed: boolean
 	currentInstructionIndex: number
 	pc: number
