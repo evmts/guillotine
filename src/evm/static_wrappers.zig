@@ -36,35 +36,39 @@ pub const StaticDatabase = struct {
     }
 
     // Read operations - forwarded to underlying database
-    pub fn get_account(self: *StaticDatabase, address: Address) DatabaseInterface.Error!?Account {
+    pub fn get_account(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!?Account {
         return self.inner.get_account(address);
     }
 
-    pub fn get_storage(self: *StaticDatabase, address: Address, key: u256) DatabaseInterface.Error!u256 {
+    pub fn get_storage(self: *StaticDatabase, address: [20]u8, key: u256) DatabaseInterface.Error!u256 {
         return self.inner.get_storage(address, key);
     }
 
-    pub fn get_code(self: *StaticDatabase, address: Address) DatabaseInterface.Error![]const u8 {
+    pub fn get_code(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![]const u8 {
         return self.inner.get_code(address);
     }
 
-    pub fn account_exists(self: *StaticDatabase, address: Address) DatabaseInterface.Error!bool {
+    pub fn get_code_by_address(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![]const u8 {
+        return self.inner.get_code_by_address(address);
+    }
+
+    pub fn account_exists(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!bool {
         return self.inner.account_exists(address);
     }
 
-    pub fn get_balance(self: *StaticDatabase, address: Address) DatabaseInterface.Error!u256 {
+    pub fn get_balance(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!u256 {
         return self.inner.get_balance(address);
     }
 
-    pub fn get_nonce(self: *StaticDatabase, address: Address) DatabaseInterface.Error!u64 {
+    pub fn get_nonce(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!u64 {
         return self.inner.get_nonce(address);
     }
 
-    pub fn is_empty(self: *StaticDatabase, address: Address) DatabaseInterface.Error!bool {
+    pub fn is_empty(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!bool {
         return self.inner.is_empty(address);
     }
 
-    pub fn get_code_hash(self: *StaticDatabase, address: Address) DatabaseInterface.Error![32]u8 {
+    pub fn get_code_hash(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![32]u8 {
         return self.inner.get_code_hash(address);
     }
 
