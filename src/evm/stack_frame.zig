@@ -113,8 +113,8 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //
         //   Offset 0-63: Primary cacheline (64 bytes)
         //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
-        //   ├── bytecode: Bytecode              // ~40 bytes (slices + metadata)
-        //   └── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
+        //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
+        //   └── memory: Memory (partial)        // ~32 bytes start
         // 
         //   Secondary Components (Cacheline 2)
         // 
@@ -164,11 +164,10 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //
         //   Memory Layout Visualization
         // 
-        // Cache Line 1 (0-63):    [Stack(24)][Bytecode(~40)]
-        // Cache Line 2 (64-127):  [Gas][Memory][Database][Address]
+        // Cache Line 1 (0-63):    [Stack(24)][Gas][Memory(start)]
+        // Cache Line 2 (64-127):  [Memory(cont)][Database][Address]
         // Cache Line 3 (128-191): [Host][Logs][Output][SelfDest*][Alloc]
         stack: Stack,
-        bytecode: Bytecode, 
         gas_remaining: GasType, 
         memory: Memory,
         database: if (config.has_database) ?DatabaseInterface else void,
@@ -180,30 +179,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         allocator: std.mem.Allocator,
         /// Initialize a new execution frame.
         ///
-        /// Creates stack, memory, and other execution components. Validates
-        /// bytecode size and allocates resources with proper cleanup on failure.
+        /// Creates stack, memory, and other execution components. Allocates 
+        /// resources with proper cleanup on failure. Bytecode validation
+        /// and analysis is now handled separately by dispatch initialization.
         /// 
         /// EIP-214: For static calls, self_destruct should be null to prevent 
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, bytecode_raw: []const u8, gas_remaining: GasType, database: if (config.has_database) ?DatabaseInterface else void, host: Host, self_destruct: ?*SelfDestruct) Error!Self {
-            if (bytecode_raw.len > max_bytecode_size) {
-                @branchHint(.unlikely);
-                return Error.BytecodeTooLarge;
-            }
-
-            log.debug("Initializing bytecode with len: {}", .{bytecode_raw.len});
-            var bytecode = Bytecode.init(allocator, bytecode_raw) catch |e| {
-                @branchHint(.unlikely);
-                log.err("Bytecode init failed: {}", .{e});
-                return switch (e) {
-                    error.BytecodeTooLarge => Error.BytecodeTooLarge,
-                    error.InvalidOpcode => Error.InvalidOpcode,
-                    error.OutOfMemory => Error.AllocationError,
-                    else => Error.AllocationError,
-                };
-            };
-            log.debug("Bytecode initialized successfully, packed_bitmap len: {}", .{bytecode.packed_bitmap.len});
-            errdefer bytecode.deinit();
+        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: if (config.has_database) ?DatabaseInterface else void, host: Host, self_destruct: ?*SelfDestruct) Error!Self {
 
             var stack = Stack.init(allocator) catch {
                 @branchHint(.cold);
@@ -221,7 +203,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             errdefer output_data.deinit();
             return Self{
                 .stack = stack,
-                .bytecode = bytecode,
                 .gas_remaining = @as(GasType, @intCast(@max(gas_remaining, 0))),
                 .memory = memory,
                 .database = database,
@@ -236,7 +217,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.stack.deinit(allocator);
             self.memory.deinit();
-            self.bytecode.deinit();
             // Free log data
             for (self.logs.items) |log_entry| {
                 allocator.free(log_entry.topics);
@@ -248,19 +228,40 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
         /// Execute this frame without tracing (backward compatibility method).
         /// Simply delegates to interpret_with_tracer with no tracer.
-        pub fn interpret(self: *Self) Error!Success {
-            log.debug("StackFrame.interpret called, bytecode len: {}", .{self.bytecode.runtime_code.len});
-            return self.interpret_with_tracer(null, {});
+        /// @param bytecode_raw: Raw bytecode to execute
+        pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!Success {
+            log.debug("StackFrame.interpret called, bytecode len: {}", .{bytecode_raw.len});
+            return self.interpret_with_tracer(bytecode_raw, null, {});
         }
         
         /// Execute this frame by building a dispatch schedule and jumping to the first handler.
         /// Performs a one-time static gas charge for the first basic block before execution.
         /// 
+        /// @param bytecode_raw: Raw bytecode to execute
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
-        pub fn interpret_with_tracer(self: *Self, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
+        pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
+            // Validate bytecode size
+            if (bytecode_raw.len > max_bytecode_size) {
+                @branchHint(.unlikely);
+                return Error.BytecodeTooLarge;
+            }
+
+            log.debug("Initializing bytecode with len: {}", .{bytecode_raw.len});
+            var bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
+                @branchHint(.unlikely);
+                log.err("Bytecode init failed: {}", .{e});
+                return switch (e) {
+                    error.BytecodeTooLarge => Error.BytecodeTooLarge,
+                    error.InvalidOpcode => Error.InvalidOpcode,
+                    error.OutOfMemory => Error.AllocationError,
+                    else => Error.AllocationError,
+                };
+            };
+            defer bytecode.deinit();
+            
             const handlers = &Self.opcode_handlers;
-            log.debug("interpret_with_tracer called, bytecode len: {}, gas: {}", .{self.bytecode.runtime_code.len, self.gas_remaining});
+            log.debug("interpret_with_tracer called, bytecode len: {}, gas: {}", .{bytecode.runtime_code.len, self.gas_remaining});
 
             // Call beforeExecute hook if tracer is configured
             if (TracerType) |T| {
@@ -272,11 +273,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             // Execute the bytecode
             const result = if (TracerType) |T| blk: {
                 // When tracing is enabled, use the traced dispatch schedule
-                const traced_schedule = Dispatch.initWithTracing(self.allocator, &self.bytecode, handlers, T, tracer_instance) catch return Error.AllocationError;
+                const traced_schedule = Dispatch.initWithTracing(self.allocator, &bytecode, handlers, T, tracer_instance) catch return Error.AllocationError;
                 defer Dispatch.deinitSchedule(self.allocator, traced_schedule);
                 
                 // Create jump table for traced schedule
-                var traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &self.bytecode) catch return Error.AllocationError;
+                var traced_jump_table = Dispatch.createJumpTable(self.allocator, traced_schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(traced_jump_table.entries);
                 
                 // Process first block gas if needed
@@ -294,7 +295,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             } else blk: {
                 // Normal execution without tracing
                 log.debug("Creating dispatch schedule...", .{});
-                const schedule = Dispatch.init(self.allocator, &self.bytecode, handlers) catch |e| {
+                const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {}", .{e});
                     return Error.AllocationError;
                 };
@@ -302,14 +303,14 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 log.debug("Dispatch schedule created, len: {}", .{schedule.len});
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={}", .{schedule.len});
-                    log.err("  Bytecode len: {}", .{self.bytecode.runtime_code.len});
-                    if (self.bytecode.runtime_code.len > 0) {
-                        log.err("  First few bytes: {x}", .{self.bytecode.runtime_code[0..@min(self.bytecode.runtime_code.len, 16)]});
+                    log.err("  Bytecode len: {}", .{bytecode.runtime_code.len});
+                    if (bytecode.runtime_code.len > 0) {
+                        log.err("  First few bytes: {x}", .{bytecode.runtime_code[0..@min(bytecode.runtime_code.len, 16)]});
                     }
                     return Error.InvalidOpcode;
                 }
 
-                var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &self.bytecode) catch return Error.AllocationError;
+                var jump_table = Dispatch.createJumpTable(self.allocator, schedule, &bytecode) catch return Error.AllocationError;
                 defer self.allocator.free(jump_table.entries);
 
                 // Process first block gas
@@ -396,7 +397,6 @@ pub fn StackFrame(comptime config: FrameConfig) type {
 
             return Self{
                 .stack = new_stack,
-                .bytecode = self.bytecode, // Note: Bytecode is shared, not copied
                 .gas_remaining = self.gas_remaining,
                 .memory = new_memory,
                 .database = self.database,
