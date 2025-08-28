@@ -5,7 +5,7 @@ const primitives = @import("primitives");
 const Evm = @import("evm.zig").Evm;
 const DefaultEvm = @import("evm.zig").DefaultEvm;
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo;
-const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
+const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
 const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;
@@ -57,7 +57,7 @@ test "EVM error type definition" {
     // Create test database
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -109,7 +109,7 @@ test "EVM call() method routes to different handlers" {
     // Create test database
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -195,7 +195,7 @@ test "EVM call_handler basic functionality" {
     // Create test database
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     // Add a simple contract that just STOPs
     const stop_bytecode = [_]u8{0x00}; // STOP opcode
@@ -258,7 +258,7 @@ test "EVM staticcall handler prevents state changes" {
     // Create test database with initial state
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     // Add a contract that tries to modify storage (should fail in staticcall)
     const sstore_bytecode = [_]u8{
@@ -322,7 +322,7 @@ test "EVM delegatecall handler preserves caller context" {
     // Create test database
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     // Add a contract that returns the caller address
     // CALLER opcode pushes msg.sender to stack
@@ -396,7 +396,7 @@ test "Evm creation with custom config" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -424,7 +424,7 @@ test "Evm call depth limit" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -469,7 +469,7 @@ test "call method basic functionality - simple STOP" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -513,7 +513,7 @@ test "call method loads contract code from state" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -568,7 +568,7 @@ test "call method handles CREATE operation" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -611,7 +611,7 @@ test "call method handles gas limit properly" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -821,7 +821,7 @@ test "EvmConfig - custom configurations" {
     // Create test database and verify custom EVM compiles
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -860,7 +860,7 @@ test "TransactionContext creation and fields" {
 test "Evm initialization with all parameters" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 12345678,
@@ -902,7 +902,7 @@ test "Evm initialization with all parameters" {
 test "Host interface - get_balance functionality" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -946,7 +946,7 @@ test "Host interface - get_balance functionality" {
 test "Host interface - storage operations" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -990,7 +990,7 @@ test "Host interface - storage operations" {
 test "Host interface - account_exists functionality" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1031,7 +1031,7 @@ test "Host interface - account_exists functionality" {
 test "Host interface - call type differentiation" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1095,7 +1095,7 @@ test "Host interface - call type differentiation" {
 test "EVM CREATE operation - basic contract creation" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1174,7 +1174,7 @@ test "EVM CREATE operation - basic contract creation" {
 test "EVM CREATE operation - with value transfer" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1238,7 +1238,7 @@ test "EVM CREATE operation - with value transfer" {
 test "EVM CREATE operation - insufficient balance fails" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1287,7 +1287,7 @@ test "EVM CREATE operation - insufficient balance fails" {
 test "EVM CREATE2 operation - deterministic address creation" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1365,7 +1365,7 @@ test "EVM CREATE2 operation - deterministic address creation" {
 test "EVM CREATE2 operation - same parameters produce same address" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1428,7 +1428,7 @@ test "EVM CREATE2 operation - same parameters produce same address" {
 test "EVM CREATE operation - collision detection" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1493,7 +1493,7 @@ test "EVM CREATE operation - collision detection" {
 test "EVM CREATE operation - init code execution and storage" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1574,7 +1574,7 @@ test "EVM CREATE operation - init code execution and storage" {
 test "EVM CREATE/CREATE2 - nested contract creation" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1660,7 +1660,7 @@ test "EVM CREATE/CREATE2 - nested contract creation" {
 test "EVM logs - emit_log functionality" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1708,7 +1708,7 @@ test "EVM logs - emit_log functionality" {
 test "EVM logs - included in CallResult" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1774,7 +1774,7 @@ test "EVM logs - included in CallResult" {
 test "Host interface - hardfork compatibility checks" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1812,7 +1812,7 @@ test "Host interface - hardfork compatibility checks" {
 test "Host interface - access cost operations" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1848,7 +1848,7 @@ test "Host interface - access cost operations" {
 test "Host interface - input size validation" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1894,7 +1894,7 @@ test "Host interface - input size validation" {
 test "Call types - CREATE2 with salt" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1939,7 +1939,7 @@ test "Error handling - nested call depth tracking" {
 
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -1988,7 +1988,7 @@ test "Error handling - nested call depth tracking" {
 test "Error handling - precompile execution" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2031,7 +2031,7 @@ test "Error handling - precompile execution" {
 test "Precompiles - IDENTITY precompile (0x04)" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2081,7 +2081,7 @@ test "Precompiles - IDENTITY precompile (0x04)" {
 test "Precompiles - SHA256 precompile (0x02)" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2130,7 +2130,7 @@ test "Precompiles - disabled configuration" {
 
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2176,7 +2176,7 @@ test "Precompiles - disabled configuration" {
 test "Precompiles - invalid precompile addresses" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2226,7 +2226,7 @@ test "Debug - Gas limit affects execution" {
 
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2322,7 +2322,7 @@ test "Debug - Contract deployment and execution" {
 
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2433,7 +2433,7 @@ test "Debug - Bytecode size affects execution time" {
 
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2509,7 +2509,7 @@ test "Debug - Bytecode size affects execution time" {
 test "Security - bounds checking and edge cases" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2571,7 +2571,7 @@ test "EVM with minimal planner strategy" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2624,7 +2624,7 @@ test "EVM with advanced planner strategy" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2675,7 +2675,7 @@ test "journal state application - storage change rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2734,7 +2734,7 @@ test "journal state application - balance change rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2795,7 +2795,7 @@ test "journal state application - nonce change rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2856,7 +2856,7 @@ test "journal state application - code change rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -2917,7 +2917,7 @@ test "journal state application - multiple changes rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3027,7 +3027,7 @@ test "journal state application - nested snapshots rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3105,7 +3105,7 @@ test "journal state application - empty journal rollback" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3140,7 +3140,7 @@ test "EVM contract execution - minimal benchmark reproduction" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3207,7 +3207,7 @@ test "Precompile - IDENTITY (0x04) basic functionality" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3255,7 +3255,7 @@ test "Precompile - SHA256 (0x02) basic functionality" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -3565,7 +3565,7 @@ test "EVM benchmark scenario - reproduces segfault" {
     // Create test database
     var memory_db = MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     // Deploy contract first (ERC20 approval bytecode snippet)
     const stop_bytecode = [_]u8{0x00}; // Simple STOP for now
@@ -4241,7 +4241,7 @@ test "CREATE interaction - created contract modifies parent storage" {
 test "Arena allocator - resets between calls" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4319,7 +4319,7 @@ test "Arena allocator - resets between calls" {
 test "Arena allocator - handles multiple logs efficiently" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4387,7 +4387,7 @@ test "Arena allocator - handles multiple logs efficiently" {
 test "Arena allocator - precompile outputs use arena" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4445,7 +4445,7 @@ test "Arena allocator - precompile outputs use arena" {
 test "Arena allocator - memory efficiency with nested calls" {
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -4965,7 +4965,7 @@ test "EVM bytecode iterator execution - simple STOP" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -5019,7 +5019,7 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,
@@ -5087,7 +5087,7 @@ test "EVM bytecode iterator execution - handles jumps" {
     // Create test database
     var memory_db = MemoryDatabase.init(std.testing.allocator);
     defer memory_db.deinit();
-    const db_interface = DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = BlockInfo{
         .number = 1,

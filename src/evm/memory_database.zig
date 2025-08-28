@@ -5,8 +5,8 @@
 //! atomic updates. Not suitable for production due to memory constraints.
 
 const std = @import("std");
-const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
-const Account = @import("database_interface.zig").Account;
+const Database = @import("database.zig").Database;
+const Account = @import("database.zig").Account;
 const crypto = @import("crypto");
 const primitives = @import("primitives");
 
@@ -118,13 +118,14 @@ pub const MemoryDatabase = struct {
     }
 
     /// Convert to the generic database interface.
-    pub fn to_database_interface(self: *Self) DatabaseInterface {
-        return DatabaseInterface.init(self);
+    /// Since we now use concrete Database type, return self as the concrete implementation
+    pub fn to_database_interface(self: *Self) *Self {
+        return self;
     }
 
     // Account operations
 
-    pub fn get_account(self: *Self, address: [20]u8) DatabaseInterface.Error!?Account {
+    pub fn get_account(self: *Self, address: [20]u8) Database.Error!?Account {
         if (self.batch_in_progress) {
             if (self.batch_changes) |*batch| {
                 if (batch.accounts.get(address)) |maybe_account| {
@@ -135,7 +136,7 @@ pub const MemoryDatabase = struct {
         return self.accounts.get(address);
     }
 
-    pub fn set_account(self: *Self, address: [20]u8, account: Account) DatabaseInterface.Error!void {
+    pub fn set_account(self: *Self, address: [20]u8, account: Account) Database.Error!void {
         if (self.batch_in_progress) {
             if (self.batch_changes) |*batch| {
                 try batch.accounts.put(address, account);
@@ -145,7 +146,7 @@ pub const MemoryDatabase = struct {
         try self.accounts.put(address, account);
     }
 
-    pub fn delete_account(self: *Self, address: [20]u8) DatabaseInterface.Error!void {
+    pub fn delete_account(self: *Self, address: [20]u8) Database.Error!void {
         if (self.batch_in_progress) {
             if (self.batch_changes) |*batch| {
                 try batch.accounts.put(address, null);
@@ -166,14 +167,14 @@ pub const MemoryDatabase = struct {
         return self.accounts.contains(address);
     }
 
-    pub fn get_balance(self: *Self, address: [20]u8) DatabaseInterface.Error!u256 {
+    pub fn get_balance(self: *Self, address: [20]u8) Database.Error!u256 {
         const account = try self.get_account(address);
         return if (account) |acc| acc.balance else 0;
     }
 
     // Storage operations
 
-    pub fn get_storage(self: *Self, address: [20]u8, key: u256) DatabaseInterface.Error!u256 {
+    pub fn get_storage(self: *Self, address: [20]u8, key: u256) Database.Error!u256 {
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.batch_in_progress) {
             if (self.batch_changes) |*batch| {
@@ -185,7 +186,7 @@ pub const MemoryDatabase = struct {
         return self.storage.get(storage_key) orelse 0;
     }
 
-    pub fn set_storage(self: *Self, address: [20]u8, key: u256, value: u256) DatabaseInterface.Error!void {
+    pub fn set_storage(self: *Self, address: [20]u8, key: u256, value: u256) Database.Error!void {
         const storage_key = StorageKey{ .address = address, .key = key };
         if (self.batch_in_progress) {
             if (self.batch_changes) |*batch| {
@@ -200,12 +201,12 @@ pub const MemoryDatabase = struct {
         }
     }
 
-    pub fn get_transient_storage(self: *Self, address: [20]u8, key: u256) DatabaseInterface.Error!u256 {
+    pub fn get_transient_storage(self: *Self, address: [20]u8, key: u256) Database.Error!u256 {
         const storage_key = StorageKey{ .address = address, .key = key };
         return self.transient_storage.get(storage_key) orelse 0;
     }
 
-    pub fn set_transient_storage(self: *Self, address: [20]u8, key: u256, value: u256) DatabaseInterface.Error!void {
+    pub fn set_transient_storage(self: *Self, address: [20]u8, key: u256, value: u256) Database.Error!void {
         const storage_key = StorageKey{ .address = address, .key = key };
         if (value == 0) {
             _ = self.transient_storage.remove(storage_key);
@@ -216,11 +217,11 @@ pub const MemoryDatabase = struct {
 
     // Code operations
 
-    pub fn get_code(self: *Self, code_hash: [32]u8) DatabaseInterface.Error![]const u8 {
-        return self.codes.get(code_hash) orelse return DatabaseInterface.Error.CodeNotFound;
+    pub fn get_code(self: *Self, code_hash: [32]u8) Database.Error![]const u8 {
+        return self.codes.get(code_hash) orelse return Database.Error.CodeNotFound;
     }
 
-    pub fn get_code_by_address(self: *Self, address: [20]u8) DatabaseInterface.Error![]const u8 {
+    pub fn get_code_by_address(self: *Self, address: [20]u8) Database.Error![]const u8 {
         const account = try self.get_account(address);
         if (account) |acc| {
             if (std.mem.eql(u8, &acc.code_hash, &[_]u8{0} ** 32)) {
@@ -231,7 +232,7 @@ pub const MemoryDatabase = struct {
         return &[_]u8{};
     }
 
-    pub fn set_code(self: *Self, code: []const u8) DatabaseInterface.Error![32]u8 {
+    pub fn set_code(self: *Self, code: []const u8) Database.Error![32]u8 {
         // Calculate keccak256 hash of the code
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha3.Keccak256.hash(code, &hash, .{});
@@ -247,13 +248,13 @@ pub const MemoryDatabase = struct {
 
     // State root operations (simplified for in-memory)
 
-    pub fn get_state_root(self: *Self) DatabaseInterface.Error![32]u8 {
+    pub fn get_state_root(self: *Self) Database.Error![32]u8 {
         _ = self;
         // For in-memory database, return a dummy root
         return [_]u8{0} ** 32;
     }
 
-    pub fn commit_changes(self: *Self) DatabaseInterface.Error![32]u8 {
+    pub fn commit_changes(self: *Self) Database.Error![32]u8 {
         // Clear transient storage
         self.transient_storage.clearAndFree();
         
@@ -263,7 +264,7 @@ pub const MemoryDatabase = struct {
 
     // Snapshot operations
 
-    pub fn create_snapshot(self: *Self) DatabaseInterface.Error!u64 {
+    pub fn create_snapshot(self: *Self) Database.Error!u64 {
         const snapshot_id = self.next_snapshot_id;
         self.next_snapshot_id += 1;
         
@@ -293,7 +294,7 @@ pub const MemoryDatabase = struct {
         return snapshot_id;
     }
 
-    pub fn revert_to_snapshot(self: *Self, snapshot_id: u64) DatabaseInterface.Error!void {
+    pub fn revert_to_snapshot(self: *Self, snapshot_id: u64) Database.Error!void {
         // Find the snapshot
         var snapshot_index: ?usize = null;
         for (self.snapshots.items, 0..) |snapshot, i| {
@@ -303,7 +304,7 @@ pub const MemoryDatabase = struct {
             }
         }
         
-        const index = snapshot_index orelse return DatabaseInterface.Error.SnapshotNotFound;
+        const index = snapshot_index orelse return Database.Error.SnapshotNotFound;
         
         // Revert to the snapshot state
         const snapshot = self.snapshots.items[index];
@@ -334,7 +335,7 @@ pub const MemoryDatabase = struct {
         }
     }
 
-    pub fn commit_snapshot(self: *Self, snapshot_id: u64) DatabaseInterface.Error!void {
+    pub fn commit_snapshot(self: *Self, snapshot_id: u64) Database.Error!void {
         // Find and remove the snapshot
         var snapshot_index: ?usize = null;
         for (self.snapshots.items, 0..) |snapshot, i| {
@@ -344,7 +345,7 @@ pub const MemoryDatabase = struct {
             }
         }
         
-        const index = snapshot_index orelse return DatabaseInterface.Error.SnapshotNotFound;
+        const index = snapshot_index orelse return Database.Error.SnapshotNotFound;
         
         var removed = self.snapshots.orderedRemove(index);
         removed.accounts.deinit();
@@ -353,8 +354,8 @@ pub const MemoryDatabase = struct {
 
     // Batch operations
 
-    pub fn begin_batch(self: *Self) DatabaseInterface.Error!void {
-        if (self.batch_in_progress) return DatabaseInterface.Error.NoBatchInProgress;
+    pub fn begin_batch(self: *Self) Database.Error!void {
+        if (self.batch_in_progress) return Database.Error.NoBatchInProgress;
         
         self.batch_in_progress = true;
         self.batch_changes = BatchChanges{
@@ -363,8 +364,8 @@ pub const MemoryDatabase = struct {
         };
     }
 
-    pub fn commit_batch(self: *Self) DatabaseInterface.Error!void {
-        if (!self.batch_in_progress) return DatabaseInterface.Error.NoBatchInProgress;
+    pub fn commit_batch(self: *Self) Database.Error!void {
+        if (!self.batch_in_progress) return Database.Error.NoBatchInProgress;
         
         if (self.batch_changes) |*batch| {
             // Apply account changes
@@ -395,8 +396,8 @@ pub const MemoryDatabase = struct {
         self.batch_changes = null;
     }
 
-    pub fn rollback_batch(self: *Self) DatabaseInterface.Error!void {
-        if (!self.batch_in_progress) return DatabaseInterface.Error.NoBatchInProgress;
+    pub fn rollback_batch(self: *Self) Database.Error!void {
+        if (!self.batch_in_progress) return Database.Error.NoBatchInProgress;
         
         if (self.batch_changes) |*batch| {
             batch.accounts.deinit();

@@ -462,7 +462,7 @@ test "EIP-2929: correct gas costs" {
 
 // Tests from eip_2929_test.zig
 const Evm = @import("evm.zig").Evm;
-const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
+const Database = @import("database.zig").Database;
 const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;

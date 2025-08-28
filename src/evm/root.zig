@@ -66,7 +66,7 @@ pub const BlockInfoConfig = @import("block_info_config.zig").BlockInfoConfig;
 pub const CallParams = @import("call_params.zig").CallParams;
 pub const CallResult = @import("call_result.zig").CallResult;
 pub const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
-pub const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
+pub const Database = @import("database.zig").Database;
 pub const Account = @import("database_interface_account.zig").Account;
 pub const AccessList = @import("access_list.zig").AccessList;
 pub const Hardfork = @import("hardfork.zig").Hardfork;
@@ -124,7 +124,7 @@ test {
     _ = CallParams;
     _ = CallResult;
     _ = CreatedContracts;
-    _ = DatabaseInterface;
+    _ = Database;
     _ = Account;
     _ = Hardfork;
     _ = MemoryDatabase;

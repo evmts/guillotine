@@ -14,8 +14,8 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
-const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
-const Account = @import("database_interface.zig").Account;
+const Database = @import("database.zig").Database;
+const Account = @import("database.zig").Account;
 const logs = @import("logs.zig");
 const Log = logs.Log;
 const CallParams = @import("call_params.zig").CallParams;
@@ -26,32 +26,33 @@ const Hardfork = @import("hardfork.zig").Hardfork;
 /// Implements EIP-214 constraint: STATICCALL cannot modify blockchain state.
 pub const StaticDatabase = struct {
     /// Underlying database for read operations
-    inner: DatabaseInterface,
+    inner: Database,
 
     /// Initialize static database wrapper
-    pub fn init(inner: DatabaseInterface) StaticDatabase {
+    pub fn init(inner: Database) StaticDatabase {
         return StaticDatabase{ .inner = inner };
     }
 
-    /// Convert to DatabaseInterface - read operations are forwarded, writes throw errors
-    pub fn to_database_interface(self: *StaticDatabase) DatabaseInterface {
-        return DatabaseInterface.init(self);
+    /// Convert to Database - read operations are forwarded, writes throw errors
+    /// Since we now use concrete Database type, return self as the static implementation
+    pub fn to_database_interface(self: *StaticDatabase) *StaticDatabase {
+        return self;
     }
 
     // Read operations - forwarded to underlying database
-    pub fn get_account(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!?Account {
+    pub fn get_account(self: *StaticDatabase, address: [20]u8) Database.Error!?Account {
         return self.inner.get_account(address);
     }
 
-    pub fn get_storage(self: *StaticDatabase, address: [20]u8, key: u256) DatabaseInterface.Error!u256 {
+    pub fn get_storage(self: *StaticDatabase, address: [20]u8, key: u256) Database.Error!u256 {
         return self.inner.get_storage(address, key);
     }
 
-    pub fn get_code(self: *StaticDatabase, code_hash: [32]u8) DatabaseInterface.Error![]const u8 {
+    pub fn get_code(self: *StaticDatabase, code_hash: [32]u8) Database.Error![]const u8 {
         return self.inner.get_code(code_hash);
     }
 
-    pub fn get_code_by_address(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![]const u8 {
+    pub fn get_code_by_address(self: *StaticDatabase, address: [20]u8) Database.Error![]const u8 {
         return self.inner.get_code_by_address(address);
     }
 
@@ -59,125 +60,125 @@ pub const StaticDatabase = struct {
         return self.inner.account_exists(address);
     }
 
-    pub fn get_balance(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!u256 {
+    pub fn get_balance(self: *StaticDatabase, address: [20]u8) Database.Error!u256 {
         return self.inner.get_balance(address);
     }
 
-    pub fn get_nonce(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!u64 {
+    pub fn get_nonce(self: *StaticDatabase, address: [20]u8) Database.Error!u64 {
         return self.inner.get_nonce(address);
     }
 
-    pub fn is_empty(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!bool {
+    pub fn is_empty(self: *StaticDatabase, address: [20]u8) Database.Error!bool {
         return self.inner.is_empty(address);
     }
 
-    pub fn get_code_hash(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error![32]u8 {
+    pub fn get_code_hash(self: *StaticDatabase, address: [20]u8) Database.Error![32]u8 {
         return self.inner.get_code_hash(address);
     }
 
     // Write operations - all throw PermissionDenied errors per EIP-214
-    pub fn set_account(self: *StaticDatabase, address: [20]u8, account: Account) DatabaseInterface.Error!void {
+    pub fn set_account(self: *StaticDatabase, address: [20]u8, account: Account) Database.Error!void {
         _ = self;
         _ = address;
         _ = account;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
 
-    pub fn set_storage(self: *StaticDatabase, address: [20]u8, key: u256, value: u256) DatabaseInterface.Error!void {
+    pub fn set_storage(self: *StaticDatabase, address: [20]u8, key: u256, value: u256) Database.Error!void {
         _ = self;
         _ = address;
         _ = key;
         _ = value;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
 
-    pub fn set_code(self: *StaticDatabase, code: []const u8) DatabaseInterface.Error![32]u8 {
+    pub fn set_code(self: *StaticDatabase, code: []const u8) Database.Error![32]u8 {
         _ = self;
         _ = code;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
 
-    pub fn set_balance(self: *StaticDatabase, address: [20]u8, balance: u256) DatabaseInterface.Error!void {
+    pub fn set_balance(self: *StaticDatabase, address: [20]u8, balance: u256) Database.Error!void {
         _ = self;
         _ = address;
         _ = balance;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
 
-    pub fn set_nonce(self: *StaticDatabase, address: [20]u8, nonce: u64) DatabaseInterface.Error!void {
+    pub fn set_nonce(self: *StaticDatabase, address: [20]u8, nonce: u64) Database.Error!void {
         _ = self;
         _ = address;
         _ = nonce;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
 
-    pub fn delete_account(self: *StaticDatabase, address: [20]u8) DatabaseInterface.Error!void {
+    pub fn delete_account(self: *StaticDatabase, address: [20]u8) Database.Error!void {
         _ = self;
         _ = address;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
 
     // Transient storage operations - also throw PermissionDenied for writes
-    pub fn get_transient_storage(self: *StaticDatabase, address: [20]u8, key: u256) DatabaseInterface.Error!u256 {
+    pub fn get_transient_storage(self: *StaticDatabase, address: [20]u8, key: u256) Database.Error!u256 {
         return self.inner.get_transient_storage(address, key);
     }
 
-    pub fn set_transient_storage(self: *StaticDatabase, address: [20]u8, key: u256, value: u256) DatabaseInterface.Error!void {
+    pub fn set_transient_storage(self: *StaticDatabase, address: [20]u8, key: u256, value: u256) Database.Error!void {
         _ = self;
         _ = address;
         _ = key;
         _ = value;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
     
     // Read operations - forward to underlying database
-    pub fn get_state_root(self: *StaticDatabase) DatabaseInterface.Error![32]u8 {
+    pub fn get_state_root(self: *StaticDatabase) Database.Error![32]u8 {
         return self.inner.get_state_root();
     }
     
     // Write operations - throw PermissionDenied
-    pub fn commit_changes(self: *StaticDatabase) DatabaseInterface.Error![32]u8 {
+    pub fn commit_changes(self: *StaticDatabase) Database.Error![32]u8 {
         _ = self;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
     
-    pub fn create_snapshot(self: *StaticDatabase) DatabaseInterface.Error!u64 {
+    pub fn create_snapshot(self: *StaticDatabase) Database.Error!u64 {
         return self.inner.create_snapshot();
     }
     
-    pub fn revert_to_snapshot(self: *StaticDatabase, snapshot_id: u64) DatabaseInterface.Error!void {
+    pub fn revert_to_snapshot(self: *StaticDatabase, snapshot_id: u64) Database.Error!void {
         return self.inner.revert_to_snapshot(snapshot_id);
     }
     
-    pub fn commit_snapshot(self: *StaticDatabase, snapshot_id: u64) DatabaseInterface.Error!void {
+    pub fn commit_snapshot(self: *StaticDatabase, snapshot_id: u64) Database.Error!void {
         _ = self;
         _ = snapshot_id;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
     
-    pub fn begin_batch(self: *StaticDatabase) DatabaseInterface.Error!void {
+    pub fn begin_batch(self: *StaticDatabase) Database.Error!void {
         return self.inner.begin_batch();
     }
     
-    pub fn commit_batch(self: *StaticDatabase) DatabaseInterface.Error!void {
+    pub fn commit_batch(self: *StaticDatabase) Database.Error!void {
         _ = self;
-        return DatabaseInterface.Error.PermissionDenied;
+        return Database.Error.PermissionDenied;
     }
     
-    pub fn rollback_batch(self: *StaticDatabase) DatabaseInterface.Error!void {
+    pub fn rollback_batch(self: *StaticDatabase) Database.Error!void {
         return self.inner.rollback_batch();
     }
 
     // Transaction tracking - not relevant but required by interface
-    pub fn begin_transaction(self: *StaticDatabase) DatabaseInterface.Error!u32 {
+    pub fn begin_transaction(self: *StaticDatabase) Database.Error!u32 {
         return self.inner.begin_transaction();
     }
 
-    pub fn commit_transaction(self: *StaticDatabase, id: u32) DatabaseInterface.Error!void {
+    pub fn commit_transaction(self: *StaticDatabase, id: u32) Database.Error!void {
         return self.inner.commit_transaction(id);
     }
 
-    pub fn rollback_transaction(self: *StaticDatabase, id: u32) DatabaseInterface.Error!void {
+    pub fn rollback_transaction(self: *StaticDatabase, id: u32) Database.Error!void {
         return self.inner.rollback_transaction(id);
     }
 
@@ -380,9 +381,9 @@ test "StaticDatabase blocks write operations" {
     try std.testing.expectEqual(@as(u256, 0), balance);
     
     // Write operations should throw PermissionDenied error
-    try std.testing.expectError(DatabaseInterface.Error.PermissionDenied, 
+    try std.testing.expectError(Database.Error.PermissionDenied, 
         static_interface.set_balance(Address.ZERO_ADDRESS.bytes, 100));
     
-    try std.testing.expectError(DatabaseInterface.Error.PermissionDenied, 
+    try std.testing.expectError(Database.Error.PermissionDenied, 
         static_interface.set_storage(Address.ZERO_ADDRESS.bytes, 0, 42));
 }

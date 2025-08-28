@@ -141,7 +141,7 @@ pub fn main() !void {
     // Set up EVM infrastructure
     var memory_db = evm.MemoryDatabase.init(allocator);
     defer memory_db.deinit();
-    const db_interface = evm.DatabaseInterface.init(&memory_db);
+    const db_interface = memory_db;
 
     const block_info = evm.BlockInfo{
         .number = 1,
