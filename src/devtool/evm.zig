@@ -217,11 +217,10 @@ pub fn singleStep(self: *DevtoolEvm) !DebugStepResult {
             self.tx_ended = true;
         }
     }
-    const recent = f.tracer.getRecentSteps(1);
-    const error_info: ?debug_state.ErrorInfo = if (recent.len == 1 and recent[0].@"error" != null) 
+    const error_info: ?debug_state.ErrorInfo = if (f.tracer.getLastError()) |last_err|
         .{ 
-            .kind = if (recent[0].@"error".?.kind == .Revert) "Revert" else "ExecutionError",
-            .message = recent[0].@"error".?.message,
+            .kind = if (last_err.kind == .Revert) "Revert" else "ExecutionError",
+            .message = last_err.message,
         } 
     else 
         null;
@@ -526,17 +525,13 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
         ui_current_instr_idx = current_block_start_idx + 1;
     }
 
-    // Get the most recent error information
-    const recent_steps = f.tracer.getRecentSteps(1);
+    // Get the last error from tracer
     var error_info: ?debug_state.ErrorInfo = null;
-    if (recent_steps.len > 0) {
-        const st = recent_steps[0];
-        if (st.@"error") |e| {
-            error_info = .{
-                .kind = try self.allocator.dupe(u8, if (e.kind == .Revert) "Revert" else "ExecutionError"),
-                .message = try self.allocator.dupe(u8, e.message),
-            };
-        }
+    if (f.tracer.getLastError()) |last_err| {
+        error_info = .{
+            .kind = try self.allocator.dupe(u8, if (last_err.kind == .Revert) "Revert" else "ExecutionError"),
+            .message = try self.allocator.dupe(u8, last_err.message),
+        };
     }
 
     const st = debug_state.DebuggerStateJson{
