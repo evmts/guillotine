@@ -1060,6 +1060,164 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
         }
 
+        /// Pretty print bytecode with human-readable formatting, colors, and metadata
+        pub fn pretty_print(self: Self, allocator: std.mem.Allocator) ![]u8 {
+            const opcode_data = @import("opcode_data.zig");
+            
+            // ANSI color codes
+            const Colors = struct {
+                const reset = "\x1b[0m";
+                const bold = "\x1b[1m";
+                const dim = "\x1b[2m";
+                const red = "\x1b[31m";
+                const green = "\x1b[32m";
+                const yellow = "\x1b[33m";
+                const blue = "\x1b[34m";
+                const magenta = "\x1b[35m";
+                const cyan = "\x1b[36m";
+                const white = "\x1b[37m";
+                const bright_red = "\x1b[91m";
+                const bright_green = "\x1b[92m";
+                const bright_yellow = "\x1b[93m";
+                const bright_blue = "\x1b[94m";
+                const bright_magenta = "\x1b[95m";
+                const bright_cyan = "\x1b[96m";
+            };
+            
+            var output = std.ArrayList(u8).init(allocator);
+            defer output.deinit();
+            
+            // Header
+            try output.writer().print("{s}=== EVM Bytecode Disassembly ==={s}\n", .{ Colors.bold, Colors.reset });
+            try output.writer().print("{s}Length: {} bytes{s}\n\n", .{ Colors.dim, self.runtime_code.len, Colors.reset });
+            
+            var pc: PcType = 0;
+            var line_num: u32 = 1;
+            
+            while (pc < self.runtime_code.len) {
+                const opcode_byte = self.runtime_code[pc];
+                
+                // Line number and PC address
+                try output.writer().print("{s}{:3}:{s} {s}0x{:04x}{s} ", .{
+                    Colors.dim, line_num, Colors.reset,
+                    Colors.cyan, pc, Colors.reset
+                });
+                
+                // Check if this is a jump destination
+                if (self.isValidJumpDest(pc)) {
+                    try output.writer().print("{s}►{s} ", .{ Colors.bright_yellow, Colors.reset });
+                } else {
+                    try output.writer().print("  ");
+                }
+                
+                // Raw hex bytes (show opcode + data for PUSH instructions)
+                const instruction_size = self.getInstructionSize(pc);
+                var hex_output = std.ArrayList(u8).init(allocator);
+                defer hex_output.deinit();
+                
+                for (0..instruction_size) |i| {
+                    if (pc + i < self.runtime_code.len) {
+                        try hex_output.writer().print("{:02x}", .{self.runtime_code[pc + i]});
+                        if (i + 1 < instruction_size) try hex_output.writer().print(" ");
+                    }
+                }
+                
+                // Pad hex to fixed width for alignment
+                const hex_str = hex_output.items;
+                try output.writer().print("{s}{s:<24}{s} ", .{ Colors.dim, hex_str, Colors.reset });
+                
+                // Parse and format the instruction
+                if (std.meta.intToEnum(Opcode, opcode_byte)) |opcode| {
+                    const opcode_info = opcode_data.OPCODE_INFO[opcode_byte];
+                    
+                    switch (opcode) {
+                        .PUSH1, .PUSH2, .PUSH3, .PUSH4, .PUSH5, .PUSH6, .PUSH7, .PUSH8,
+                        .PUSH9, .PUSH10, .PUSH11, .PUSH12, .PUSH13, .PUSH14, .PUSH15, .PUSH16,
+                        .PUSH17, .PUSH18, .PUSH19, .PUSH20, .PUSH21, .PUSH22, .PUSH23, .PUSH24,
+                        .PUSH25, .PUSH26, .PUSH27, .PUSH28, .PUSH29, .PUSH30, .PUSH31, .PUSH32 => {
+                            const push_size = @intFromEnum(opcode) - @intFromEnum(Opcode.PUSH1) + 1;
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.green, @tagName(opcode), Colors.reset });
+                            
+                            // Extract and format push value
+                            if (self.readPushValueN(pc, push_size)) |value| {
+                                try output.writer().print(" {s}0x{x}{s}", .{ Colors.bright_magenta, value, Colors.reset });
+                                
+                                // Show decimal if small value
+                                if (value <= 0xFFFF) {
+                                    try output.writer().print(" {s}({}){s}", .{ Colors.dim, value, Colors.reset });
+                                }
+                            }
+                        },
+                        .JUMPDEST => {
+                            try output.writer().print("{s}{s}{s:<12}{s}", .{ 
+                                Colors.bright_yellow, Colors.bold, @tagName(opcode), Colors.reset 
+                            });
+                        },
+                        .JUMP, .JUMPI => {
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.yellow, @tagName(opcode), Colors.reset });
+                        },
+                        .STOP, .RETURN, .REVERT => {
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.red, @tagName(opcode), Colors.reset });
+                        },
+                        .ADD, .SUB, .MUL, .DIV, .SDIV, .MOD, .SMOD, .ADDMOD, .MULMOD, .EXP => {
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.blue, @tagName(opcode), Colors.reset });
+                        },
+                        .LT, .GT, .SLT, .SGT, .EQ, .ISZERO => {
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.magenta, @tagName(opcode), Colors.reset });
+                        },
+                        .AND, .OR, .XOR, .NOT, .BYTE, .SHL, .SHR, .SAR => {
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.cyan, @tagName(opcode), Colors.reset });
+                        },
+                        else => {
+                            try output.writer().print("{s}{s:<12}{s}", .{ Colors.white, @tagName(opcode), Colors.reset });
+                        }
+                    }
+                    
+                    // Gas cost
+                    try output.writer().print(" {s}[gas: {}]{s}", .{ Colors.dim, opcode_info.gas_cost, Colors.reset });
+                    
+                    // Stack effects
+                    if (opcode_info.stack_inputs > 0 or opcode_info.stack_outputs > 0) {
+                        try output.writer().print(" {s}[stack: -{}, +{}]{s}", .{ 
+                            Colors.dim, opcode_info.stack_inputs, opcode_info.stack_outputs, Colors.reset 
+                        });
+                    }
+                    
+                } else |_| {
+                    // Invalid opcode
+                    try output.writer().print("{s}INVALID(0x{:02x}){s}", .{ Colors.bright_red, opcode_byte, Colors.reset });
+                }
+                
+                try output.writer().print("\n");
+                
+                pc += instruction_size;
+                line_num += 1;
+            }
+            
+            // Footer with summary
+            try output.writer().print("\n{s}=== Summary ==={s}\n", .{ Colors.bold, Colors.reset });
+            
+            // Count jump destinations
+            var jumpdest_count: u32 = 0;
+            for (0..self.runtime_code.len) |i| {
+                if (self.isValidJumpDest(@intCast(i))) {
+                    jumpdest_count += 1;
+                }
+            }
+            
+            try output.writer().print("{s}Jump destinations: {}{s}\n", .{ Colors.dim, jumpdest_count, Colors.reset });
+            try output.writer().print("{s}Total instructions: {}{s}\n", .{ Colors.dim, line_num - 1, Colors.reset });
+            
+            if (self.metadata) |meta| {
+                try output.writer().print("{s}Solidity metadata: {} bytes{s}\n", .{ Colors.dim, meta.metadata_length, Colors.reset });
+                try output.writer().print("{s}Compiler version: {}.{}.{}{s}\n", .{ 
+                    Colors.dim, meta.solc_version[0], meta.solc_version[1], meta.solc_version[2], Colors.reset 
+                });
+            }
+            
+            return output.toOwnedSlice();
+        }
+
         /// Detect fusion candidates (PUSH+ADD, PUSH+MUL patterns) for opcode optimization
         /// Marks patterns that can be fused into synthetic opcodes for better performance
         fn markFusionCandidates(self: Self) void {
@@ -1115,4 +1273,47 @@ pub const BytecodeValidationError = BytecodeDefault.ValidationError;
 
 // Export the factory function for creating Bytecode types
 pub const createBytecode = Bytecode;
+
+test "pretty_print: should format bytecode with colors and metadata" {
+    const allocator = std.testing.allocator;
+    
+    // Simple bytecode: PUSH1 0x42, PUSH1 0x24, ADD, JUMPDEST, STOP
+    const code = [_]u8{ 0x60, 0x42, 0x60, 0x24, 0x01, 0x5B, 0x00 };
+    var bytecode = try BytecodeDefault.init(allocator, &code);
+    defer bytecode.deinit();
+    
+    const formatted = try bytecode.pretty_print(allocator);
+    defer allocator.free(formatted);
+    
+    // Expected output should contain:
+    // - PC addresses (0x00, 0x02, etc.)
+    // - Opcode names (PUSH1, ADD, JUMPDEST, STOP)
+    // - Push values (0x42, 0x24)
+    // - Gas costs
+    // - Jump destinations highlighted
+    // - ANSI colors
+    
+    const expected_parts = [_][]const u8{
+        "0x00", // PC address
+        "PUSH1", // Opcode name
+        "0x42", // Push value
+        "0x02", // Next PC
+        "0x24", // Second push value
+        "ADD", // Add opcode
+        "JUMPDEST", // Jump destination
+        "STOP", // Stop opcode
+        "gas:", // Gas cost indicator
+        "\x1b[", // ANSI escape sequence for colors
+    };
+    
+    for (expected_parts) |part| {
+        std.testing.expect(std.mem.indexOf(u8, formatted, part) != null) catch |err| {
+            std.debug.print("Expected to find '{s}' in:\n{s}\n", .{ part, formatted });
+            return err;
+        };
+    }
+    
+    // Verify it's a valid string
+    try std.testing.expect(formatted.len > 0);
+}
 
