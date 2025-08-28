@@ -327,7 +327,9 @@ pub const DifferentialTestor = struct {
             },
         };
         
+        std.debug.print("DIFFERENTIAL: About to call Guillotine with gas={}\n", .{gas_limit});
         const result = self.guillotine_instance.call(params);
+        std.debug.print("DIFFERENTIAL: Guillotine call complete, success={}, gas_left={}\n", .{result.success, result.gas_left});
         
         // For now, create empty trace - we'll focus on the execution result
         const trace = ExecutionTrace.empty(self.allocator);
