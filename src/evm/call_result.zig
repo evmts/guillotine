@@ -12,6 +12,8 @@ pub const CallResult = struct {
     accessed_storage: []const StorageAccess = &.{},
     /// Execution trace (for debugging and differential testing)
     trace: ?ExecutionTrace = null,
+    /// Error information (for debugging and differential testing)
+    error_info: ?[]const u8 = null,
 
     /// Create a successful call result
     pub fn success_with_output(gas_left: u64, output: []const u8) CallResult {
@@ -49,6 +51,20 @@ pub const CallResult = struct {
             .selfdestructs = &.{},
             .accessed_addresses = &.{},
             .accessed_storage = &.{},
+        };
+    }
+    
+    /// Create a failed call result with error info
+    pub fn failure_with_error(gas_left: u64, error_info: []const u8) CallResult {
+        return CallResult{
+            .success = false,
+            .gas_left = gas_left,
+            .output = &[_]u8{},
+            .logs = &.{},
+            .selfdestructs = &.{},
+            .accessed_addresses = &.{},
+            .accessed_storage = &.{},
+            .error_info = error_info,
         };
     }
 
