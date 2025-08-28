@@ -2,7 +2,6 @@ const std = @import("std");
 const stack_frame_mod = @import("stack_frame.zig");
 const StackFrame = stack_frame_mod.StackFrame;
 const Opcode = @import("opcode.zig").Opcode;
-// const Host = @import("host.zig").Host;
 const primitives = @import("primitives");
 const Address = primitives.Address.Address;
 const block_info_mod = @import("block_info.zig");
@@ -13,6 +12,9 @@ const frame_config = @import("frame_config.zig");
 const FrameConfig = frame_config.FrameConfig;
 const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const GasConstants = primitives.GasConstants;
+const DefaultEvm = @import("evm.zig").Evm(.{});
+const log_mod = @import("logs.zig");
+const StorageKey = @import("database_interface.zig").StorageKey;
 
 fn to_u256(val: anytype) u256 {
     return switch (@TypeOf(val)) {
@@ -24,22 +26,83 @@ fn to_u256(val: anytype) u256 {
 
 const ZERO_ADDRESS = Address.fromBytes(&[_]u8{0} ** 20);
 
-// Helper function to create a test host for frame tests
-fn createTestHost() Host {
-    const holder = struct {
-        var instance: TestHost = .{};
-    };
-    return Host.init(&holder.instance);
-}
-
-// Minimal test host for frame tests
-const TestHost = struct {
+// Mock EVM for testing stack frame operations
+const MockEvm = struct {
     const Self = @This();
+    allocator: std.mem.Allocator,
+    
+    // Context data
+    contract_address: Address = ZERO_ADDRESS,
+    caller_address: Address = ZERO_ADDRESS,
+    origin_address: Address = ZERO_ADDRESS,
+    call_value: u256 = 0,
+    gas_price: u256 = 0,
+    chain_id: u64 = 1,
+    input_data: []const u8 = &.{},
+    return_data: []const u8 = &.{},
+    block_info: block_info_mod.BlockInfo = .{
+        .number = 0,
+        .timestamp = 0,
+        .gas_limit = 30_000_000,
+        .difficulty = 0,
+        .base_fee = 0,
+        .coinbase = ZERO_ADDRESS,
+        .prevrandao = [32]u8{0} ** 32,
+        .blob_base_fee = 0,
+    },
+    code_map: std.AutoHashMap(Address, []const u8),
+    
+    // Storage maps  
+    storage: std.AutoHashMap(StorageKey, u256),
+    transient_storage: std.AutoHashMap(StorageKey, u256),
+    accessed_slots: std.AutoHashMap(StorageKey, void),
+    
+    // Logs
+    logs: std.ArrayList(log_mod.Log),
+    
+    // Call result for testing
+    call_result: call_params_mod.CallResult = .{
+        .success = true,
+        .gas_remaining = 0,
+        .output = &.{},
+    },
+    
+    // Balance mapping for testing
+    balances: std.AutoHashMap(Address, u256),
+    
+    // Code size mapping
+    code_sizes: std.AutoHashMap(Address, usize),
+    
+    // Code hash mapping
+    code_hashes: std.AutoHashMap(Address, [32]u8),
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return .{
+            .allocator = allocator,
+            .code_map = std.AutoHashMap(Address, []const u8).init(allocator),
+            .storage = std.AutoHashMap(StorageKey, u256).init(allocator),
+            .transient_storage = std.AutoHashMap(StorageKey, u256).init(allocator),
+            .accessed_slots = std.AutoHashMap(StorageKey, void).init(allocator),
+            .logs = std.ArrayList(log_mod.Log).init(allocator),
+            .balances = std.AutoHashMap(Address, u256).init(allocator),
+            .code_sizes = std.AutoHashMap(Address, usize).init(allocator),
+            .code_hashes = std.AutoHashMap(Address, [32]u8).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.code_map.deinit();
+        self.storage.deinit();
+        self.transient_storage.deinit();
+        self.accessed_slots.deinit();
+        self.logs.deinit();
+        self.balances.deinit();
+        self.code_sizes.deinit();
+        self.code_hashes.deinit();
+    }
 
     pub fn get_balance(self: *Self, address: Address) u256 {
-        _ = self;
-        _ = address;
-        return 0;
+        return self.balances.get(address) orelse 0;
     }
 
     pub fn account_exists(self: *Self, address: Address) bool {
@@ -49,27 +112,25 @@ const TestHost = struct {
     }
 
     pub fn get_code(self: *Self, address: Address) []const u8 {
-        _ = self;
-        _ = address;
-        return &[_]u8{};
+        return self.code_map.get(address) orelse &[_]u8{};
     }
 
     pub fn get_block_info(self: *Self) block_info_mod.DefaultBlockInfo {
-        _ = self;
-        return block_info_mod.DefaultBlockInfo.init();
+        return self.block_info;
     }
 
     pub fn emit_log(self: *Self, contract_address: Address, topics: []const u256, data: []const u8) void {
-        _ = self;
-        _ = contract_address;
-        _ = topics;
-        _ = data;
+        const log = log_mod.Log{
+            .address = contract_address,
+            .topics = self.allocator.dupe(u256, topics) catch return,
+            .data = self.allocator.dupe(u8, data) catch return,
+        };
+        self.logs.append(log) catch return;
     }
 
-    pub fn inner_call(self: *Self, params: call_params_mod.CallParams) !call_result_mod.CallResult {
-        _ = self;
+    pub fn inner_call(self: *Self, params: call_params_mod.CallParams) !call_params_mod.CallResult {
         _ = params;
-        return error.NotImplemented;
+        return self.call_result;
     }
 
     pub fn register_created_contract(self: *Self, address: Address) !void {
@@ -94,17 +155,13 @@ const TestHost = struct {
     }
 
     pub fn get_storage(self: *Self, address: Address, slot: u256) u256 {
-        _ = self;
-        _ = address;
-        _ = slot;
-        return 0;
+        const key = StorageKey{ .address = address, .slot = slot };
+        return self.storage.get(key) orelse 0;
     }
 
     pub fn set_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
-        _ = self;
-        _ = address;
-        _ = slot;
-        _ = value;
+        const key = StorageKey{ .address = address, .slot = slot };
+        try self.storage.put(key, value);
     }
 
     pub fn record_storage_change(self: *Self, address: Address, slot: u256, original_value: u256) !void {
@@ -198,19 +255,91 @@ const TestHost = struct {
         return 0;
     }
 
+    // Context methods
     pub fn get_tx_origin(self: *Self) Address {
-        _ = self;
-        return ZERO_ADDRESS;
+        return self.origin_address;
     }
 
     pub fn get_caller(self: *Self) Address {
-        _ = self;
-        return ZERO_ADDRESS;
+        return self.caller_address;
     }
 
     pub fn get_call_value(self: *Self) u256 {
-        _ = self;
+        return self.call_value;
+    }
+    
+    pub fn get_contract_address(self: *Self) Address {
+        return self.contract_address;
+    }
+
+    pub fn get_gas_price(self: *Self) u256 {
+        return self.gas_price;
+    }
+
+    pub fn get_block_timestamp(self: *Self) u256 {
+        return self.block_info.timestamp;
+    }
+
+    pub fn get_block_number(self: *Self) u256 {
+        return self.block_info.number;
+    }
+
+    pub fn get_block_gas_limit(self: *Self) u256 {
+        return self.block_info.gas_limit;
+    }
+
+    pub fn get_block_coinbase(self: *Self) Address {
+        return self.block_info.coinbase;
+    }
+
+    pub fn get_block_difficulty(self: *Self) u256 {
+        return self.block_info.difficulty;
+    }
+
+    pub fn get_block_base_fee(self: *Self) u256 {
+        return self.block_info.base_fee;
+    }
+
+    pub fn get_chain_id(self: *Self) u64 {
+        return self.chain_id;
+    }
+
+    pub fn get_code_size(self: *Self, address: Address) usize {
+        return self.code_sizes.get(address) orelse 0;
+    }
+
+    pub fn get_code_hash(self: *Self, address: Address) [32]u8 {
+        return self.code_hashes.get(address) orelse [_]u8{0} ** 32;
+    }
+
+    pub fn get_block_hash(self: *Self, block_num: u256) ?u256 {
+        // For tests, just return a dummy hash based on block number
+        _ = block_num;
         return 0;
+    }
+    
+    pub fn get_return_data(self: *Self) []const u8 {
+        return self.return_data;
+    }
+
+    pub fn get_transient_storage(self: *Self, address: Address, slot: u256) u256 {
+        const key = StorageKey{ .address = address, .slot = slot };
+        return self.transient_storage.get(key) orelse 0;
+    }
+
+    pub fn set_transient_storage(self: *Self, address: Address, slot: u256, value: u256) !void {
+        const key = StorageKey{ .address = address, .slot = slot };
+        try self.transient_storage.put(key, value);
+    }
+
+    pub fn get_blob_base_fee(self: *Self) u128 {
+        return self.block_info.blob_base_fee;
+    }
+    
+    pub fn get_blob_hash(self: *Self, index: u64) ?u256 {
+        _ = index;
+        // For tests, return null for simplicity
+        return null;
     }
 };
 
@@ -229,14 +358,16 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             // Test with small bytecode (fits in u8)
             const SmallFrame = StackFrame(.{ .max_bytecode_size = 255 });
             const small_bytecode = [_]u8{ @intFromEnum(Opcode.PUSH1), 0x01, @intFromEnum(Opcode.PUSH1), 0x02, @intFromEnum(Opcode.STOP) };
-            const host = createTestHost();
-            var small_frame = try SmallFrame.init(allocator, &small_bytecode, 1000000, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var small_frame = try SmallFrame.init(allocator, &small_bytecode, 1000000, {}, evm_ptr);
             defer small_frame.deinit(allocator);
             try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), small_frame.bytecode.get(0).?);
             // Test with medium bytecode (fits in u16)
             const MediumFrame = StackFrame(.{ .max_bytecode_size = 65535 });
             const medium_bytecode = [_]u8{ @intFromEnum(Opcode.PUSH1), 0xFF, @intFromEnum(Opcode.STOP) };
-            var medium_frame = try MediumFrame.init(allocator, &medium_bytecode, 1000000, {}, host);
+            var medium_frame = try MediumFrame.init(allocator, &medium_bytecode, 1000000, {}, evm_ptr);
             defer medium_frame.deinit(allocator);
             try std.testing.expectEqual(@intFromEnum(Opcode.PUSH1), medium_frame.bytecode.get(0).?);
         }
@@ -244,8 +375,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Execute op_stop - should return Success.Stop
             try std.testing.expectEqual(F.Success.Stop, try frame.stop());
@@ -254,8 +387,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ @intFromEnum(Opcode.POP), @intFromEnum(Opcode.STOP) };
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Setup stack with some values
             frame.stack.push_unsafe(100);
@@ -276,8 +411,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ @intFromEnum(Opcode.PUSH0), @intFromEnum(Opcode.STOP) };
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH0 using push0_handler
             try frame.stack.push(0);
@@ -287,8 +424,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x60, 0x42, 0x60, 0xFF, 0x00 }; // PUSH1 0x42 PUSH1 0xFF STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH1 opcodes using push1_handler
             // For now we test the stack operations directly
@@ -301,8 +440,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x61, 0x12, 0x34, 0x00 }; // PUSH2 0x1234 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH2 opcodes using push2_handler
             // For now we test the stack operations directly
@@ -319,8 +460,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
                 bytecode[i] = 0xFF;
             }
             bytecode[33] = 0x00; // STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH32 using push32_handler
             try frame.stack.push(std.math.maxInt(u256));
@@ -330,8 +473,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x62, 0xAB, 0xCD, 0xEF, 0x00 }; // PUSH3 0xABCDEF STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH3 using push3_handler
             try frame.stack.push(0xABCDEF);
@@ -342,8 +487,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const F = StackFrame(.{});
             // PUSH7 with specific pattern
             const bytecode = [_]u8{ 0x66, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0x00 }; // PUSH7 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH7 using push7_handler
             try frame.stack.push(0x0123456789ABCD);
@@ -359,8 +506,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
                 bytecode[i] = @as(u8, @intCast(i));
             }
             bytecode[17] = 0x00; // STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Calculate expected value
             var expected: u256 = 0;
@@ -382,8 +531,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
                 bytecode[i] = @as(u8, @intCast(i % 256));
             }
             bytecode[32] = 0x00; // STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle PUSH31 using push31_handler
             // For this test, just verify the frame was created properly
@@ -394,8 +545,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x80, 0x00 }; // DUP1 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Setup stack with value
             frame.stack.push_unsafe(42);
@@ -413,8 +566,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x8f, 0x00 }; // DUP16 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Setup stack with values 1-16
             for (0..16) |i| {
@@ -438,8 +593,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x90, 0x00 }; // SWAP1 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Setup stack with values
             frame.stack.push_unsafe(100);
@@ -457,8 +614,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x9f, 0x00 }; // SWAP16 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Setup stack with values 1-17
             for (0..17) |i| {
@@ -482,8 +641,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{0x00}; // STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Push 16 distinct values
             for (0..16) |i| {
@@ -521,8 +682,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{0x00}; // STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Push 17 distinct values to test all SWAP operations
             for (0..17) |i| {
@@ -582,8 +745,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const small_bytecode = [_]u8{ 0x60, 0x01, 0x00 }; // PUSH1 1 STOP
             const stack_memory = try allocator.create([1024]u256);
             defer allocator.destroy(stack_memory);
-            const host = createTestHost();
-            var frame = try SmallFrame.init(allocator, &small_bytecode, 1000000, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try SmallFrame.init(allocator, &small_bytecode, 1000000, {}, evm_ptr);
             defer frame.deinit(allocator);
             // PC is now managed by plan, not frame directly
             try std.testing.expectEqual(&small_bytecode, frame.bytecode.ptr);
@@ -625,8 +790,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x16, 0x00 }; // AND STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 0xFF & 0x0F = 0x0F
             try frame.stack.push(0xFF);
@@ -660,8 +827,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x17, 0x00 }; // OR STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 0xF0 | 0x0F = 0xFF
             try frame.stack.push(0xF0);
@@ -695,8 +864,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x18, 0x00 }; // XOR STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 0xFF ^ 0xFF = 0
             try frame.stack.push(0xFF);
@@ -721,8 +892,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x19, 0x00 }; // NOT STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test ~0 = max value
             try frame.stack.push(0);
@@ -750,8 +923,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x1A, 0x00 }; // BYTE STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test extracting byte 31 (rightmost) from 0x...FF
             try frame.stack.push(0xFF);
@@ -783,8 +958,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x1B, 0x00 }; // SHL STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 1 << 4 = 16
             try frame.stack.push(1);
@@ -809,8 +986,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x1C, 0x00 }; // SHR STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 16 >> 4 = 1
             try frame.stack.push(16);
@@ -835,8 +1014,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x1D, 0x00 }; // SAR STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test positive number: 16 >> 4 = 1
             try frame.stack.push(16);
@@ -870,8 +1051,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x01, 0x00 }; // ADD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 10 + 20 = 30
             try frame.stack.push(10);
@@ -896,8 +1079,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x02, 0x00 }; // MUL STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 5 * 6 = 30
             try frame.stack.push(5);
@@ -923,8 +1108,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x03, 0x00 }; // SUB STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 30 - 10 = 20
             try frame.stack.push(30);
@@ -949,8 +1136,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x04, 0x00 }; // DIV STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 20 / 5 = 4
             try frame.stack.push(20);
@@ -975,8 +1164,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x05, 0x00 }; // SDIV STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 20 / 5 = 4 (positive / positive)
             try frame.stack.push(20);
@@ -1011,8 +1202,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x06, 0x00 }; // MOD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 17 % 5 = 2
             try frame.stack.push(17);
@@ -1037,8 +1230,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x07, 0x00 }; // SMOD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 17 % 5 = 2 (positive % positive)
             try frame.stack.push(17);
@@ -1072,8 +1267,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x08, 0x00 }; // ADDMOD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test (10 + 20) % 7 = 2
             try frame.stack.push(10);
@@ -1114,8 +1311,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x09, 0x00 }; // MULMOD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test (10 * 20) % 7 = 200 % 7 = 4
             try frame.stack.push(10);
@@ -1156,8 +1355,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x0A, 0x00 }; // EXP STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 2^10 = 1024
             try frame.stack.push(2);
@@ -1194,8 +1395,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x0B, 0x00 }; // SIGNEXTEND STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test extending positive 8-bit value (0x7F)
             try frame.stack.push(0x7F);
@@ -1234,8 +1437,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x5A, 0x00 }; // GAS STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test op_gas pushes gas_remaining to stack
             _ = try frame.gas(createTestHandlerChain(@TypeOf(frame)));
@@ -1261,8 +1466,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x10, 0x00 }; // LT STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 10 < 20 = 1
             try frame.stack.push(10);
@@ -1293,8 +1500,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x11, 0x00 }; // GT STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 20 > 10 = 1
             try frame.stack.push(20);
@@ -1325,8 +1534,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x12, 0x00 }; // SLT STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 10 < 20 = 1 (positive comparison)
             try frame.stack.push(10);
@@ -1360,8 +1571,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x13, 0x00 }; // SGT STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 20 > 10 = 1 (positive comparison)
             try frame.stack.push(20);
@@ -1395,8 +1608,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x14, 0x00 }; // EQ STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 10 == 10 = 1
             try frame.stack.push(10);
@@ -1427,8 +1642,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x15, 0x00 }; // ISZERO STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test iszero(0) = 1
             try frame.stack.push(0);
@@ -1456,8 +1673,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const F = StackFrame(.{});
             // JUMP STOP JUMPDEST STOP (positions: 0=JUMP, 1=STOP, 2=JUMPDEST, 3=STOP)
             const bytecode = [_]u8{ 0x56, 0x00, 0x5B, 0x00 };
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle JUMP opcodes using op_jump_handler
             // For now we test that the frame was properly initialized
@@ -1470,8 +1689,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const F = StackFrame(.{});
             // JUMPI STOP JUMPDEST STOP (positions: 0=JUMPI, 1=STOP, 2=JUMPDEST, 3=STOP)
             const bytecode = [_]u8{ 0x57, 0x00, 0x5B, 0x00 };
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle JUMPI opcodes using op_jumpi_handler
             // For now we test that the frame was properly initialized
@@ -1483,8 +1704,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x5B, 0x00 }; // JUMPDEST STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // JUMPDEST should do nothing
             // PC is now managed by plan, not frame directly
@@ -1494,8 +1717,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0xFE, 0x00 }; // INVALID STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // INVALID should always return error
             try std.testing.expectError(error.InvalidOpcode, frame.invalid());
@@ -1504,8 +1729,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x20, 0x00 }; // KECCAK256 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 0, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 0, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Test keccak256 of empty data
             try frame.keccak256_data(&[_]u8{});
@@ -1526,8 +1753,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             // Simple bytecode: PUSH1 0x05, PUSH1 0x03, ADD
             const bytecode = [_]u8{ 0x60, 0x05, 0x60, 0x03, 0x01 };
             const F = StackFrame(.{});
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Execute by pushing values and calling add
             try frame.stack.push(5);
@@ -1567,8 +1796,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const F = StackFrame(config);
             // Simple bytecode: PUSH1 0x05
             const bytecode = [_]u8{ 0x60, 0x05 };
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000, {}, evm_ptr);
             defer frame.deinit(allocator);
             // Check that our test tracer was initialized
             try std.testing.expectEqual(@as(usize, 0), frame.tracer.call_count);
@@ -1581,8 +1812,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x59, 0x00 }; // MSIZE STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Initially memory size should be 0
             _ = try frame.msize(createTestHandlerChain(@TypeOf(frame)));
@@ -1609,8 +1842,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x51, 0x00 }; // MLOAD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Store a value first
             const test_value: u256 = 0x123456789ABCDEF0;
@@ -1637,8 +1872,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x52, 0x00 }; // MSTORE STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Store multiple values at different offsets
             const value1: u256 = 0xDEADBEEF;
@@ -1663,8 +1900,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x53, 0x00 }; // MSTORE8 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Store a single byte
             try frame.stack.push(0xFF); // value (only low byte will be stored)
@@ -1717,8 +1956,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             });
             // Verify both frame types can be instantiated
             const bytecode = [_]u8{ 0x60, 0x05, 0x00 }; // PUSH1 5, STOP
-            const host = createTestHost();
-            var frame_noop = try FrameNoOp.init(allocator, &bytecode, 1000, {}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame_noop = try FrameNoOp.init(allocator, &bytecode, 1000, {}, evm_ptr);
             defer frame_noop.deinit(allocator);
             var frame_traced = try FrameWithTestTracer.init(allocator, &bytecode, 1000, {}, host);
             defer frame_traced.deinit(allocator);
@@ -1739,8 +1980,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x53, 0x00 }; // MSTORE8 STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test memory expansion with MSTORE8 at various offsets
             // Memory should expand in 32-byte chunks (EVM word alignment)
@@ -1784,8 +2027,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x5e, 0x00 }; // MCOPY STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // First, set up some data in memory
             const test_data: u256 = 0xDEADBEEFCAFEBABE;
@@ -1865,8 +2110,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
                 0x60, 0x02, // PUSH1 2 (offset 14-15)
                 0x00, // STOP (offset 16)
             };
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // The interpreter would handle JUMP/JUMPI opcodes with proper JUMPDEST validation
             // For now we test that the frame was properly initialized and bytecode is correct
@@ -1961,8 +2208,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             // Create a frame without database support (default)
             const F = StackFrame(.{});
             const bytecode = [_]u8{ 0x54, 0x00 }; // SLOAD STOP
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // All storage operations should return InvalidOpcode when no database
             try frame.stack.push(0);
@@ -2121,8 +2370,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Store some data in memory
             const test_data = "Hello, Ethereum!";
@@ -2148,8 +2399,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Store some data in memory
             const test_data = [_]u8{ 0x12, 0x34, 0x56, 0x78 };
@@ -2179,8 +2432,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Topics for LOG4
             const topic1: u256 = 0x1111111111111111;
@@ -2212,8 +2467,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Set static context
             frame.is_static = true;
@@ -2228,8 +2485,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Push data for LOG0 with huge offset
             try frame.stack.push(std.math.maxInt(u256)); // offset too large
@@ -2268,8 +2527,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test ADD at maximum values - should wrap to 0
             try frame.stack.push(std.math.maxInt(u256));
@@ -2301,8 +2562,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test division by zero returns zero
             try frame.stack.push(100);
@@ -2329,8 +2592,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test modulo by zero returns zero
             try frame.stack.push(57);
@@ -2358,8 +2623,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test ADDMOD with zero modulus - should return 0
             try frame.stack.push(10);
@@ -2388,8 +2655,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test 0^0 = 1 (mathematical convention in EVM)
             try frame.stack.push(0);
@@ -2420,8 +2689,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test SHL with shift amount >= 256 - should result in 0
             try frame.stack.push(0xFF);
@@ -2453,8 +2724,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test SIGNEXTEND with index >= 32 - should leave value unchanged
             const test_val: u256 = 0x123456789ABCDEF0;
@@ -2480,8 +2753,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test MLOAD with very large offset - should fail with OutOfBounds
             try frame.stack.push(std.math.maxInt(u256));
@@ -2508,8 +2783,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Fill stack to exactly capacity (1024)
             var i: usize = 0;
@@ -2531,8 +2808,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Push 16 values for DUP16 test
             var i: usize = 1;
@@ -2557,8 +2836,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Push 17 values for SWAP16 test (need top + 16 more)
             var i: usize = 1;
@@ -2606,8 +2887,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             const min_i256 = @as(u256, 1) << 255; // Most negative number in two's complement
             const max_i256 = (@as(u256, 1) << 255) - 1; // Most positive number in two's complement
@@ -2635,8 +2918,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             const test_value: u256 = 0x123456789ABCDEF0;
             // Test BYTE with index >= 32 - should return 0
@@ -2662,8 +2947,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test KECCAK256 with zero-length input
             try frame.stack.push(0); // offset
@@ -2682,8 +2969,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // TODO: Re-enable these tests once we have a proper mock host that can simulate static context
             // Test LOG operations in static context should all fail
@@ -2743,8 +3032,10 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const allocator = std.testing.allocator;
             const F = StackFrame(.{});
             const bytecode = [_]u8{@intFromEnum(Opcode.STOP)};
-            const host = createTestHost();
-            var frame = try F.init(allocator, &bytecode, 1000000, void{}, host);
+            var evm = MockEvm.init(allocator);
+            defer evm.deinit();
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &bytecode, 1000000, void{}, evm_ptr);
             defer frame.deinit(allocator);
             // Test that failed operations don't corrupt stack state
             const initial_stack_len = frame.stack.size();
@@ -3032,8 +3323,12 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const bytecode = try loadFixtureBytecode(allocator, "src/evm/fixtures/opcodes-arithmetic/bytecode.txt");
             defer allocator.free(bytecode);
 
-            const host = createTestHost();
-            var frame = try F.init(allocator, bytecode, 100000, {}, host);
+            var evm = MockEvm.init(allocator);
+
+            defer evm.deinit();
+
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, bytecode, 100000, {}, evm_ptr);
             defer frame.deinit(allocator);
 
             // This should contain arithmetic operations
@@ -3047,8 +3342,12 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const bytecode = try loadFixtureBytecode(allocator, "src/evm/fixtures/opcodes-jump-basic/bytecode.txt");
             defer allocator.free(bytecode);
 
-            const host = createTestHost();
-            var frame = try F.init(allocator, bytecode, 100000, {}, host);
+            var evm = MockEvm.init(allocator);
+
+            defer evm.deinit();
+
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, bytecode, 100000, {}, evm_ptr);
             defer frame.deinit(allocator);
 
             // Should contain jumps
@@ -3076,8 +3375,12 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
                 @intFromEnum(Opcode.STOP),
             };
 
-            const host = createTestHost();
-            var frame = try F.init(allocator, &test_bytecode, 100000, {}, host);
+            var evm = MockEvm.init(allocator);
+
+            defer evm.deinit();
+
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, &test_bytecode, 100000, {}, evm_ptr);
             defer frame.deinit(allocator);
 
             // Generate schedule
@@ -3098,8 +3401,12 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const bytecode = try loadFixtureBytecode(allocator, "src/evm/fixtures/ten-thousand-hashes/bytecode.txt");
             defer allocator.free(bytecode);
 
-            const host = createTestHost();
-            var frame = try F.init(allocator, bytecode, 100000000, {}, host);
+            var evm = MockEvm.init(allocator);
+
+            defer evm.deinit();
+
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, bytecode, 100000000, {}, evm_ptr);
             defer frame.deinit(allocator);
 
             // Should be a large contract with many operations
@@ -3113,8 +3420,12 @@ fn createTestHandlerChain(comptime FrameType: type) *const fn (*FrameType, *cons
             const bytecode = try loadFixtureBytecode(allocator, "src/evm/fixtures/erc20-transfer/bytecode.txt");
             defer allocator.free(bytecode);
 
-            const host = createTestHost();
-            var frame = try F.init(allocator, bytecode, 1000000, {}, host);
+            var evm = MockEvm.init(allocator);
+
+            defer evm.deinit();
+
+            const evm_ptr = @as(*anyopaque, @ptrCast(&evm));
+            var frame = try F.init(allocator, bytecode, 1000000, {}, evm_ptr);
             defer frame.deinit(allocator);
 
             // Create iterator and check for fusion opportunities
