@@ -18,8 +18,8 @@ pub const EvmConfig = struct {
     /// This prevents excessive memory usage in single operations
     max_input_size: u18 = 131072, // 128 KB
 
-    /// Frame configuration parameters (enable database by default)
-    frame_config: FrameConfig = .{ .has_database = true },
+    /// Frame configuration parameters (database now always enabled)
+    frame_config: FrameConfig = .{ .DatabaseType = @import("database.zig").Database },
 
     /// Enable precompiled contracts support (default: true)
     /// When disabled, precompile calls will fail with an error

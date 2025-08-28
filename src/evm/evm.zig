@@ -17,7 +17,7 @@
 const std = @import("std");
 const primitives = @import("primitives");
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo; // Default for backward compatibility
-const DatabaseInterface = @import("database_interface.zig").DatabaseInterface;
+const Database = @import("database.zig").Database;
 const Account = @import("database_interface_account.zig").Account;
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
 const CreatedContracts = @import("created_contracts.zig").CreatedContracts;
@@ -170,7 +170,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Current snapshot ID for the active call frame
         current_snapshot_id: Journal.SnapshotIdType,
         /// Database interface for state storage
-        database: DatabaseInterface,
+        database: Database,
         /// Journal for tracking state changes and snapshots
         journal: Journal,
         /// Allocator for dynamic memory
@@ -221,7 +221,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Sets up the execution environment with state storage, block context,
         /// and transaction parameters. The planner cache is initialized with
         /// a default size for bytecode optimization.
-        pub fn init(allocator: std.mem.Allocator, database: DatabaseInterface, block_info: BlockInfo, context: TransactionContext, gas_price: u256, origin: primitives.Address, hardfork_config: Hardfork) !Self {
+        pub fn init(allocator: std.mem.Allocator, database: Database, block_info: BlockInfo, context: TransactionContext, gas_price: u256, origin: primitives.Address, hardfork_config: Hardfork) !Self {
             var access_list = AccessList.init(allocator);
             errdefer access_list.deinit();
             return Self{
@@ -364,17 +364,17 @@ pub fn Evm(comptime config: EvmConfig) type {
                 log.err("EXECUTE_CALL ERROR: Failed to get code: {}", .{err});
                 log.err("EXECUTE_CALL ERROR: Address bytes: {x}", .{params.to.bytes});
                 const error_str = switch (err) {
-                    DatabaseInterface.Error.CodeNotFound => "CodeNotFound",
-                    DatabaseInterface.Error.AccountNotFound => "AccountNotFound",
-                    DatabaseInterface.Error.StorageNotFound => "StorageNotFound",
-                    DatabaseInterface.Error.InvalidAddress => "InvalidAddress",
-                    DatabaseInterface.Error.DatabaseCorrupted => "DatabaseCorrupted",
-                    DatabaseInterface.Error.NetworkError => "NetworkError",
-                    DatabaseInterface.Error.PermissionDenied => "PermissionDenied",
-                    DatabaseInterface.Error.OutOfMemory => "OutOfMemory",
-                    DatabaseInterface.Error.InvalidSnapshot => "InvalidSnapshot",
-                    DatabaseInterface.Error.NoBatchInProgress => "NoBatchInProgress",
-                    DatabaseInterface.Error.SnapshotNotFound => "SnapshotNotFound",
+                    Database.Error.CodeNotFound => "CodeNotFound",
+                    Database.Error.AccountNotFound => "AccountNotFound",
+                    Database.Error.StorageNotFound => "StorageNotFound",
+                    Database.Error.InvalidAddress => "InvalidAddress",
+                    Database.Error.DatabaseCorrupted => "DatabaseCorrupted",
+                    Database.Error.NetworkError => "NetworkError",
+                    Database.Error.PermissionDenied => "PermissionDenied",
+                    Database.Error.OutOfMemory => "OutOfMemory",
+                    Database.Error.InvalidSnapshot => "InvalidSnapshot",
+                    Database.Error.NoBatchInProgress => "NoBatchInProgress",
+                    Database.Error.SnapshotNotFound => "SnapshotNotFound",
                 };
                 return CallResult.failure_with_error(0, error_str);
             };

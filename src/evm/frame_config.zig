@@ -28,8 +28,8 @@ pub const FrameConfig = struct {
     /// Memory configuration
     memory_initial_capacity: usize = 4096,
     memory_limit: u64 = 0xFFFFFF,
-    /// Whether the frame has access to a database interface for storage operations
-    has_database: bool = false,
+    /// Database implementation type for storage operations (always required).
+    DatabaseType: type,
     /// Vector length for SIMD operations. Auto-detects CPU capabilities for optimal performance.
     /// Set to 0 to disable SIMD and use scalar implementations. When > 0, enables vectorized
     /// operations for bulk stack operations (DUP/SWAP) and other suitable operations.
