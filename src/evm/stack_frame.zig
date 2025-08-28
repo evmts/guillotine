@@ -30,7 +30,7 @@ const from_u256 = primitives.Address.from_u256;
 const keccak_asm = @import("keccak_asm.zig");
 const stack_frame_handlers = @import("stack_frame_handlers.zig");
 const SelfDestruct = @import("self_destruct.zig").SelfDestruct;
-const Host = @import("host.zig").Host;
+const DefaultEvm = @import("evm.zig").DefaultEvm;
 const CallParams = @import("call_params.zig").CallParams;
 const CallResult = @import("call_result.zig").CallResult;
 const logs = @import("logs.zig");
@@ -116,20 +116,18 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   ├── stack: Stack                    // 24 bytes (slice: ptr + len = 16 bytes, stack_ptr = 8 bytes)
         //   ├── gas_remaining: GasType          // 4-8 bytes (i32/i64 based on config)
         //   ├── memory: Memory                  // 16 bytes
-        //   ├── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable)
-        //   └── contract_address: Address       // 20 bytes (fits if no database)
+        //   └── database: DatabaseInterface     // 0 or 16 bytes (ptr + vtable if enabled)
         // 
         //   Secondary Components (Cacheline 2)
         // 
         //   Offset 64-127: Execution context
-        //   ├── contract_address: Address       // 20 bytes (if database enabled)
-        //   ├── host: Host                      // 16 bytes (ptr + vtable)
+        //   ├── contract_address: Address       // 20 bytes
+        //   ├── evm_ptr: *anyopaque             // 8 bytes
         //   └── logs: ArrayList(Log)            // 24 bytes
         // 
         //   Tertiary Components (Cacheline 3+)
         // 
         //   Offset 128+: Cold data
-        //   ├── logs: ArrayList(Log)            // 24 bytes
         //   ├── output_data: ArrayList(u8)      // 24 bytes
         //   ├── self_destruct: ?*SelfDestruct   // 8 bytes
         //   └── allocator: Allocator            // 16 bytes
@@ -173,7 +171,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   Memory Layout Visualization
         // 
         // Cache Line 1 (0-63):    [Stack(24)][Gas(4-8)][Memory(16)][Database(0-16)][Address?(20)]
-        // Cache Line 2 (64-127):  [Address?(20)][Host(16)][Logs(24)][Output(start)]
+        // Cache Line 2 (64-127):  [Address?(20)][evm_ptr(8)][Logs(24)][Output(start)]
         // Cache Line 3 (128-191): [Output(cont,24)][SelfDest*(8)][Alloc(16)]
         // Note: Tracer is not stored in the struct - it's a compile-time parameter
         stack: Stack,
@@ -181,7 +179,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         memory: Memory,
         database: if (config.has_database) ?DatabaseInterface else void,
         contract_address: Address = Address.ZERO_ADDRESS,
-        host: Host,
+        evm_ptr: *anyopaque,
         logs: std.ArrayList(Log),
         output_data: std.ArrayList(u8),
         self_destruct: ?*SelfDestruct = null,
@@ -194,7 +192,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         /// 
         /// EIP-214: For static calls, self_destruct should be null to prevent 
         /// SELFDESTRUCT operations which modify blockchain state.
-        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: if (config.has_database) ?DatabaseInterface else void, host: Host, self_destruct: ?*SelfDestruct) Error!Self {
+        pub fn init(allocator: std.mem.Allocator, gas_remaining: GasType, database: if (config.has_database) ?DatabaseInterface else void, evm_ptr: *anyopaque, self_destruct: ?*SelfDestruct) Error!Self {
 
             var stack = Stack.init(allocator) catch {
                 @branchHint(.cold);
@@ -217,7 +215,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .database = database,
                 .logs = frame_logs,
                 .output_data = output_data,
-                .host = host,
+                .evm_ptr = evm_ptr,
                 .self_destruct = self_destruct,
                 .allocator = allocator,
             };
@@ -413,7 +411,7 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 .self_destruct = self.self_destruct,
                 .logs = new_logs,
                 .output_data = new_output_data,
-                .host = self.host,
+                .evm_ptr = self.evm_ptr,
                 .allocator = allocator,
             };
         }
@@ -428,6 +426,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             const amt = std.math.cast(GasType, amount) orelse return Error.OutOfGas;
             self.gas_remaining -= amt;
             if (self.gas_remaining < 0) return Error.OutOfGas;
+        }
+
+        /// Get the EVM instance from the opaque pointer
+        pub inline fn getEvm(self: *const Self) *DefaultEvm {
+            return @as(*DefaultEvm, @ptrCast(@alignCast(self.evm_ptr)));
         }
     };
 }

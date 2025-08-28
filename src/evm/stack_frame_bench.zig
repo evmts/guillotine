@@ -4,7 +4,6 @@ const zbench = @import("zbench");
 const StackFrame = @import("stack_frame.zig").StackFrame;
 const FrameConfig = @import("frame_config.zig").FrameConfig;
 const Opcode = @import("opcode.zig").Opcode;
-const Host = @import("host.zig").Host;
 const primitives = @import("primitives");
 const Address = primitives.Address;
 const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
