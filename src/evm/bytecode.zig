@@ -92,10 +92,17 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 if (iterator.pc >= iterator.bytecode.len()) return null;
 
                 const opcode = iterator.bytecode.get_unsafe(iterator.pc);
+                // Check if packed_bitmap has enough elements
+                if (iterator.pc >= iterator.bytecode.packed_bitmap.len) {
+                    // Log error and return null
+                    const log = @import("log.zig");
+                    log.err("Iterator PC {} exceeds packed_bitmap len {}", .{iterator.pc, iterator.bytecode.packed_bitmap.len});
+                    return null;
+                }
                 const packed_bits = iterator.bytecode.packed_bitmap[iterator.pc];
 
-                // Handle fusion opcodes first
-                if (packed_bits.is_fusion_candidate) {
+                // Handle fusion opcodes first (only if fusions are enabled)
+                if (fusions_enabled and packed_bits.is_fusion_candidate) {
                     const fusion_data = iterator.bytecode.getFusionData(iterator.pc);
                     // Advance PC properly for fusion opcodes (PUSH + data + op)
                     switch (fusion_data) {
@@ -274,8 +281,7 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             if (pc >= self.len()) return OpcodeData{ .regular = .{ .opcode = 0x00 } }; // STOP fallback
 
             const first_op = self.get_unsafe(pc);
-            const second_op = if (pc + 1 < self.len()) self.get_unsafe(pc + 1) else 0x00;
-
+            
             // Read PUSH value first (since all fusions start with PUSH)
             if (first_op < 0x60 or first_op > 0x7F) {
                 // Not a PUSH opcode, shouldn't be marked as fusion candidate
@@ -288,6 +294,10 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             for (pc + 1..end_pc) |i| {
                 value = (value << 8) | self.get_unsafe(@intCast(i));
             }
+            
+            // The second opcode comes AFTER the push data
+            const second_op_pc = pc + 1 + push_size;
+            const second_op = if (second_op_pc < self.len()) self.get_unsafe(second_op_pc) else 0x00;
 
             // Return appropriate fusion type based on second opcode
             switch (second_op) {
@@ -1254,7 +1264,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                             else => false,
                         };
 
-                        if (is_fusable) {
+                        // Only mark as fusion candidate if fusions are enabled
+                        if (is_fusable and fusions_enabled) {
                             // Mark the PUSH as a fusion candidate
                             self.packed_bitmap[i].is_fusion_candidate = true;
                         }

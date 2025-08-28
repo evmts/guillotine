@@ -16,6 +16,7 @@ pub const FrameConfig = @import("frame_config.zig").FrameConfig;
 pub const Frame = @import("frame.zig").Frame;
 pub const StackFrame = @import("stack_frame.zig").StackFrame;
 pub const StackFrameDispatch = @import("dispatch.zig").Dispatch;
+pub const frame_mod = @import("stack_frame.zig");
 
 // Stack and memory modules
 pub const StackConfig = @import("stack_config.zig").StackConfig;
@@ -40,6 +41,7 @@ pub const LoggingTracer = @import("tracer.zig").LoggingTracer;
 pub const FileTracer = @import("tracer.zig").FileTracer;
 pub const NoOpTracer = @import("tracer.zig").NoOpTracer;
 pub const DebuggingTracer = @import("tracer.zig").DebuggingTracer;
+pub const tracer_mod = @import("tracer.zig");
 
 // Bytecode modules
 pub const BytecodeConfig = @import("bytecode_config.zig").BytecodeConfig;
@@ -51,6 +53,7 @@ pub const Opcode = @import("opcode.zig").Opcode;
 pub const OpcodeData = @import("opcode_data.zig");
 pub const OpcodeSynthetic = @import("opcode_synthetic.zig");
 pub const opcode_synthetic = @import("opcode_synthetic.zig");
+pub const opcode_data = @import("opcode_data.zig");
 
 // Precompiles module
 pub const precompiles = @import("precompiles.zig");

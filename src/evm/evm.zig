@@ -341,12 +341,17 @@ pub fn Evm(comptime config: EvmConfig) type {
             }
 
             // Get contract code
-            const code = self.database.get_code_by_address(params.to.bytes) catch &.{};
+            const code = self.database.get_code_by_address(params.to.bytes) catch |err| {
+                log.debug("Error getting code for {any}: {}", .{params.to, err});
+                return CallResult.failure(0);
+            };
+            log.debug("Call to {any}: code_len={}", .{params.to, code.len});
             if (code.len == 0) {
                 log.debug("Call to empty account: {any}", .{params.to});
                 return CallResult.success_empty(params.gas);
             }
             // Execute frame
+            log.debug("About to execute_frame with code_len={}, gas={}", .{code.len, params.gas});
             const result = self.execute_frame(
                 code,
                 params.input,
@@ -356,7 +361,8 @@ pub fn Evm(comptime config: EvmConfig) type {
                 params.value,
                 false, // is_static
                 snapshot_id,
-            ) catch {
+            ) catch |err| {
+                log.err("execute_frame failed: {}", .{err});
                 self.journal.revert_to_snapshot(snapshot_id);
                 return CallResult.failure(0);
             };
@@ -782,7 +788,11 @@ pub fn Evm(comptime config: EvmConfig) type {
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
-                const outcome = frame.interpret() catch return CallResult.failure(0);
+                log.debug("Executing frame: code_len={}, gas={}, address={any}, is_static={}", .{code.len, gas_cast, address, is_static});
+                const outcome = frame.interpret() catch |err| {
+                    log.debug("Frame.interpret() failed (static): {}", .{err});
+                    return CallResult.failure(0);
+                };
 
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
@@ -805,7 +815,19 @@ pub fn Evm(comptime config: EvmConfig) type {
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
-                const outcome = frame.interpret() catch return CallResult.failure(0);
+                log.debug("Executing frame (non-static): code_len={}, gas={}, address={any}", .{code.len, gas_cast, address});
+                
+                // Wrap in a more detailed error handler
+                const outcome = frame.interpret() catch |err| {
+                    log.err("Frame.interpret() failed (non-static): {}", .{err});
+                    log.err("  Code length: {}", .{code.len});
+                    log.err("  Gas: {}", .{gas_cast});
+                    log.err("  Address: {any}", .{address});
+                    if (code.len > 0) {
+                        log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
+                    }
+                    return CallResult.failure(0);
+                };
 
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));

@@ -407,7 +407,7 @@ pub const JSONRPCTracer = struct {
         stack: []const u256,
         memory: ?[]const u8 = null,
         memSize: u32 = 0,
-        storage: ?std.HashMap(u256, u256) = null,
+        storage: ?std.hash_map.HashMap(u256, u256, std.hash_map.AutoContext(u256), 80) = null,
         
         pub fn deinit(self: *JSONRPCStep, allocator: std.mem.Allocator) void {
             allocator.free(self.op);
@@ -424,7 +424,7 @@ pub const JSONRPCTracer = struct {
     pub fn init(allocator: std.mem.Allocator) Self {
         return .{
             .allocator = allocator,
-            .trace_steps = std.ArrayList(JSONRPCStep).init(allocator),
+            .trace_steps = std.ArrayList(JSONRPCStep){},
         };
     }
     
@@ -432,7 +432,7 @@ pub const JSONRPCTracer = struct {
         for (self.trace_steps.items) |*step| {
             step.deinit(self.allocator);
         }
-        self.trace_steps.deinit();
+        self.trace_steps.deinit(self.allocator);
     }
     
     /// Called before frame execution begins
