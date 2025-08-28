@@ -63,6 +63,8 @@ export async function getEvmState(): Promise<EvmState> {
 			bytecode: parsed.bytecode ?? '0x',
 			logs: parsed.logs ?? [],
 			returnData: parsed.returnData ?? '0x',
+			errorOccurred: parsed.errorOccurred ?? false,
+			errorName: parsed.errorName ?? '',
 			completed: parsed.completed ?? false,
 			currentInstructionIndex: parsed.currentInstructionIndex ?? 0,
 			preanalyzedBlocks: parsed.preanalyzedBlocks ?? [],

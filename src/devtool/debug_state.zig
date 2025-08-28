@@ -29,6 +29,9 @@ pub const DebuggerStateJson = struct {
     bytecode: []const u8,
     logs: [][]const u8,
     returnData: []const u8,
+    // Execution error surfacing for UI
+    errorOccurred: bool = false,
+    errorName: []const u8 = "",
     completed: bool,
     currentInstructionIndex: usize,
     pc: u32,
@@ -293,6 +296,7 @@ pub fn free_debugger_state_json(allocator: std.mem.Allocator, state: DebuggerSta
     for (state.logs) |s| allocator.free(s);
     allocator.free(state.logs);
     allocator.free(state.returnData);
+    allocator.free(state.errorName);
     for (state.steps) |st| free_step_json(allocator, st);
     allocator.free(state.steps);
     free_state_json(allocator, state.state);

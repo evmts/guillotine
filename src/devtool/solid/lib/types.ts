@@ -36,6 +36,8 @@ export interface EvmState {
 	bytecode: string
 	logs: string[]
 	returnData: string
+	errorOccurred?: boolean
+	errorName?: string
 	completed: boolean
 	currentInstructionIndex: number
 	pc: number
