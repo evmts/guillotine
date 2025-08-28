@@ -48,6 +48,11 @@ fn alloc_error_json(allocator: std.mem.Allocator, msg: []const u8) ![]u8 {
     return try std.fmt.allocPrint(allocator, "{{\"error\":\"{s}\"}}", .{msg});
 }
 
+fn alloc_error_json_with_kind(allocator: std.mem.Allocator, kind: []const u8, msg: []const u8) ![]u8 {
+    // JSON with error kind and message
+    return try std.fmt.allocPrint(allocator, "{{\"error\":{{\"kind\":\"{s}\",\"message\":\"{s}\"}}}}", .{ kind, msg });
+}
+
 fn alloc_breakpoints_array_json(allocator: std.mem.Allocator, bps: []const u32) ![]u8 {
     var s = try allocator.dupe(u8, "[");
     errdefer allocator.free(s);
@@ -79,38 +84,22 @@ fn loadBytecodeHandler(e: *webui.Event) void {
                 error.EmptyBytecode => "Bytecode cannot be empty",
                 error.InvalidHexLength => "Hex string must have even number of characters",
                 error.InvalidHexCharacter => "Bytecode contains invalid hex characters",
-                error.OutOfMemory => "Out of memory",
+                error.InvalidJumpDestination => "Invalid jump destination detected in bytecode",
+                error.OutOfMemory => "Out of memory while processing bytecode",
                 else => "Unknown error loading bytecode",
             };
-            const json = alloc_error_json(app.allocator, msg) catch {
-                e.return_string("{\"error\":\"Failed to load bytecode\"}");
-                return;
-            };
-            return_json_owned(e, app.allocator, json);
-            return;
-        };
-    }
-
-    e.return_string("{\"success\": true}");
-}
-
-fn resetEvmHandler(e: *webui.Event) void {
-    const app_ptr = e.get_ptr();
-    const app: *App = @ptrCast(@alignCast(app_ptr));
-
-    if (app.devtool_evm) |*evm| {
-        evm.resetExecution() catch {
-            const json = alloc_error_json(app.allocator, "Failed to reset EVM") catch {
-                e.return_string("{\"error\":\"Failed to reset EVM\"}");
+            const json = alloc_error_json_with_kind(app.allocator, "BytecodeError", msg) catch {
+                e.return_string("{\"error\":{\"kind\":\"BytecodeError\",\"message\":\"Failed to load bytecode\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
             return;
         };
 
+        // Return the serialized EVM state after successful load
         const state_json = evm.serializeEvmState() catch {
-            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
-                e.return_string("{\"error\":\"Failed to serialize state\"}");
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", "Failed to serialize EVM state") catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to serialize state\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -118,8 +107,45 @@ fn resetEvmHandler(e: *webui.Event) void {
         };
         return_json_from_evm(e, app.allocator, evm.allocator, state_json);
     } else {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
+            return;
+        };
+        return_json_owned(e, app.allocator, json);
+    }
+}
+
+fn resetEvmHandler(e: *webui.Event) void {
+    const app_ptr = e.get_ptr();
+    const app: *App = @ptrCast(@alignCast(app_ptr));
+
+    if (app.devtool_evm) |*evm| {
+        evm.resetExecution() catch |err| {
+            const msg = switch (err) {
+                error.InvalidJumpDestination => "Invalid jump destination detected in bytecode",
+                error.OutOfMemory => "Out of memory during reset",
+                else => "Failed to reset EVM execution",
+            };
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", msg) catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to reset EVM\"}}");
+                return;
+            };
+            return_json_owned(e, app.allocator, json);
+            return;
+        };
+
+        const state_json = evm.serializeEvmState() catch {
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", "Failed to serialize EVM state") catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to serialize state\"}}");
+                return;
+            };
+            return_json_owned(e, app.allocator, json);
+            return;
+        };
+        return_json_from_evm(e, app.allocator, evm.allocator, state_json);
+    } else {
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -131,9 +157,14 @@ fn stepEvmHandler(e: *webui.Event) void {
     const app: *App = @ptrCast(@alignCast(app_ptr));
 
     if (app.devtool_evm) |*evm| {
-        const step_result = evm.singleStep() catch {
-            const json = alloc_error_json(app.allocator, "Failed to step EVM") catch {
-                e.return_string("{\"error\":\"Failed to step EVM\"}");
+        const step_result = evm.singleStep() catch |err| {
+            const msg = switch (err) {
+                error.NotInitialized => "EVM not properly initialized",
+                error.OutOfMemory => "Out of memory during step execution",
+                else => "Failed to step EVM execution",
+            };
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", msg) catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to step EVM\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -142,8 +173,8 @@ fn stepEvmHandler(e: *webui.Event) void {
         _ = step_result;
 
         const state_json = evm.serializeEvmState() catch {
-            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
-                e.return_string("{\"error\":\"Failed to serialize state\"}");
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", "Failed to serialize EVM state") catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to serialize state\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -151,8 +182,8 @@ fn stepEvmHandler(e: *webui.Event) void {
         };
         return_json_from_evm(e, app.allocator, evm.allocator, state_json);
     } else {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -164,9 +195,14 @@ fn runEvmHandler(e: *webui.Event) void {
     const app: *App = @ptrCast(@alignCast(app_ptr));
 
     if (app.devtool_evm) |*evm| {
-        const run_result = evm.runUntilHalt() catch {
-            const json = alloc_error_json(app.allocator, "Failed to run EVM") catch {
-                e.return_string("{\"error\":\"Failed to run EVM\"}");
+        const run_result = evm.runUntilHalt() catch |err| {
+            const msg = switch (err) {
+                error.NotInitialized => "EVM not properly initialized",
+                error.OutOfMemory => "Out of memory during execution",
+                else => "Failed to run EVM execution",
+            };
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", msg) catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to run EVM\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -175,8 +211,8 @@ fn runEvmHandler(e: *webui.Event) void {
         _ = run_result;
 
         const state_json = evm.serializeEvmState() catch {
-            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
-                e.return_string("{\"error\":\"Failed to serialize state\"}");
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", "Failed to serialize EVM state") catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to serialize state\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -184,8 +220,8 @@ fn runEvmHandler(e: *webui.Event) void {
         };
         return_json_from_evm(e, app.allocator, evm.allocator, state_json);
     } else {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -197,9 +233,14 @@ fn blockEvmHandler(e: *webui.Event) void {
     const app: *App = @ptrCast(@alignCast(app_ptr));
 
     if (app.devtool_evm) |*evm| {
-        const run_result = evm.runUntilNextBlock() catch {
-            const json = alloc_error_json(app.allocator, "Failed to run block") catch {
-                e.return_string("{\"error\":\"Failed to run block\"}");
+        const run_result = evm.runUntilNextBlock() catch |err| {
+            const msg = switch (err) {
+                error.NotInitialized => "EVM not properly initialized",
+                error.OutOfMemory => "Out of memory during block execution",
+                else => "Failed to execute block",
+            };
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", msg) catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to run block\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -208,8 +249,8 @@ fn blockEvmHandler(e: *webui.Event) void {
         _ = run_result;
 
         const state_json = evm.serializeEvmState() catch {
-            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
-                e.return_string("{\"error\":\"Failed to serialize state\"}");
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", "Failed to serialize EVM state") catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to serialize state\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -217,8 +258,8 @@ fn blockEvmHandler(e: *webui.Event) void {
         };
         return_json_from_evm(e, app.allocator, evm.allocator, state_json);
     } else {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -231,8 +272,8 @@ fn getEvmStateHandler(e: *webui.Event) void {
 
     if (app.devtool_evm) |*evm| {
         const state_json = evm.serializeEvmState() catch {
-            const json = alloc_error_json(app.allocator, "Failed to serialize state") catch {
-                e.return_string("{\"error\":\"Failed to serialize state\"}");
+            const json = alloc_error_json_with_kind(app.allocator, "InternalError", "Failed to serialize EVM state") catch {
+                e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"Failed to serialize state\"}}");
                 return;
             };
             return_json_owned(e, app.allocator, json);
@@ -240,8 +281,8 @@ fn getEvmStateHandler(e: *webui.Event) void {
         };
         return_json_from_evm(e, app.allocator, evm.allocator, state_json);
     } else {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -306,8 +347,8 @@ fn addBreakpointHandler(e: *webui.Event) void {
     }
 
     {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -362,8 +403,8 @@ fn removeBreakpointHandler(e: *webui.Event) void {
     }
 
     {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -386,8 +427,8 @@ fn clearBreakpointsHandler(e: *webui.Event) void {
     }
 
     {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -418,8 +459,8 @@ fn getBreakpointsHandler(e: *webui.Event) void {
     }
 
     {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);
@@ -450,8 +491,8 @@ fn getAvailableBreakpointsHandler(e: *webui.Event) void {
     }
 
     {
-        const json = alloc_error_json(app.allocator, "EVM not initialized") catch {
-            e.return_string("{\"error\":\"EVM not initialized\"}");
+        const json = alloc_error_json_with_kind(app.allocator, "InternalError", "EVM not initialized") catch {
+            e.return_string("{\"error\":{\"kind\":\"InternalError\",\"message\":\"EVM not initialized\"}}");
             return;
         };
         return_json_owned(e, app.allocator, json);

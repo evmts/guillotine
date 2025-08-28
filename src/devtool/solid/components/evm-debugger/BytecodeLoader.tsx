@@ -7,7 +7,7 @@ import { Combobox, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxTrigger
 import { TextArea } from '~/components/ui/textarea'
 import { TextFieldRoot } from '~/components/ui/textfield'
 import { type EvmState, sampleContracts } from '~/lib/types'
-import { loadBytecode, resetEvm } from '~/lib/utils'
+import { loadBytecode } from '~/lib/utils'
 
 interface BytecodeLoaderProps {
 	loadedBytecode: string
@@ -23,8 +23,7 @@ const BytecodeLoader: Component<BytecodeLoaderProps> = (props) => {
 	})
 
 	const handleLoadBytecode = async () => {
-		await loadBytecode(input())
-		const state = await resetEvm()
+		const state = await loadBytecode(input())
 		props.setState(state)
 	}
 

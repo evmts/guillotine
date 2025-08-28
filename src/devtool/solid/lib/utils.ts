@@ -8,9 +8,13 @@ function assertJson<T = unknown>(response: unknown): T {
 	return response as T
 }
 
-export async function loadBytecode(bytecodeHex: string): Promise<void> {
+export async function loadBytecode(bytecodeHex: string): Promise<EvmState> {
 	try {
-		assertJson(await window.load_bytecode(bytecodeHex))
+		const state = assertJson(await window.load_bytecode(bytecodeHex)) as EvmState
+		// If there is an error don't try to step so we can surface it
+		if (state.error) return state
+		// step once after reset to be place pointer right before the first instruction
+		return assertJson(await window.step_evm())
 	} catch (err) {
 		throw new Error(`Failed to load bytecode: ${err}`)
 	}
@@ -18,9 +22,11 @@ export async function loadBytecode(bytecodeHex: string): Promise<void> {
 
 export async function resetEvm(): Promise<EvmState> {
 	try {
-		assertJson(await window.reset_evm())
+		const state = assertJson(await window.reset_evm()) as EvmState
+		// If there is an error don't try to step so we can surface it
+		if (state.error) return state
 		// step once after reset to be place pointer right before the first instruction
-		return assertJson(await stepEvm())
+		return assertJson(await window.step_evm())
 	} catch (err) {
 		throw new Error(`Failed to reset EVM: ${err}`)
 	}
@@ -63,8 +69,7 @@ export async function getEvmState(): Promise<EvmState> {
 			bytecode: parsed.bytecode ?? '0x',
 			logs: parsed.logs ?? [],
 			returnData: parsed.returnData ?? '0x',
-			errorOccurred: parsed.errorOccurred ?? false,
-			errorName: parsed.errorName ?? '',
+			error: parsed.error ?? null,
 			completed: parsed.completed ?? false,
 			currentInstructionIndex: parsed.currentInstructionIndex ?? 0,
 			preanalyzedBlocks: parsed.preanalyzedBlocks ?? [],

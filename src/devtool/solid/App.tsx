@@ -90,8 +90,7 @@ function App() {
 		// Wait for WebUI connection event
 		window.on_web_ui_ready = async () => {
 			try {
-				await loadBytecode(sampleContracts[7].bytecode)
-				const initialState = await resetEvm()
+				const initialState = await loadBytecode(sampleContracts[7].bytecode)
 				setState(initialState)
 			} catch (err) {
 				console.error('Initial load error:', err)

@@ -22,8 +22,6 @@ is_completed: bool,
 tx_started: bool = false,
 tx_ended: bool = false,
 available_breakpoints: []u32 = &.{},
-/// Error that occurred during bytecode loading
-bytecode_error: ?debug_state.ErrorInfo = null,
 /// Tracer configuration applied on interpreter (re)initialization
 tracer_cfg: Evm.DebuggingTracer.Config = .{
     .throw_on_error = false,
@@ -34,6 +32,7 @@ tracer_cfg: Evm.DebuggingTracer.Config = .{
     .prestate_disable_storage = false,
     .prestate_disable_code = false,
     .prestate_include_empty = false,
+    .preflight_checks = true,  // Enable preflight checks to catch issues before they crash
 },
 
 pub const DebugStepResult = struct {
@@ -66,10 +65,6 @@ pub fn deinit(self: *DevtoolEvm) void {
     }
     if (self.bytecode.len != 0) self.allocator.free(self.bytecode);
     if (self.available_breakpoints.len != 0) self.allocator.free(self.available_breakpoints);
-    if (self.bytecode_error) |e| {
-        self.allocator.free(e.kind);
-        self.allocator.free(e.message);
-    }
 }
 
 pub fn setBytecode(self: *DevtoolEvm, bytecode: []const u8) !void {
@@ -80,45 +75,22 @@ pub fn setBytecode(self: *DevtoolEvm, bytecode: []const u8) !void {
 }
 
 pub fn loadBytecodeHex(self: *DevtoolEvm, hex_string: []const u8) !void {
-    // Clear any previous bytecode error
-    if (self.bytecode_error) |e| {
-        self.allocator.free(e.kind);
-        self.allocator.free(e.message);
-        self.bytecode_error = null;
-    }
-    
     // Validate hex input
     if (hex_string.len == 0) {
-        self.bytecode_error = .{
-            .kind = try self.allocator.dupe(u8, "BytecodeError"),
-            .message = try self.allocator.dupe(u8, "Empty bytecode provided"),
-        };
         return error.EmptyBytecode;
     }
     
     const hex_data = if (std.mem.startsWith(u8, hex_string, "0x")) hex_string[2..] else hex_string;
     if (hex_data.len == 0) {
-        self.bytecode_error = .{
-            .kind = try self.allocator.dupe(u8, "BytecodeError"),
-            .message = try self.allocator.dupe(u8, "Empty bytecode after removing 0x prefix"),
-        };
         return error.EmptyBytecode;
     }
     
     if (hex_data.len % 2 != 0) {
-        self.bytecode_error = .{
-            .kind = try self.allocator.dupe(u8, "BytecodeError"),
-            .message = try self.allocator.dupe(u8, "Invalid hex length - must be even number of characters"),
-        };
         return error.InvalidHexLength;
     }
     
     for (hex_data) |c| {
         if (!std.ascii.isHex(c)) {
-            self.bytecode_error = .{
-                .kind = try self.allocator.dupe(u8, "BytecodeError"),
-                .message = try self.allocator.dupe(u8, "Invalid hex character detected"),
-            };
             return error.InvalidHexCharacter;
         }
     }
@@ -130,19 +102,11 @@ pub fn loadBytecodeHex(self: *DevtoolEvm, hex_string: []const u8) !void {
     
     // Try to set bytecode and catch any errors
     self.setBytecode(tmp) catch |err| {
-        self.bytecode_error = .{
-            .kind = try self.allocator.dupe(u8, "BytecodeError"),
-            .message = try self.allocator.dupe(u8, @errorName(err)),
-        };
         return err;
     };
     
     // Try to reset execution and catch any errors (e.g., invalid jump destination)
     self.resetExecution() catch |err| {
-        self.bytecode_error = .{
-            .kind = try self.allocator.dupe(u8, "BytecodeError"),
-            .message = try std.fmt.allocPrint(self.allocator, "Invalid bytecode: {s}", .{@errorName(err)}),
-        };
         // Don't initialize if bytecode is invalid
         self.is_initialized = false;
         return err;
@@ -402,15 +366,6 @@ pub fn getAvailableBreakpoints(self: *DevtoolEvm, allocator: std.mem.Allocator) 
 
 pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
     if (!self.is_initialized or self.interpreter == null) {
-        // Minimal empty payload for UI boot - include bytecode error if present
-        var error_info: ?debug_state.ErrorInfo = null;
-        if (self.bytecode_error) |e| {
-            error_info = .{
-                .kind = try self.allocator.dupe(u8, e.kind),
-                .message = try self.allocator.dupe(u8, e.message),
-            };
-        }
-        
         const st = debug_state.DebuggerStateJson{
             .gasLeft = 0,
             .depth = 0,
@@ -419,7 +374,7 @@ pub fn serializeEvmState(self: *DevtoolEvm) ![]u8 {
             .bytecode = if (self.bytecode.len > 0) try debug_state.format_bytes_hex(self.allocator, self.bytecode) else try self.allocator.dupe(u8, "0x"),
             .logs = &.{},
             .returnData = try self.allocator.dupe(u8, "0x"),
-            .@"error" = error_info,
+            .@"error" = null,
             .completed = false,
             .currentInstructionIndex = 0,
             .pc = 0,
