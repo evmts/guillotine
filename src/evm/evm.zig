@@ -63,6 +63,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         const CallStackEntry = struct {
             caller: primitives.Address,
             value: config.frame_config.WordType,
+            is_static: bool, // EIP-214: Track static context per call level
         };
 
         pub const Success = enum {
@@ -224,7 +225,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             errdefer access_list.deinit();
             return Self{
                 .depth = 0,
-                .call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0 }} ** config.max_call_depth,
+                .call_stack = [_]CallStackEntry{CallStackEntry{ .caller = primitives.Address.ZERO_ADDRESS, .value = 0, .is_static = false }} ** config.max_call_depth,
                 .allocator = allocator,
                 .database = database,
                 .journal = Journal.init(allocator),
@@ -374,7 +375,7 @@ pub fn Evm(comptime config: EvmConfig) type {
                 };
                 return CallResult.failure_with_error(0, error_str);
             };
-            log.debug("EXECUTE_CALL: Got code for address {any}: code_len={}", .{params.to, code.len});
+            log.debug("EXECUTE_CALL: Got code for address {any}: code_len={d}", .{params.to, code.len});
             if (code.len == 0) {
                 log.debug("EXECUTE_CALL: Call to empty account: {any}", .{params.to});
                 return CallResult.success_empty(params.gas);
@@ -784,7 +785,7 @@ pub fn Evm(comptime config: EvmConfig) type {
             self.depth += 1;
             defer if (self.depth > 0) { self.depth -= 1; };
 
-            self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value };
+            self.call_stack[self.depth - 1] = CallStackEntry{ .caller = caller, .value = value, .is_static = is_static };
 
             const gas_cast = @as(Frame.GasType, @intCast(@min(gas, @as(u64, @intCast(std.math.maxInt(Frame.GasType))))));
 
@@ -792,30 +793,28 @@ pub fn Evm(comptime config: EvmConfig) type {
             // Static calls use null self_destruct to prevent SELFDESTRUCT operations
             const self_destruct_param = if (is_static) null else &self.self_destruct;
 
-            // For static calls, wrap database and host to enforce EIP-214 constraints
+            // For static calls, use normal database but enforce EIP-214 constraints at opcode level
             if (is_static) {
-                // Allocate static wrappers that live for the frame duration
-                const static_db_ptr = try self.allocator.create(StaticDatabase);
-                defer self.allocator.destroy(static_db_ptr);
-                static_db_ptr.* = StaticDatabase.init(self.database.*);
-                // TODO: Use static database wrapper
-                
-                // Static calls - we'll need to enforce constraints in the EVM methods themselves
-                // Pass call context data directly to frame
+                // Static calls - EIP-214 constraints enforced via:
+                // 1. null self_destruct parameter prevents SELFDESTRUCT operations 
+                // 2. Static context tracked in EVM for SSTORE/LOG operations
+                // 3. Frame validates static context for state-modifying operations
                 var frame = try Frame.init(self.allocator, gas_cast, self.database.*, caller, value, input, self.block_info, @as(*anyopaque, @ptrCast(self)), self_destruct_param);
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
-                log.debug("Executing frame: code_len={}, gas={}, address={any}, is_static={}", .{code.len, gas_cast, address, is_static});
+                log.debug("Executing frame: code_len={d}, gas={d}, address={any}, is_static={any}", .{code.len, gas_cast, address, is_static});
+                log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
                 const outcome = frame.interpret(code) catch |err| {
-                    log.debug("Frame.interpret() failed (static): {}", .{err});
+                    log.debug("Frame.interpret() failed (static): {any}", .{err});
                     return CallResult.failure(0);
                 };
 
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
+                log.debug("Frame execution complete. gas_remaining={d}, gas_left={d}", .{frame.gas_remaining, gas_left});
                 const out_items = frame.output;
-                log.debug("Frame execution complete. Output length: {}", .{out_items.len});
+                log.debug("Frame execution complete. Output length: {d}", .{out_items.len});
                 if (out_items.len > 0) {
                     log.debug("Output data: {x}", .{out_items});
                 }
@@ -837,12 +836,13 @@ pub fn Evm(comptime config: EvmConfig) type {
                 frame.contract_address = address;
                 defer frame.deinit(self.allocator);
 
-                log.debug("Executing frame (non-static): code_len={}, gas={}, address={any}", .{code.len, gas_cast, address});
+                log.debug("Executing frame (non-static): code_len={d}, gas={d}, address={any}", .{code.len, gas_cast, address});
+                log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
                 
                 // Wrap in a more detailed error handler
                 const outcome = frame.interpret(code) catch |err| {
-                    log.err("Frame.interpret() failed (non-static): {}", .{err});
-                    log.err("  Code length: {}", .{code.len});
+                    log.err("Frame.interpret() failed (non-static): {any}", .{err});
+                    log.err("  Code length: {d}", .{code.len});
                     log.err("  Gas: {}", .{gas_cast});
                     log.err("  Address: {any}", .{address});
                     if (code.len > 0) {
@@ -853,8 +853,9 @@ pub fn Evm(comptime config: EvmConfig) type {
 
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
+                log.debug("Frame execution complete. gas_remaining={d}, gas_left={d}", .{frame.gas_remaining, gas_left});
                 const out_items = frame.output;
-                log.debug("Frame execution complete. Output length: {}", .{out_items.len});
+                log.debug("Frame execution complete. Output length: {d}", .{out_items.len});
                 if (out_items.len > 0) {
                     log.debug("Output data: {x}", .{out_items});
                 }
@@ -965,6 +966,11 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Emit log event
         pub fn emit_log(self: *Self, contract_address: primitives.Address, topics: []const u256, data: []const u8) void {
+            // EIP-214: Prevent log emission in static context
+            if (self.is_static_context()) {
+                return; // Silently fail in static context
+            }
+            
             // Allocate copies with the main allocator so tests can free via evm.allocator
             const topics_copy = self.allocator.dupe(u256, topics) catch return;
             const data_copy = self.allocator.dupe(u8, data) catch return;
@@ -999,7 +1005,7 @@ pub fn Evm(comptime config: EvmConfig) type {
         /// Revert state changes to a previous snapshot
         pub fn revert_to_snapshot(self: *Self, snapshot_id: Journal.SnapshotIdType) void {
             // Get the journal entries that need to be reverted before removing them
-            var entries_to_revert = std.ArrayList(Journal.EntryType){};
+            var entries_to_revert = std.ArrayList(Journal.EntryType).init(self.allocator);
             defer entries_to_revert.deinit(self.allocator);
 
             // Collect entries that belong to snapshots newer than or equal to the target snapshot
@@ -1103,6 +1109,10 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Mark a contract for destruction
         pub fn mark_for_destruction(self: *Self, contract_address: primitives.Address, recipient: primitives.Address) !void {
+            // EIP-214: Prevent self-destruction in static context
+            if (self.is_static_context()) {
+                return error.StaticCallViolation;
+            }
             try self.self_destruct.mark_for_destruction(contract_address, recipient);
         }
 
@@ -1121,8 +1131,7 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Get current hardfork (deprecated - use EIPs)
         pub fn get_hardfork(self: *Self) Hardfork {
-            _ = self;
-            return .CANCUN; // Default to latest
+            return self.hardfork_config;
         }
 
         /// Get the call depth for the current frame
@@ -1147,6 +1156,12 @@ pub fn Evm(comptime config: EvmConfig) type {
             return self.call_stack[self.depth - 1].value;
         }
 
+        /// Check if current context is static (EIP-214)
+        pub fn is_static_context(self: *Self) bool {
+            if (self.depth == 0) return false;
+            return self.call_stack[self.depth - 1].is_static;
+        }
+
         /// Get storage value
         pub fn get_storage(self: *Self, address: primitives.Address, slot: u256) u256 {
             return self.database.get_storage(address.bytes, slot) catch 0;
@@ -1154,6 +1169,10 @@ pub fn Evm(comptime config: EvmConfig) type {
 
         /// Set storage value
         pub fn set_storage(self: *Self, address: primitives.Address, slot: u256, value: u256) !void {
+            // EIP-214: Prevent storage writes in static context
+            if (self.is_static_context()) {
+                return error.StaticCallViolation;
+            }
             // Record original value for journal
             const original_value = self.get_storage(address, slot);
             try self.record_storage_change(address, slot, original_value);
@@ -3735,7 +3754,7 @@ test "Debug - Bytecode size affects execution time" {
 
     // Create a large contract that does simple operations
     var large_bytecode = std.ArrayList(u8){};
-    defer large_bytecode.deinit(std.testing.allocator);
+    defer large_bytecode.deinit();
 
     // Add many PUSH1/POP pairs (each costs gas but doesn't loop)
     for (0..1000) |_| {
