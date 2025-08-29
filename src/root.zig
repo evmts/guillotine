@@ -182,7 +182,7 @@ export fn guillotine_init() c_int {
         .chain_id = 1,
     };
 
-    vm.* = evm_root.DefaultEvm.init(allocator, database.*, block_info, tx_context, 0, // gas_price
+    vm.* = evm_root.DefaultEvm.init(allocator, database, block_info, tx_context, 0, // gas_price
         ZERO_ADDRESS, // origin
         .CANCUN // hardfork
     ) catch |err| {
@@ -355,7 +355,7 @@ export fn guillotine_vm_create() ?*GuillotineVm {
         .chain_id = 1,
     };
 
-    state.vm.* = evm_root.DefaultEvm.init(alloc, state.database.*, block_info, tx_context, 0, // gas_price
+    state.vm.* = evm_root.DefaultEvm.init(alloc, state.database, block_info, tx_context, 0, // gas_price
         primitives.ZERO_ADDRESS, // origin
         .CANCUN // hardfork
     ) catch {
