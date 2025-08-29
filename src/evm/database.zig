@@ -108,7 +108,7 @@ pub const Database = struct {
             snapshot.accounts.deinit();
             snapshot.storage.deinit();
         }
-        self.snapshots.deinit();
+        self.snapshots.deinit(self.allocator);
     }
 
     // Account operations
