@@ -209,11 +209,12 @@ pub fn Handlers(comptime FrameType: type) type {
             const offset_usize = @as(usize, @intCast(offset));
             const length_usize = @as(usize, @intCast(length));
 
-            // Get codecopy metadata from dispatch
-            const op_data = dispatch.getOpData(.CODECOPY);
+            // Get codecopy metadata from dispatch (stored in next item)
+            const metadata = dispatch.cursor[1].codecopy;
+            const next = dispatch.skipMetadata();
 
             if (length_usize == 0) {
-                return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
+                return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
             }
 
             // Ensure memory capacity
@@ -223,7 +224,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 else => return Error.AllocationError,
             };
 
-            const code_data = op_data.metadata.bytecode_ptr.*;
+            const code_data = metadata.bytecode_ptr.*;
 
             // Copy code to memory with proper zero-padding
             var i: usize = 0;
@@ -233,7 +234,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 self.memory.set_byte(self.allocator, @as(u24, @intCast(dest_offset_usize + i)), byte_val) catch return Error.OutOfBounds;
             }
 
-            return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
