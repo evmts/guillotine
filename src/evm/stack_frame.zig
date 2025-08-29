@@ -353,9 +353,19 @@ pub fn StackFrame(comptime config: FrameConfig) type {
             var bytecode = Bytecode.init(self.allocator, bytecode_raw) catch |e| {
                 @branchHint(.unlikely);
                 log.err("Bytecode init failed: {}", .{e});
+                if (bytecode_raw.len > 0) {
+                    log.err("  Bytecode length: {}", .{bytecode_raw.len});
+                    log.err("  First 16 bytes: {x}", .{bytecode_raw[0..@min(bytecode_raw.len, 16)]});
+                    // Check for specific test bytecode
+                    if (bytecode_raw.len >= 10 and bytecode_raw[0] == 0x60 and bytecode_raw[1] == 0x42) {
+                        log.warn("  This appears to be the MSTORE/RETURN test bytecode!", .{});
+                    }
+                }
                 return switch (e) {
                     error.BytecodeTooLarge => Error.BytecodeTooLarge,
                     error.InvalidOpcode => Error.InvalidOpcode,
+                    error.InvalidJumpDestination => Error.InvalidJump,
+                    error.TruncatedPush => Error.InvalidOpcode,
                     error.OutOfMemory => Error.AllocationError,
                     else => Error.AllocationError,
                 };
@@ -389,10 +399,13 @@ pub fn StackFrame(comptime config: FrameConfig) type {
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
                 break :blk cursor.cursor[0].opcode_handler(self, cursor);
             } else blk: {
+                log.debug("DISPATCH INIT: bytecode len={}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
                     log.err("Failed to create dispatch schedule: {}", .{e});
+                    log.err("  Bytecode runtime_code len: {}", .{bytecode.runtime_code.len});
                     return Error.AllocationError;
                 };
+                log.debug("DISPATCH INIT COMPLETE: schedule len={}, opcode_count={}", .{schedule.len, bytecode.runtime_code.len});
                 defer Dispatch.deinitSchedule(self.allocator, schedule);
                 if (schedule.len < 3) {
                     log.err("Dispatch schedule is too short! len={}", .{schedule.len});
