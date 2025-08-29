@@ -15,7 +15,7 @@ const opcode = bytecode.getOpcode(pc);
 
 ## Description
 
-Two-phase security model with rigorous validation followed by optimized execution using precomputed bitmaps. Supports EIP-170 contract size limits, EIP-3860 initcode restrictions, Solidity metadata parsing, and SIMD-accelerated pattern detection.
+Two-phase security model with rigorous validation followed by optimized execution using precomputed bitmaps. Supports EIP-170 contract size limits, EIP-3860 initcode restrictions, Solidity metadata parsing, and efficient pattern detection.
 
 ## Architecture & Design
 
@@ -584,4 +584,4 @@ pub const BytecodeStats = struct {
 };
 ```
 
-The Bytecode module serves as the foundation for secure, high-performance EVM bytecode handling, providing comprehensive validation, optimization analysis, and EVM specification compliance while maintaining optimal runtime performance through SIMD acceleration and cache-conscious design.
+The Bytecode module serves as the foundation for secure, high-performance EVM bytecode handling, providing comprehensive validation, optimization analysis, and EVM specification compliance while maintaining optimal runtime performance through cache-conscious design.
