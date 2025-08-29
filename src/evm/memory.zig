@@ -14,6 +14,12 @@ const std = @import("std");
 const builtin = @import("builtin");
 pub const MemoryConfig = @import("memory_config.zig").MemoryConfig;
 
+// EVM memory constants
+const WORD_SIZE = 32;
+const WORD_SHIFT = 5;  // log2(32)
+const WORD_MASK = 31;  // 32 - 1
+const FAST_PATH_THRESHOLD = 32;
+
 pub const MemoryError = error{
     OutOfMemory,
     MemoryOverflow,
@@ -34,8 +40,8 @@ pub fn Memory(comptime config: MemoryConfig) type {
         pub const MEMORY_LIMIT = config.memory_limit;
         pub const is_owned = config.owned;
         
-        checkpoint: u24,
         buffer_ptr: *std.ArrayList(u8),
+        checkpoint: u32,
         
         pub fn init(allocator: std.mem.Allocator) !Self {
             if (is_owned) {
@@ -53,7 +59,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             }
         }
         
-        pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: u24) !Self {
+        pub fn init_borrowed(buffer_ptr: *std.ArrayList(u8), checkpoint: u32) !Self {
             // For backward compatibility on owned memory types, we just ignore ownership and return borrowed-like behavior
             return Self{
                 .checkpoint = checkpoint,
@@ -72,8 +78,10 @@ pub fn Memory(comptime config: MemoryConfig) type {
         pub fn init_child(self: *Self) !Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false }) {
             // Children are always borrowed memory types
             const BorrowedMemType = Memory(.{ .initial_capacity = config.initial_capacity, .memory_limit = config.memory_limit, .owned = false });
+            const current_len = self.buffer_ptr.items.len;
+            if (current_len > std.math.maxInt(u32)) return MemoryError.MemoryOverflow;
             return BorrowedMemType{
-                .checkpoint = @as(u24, @intCast(self.buffer_ptr.items.len)),
+                .checkpoint = @as(u32, @intCast(current_len)),
                 .buffer_ptr = self.buffer_ptr,
             };
         }
@@ -86,7 +94,7 @@ pub fn Memory(comptime config: MemoryConfig) type {
             return total - checkpoint_usize;
         }
         
-        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u24) !void {
+        pub inline fn ensure_capacity(self: *Self, allocator: std.mem.Allocator, new_size: u32) !void {
             const checkpoint_usize = @as(usize, self.checkpoint);
             const new_size_usize = @as(usize, new_size);
             const required_total = checkpoint_usize + new_size_usize;
@@ -97,9 +105,9 @@ pub fn Memory(comptime config: MemoryConfig) type {
             const current_len = self.buffer_ptr.items.len;
             if (required_total <= current_len) return;
             
-            // Fast path for small growth (32 bytes or less - common for single word operations)
+            // Fast path for small growth (common for single word operations)
             const growth = required_total - current_len;
-            if (growth <= 32) {
+            if (growth <= FAST_PATH_THRESHOLD) {
                 // For small growth, try to use existing capacity first
                 if (required_total <= self.buffer_ptr.capacity) {
                     // We have capacity, just extend length and zero
@@ -120,18 +128,19 @@ pub fn Memory(comptime config: MemoryConfig) type {
         }
         
         // EVM-compliant memory operations that expand to word boundaries
-        pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, data: []const u8) !void {
+        pub fn set_data_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, data: []const u8) !void {
             const offset_usize = @as(usize, offset);
             const end = offset_usize + data.len;
-            // Round up to next 32-byte word boundary for EVM compliance
-            const word_aligned_end = ((end + 31) >> 5) << 5;
-            try self.ensure_capacity(allocator, @as(u24, @intCast(word_aligned_end)));
+            // Round up to next word boundary for EVM compliance
+            const word_aligned_end = ((end + WORD_MASK) >> WORD_SHIFT) << WORD_SHIFT;
+            if (word_aligned_end > std.math.maxInt(u32)) return MemoryError.MemoryOverflow;
+            try self.ensure_capacity(allocator, @as(u32, @intCast(word_aligned_end)));
             const checkpoint_usize = @as(usize, self.checkpoint);
             const start_idx = checkpoint_usize + offset_usize;
             @memcpy(self.buffer_ptr.items[start_idx..start_idx + data.len], data);
         }
         
-        pub fn set_byte_evm(self: *Self, allocator: std.mem.Allocator, offset: u24, value: u8) !void {
+        pub fn set_byte_evm(self: *Self, allocator: std.mem.Allocator, offset: u32, value: u8) !void {
             const bytes = [_]u8{value};
             try self.set_data_evm(allocator, offset, &bytes);
         }

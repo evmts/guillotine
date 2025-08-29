@@ -182,11 +182,12 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
         /// Stack: [] → [size]
         pub fn codesize(self: *FrameType, dispatch: Dispatch) Error!Success {
-            // Get codesize from dispatch metadata
-            const op_data = dispatch.getOpData(.CODESIZE);
-            const bytecode_len = @as(WordType, @truncate(@as(u256, @intCast(op_data.metadata.size))));
+            // Get codesize from dispatch metadata (stored in next item)
+            const metadata = dispatch.cursor[1].codesize;
+            const bytecode_len = @as(WordType, @intCast(metadata.size));
             try self.stack.push(bytecode_len);
-            return @call(.auto, op_data.next.cursor[0].opcode_handler, .{ self, op_data.next });
+            const next = dispatch.skipMetadata();
+            return @call(.auto, next.cursor[0].opcode_handler, .{ self, next });
         }
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.

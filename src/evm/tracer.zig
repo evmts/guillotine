@@ -135,13 +135,13 @@ pub const DebuggingTracer = struct {
                 self.allocator.free(msg);
             }
         }
-        self.steps.deinit(self.allocator);
+        self.steps.deinit();
 
         // Free state snapshots
         for (self.state_snapshots.items) |*snapshot| {
             self.allocator.free(snapshot.stack);
         }
-        self.state_snapshots.deinit(self.allocator);
+        self.state_snapshots.deinit();
 
         self.breakpoints.deinit();
     }
@@ -431,7 +431,7 @@ pub const JSONRPCTracer = struct {
         for (self.trace_steps.items) |*step| {
             step.deinit(self.allocator);
         }
-        self.trace_steps.deinit(self.allocator);
+        self.trace_steps.deinit();
     }
     
     /// Called before frame execution begins

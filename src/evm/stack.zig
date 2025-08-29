@@ -8,6 +8,22 @@
 //! - Safe and unsafe operation variants
 //! - Automatic index type selection based on capacity
 //! - Zero-cost abstractions through compile-time configuration
+//!
+//! ## Thread Safety Assumptions
+//!
+//! **SINGLE THREAD ONLY**: This implementation assumes single-threaded access.
+//! The stack is NOT thread-safe and MUST NOT be accessed concurrently from
+//! multiple threads without external synchronization.
+//!
+//! Rationale:
+//! - EVM execution is inherently single-threaded within a transaction
+//! - Avoiding atomic operations and locks maximizes performance
+//! - Stack operations are frequent and must be as fast as possible
+//!
+//! Memory safety is guaranteed under single-threaded access through:
+//! - Bounds checking in safe operations (push/pop/peek/set_top)
+//! - Assertion-based validation in unsafe operations (*_unsafe variants)
+//! - Proper ownership of aligned memory allocation
 const std = @import("std");
 
 const StackConfig = @import("stack_config.zig").StackConfig;
@@ -47,9 +63,8 @@ pub fn Stack(comptime config: StackConfig) type {
         /// Allocates cache-aligned memory and sets up pointer boundaries.
         /// Stack pointer starts at the top (highest address) and grows downward.
         pub fn init(allocator: std.mem.Allocator) Error!Self {
-            const memory = allocator.alignedAlloc(WordType, @as(std.mem.Alignment, @enumFromInt(std.math.log2_int(usize, 64))), stack_capacity) catch return Error.AllocationError;
+            const memory = allocator.alignedAlloc(WordType, @enumFromInt(6), stack_capacity) catch return Error.AllocationError;
             errdefer allocator.free(memory);
-            @memset(memory, 0);
 
             const base_ptr: [*]align(64) WordType = memory.ptr;
 
@@ -59,6 +74,8 @@ pub fn Stack(comptime config: StackConfig) type {
             };
         }
 
+        /// Deallocates the stack's aligned memory.
+        /// Must be called when the stack is no longer needed.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             const memory_slice = self.buf_ptr[0..stack_capacity];
             allocator.free(memory_slice);
@@ -213,12 +230,12 @@ pub fn Stack(comptime config: StackConfig) type {
         pub fn swap16(self: *Self) Error!void { return self.swap_n(16); }
         
         // Accessors for tracer
-        pub fn size(self: *const Self) usize {
+        pub inline fn size(self: *const Self) usize {
             const bytes_used = @intFromPtr(self.stack_base()) - @intFromPtr(self.stack_ptr);
             return bytes_used / @sizeOf(WordType);
         }
         
-        pub fn get_slice(self: *const Self) []const WordType {
+        pub inline fn get_slice(self: *const Self) []const WordType {
             const count = self.size();
             if (count == 0) return &[_]WordType{};
             // Return slice from stack_ptr to stack_base
