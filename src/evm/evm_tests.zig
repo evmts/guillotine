@@ -6,6 +6,7 @@ const Evm = @import("evm.zig").Evm;
 const DefaultEvm = @import("evm.zig").DefaultEvm;
 const BlockInfo = @import("block_info.zig").DefaultBlockInfo;
 const Database = @import("database.zig").Database;
+const MemoryDatabase = @import("memory_database.zig").MemoryDatabase;
 const Account = @import("database_interface_account.zig").Account;
 const TransactionContext = @import("transaction_context.zig").TransactionContext;
 const Opcode = @import("opcode.zig").Opcode;
@@ -50,12 +51,14 @@ test "EVM error type definition" {
 
     // Test that different errors are not equal
     try std.testing.expect(err1 != err2);
-}test "EVM call() entry point method" {
+}
+test "EVM call() entry point method" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var db = Database.init(allocator);
-    defer db.deinit();
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.database();
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -74,7 +77,7 @@ test "EVM error type definition" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test that call method exists and has correct signature
@@ -105,8 +108,9 @@ test "EVM call() method routes to different handlers" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var db = Database.init(allocator);
-    defer db.deinit();
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.database();
 
     // Create EVM instance
     const block_info = BlockInfo{
@@ -125,7 +129,7 @@ test "EVM call() method routes to different handlers" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test CALL routing
@@ -190,14 +194,15 @@ test "EVM call_handler basic functionality" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var db = Database.init(allocator);
-    defer db.deinit();
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.database();
 
     // Add a simple contract that just STOPs
     const stop_bytecode = [_]u8{0x00}; // STOP opcode
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
-    const code_hash = try db.set_code(&stop_bytecode);
-    try db.set_account(contract_address, Account{
+    const code_hash = try db_interface.set_code(&stop_bytecode);
+    try db_interface.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = code_hash,
@@ -221,7 +226,7 @@ test "EVM call_handler basic functionality" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test call_handler directly (once it's implemented)
@@ -315,8 +320,9 @@ test "EVM delegatecall handler preserves caller context" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var db = Database.init(allocator);
-    defer db.deinit();
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.database();
 
     // Add a contract that returns the caller address
     // CALLER opcode pushes msg.sender to stack
@@ -329,7 +335,7 @@ test "EVM delegatecall handler preserves caller context" {
         0xF3, // RETURN - return 32 bytes from memory[0]
     };
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
-    try db.set_account(contract_address, Account{
+    try db_interface.set_account(contract_address, Account{
         .balance = 0,
         .nonce = 0,
         .code_hash = [_]u8{0} ** 32,
@@ -354,7 +360,7 @@ test "EVM delegatecall handler preserves caller context" {
         .chain_id = 1,
     };
 
-    var evm = try DefaultEvm.init(allocator, &db, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
+    var evm = try DefaultEvm.init(allocator, &db_interface, block_info, tx_context, 0, primitives.ZERO_ADDRESS, .BERLIN);
     defer evm.deinit();
 
     // Test delegatecall - should preserve original caller
@@ -3509,14 +3515,15 @@ test "EVM benchmark scenario - reproduces segfault" {
     const allocator = std.testing.allocator;
 
     // Create test database
-    var db = Database.init(allocator);
-    defer db.deinit();
+    var memory_db = MemoryDatabase.init(allocator);
+    defer memory_db.deinit();
+    const db_interface = memory_db.database();
 
     // Deploy contract first (ERC20 approval bytecode snippet)
     const stop_bytecode = [_]u8{0x00}; // Simple STOP for now
     const deploy_address: primitives.Address = [_]u8{0} ** 19 ++ [_]u8{1};
-    const code_hash = try db.set_code(&stop_bytecode);
-    try db.set_account(deploy_address, Account{
+    const code_hash = try db_interface.set_code(&stop_bytecode);
+    try db_interface.set_account(deploy_address, Account{
         .nonce = 0,
         .balance = 0,
         .code_hash = code_hash,
@@ -3540,7 +3547,7 @@ test "EVM benchmark scenario - reproduces segfault" {
         .chain_id = 1,
     };
 
-    var evm_instance = try DefaultEvm.init(allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+    var evm_instance = try DefaultEvm.init(allocator, &db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
     defer evm_instance.deinit();
 
     // Simple calldata
@@ -3563,7 +3570,7 @@ test "EVM benchmark scenario - reproduces segfault" {
     // The segfault happens in deinit, so let's explicitly test that
     // by creating and destroying multiple times
     for (0..3) |_| {
-        var temp_evm = try DefaultEvm.init(allocator, &db, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
+        var temp_evm = try DefaultEvm.init(allocator, &db_interface, block_info, context, 0, primitives.ZERO_ADDRESS, .CANCUN);
         const temp_result = try temp_evm.call(call_params);
         try std.testing.expect(temp_result.success);
         temp_evm.deinit(); // This is where the segfault happens
@@ -4928,7 +4935,7 @@ test "EVM bytecode iterator execution - simple STOP" {
 
     // Test bytecode iterator execution with simple STOP
     const stop_bytecode = [_]u8{0x00}; // STOP opcode
-    
+
     // Add contract with STOP bytecode
     const contract_address: primitives.Address = [_]u8{0x42} ++ [_]u8{0} ** 19;
     const code_hash = try db.set_code(&stop_bytecode);
@@ -4984,12 +4991,12 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
     const return_bytecode = [_]u8{
         0x60, 0x42, // PUSH1 0x42
         0x60, 0x00, // PUSH1 0x00
-        0x52,       // MSTORE
+        0x52, // MSTORE
         0x60, 0x20, // PUSH1 0x20
         0x60, 0x00, // PUSH1 0x00
-        0xF3,       // RETURN
+        0xF3, // RETURN
     };
-    
+
     // Add contract
     const contract_address: primitives.Address = [_]u8{0x43} ++ [_]u8{0} ** 19;
     const code_hash = try db.set_code(&return_bytecode);
@@ -5013,7 +5020,7 @@ test "EVM bytecode iterator execution - PUSH and RETURN" {
 
     try std.testing.expect(result.success);
     try std.testing.expectEqual(@as(usize, 32), result.output.len);
-    
+
     // Verify returned value is 0x42
     var returned_value: u256 = 0;
     for (result.output, 0..) |byte, i| {
@@ -5050,12 +5057,12 @@ test "EVM bytecode iterator execution - handles jumps" {
     // PUSH1 0x04, JUMP, 0x00 (invalid), JUMPDEST, STOP
     const jump_bytecode = [_]u8{
         0x60, 0x04, // PUSH1 0x04 (jump destination)
-        0x56,       // JUMP
-        0x00,       // Should be skipped
-        0x5B,       // JUMPDEST at PC=4
-        0x00,       // STOP
+        0x56, // JUMP
+        0x00, // Should be skipped
+        0x5B, // JUMPDEST at PC=4
+        0x00, // STOP
     };
-    
+
     // Add contract
     const contract_address: primitives.Address = [_]u8{0x44} ++ [_]u8{0} ** 19;
     const code_hash = try db.set_code(&jump_bytecode);
