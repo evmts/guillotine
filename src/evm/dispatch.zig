@@ -241,7 +241,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             
             // TEMPORARY: Force output to see if this code is reached
             if (bytecode.runtime_code.len > 0) {
-                std.debug.print("DISPATCH INIT: bytecode len={}\n", .{bytecode.runtime_code.len});
+                std.debug.print("DISPATCH INIT: bytecode len={d}\n", .{bytecode.runtime_code.len});
             }
             
             var schedule_items = ArrayList(Self.Item, null){};
@@ -299,7 +299,7 @@ pub fn Dispatch(comptime FrameType: type) type {
             // Add first_block_gas entry if there's any gas to charge
             if (first_block_gas > 0) {
                 try schedule_items.append(allocator, .{ .first_block_gas = .{ .gas = first_block_gas } });
-                log.debug("Added first_block_gas: {}", .{first_block_gas});
+                log.debug("Added first_block_gas: {d}", .{first_block_gas});
             }
 
             var opcode_count: usize = 0;
@@ -312,7 +312,7 @@ pub fn Dispatch(comptime FrameType: type) type {
                 }
                 const op_data = maybe.?;
                 opcode_count += 1;
-                log.debug("Processing opcode at PC {}: {any}", .{instr_pc, op_data});
+                // log.debug("Processing opcode at PC {}: {any}", .{instr_pc, op_data});
                 switch (op_data) {
                     .regular => |data| {
                         // Regular opcode - add handler first, then metadata for PC, CODESIZE, CODECOPY
