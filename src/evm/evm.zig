@@ -815,6 +815,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
                 const out_items = frame.output;
+                log.debug("Frame execution complete. Output length: {}", .{out_items.len});
+                if (out_items.len > 0) {
+                    log.debug("Output data: {x}", .{out_items});
+                }
                 const out_buf = if (out_items.len > 0) blk: {
                     const b = try self.allocator.alloc(u8, out_items.len);
                     @memcpy(b, out_items);
@@ -850,6 +854,10 @@ pub fn Evm(comptime config: EvmConfig) type {
                 // Map frame outcome to CallResult
                 const gas_left: u64 = @intCast(@max(frame.gas_remaining, 0));
                 const out_items = frame.output;
+                log.debug("Frame execution complete. Output length: {}", .{out_items.len});
+                if (out_items.len > 0) {
+                    log.debug("Output data: {x}", .{out_items});
+                }
                 const out_buf = if (out_items.len > 0) blk: {
                     const b = try self.allocator.alloc(u8, out_items.len);
                     @memcpy(b, out_items);
