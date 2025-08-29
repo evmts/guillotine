@@ -11,7 +11,6 @@ const keccak_asm = @import("keccak_asm.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
@@ -38,7 +37,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// ADDRESS opcode (0x30) - Get address of currently executing account.
         /// Stack: [] → [address]
-        pub fn address(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn address(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const addr_u256 = to_u256(self.contract_address);
             try self.stack.push(addr_u256);
             const next = dispatch.getNext();
@@ -47,7 +46,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// BALANCE opcode (0x31) - Get balance of the given account.
         /// Stack: [address] → [balance]
-        pub fn balance(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn balance(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const address_u256 = try self.stack.pop();
             const addr = from_u256(address_u256);
 
@@ -67,7 +66,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// ORIGIN opcode (0x32) - Get execution origination address.
         /// Stack: [] → [origin]
-        pub fn origin(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn origin(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const tx_origin = self.getEvm().get_tx_origin();
             const origin_u256 = to_u256(tx_origin);
             try self.stack.push(origin_u256);
@@ -77,7 +76,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CALLER opcode (0x33) - Get caller address.
         /// Stack: [] → [caller]
-        pub fn caller(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn caller(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const caller_u256 = to_u256(self.caller);
             try self.stack.push(caller_u256);
             const next = dispatch.getNext();
@@ -86,7 +85,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CALLVALUE opcode (0x34) - Get deposited value by the instruction/transaction responsible for this execution.
         /// Stack: [] → [value]
-        pub fn callvalue(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn callvalue(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const value = self.value.*;
             try self.stack.push(value);
             const next = dispatch.getNext();
@@ -95,7 +94,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CALLDATALOAD opcode (0x35) - Get input data of current environment.
         /// Stack: [offset] → [data]
-        pub fn calldataload(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn calldataload(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const offset = try self.stack.pop();
             // Convert u256 to usize, checking for overflow
             if (offset > std.math.maxInt(usize)) {
@@ -126,7 +125,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CALLDATASIZE opcode (0x36) - Get size of input data in current environment.
         /// Stack: [] → [size]
-        pub fn calldatasize(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn calldatasize(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const calldata = self.calldata;
             const calldata_len = @as(WordType, @truncate(@as(u256, @intCast(calldata.len))));
             try self.stack.push(calldata_len);
@@ -136,7 +135,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CALLDATACOPY opcode (0x37) - Copy input data in current environment to memory.
         /// Stack: [destOffset, offset, length] → []
-        pub fn calldatacopy(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn calldatacopy(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const dest_offset = try self.stack.pop();
             const offset = try self.stack.pop();
             const length = try self.stack.pop();
@@ -181,7 +180,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CODESIZE opcode (0x38) - Get size of code running in current environment.
         /// Stack: [] → [size]
-        pub fn codesize(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn codesize(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // Get codesize from dispatch metadata (stored in next item)
             const metadata = dispatch.cursor[1].codesize;
             const bytecode_len = @as(WordType, @intCast(metadata.size));
@@ -192,7 +191,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CODECOPY opcode (0x39) - Copy code running in current environment to memory.
         /// Stack: [destOffset, offset, length] → []
-        pub fn codecopy(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn codecopy(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const dest_offset = try self.stack.pop();
             const offset = try self.stack.pop();
             const length = try self.stack.pop();
@@ -252,7 +251,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// GASPRICE opcode (0x3A) - Get price of gas in current environment.
         /// Stack: [] → [gas_price]
-        pub fn gasprice(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn gasprice(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const gas_price = self.getEvm().get_gas_price();
             const gas_price_truncated = @as(WordType, @truncate(gas_price));
             try self.stack.push(gas_price_truncated);
@@ -262,7 +261,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXTCODESIZE opcode (0x3B) - Get size of an account's code.
         /// Stack: [address] → [size]
-        pub fn extcodesize(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn extcodesize(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const address_u256 = try self.stack.pop();
             const addr = from_u256(address_u256);
             const code = self.getEvm().get_code(addr);
@@ -274,7 +273,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXTCODECOPY opcode (0x3C) - Copy an account's code to memory.
         /// Stack: [address, destOffset, offset, length] → []
-        pub fn extcodecopy(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn extcodecopy(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const address_u256 = try self.stack.pop();
             const dest_offset = try self.stack.pop();
             const offset = try self.stack.pop();
@@ -321,7 +320,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// EXTCODEHASH opcode (0x3F) - Get hash of account's code.
         /// Stack: [address] → [hash]
-        pub fn extcodehash(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn extcodehash(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const address_u256 = try self.stack.pop();
             const addr = from_u256(address_u256);
 
@@ -360,7 +359,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// RETURNDATASIZE opcode (0x3D) - Get size of output data from the previous call.
         /// Stack: [] → [size]
-        pub fn returndatasize(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn returndatasize(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const return_data = self.getEvm().get_return_data();
             const return_data_len = @as(WordType, @truncate(@as(u256, @intCast(return_data.len))));
             try self.stack.push(return_data_len);
@@ -370,7 +369,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// RETURNDATACOPY opcode (0x3E) - Copy output data from the previous call to memory.
         /// Stack: [destOffset, offset, length] → []
-        pub fn returndatacopy(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn returndatacopy(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const dest_offset = try self.stack.pop();
             const offset = try self.stack.pop();
             const length = try self.stack.pop();
@@ -418,7 +417,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// BLOCKHASH opcode (0x40) - Get the hash of one of the 256 most recent complete blocks.
         /// Stack: [block_number] → [hash]
-        pub fn blockhash(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn blockhash(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_number = try self.stack.pop();
             // Cast to u64 - EVM spec says only last 256 blocks are accessible
             const block_number_u64 = @as(u64, @truncate(block_number));
@@ -443,7 +442,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// COINBASE opcode (0x41) - Get the current block's beneficiary address.
         /// Stack: [] → [coinbase]
-        pub fn coinbase(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn coinbase(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_info = self.block_info;
             const coinbase_u256 = to_u256(block_info.coinbase);
             const coinbase_word = @as(WordType, @truncate(coinbase_u256));
@@ -454,7 +453,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// TIMESTAMP opcode (0x42) - Get the current block's timestamp.
         /// Stack: [] → [timestamp]
-        pub fn timestamp(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn timestamp(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_info = self.block_info;
             const timestamp_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.timestamp))));
             try self.stack.push(timestamp_word);
@@ -464,7 +463,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// NUMBER opcode (0x43) - Get the current block's number.
         /// Stack: [] → [number]
-        pub fn number(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn number(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_info = self.block_info;
             const block_number_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.number))));
             try self.stack.push(block_number_word);
@@ -474,7 +473,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// DIFFICULTY opcode (0x44) - Get the current block's difficulty.
         /// Stack: [] → [difficulty]
-        pub fn difficulty(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn difficulty(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_info = self.block_info;
             const difficulty_word = @as(WordType, @truncate(block_info.difficulty));
             try self.stack.push(difficulty_word);
@@ -484,13 +483,13 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PREVRANDAO opcode - Alias for DIFFICULTY post-merge.
         /// Stack: [] → [prevrandao]
-        pub fn prevrandao(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn prevrandao(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             return difficulty(self, dispatch);
         }
 
         /// GASLIMIT opcode (0x45) - Get the current block's gas limit.
         /// Stack: [] → [gas_limit]
-        pub fn gaslimit(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn gaslimit(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_info = self.block_info;
             const gas_limit_word = @as(WordType, @truncate(@as(u256, @intCast(block_info.gas_limit))));
             try self.stack.push(gas_limit_word);
@@ -500,7 +499,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CHAINID opcode (0x46) - Get the chain ID.
         /// Stack: [] → [chain_id]
-        pub fn chainid(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn chainid(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const chain_id = self.getEvm().get_chain_id();
             const chain_id_word = @as(WordType, @truncate(@as(u256, chain_id)));
             try self.stack.push(chain_id_word);
@@ -510,7 +509,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SELFBALANCE opcode (0x47) - Get balance of currently executing account.
         /// Stack: [] → [balance]
-        pub fn selfbalance(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn selfbalance(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const bal = self.getEvm().get_balance(self.contract_address);
             const balance_word = @as(WordType, @truncate(bal));
             try self.stack.push(balance_word);
@@ -520,7 +519,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// BASEFEE opcode (0x48) - Get the current block's base fee.
         /// Stack: [] → [base_fee]
-        pub fn basefee(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn basefee(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const block_info = self.block_info;
             const base_fee_word = @as(WordType, @truncate(block_info.base_fee));
             try self.stack.push(base_fee_word);
@@ -530,7 +529,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// BLOBHASH opcode (0x49) - Get versioned hashes of blob transactions.
         /// Stack: [index] → [hash]
-        pub fn blobhash(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn blobhash(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const index = try self.stack.pop();
             // Convert u256 to usize for array access
             if (index > std.math.maxInt(usize)) {
@@ -559,7 +558,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// BLOBBASEFEE opcode (0x4a) - Get the current block's blob base fee.
         /// Stack: [] → [blob_base_fee]
-        pub fn blobbasefee(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn blobbasefee(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const blob_base_fee = self.block_info.blob_base_fee;
             const blob_base_fee_word = @as(WordType, @truncate(blob_base_fee));
             try self.stack.push(blob_base_fee_word);
@@ -569,7 +568,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// GAS opcode (0x5A) - Get the amount of available gas.
         /// Stack: [] → [gas]
-        pub fn gas(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn gas(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const gas_value = @as(WordType, @max(self.gas_remaining, 0));
             try self.stack.push(gas_value);
             const next = dispatch.getNext();
@@ -578,7 +577,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PC opcode (0x58) - Get the value of the program counter prior to the increment.
         /// Stack: [] → [pc]
-        pub fn pc(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn pc(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // Get PC value from metadata
             const metadata = dispatch.getPcMetadata();
             try self.stack.push(metadata.value);

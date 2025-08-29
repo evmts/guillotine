@@ -170,7 +170,7 @@ defer frame.deinit(allocator);
 
 ```zig
 // Execute bytecode without tracing
-pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!Success
+pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!noreturn
 
 // Execute with custom tracer
 pub fn interpret_with_tracer(
@@ -178,7 +178,7 @@ pub fn interpret_with_tracer(
     bytecode_raw: []const u8, 
     comptime TracerType: ?type, 
     tracer_instance: if (TracerType) |T| *T else void
-) Error!Success
+) Error!noreturn
 
 // Basic execution example
 const contract_code = [_]u8{ 0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3 };
@@ -332,13 +332,13 @@ Frame uses a function pointer table for efficient opcode dispatch:
 
 ```zig
 // Opcode handler signature
-pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!Success;
+pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!noreturn;
 
 // Handler table (256 entries for all possible opcodes)
 pub const opcode_handlers: [256]OpcodeHandler = stack_frame_handlers.getOpcodeHandlers(Self);
 
 // Example handler implementation
-pub fn add(frame: *Self, dispatch: Dispatch) Error!Success {
+pub fn add(frame: *Self, dispatch: Dispatch) Error!noreturn {
     const b = frame.stack.pop_unsafe();
     const a = frame.stack.pop_unsafe();
     const result = a +% b;  // Wrapping addition

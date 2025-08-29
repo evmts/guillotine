@@ -754,16 +754,22 @@ pub fn Evm(comptime config: EvmConfig) type {
             log.debug("Executing frame: code_len={d}, gas={d}, address={any}, is_static={any}", .{code.len, gas_cast, address, is_static});
             log.debug("Frame gas_remaining before interpret: {d}", .{frame.gas_remaining});
 
-            const outcome = frame.interpret(code) catch |err| {
-                // Consolidated error logging with context
-                log.err("Frame.interpret() failed (is_static={any}): {any}", .{is_static, err});
-                log.err("  Code length: {d}", .{code.len});
-                log.err("  Gas: {}", .{gas_cast});
-                log.err("  Address: {any}", .{address});
-                if (code.len > 0) {
-                    log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
-                }
-                return CallResult.failure(0);
+            // Frame.interpret now returns Error!void and uses errors for success termination
+            frame.interpret(code) catch |err| switch (err) {
+                error.Stop, error.Return, error.SelfDestruct => {
+                    // These are success termination cases
+                },
+                else => {
+                    // Actual errors
+                    log.err("Frame.interpret() failed (is_static={any}): {any}", .{ is_static, err });
+                    log.err("  Code length: {d}", .{code.len});
+                    log.err("  Gas: {}", .{gas_cast});
+                    log.err("  Address: {any}", .{address});
+                    if (code.len > 0) {
+                        log.err("  First few bytes of code: {x}", .{code[0..@min(code.len, 16)]});
+                    }
+                    return CallResult.failure(0);
+                },
             };
 
             // Map frame outcome to CallResult
@@ -781,11 +787,8 @@ pub fn Evm(comptime config: EvmConfig) type {
             } else &.{};
             self.return_data = out_buf;
 
-            switch (outcome) {
-                .Stop => return CallResult.success_with_output(gas_left, out_buf),
-                .Return => return CallResult.success_with_output(gas_left, out_buf),
-                .SelfDestruct => return CallResult.success_with_output(gas_left, out_buf),
-            }
+            // All success termination cases return the same result
+            return CallResult.success_with_output(gas_left, out_buf);
         }
 
         fn execute_init_code(

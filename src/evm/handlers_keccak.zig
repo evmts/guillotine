@@ -15,7 +15,6 @@ const keccak_asm = @import("keccak_asm.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
@@ -26,7 +25,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// The actual Keccak variant used depends on WordType:
         /// - For standard EVM (u256), uses Keccak-256
         /// - For smaller word types, may use different variants or truncate
-        pub fn keccak(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn keccak(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const size = self.stack.pop_unsafe();
             const offset = self.stack.pop_unsafe();
 

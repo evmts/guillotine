@@ -12,7 +12,6 @@ const Log = logs.Log;
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
@@ -20,7 +19,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn generateLogHandler(comptime topic_count: u8) FrameType.OpcodeHandler {
             if (topic_count > 4) @compileError("Only LOG0 to LOG4 is supported");
             return &struct {
-                pub fn logHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
+                pub fn logHandler(self: *FrameType, dispatch: Dispatch) Error!noreturn {
                     // EIP-214: WriteProtection is handled by host interface for static calls
 
                     // Pop topics in reverse order

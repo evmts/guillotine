@@ -7,12 +7,11 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// ADD opcode (0x01) - Addition with overflow wrapping.
-        pub fn add(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn add(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // Static gas consumption handled at upper layer
             log.debug("ADD handler called, stack size: {}", .{self.stack.size()});
             const top_minus_1 = try self.stack.pop();
@@ -25,7 +24,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// MUL opcode (0x02) - Multiplication with overflow wrapping.
-        pub fn mul(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mul(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top *% top_minus_1);
@@ -34,7 +33,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SUB opcode (0x03) - Subtraction with underflow wrapping.
-        pub fn sub(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sub(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top -% top_minus_1);
@@ -43,7 +42,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// DIV opcode (0x04) - Integer division. Division by zero returns 0.
-        pub fn div(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn div(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
             const result = if (denominator == 0) 0 else numerator / denominator;
@@ -53,7 +52,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SDIV opcode (0x05) - Signed integer division.
-        pub fn sdiv(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sdiv(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             log.debug("SDIV handler called, stack size: {}", .{self.stack.size()});
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
@@ -79,7 +78,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// MOD opcode (0x06) - Modulo operation. Modulo by zero returns 0.
-        pub fn mod(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mod(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
             const result = if (denominator == 0) 0 else numerator % denominator;
@@ -89,7 +88,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SMOD opcode (0x07) - Signed modulo operation.
-        pub fn smod(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn smod(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const denominator = try self.stack.pop();
             const numerator = try self.stack.peek();
             var result: WordType = undefined;
@@ -107,7 +106,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// ADDMOD opcode (0x08) - (a + b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn addmod(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn addmod(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const modulus = try self.stack.pop();
             const addend2 = try self.stack.pop();
             const addend1 = try self.stack.peek();
@@ -131,7 +130,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// MULMOD opcode (0x09) - (a * b) % N. All intermediate calculations are performed with arbitrary precision.
-        pub fn mulmod(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn mulmod(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const modulus = try self.stack.pop();
             const factor2 = try self.stack.pop();
             const factor1 = try self.stack.peek();
@@ -204,7 +203,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// EXP opcode (0x0a) - Exponential operation.
-        pub fn exp(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn exp(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const exponent = try self.stack.pop();
             const base = try self.stack.peek();
             var result: WordType = 1;
@@ -222,7 +221,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SIGNEXTEND opcode (0x0b) - Sign extend operation.
-        pub fn signextend(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn signextend(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const ext = try self.stack.pop();
             const value = try self.stack.peek();
             var result: WordType = undefined;

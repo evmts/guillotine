@@ -7,12 +7,11 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// PUSH_AND_INLINE - Fused PUSH+AND with inline value (≤8 bytes).
-        pub fn push_and_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_and_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
@@ -25,7 +24,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_AND_POINTER - Fused PUSH+AND with pointer value (>8 bytes).
-        pub fn push_and_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_and_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
@@ -38,7 +37,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_OR_INLINE - Fused PUSH+OR with inline value (≤8 bytes).
-        pub fn push_or_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_or_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
@@ -51,7 +50,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_OR_POINTER - Fused PUSH+OR with pointer value (>8 bytes).
-        pub fn push_or_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_or_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 
@@ -64,7 +63,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_XOR_INLINE - Fused PUSH+XOR with inline value (≤8 bytes).
-        pub fn push_xor_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_xor_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getInlineMetadata();
             const push_value = metadata.value;
 
@@ -77,7 +76,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_XOR_POINTER - Fused PUSH+XOR with pointer value (>8 bytes).
-        pub fn push_xor_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_xor_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getPointerMetadata();
             const push_value = metadata.value.*;
 

@@ -7,13 +7,12 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// PUSH_JUMP_INLINE - Fused PUSH+JUMP with inline destination (≤8 bytes).
         /// Pushes a destination and immediately jumps to it.
-        pub fn push_jump_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_jump_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getInlineMetadata();
             const dest = metadata.value;
 
@@ -35,7 +34,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_JUMP_POINTER - Fused PUSH+JUMP with pointer destination (>8 bytes).
-        pub fn push_jump_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_jump_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getPointerMetadata();
             const dest = metadata.value.*;
 
@@ -58,7 +57,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH_JUMPI_INLINE - Fused PUSH+JUMPI with inline destination (≤8 bytes).
         /// Pushes a destination, pops condition, and conditionally jumps.
-        pub fn push_jumpi_inline(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_jumpi_inline(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getInlineMetadata();
             const dest = metadata.value;
 
@@ -89,7 +88,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// PUSH_JUMPI_POINTER - Fused PUSH+JUMPI with pointer destination (>8 bytes).
-        pub fn push_jumpi_pointer(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push_jumpi_pointer(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const metadata = dispatch.getPointerMetadata();
             const dest = metadata.value.*;
 

@@ -9,13 +9,12 @@ const Address = @import("primitives").Address.Address;
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// SLOAD opcode (0x54) - Load from storage.
         /// Loads value from storage slot and pushes it onto the stack.
-        pub fn sload(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sload(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // SLOAD loads a value from storage
 
             const slot = try self.stack.pop();
@@ -36,7 +35,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// SSTORE opcode (0x55) - Store to storage.
         /// Stores value to storage slot. Subject to gas refunds and write protection checks.
         /// EIP-214: Static calls use database that throws WriteProtection errors
-        pub fn sstore(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sstore(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // SSTORE stores a value to storage
 
             // EIP-214: WriteProtection is handled by database interface for static calls
@@ -84,7 +83,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// TLOAD opcode (0x5c) - Load from transient storage (EIP-1153).
         /// Loads value from transient storage slot and pushes it onto the stack.
-        pub fn tload(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn tload(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const slot = try self.stack.pop();
 
             // Use the currently executing contract's address
@@ -103,7 +102,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// TSTORE opcode (0x5d) - Store to transient storage (EIP-1153).
         /// Stores value to transient storage slot (cleared after transaction).
-        pub fn tstore(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn tstore(self: *FrameType, dispatch: Dispatch) Error!noreturn {
 
             // EIP-214: WriteProtection is handled by host interface for static calls
 

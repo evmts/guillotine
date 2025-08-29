@@ -1135,7 +1135,7 @@ const TestFrame = struct {
     };
 
     // Add OpcodeHandler type for testing
-    pub const OpcodeHandler = *const fn (frame: *TestFrame, dispatch: TestDispatch) Error!Success;
+    pub const OpcodeHandler = *const fn (frame: *TestFrame, dispatch: TestDispatch) Error!noreturn;
 };
 
 const TestDispatch = Dispatch(TestFrame);

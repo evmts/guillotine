@@ -7,12 +7,11 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// AND opcode (0x16) - Bitwise AND operation.
-        pub fn @"and"(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn @"and"(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top & top_minus_1);
@@ -21,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// OR opcode (0x17) - Bitwise OR operation.
-        pub fn @"or"(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn @"or"(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top | top_minus_1);
@@ -30,7 +29,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// XOR opcode (0x18) - Bitwise XOR operation.
-        pub fn xor(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn xor(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             try self.stack.set_top(top ^ top_minus_1);
@@ -39,7 +38,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// NOT opcode (0x19) - Bitwise NOT operation.
-        pub fn not(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn not(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top = try self.stack.peek();
             try self.stack.set_top(~top);
             const next = dispatch.getNext();
@@ -49,7 +48,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// BYTE opcode (0x1a) - Extract byte from word.
         /// Takes byte index from stack top, value from second position.
         /// Returns the byte at that index or 0 if index >= 32.
-        pub fn byte(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn byte(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const byte_index = try self.stack.pop();
             const value = try self.stack.peek();
             const result = if (byte_index >= 32) 0 else blk: {
@@ -64,7 +63,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SHL opcode (0x1b) - Shift left operation.
-        pub fn shl(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn shl(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const ShiftType = std.math.Log2Int(WordType);
@@ -75,7 +74,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SHR opcode (0x1c) - Logical shift right operation.
-        pub fn shr(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn shr(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const ShiftType = std.math.Log2Int(WordType);
@@ -87,7 +86,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// SAR opcode (0x1d) - Arithmetic shift right operation.
         /// Preserves the sign bit during shift.
-        pub fn sar(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sar(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const shift = try self.stack.pop();
             const value = try self.stack.peek();
             const word_bits = @bitSizeOf(WordType);

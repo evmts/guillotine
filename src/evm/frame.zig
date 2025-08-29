@@ -48,13 +48,7 @@ pub fn Frame(comptime config: FrameConfig) type {
     comptime config.validate();
 
     return struct {
-        /// Status code type returned by Frame.interpret when frame executes successfully
-        pub const Success = enum {
-            Stop,
-            Return,
-            SelfDestruct,
-        };
-        /// Error code type returned by Frame.interpret when frame executes unsuccessfully
+        /// Error code type returned by Frame.interpret - includes both error and success termination cases
         pub const Error = error{
             StackOverflow,
             StackUnderflow,
@@ -68,11 +62,15 @@ pub fn Frame(comptime config: FrameConfig) type {
             GasOverflow,
             InvalidAmount,
             WriteProtection,
+            // Success termination cases (not actually errors)
+            Stop,
+            Return,
+            SelfDestruct,
         };
         const Self = @This();
         /// The type all opcode handlers return.
         /// Opcode handlers are expected to recursively dispatch the next opcode if they themselves don't error or return
-        pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!Success;
+        pub const OpcodeHandler = *const fn (frame: *Self, dispatch: Dispatch) Error!noreturn;
         /// The struct in charge of efficiently dispatching opcode handlers and providing them metadata
         pub const Dispatch = dispatch_mod.Dispatch(Self);
         /// The config passed into Frame(config)
@@ -84,7 +82,7 @@ pub fn Frame(comptime config: FrameConfig) type {
             return if (builtin.target.cpu.arch == .wasm32 or builtin.target.cpu.arch == .wasm64)
                 .auto
             else
-                .auto; // Changed from .always_tail to .auto to fix LLVM musttail errors
+                .always_tail; // Can use always_tail with Error!noreturn handlers
         }
         /// The "word" type used by the evm. Defaults to u256. "Word" is the type used by Stack and throughout the Evm
         /// If set to something else the EVM will update to that new word size. e.g. run kekkak128 instead of kekkak256
@@ -199,7 +197,7 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// Execute this frame without tracing (backward compatibility method).
         /// Simply delegates to interpret_with_tracer with no tracer.
         /// @param bytecode_raw: Raw bytecode to execute
-        pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!Success {
+        pub fn interpret(self: *Self, bytecode_raw: []const u8) Error!void {
             return self.interpret_with_tracer(bytecode_raw, null, {});
         }
 
@@ -209,7 +207,7 @@ pub fn Frame(comptime config: FrameConfig) type {
         /// @param bytecode_raw: Raw bytecode to execute
         /// @param TracerType: Optional comptime tracer type for zero-cost tracing abstraction
         /// @param tracer_instance: Instance of the tracer (ignored if TracerType is null)
-        pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!Success {
+        pub fn interpret_with_tracer(self: *Self, bytecode_raw: []const u8, comptime TracerType: ?type, tracer_instance: if (TracerType) |T| *T else void) Error!void {
             if (bytecode_raw.len > config.max_bytecode_size) {
                 @branchHint(.unlikely);
                 return Error.BytecodeTooLarge;
@@ -262,7 +260,8 @@ pub fn Frame(comptime config: FrameConfig) type {
                 }
 
                 const cursor = Self.Dispatch{ .cursor = traced_schedule.ptr + start_index, .jump_table = &traced_jump_table };
-                break :blk cursor.cursor[0].opcode_handler(self, cursor);
+                cursor.cursor[0].opcode_handler(self, cursor) catch |err| return err;
+                unreachable; // Handlers never return normally
             } else blk: {
                 log.debug("DISPATCH INIT: bytecode len={d}", .{bytecode.runtime_code.len});
                 const schedule = Dispatch.init(self.allocator, &bytecode, handlers) catch |e| {
@@ -297,12 +296,11 @@ pub fn Frame(comptime config: FrameConfig) type {
 
                 const cursor = Self.Dispatch{ .cursor = schedule.ptr + start_index, .jump_table = &jump_table };
                 log.debug("Starting execution at schedule index {}, first handler: {*}", .{ start_index, cursor.cursor[0].opcode_handler });
-                break :blk cursor.cursor[0].opcode_handler(self, cursor);
+                cursor.cursor[0].opcode_handler(self, cursor) catch |err| return err;
+                unreachable; // Handlers never return normally
             };
 
             if (TracerType) |T| if (@hasDecl(T, "afterExecute")) tracer_instance.afterExecute(Self, self);
-
-            return result;
         }
 
         /// Create a deep copy of the frame.

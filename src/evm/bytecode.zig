@@ -212,11 +212,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             };
             // Build bitmaps and validate only the runtime code
             try self.buildBitmapsAndValidate();
-            // Validate immediate JUMP/JUMPI targets; deinit on failure to avoid leaks
-            self.validateImmediateJumps() catch |e| {
-                self.deinit();
-                return e;
-            };
             return self;
         }
 
@@ -237,10 +232,6 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 .packed_bitmap = &.{},
             };
             try self.buildBitmapsAndValidate();
-            self.validateImmediateJumps() catch |e| {
-                self.deinit();
-                return e;
-            };
             return self;
         }
 
@@ -500,6 +491,14 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
 
             // Single pass: validate opcodes, mark bitmaps, detect JUMPDEST and fusions
+            // Track state for immediate jump validation
+            var last_push_value: ?u256 = null;
+            var last_push_end: PcType = 0;
+            
+            // Collect immediate jumps to validate after first pass
+            var immediate_jumps = std.ArrayList(PcType){};
+            defer immediate_jumps.deinit(self.allocator);
+            
             var i: PcType = 0;
             while (i < N) {
                 @branchHint(.likely);
@@ -557,7 +556,14 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                 {
                     const n: PcType = op - (@intFromEnum(Opcode.PUSH1) - 1);
                     if (i + n >= N) return error.TruncatedPush;
-
+                    
+                    // Extract push value for immediate jump validation
+                    var push_value: u256 = 0;
+                    var byte_idx: PcType = 0;
+                    while (byte_idx < n) : (byte_idx += 1) {
+                        push_value = (push_value << 8) | self.runtime_code[i + 1 + byte_idx];
+                    }
+                    
                     // Mark push data bytes
                     var j: PcType = 0;
                     while (j < n) : (j += 1) {
@@ -565,16 +571,58 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
                         self.is_push_data[idx >> BITMAP_SHIFT] |= @as(u8, 1) << @intCast(idx & BITMAP_MASK);
                         self.packed_bitmap[idx].is_push_data = true;
                     }
-                    i += n + 1;
+                    
+                    const push_end = i + 1 + n;
+                    
+                    // Check for immediate jump patterns
+                    if (push_end < N) {
+                        const next_op = self.runtime_code[push_end];
+                        
+                        // Case 1: PUSH + JUMP
+                        if (next_op == @intFromEnum(Opcode.JUMP)) {
+                            // Validate jump target bounds
+                            if (push_value >= N) return error.InvalidJumpDestination;
+                            // Collect for JUMPDEST validation after first pass
+                            try immediate_jumps.append(self.allocator, @intCast(push_value));
+                        }
+                        
+                        // Case 2: PUSH + JUMPI (check if previous was also a PUSH)
+                        else if (next_op == @intFromEnum(Opcode.JUMPI) and 
+                                 last_push_value != null and 
+                                 last_push_end == i) {
+                            // We have PUSH(dest) + PUSH(cond) + JUMPI pattern
+                            const jump_dest = last_push_value.?;
+                            if (jump_dest >= N) return error.InvalidJumpDestination;
+                            // Collect for JUMPDEST validation after first pass
+                            try immediate_jumps.append(self.allocator, @intCast(jump_dest));
+                        }
+                    }
+                    
+                    // Update state for next iteration
+                    last_push_value = push_value;
+                    last_push_end = push_end;
+                    
+                    i = push_end;
                 } else {
+                    // Reset state when we see non-PUSH opcodes (unless it's JUMPI)
+                    if (op != @intFromEnum(Opcode.JUMPI) and op != @intFromEnum(Opcode.JUMP)) {
+                        last_push_value = null;
+                        last_push_end = 0;
+                    }
                     i += 1;
                 }
             }
-            // Single pass complete - bitmaps and validation done in one traversal
+            // Single pass complete - now validate collected immediate jumps
+            for (immediate_jumps.items) |jump_target| {
+                if ((self.is_jumpdest[jump_target >> BITMAP_SHIFT] & (@as(u8, 1) << @intCast(jump_target & BITMAP_MASK))) == 0) {
+                    return error.InvalidJumpDestination;
+                }
+            }
         }
 
         /// Validate immediate JUMP/JUMPI targets encoded via preceding PUSH
-        fn validateImmediateJumps(self: *Self) ValidationError!void {
+        /// DEPRECATED: This functionality is now integrated into buildBitmapsAndValidate
+        fn validateImmediateJumps_DEPRECATED(self: *Self) ValidationError!void {
             var i: PcType = 0;
             const N = self.runtime_code.len;
             while (i < N) {
@@ -606,7 +654,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             }
         }
 
-        fn readImmediateJumpTarget(self: *Self, i: PcType) ?PcType {
+        /// DEPRECATED: No longer needed with integrated validation
+        fn readImmediateJumpTarget_DEPRECATED(self: *Self, i: PcType) ?PcType {
             var j: PcType = 0;
             while (j < i) {
                 if ((self.is_op_start[j >> BITMAP_SHIFT] & (@as(u8, 1) << @intCast(j & BITMAP_MASK))) != 0) {
@@ -625,7 +674,8 @@ pub fn Bytecode(comptime cfg: BytecodeConfig) type {
             return null;
         }
 
-        fn readImmediateJumpiTarget(self: *Self, i: PcType) ?PcType {
+        /// DEPRECATED: No longer needed with integrated validation  
+        fn readImmediateJumpiTarget_DEPRECATED(self: *Self, i: PcType) ?PcType {
             // Expect pattern: PUSH(dest) PUSH(cond) JUMPI
             const second_push_end = i;
             // Find the second push

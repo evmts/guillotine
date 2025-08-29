@@ -7,12 +7,11 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// LT opcode (0x10) - Less than comparison.
-        pub fn lt(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn lt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top < top_minus_1) 1 else 0;
@@ -22,7 +21,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// GT opcode (0x11) - Greater than comparison.
-        pub fn gt(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn gt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top > top_minus_1) 1 else 0;
@@ -32,7 +31,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SLT opcode (0x12) - Signed less than comparison.
-        pub fn slt(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn slt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
@@ -44,7 +43,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// SGT opcode (0x13) - Signed greater than comparison.
-        pub fn sgt(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn sgt(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const a_signed = @as(std.meta.Int(.signed, @bitSizeOf(WordType)), @bitCast(top));
@@ -56,7 +55,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// EQ opcode (0x14) - Equality comparison.
-        pub fn eq(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn eq(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const top_minus_1 = try self.stack.pop();
             const top = try self.stack.peek();
             const result: WordType = if (top == top_minus_1) 1 else 0;
@@ -66,7 +65,7 @@ pub fn Handlers(comptime FrameType: type) type {
         }
 
         /// ISZERO opcode (0x15) - Check if value is zero.
-        pub fn iszero(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn iszero(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const value = try self.stack.peek();
             const result: WordType = if (value == 0) 1 else 0;
             try self.stack.set_top(result);

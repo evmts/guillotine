@@ -7,13 +7,12 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// POP opcode (0x50) - Remove item from stack.
         /// Uses unsafe variant as stack bounds are pre-validated by the planner.
-        pub fn pop(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn pop(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             _ = self.stack.pop_unsafe();
             const next = dispatch.getNext();
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
@@ -21,7 +20,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// PUSH0 opcode (0x5f) - Push 0 onto stack.
         /// Uses unsafe variant as stack bounds are pre-validated by the planner.
-        pub fn push0(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn push0(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             self.stack.push_unsafe(0);
             const next = dispatch.getNext();
             return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
@@ -32,7 +31,7 @@ pub fn Handlers(comptime FrameType: type) type {
             if (push_n > 32) @compileError("Only PUSH1 to PUSH32 is supported");
             if (push_n == 0) @compileError("PUSH0 is handled as its own opcode");
             return &struct {
-                pub fn pushHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
+                pub fn pushHandler(self: *FrameType, dispatch: Dispatch) Error!noreturn {
                     if (push_n <= 8) {
                         const meta = dispatch.getInlineMetadata();
                         self.stack.push_unsafe(meta.value);
@@ -50,7 +49,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn generateDupHandler(comptime dup_n: u8) FrameType.OpcodeHandler {
             if (dup_n == 0 or dup_n > 16) @compileError("Only DUP1 to DUP16 is supported");
             return &struct {
-                pub fn dupHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
+                pub fn dupHandler(self: *FrameType, dispatch: Dispatch) Error!noreturn {
                     self.stack.dup_n_unsafe(dup_n);
                     const next = dispatch.getNext();
                     return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
@@ -62,7 +61,7 @@ pub fn Handlers(comptime FrameType: type) type {
         pub fn generateSwapHandler(comptime swap_n: u8) FrameType.OpcodeHandler {
             if (swap_n == 0 or swap_n > 16) @compileError("Only SWAP1 to SWAP16 is supported");
             return &struct {
-                pub fn swapHandler(self: *FrameType, dispatch: Dispatch) Error!Success {
+                pub fn swapHandler(self: *FrameType, dispatch: Dispatch) Error!noreturn {
                     self.stack.swap_n_unsafe(swap_n);
                     const next = dispatch.getNext();
                     return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });

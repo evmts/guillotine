@@ -11,7 +11,6 @@ const CallParams = @import("call_params.zig").CallParams;
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
@@ -38,7 +37,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// CALL opcode (0xf1) - Message-call into an account.
         /// Stack: [gas, address, value, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn call(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn call(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // Check static context - CALL with non-zero value is not allowed in static context
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
@@ -159,7 +158,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// DELEGATECALL opcode (0xf4) - Message-call with alternative account's code but current values.
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn delegatecall(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn delegatecall(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
             const input_size = try self.stack.pop();
@@ -275,7 +274,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// STATICCALL opcode (0xfa) - Static message-call (no state changes allowed).
         /// Stack: [gas, address, input_offset, input_size, output_offset, output_size] → [success]
-        pub fn staticcall(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn staticcall(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const output_size = try self.stack.pop();
             const output_offset = try self.stack.pop();
             const input_size = try self.stack.pop();
@@ -391,7 +390,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CREATE opcode (0xf0) - Create a new account with associated code.
         /// Stack: [value, offset, size] → [address]
         /// EIP-214: CREATE not allowed in static context - handled by host implementation
-        pub fn create(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn create(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // EIP-214: Static constraint encoded in host - will throw WriteProtection
 
             const size = try self.stack.pop();
@@ -464,7 +463,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// CREATE2 opcode (0xf5) - Create a new account with deterministic address.
         /// Stack: [value, offset, size, salt] → [address]
         /// EIP-214: CREATE2 not allowed in static context - handled by host implementation
-        pub fn create2(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn create2(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // EIP-214: Static constraint encoded in host - will throw WriteProtection
 
             const salt = try self.stack.pop();
@@ -541,7 +540,7 @@ pub fn Handlers(comptime FrameType: type) type {
 
         /// RETURN opcode (0xf3) - Halt execution returning output data.
         /// Stack: [offset, size] → []
-        pub fn @"return"(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn @"return"(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             _ = dispatch;
             log.debug("RETURN handler called, stack size: {d}", .{self.stack.size()});
             const size = try self.stack.pop();
@@ -595,12 +594,12 @@ pub fn Handlers(comptime FrameType: type) type {
             }
 
             // Return indicates successful execution
-            return Success.Return;
+            return Error.Return;
         }
 
         /// REVERT opcode (0xfd) - Halt execution reverting state changes.
         /// Stack: [offset, size] → []
-        pub fn revert(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn revert(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             _ = dispatch;
             const size = try self.stack.pop();
             const offset = try self.stack.pop();
@@ -653,7 +652,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// SELFDESTRUCT opcode (0xff) - Halt execution and mark account for later deletion.
         /// Stack: [recipient] → []
         /// EIP-214: STATICCALL prevents SELFDESTRUCT via null self_destruct and static host
-        pub fn selfdestruct(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn selfdestruct(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             _ = dispatch;
             const recipient_u256 = try self.stack.pop();
             const recipient = from_u256(recipient_u256);
@@ -676,19 +675,19 @@ pub fn Handlers(comptime FrameType: type) type {
             // According to EIP-6780 (Cancun hardfork), SELFDESTRUCT only actually destroys
             // the contract if it was created in the same transaction. This is handled by the host.
             // SELFDESTRUCT always stops execution
-            return Success.SelfDestruct;
+            return Error.SelfDestruct;
         }
 
         /// STOP opcode (0x00) - Halt execution.
         /// Stack: [] → []
-        pub fn stop(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn stop(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             _ = self;
             _ = dispatch;
 
             // EIP-3529 gas refund is applied at the transaction level in evm.zig,
             // not within individual frames. The frame just stops execution.
 
-            return Success.Stop;
+            return Error.Stop;
         }
     };
 }

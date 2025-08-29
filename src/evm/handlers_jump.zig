@@ -7,14 +7,13 @@ const log = @import("log.zig");
 pub fn Handlers(comptime FrameType: type) type {
     return struct {
         pub const Error = FrameType.Error;
-        pub const Success = FrameType.Success;
         pub const Dispatch = FrameType.Dispatch;
         pub const WordType = FrameType.WordType;
 
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn jump(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const dest = try self.stack.pop();
 
             // Validate jump destination range
@@ -37,7 +36,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
-        pub fn jumpi(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn jumpi(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
 
@@ -67,7 +66,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
         /// This opcode marks a valid destination for JUMP and JUMPI operations.
         /// It also serves as a gas consumption point for the entire basic block.
-        pub fn jumpdest(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn jumpdest(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
             const metadata = dispatch.getJumpDestMetadata();
             const gas_cost = metadata.gas;
@@ -86,7 +85,7 @@ pub fn Handlers(comptime FrameType: type) type {
         /// PC opcode (0x58) - Get program counter.
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
-        pub fn pc(self: *FrameType, dispatch: Dispatch) Error!Success {
+        pub fn pc(self: *FrameType, dispatch: Dispatch) Error!noreturn {
             // Get PC value from metadata
             const metadata = dispatch.getPcMetadata();
             try self.stack.push(metadata.value);
