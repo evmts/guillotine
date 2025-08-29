@@ -129,20 +129,20 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         //   ├────────┼────────────────────┼───────┼───────────────────────┤
         //   │ 0      │ stack              │ 16B   │ Stack (2 pointers)    │
         //   │ 16     │ gas_remaining      │ 4/8B  │ i32/i64 (config)      │
-        //   │ 20/24  │ memory             │ 16B   │ Memory struct         │
+        //   │ 20/24  │ memory             │ 8B    │ *Memory struct         │
         //   │ 36/40  │ database           │ 8B    │ DatabaseType pointer  │
         //   │ 44/48  │ log_items          │ 8B    │ [*]Log                │
         //   │ 52/56  │ log_len            │ 2B    │ u16                   │
         //   │ 54/58  │ evm_ptr            │ 8B    │ *anyopaque            │
-        //   │ 62/66  │ [fits/exceeds]     │       │                       │
+        //   │ 54/58  │ [fits/exceeds]     │       │                       │
         //   └─────────────────────────────────────────────────────────────┘
         //
         //   CACHE LINE 2 (64-127 bytes) - CALL CONTEXT
         //   ┌─────────────────────────────────────────────────────────────┐
         //   │ Offset │ Field              │ Size  │ Type                  │
         //   ├────────┼────────────────────┼───────┼───────────────────────┤
-        //   │ 64     │ caller             │ 20B   │ Address               │
-        //   │ 84     │ value              │ 8B    │ *const u256           │
+        //   │ 58     │ value              │ 8B    │ *const u256           │
+        //   │ 66     │ caller             │ 20B   │ Address               │
         //   │ 92     │ contract_address   │ 20B   │ Address               │
         //   │ 112    │ calldata           │ 16B   │ []const u8 (slice)    │
         //   │ 128    │ [exceeds line 2]   │       │                       │
@@ -273,11 +273,11 @@ pub fn StackFrame(comptime config: FrameConfig) type {
         database: config.DatabaseType,      // 8B - Storage access
         log_items: ?[*]Log,                 // 8B - Log array pointer (null = 0 logs)
         evm_ptr: *anyopaque,                // 8B - EVM instance pointer
-        caller: Address,                    // 20B - Calling address
         value: WordType,                    // 32B - Call value (inline)
+        caller: Address,                    // 20B - Calling address
         contract_address: Address = Address.ZERO_ADDRESS, // 20B - Current contract
-        output: []u8,                       // 16B - Output data slice (heap allocated)
         calldata: []const u8,               // 16B - Input data slice
+        output: []u8,                       // 16B - Output data slice (heap allocated)
         allocator: std.mem.Allocator,       // 16B - Memory allocator
         block_info: BlockInfo,              // ~188B - Block context
         self_destruct: ?*SelfDestruct = null, // 8B - Self destruct list
