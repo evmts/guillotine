@@ -13,7 +13,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMP opcode (0x56) - Unconditional jump.
         /// Pops destination from stack and transfers control to that location.
         /// The destination must be a valid JUMPDEST.
-        pub fn jump(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn jump(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const dest = try self.stack.pop();
 
             // Validate jump destination range
@@ -26,7 +27,7 @@ pub fn Handlers(comptime FrameType: type) type {
             // Look up the destination in the jump table
             if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                 // Found valid JUMPDEST - tail call to the jump destination
-                return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
+                return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
             } else {
                 // Not a valid JUMPDEST
                 return Error.InvalidJump;
@@ -36,7 +37,8 @@ pub fn Handlers(comptime FrameType: type) type {
         /// JUMPI opcode (0x57) - Conditional jump.
         /// Pops destination and condition from stack.
         /// Jumps to destination if condition is non-zero, otherwise continues to next instruction.
-        pub fn jumpi(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn jumpi(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             const dest = try self.stack.pop();
             const condition = try self.stack.pop();
 
@@ -51,7 +53,7 @@ pub fn Handlers(comptime FrameType: type) type {
                 // Look up the destination in the jump table
                 if (dispatch.findJumpTarget(dest_pc)) |jump_dispatch| {
                     // Found valid JUMPDEST - tail call to the jump destination
-                    return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch });
+                    return @call(FrameType.getTailCallModifier(), jump_dispatch.cursor[0].opcode_handler, .{ self, jump_dispatch.cursor });
                 } else {
                     // Not a valid JUMPDEST
                     return Error.InvalidJump;
@@ -59,14 +61,15 @@ pub fn Handlers(comptime FrameType: type) type {
             } else {
                 // Continue to next instruction
                 const next = dispatch.getNext();
-                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+                return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
             }
         }
 
         /// JUMPDEST opcode (0x5b) - Mark valid jump destination.
         /// This opcode marks a valid destination for JUMP and JUMPI operations.
         /// It also serves as a gas consumption point for the entire basic block.
-        pub fn jumpdest(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn jumpdest(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // JUMPDEST consumes gas for the entire basic block (static + dynamic)
             const metadata = dispatch.getJumpDestMetadata();
             const gas_cost = metadata.gas;
@@ -79,19 +82,20 @@ pub fn Handlers(comptime FrameType: type) type {
 
             // Continue to next operation
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
 
         /// PC opcode (0x58) - Get program counter.
         /// Pushes the current program counter onto the stack.
         /// The actual PC value is provided by the planner through metadata.
-        pub fn pc(self: *FrameType, dispatch: Dispatch) Error!noreturn {
+        pub fn pc(self: *FrameType, cursor: [*]const Dispatch.Item) Error!noreturn {
+            const dispatch = Dispatch{ .cursor = cursor, .jump_table = null };
             // Get PC value from metadata
             const metadata = dispatch.getPcMetadata();
             try self.stack.push(metadata.value);
 
             const next = dispatch.skipMetadata();
-            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next });
+            return @call(FrameType.getTailCallModifier(), next.cursor[0].opcode_handler, .{ self, next.cursor });
         }
     };
 }
