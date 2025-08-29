@@ -215,8 +215,8 @@ pub const DifferentialTestor = struct {
 
         const code_hash = try self.guillotine_db.set_code(bytecode);
         const log = std.log.scoped(.differential_testor);
-        log.debug("Set code with hash: {x}", .{code_hash});
-        log.debug("Contract address is: {x}", .{self.contract.bytes});
+        log.debug("Set code with hash: {any}", .{code_hash});
+        log.debug("Contract address is: {any}", .{self.contract.bytes});
 
         try self.guillotine_db.set_account(self.contract.bytes, .{
             .balance = 0,
@@ -224,7 +224,7 @@ pub const DifferentialTestor = struct {
             .code_hash = code_hash,
             .storage_root = [_]u8{0} ** 32,
         });
-        log.debug("Set account for address: {x}", .{self.contract.bytes});
+        log.debug("Set account for address: {any}", .{self.contract.bytes});
 
         // Verify deployment
         const deployed_code = try self.guillotine_db.get_code_by_address(self.contract.bytes);
@@ -236,7 +236,7 @@ pub const DifferentialTestor = struct {
         // Also check if account exists
         const account_check = try self.guillotine_db.get_account(self.contract.bytes);
         if (account_check) |acc| {
-            log.debug("Account found: balance={}, nonce={}, code_hash={x}", .{ acc.balance, acc.nonce, acc.code_hash });
+            log.debug("Account found: balance={}, nonce={}, code_hash={any}", .{ acc.balance, acc.nonce, acc.code_hash });
         } else {
             log.err("WARNING: Account not found after deployment!", .{});
         }
