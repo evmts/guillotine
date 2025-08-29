@@ -208,11 +208,19 @@ pub const DebuggingTracer = struct {
     
     /// Main execution control - runs interpreter until pause or completion
     pub fn runUntilPauseOrStop(self: *Self, comptime InterpreterType: type, interpreter: *InterpreterType) !ExecutionResult {
-        // Clear paused state 
-        self.paused = false;
-        
-        // Run interpreter; catch pause/stop conditions
-        interpreter.interpret() catch |err| switch (err) {
+        // Clear paused state
+        self.resumeExecution();
+
+        // Execute either from saved dispatch point or from start
+        const DispatchType = @TypeOf(interpreter.frame).Dispatch;
+        const handler = if (self.takeResumeDispatch(DispatchType)) |dispatch|
+            // Resume from saved dispatch point
+            dispatch.schedule[0].opcode_handler(&interpreter.frame, dispatch)
+        else
+            // Normal execution
+            interpreter.interpret();
+
+        handler catch |err| switch (err) {
             error.ExecutionPaused => return .Paused,
             error.STOP => return .Completed,
             else => {
@@ -227,6 +235,7 @@ pub const DebuggingTracer = struct {
                 }
             },
         };
+
         return .Completed;
     }
     
@@ -240,9 +249,17 @@ pub const DebuggingTracer = struct {
     /// Set resume dispatch pointer when paused
     pub fn setResumeDispatch(self: *Self, dispatch: anytype) void {
         self.resume_dispatch = @ptrCast(dispatch);
-        self.paused = true;
+        self.pause();
     }
-    
+
+    /// Take and clear the resume dispatch pointer
+    fn takeResumeDispatch(self: *Self, comptime DispatchType: type) ?DispatchType {
+        if (self.resume_dispatch) |dispatch_ptr| {
+            defer self.resume_dispatch = null;
+            return @ptrCast(dispatch_ptr);
+        }
+        return null;
+    }
 
     /// Get the current execution step count
     pub fn getStepCount(self: *Self) u64 {
@@ -313,7 +330,7 @@ pub const DebuggingTracer = struct {
     pub fn beforeOp(self: *Self, pc: u32, opcode: u8, comptime FrameType: type, frame: *const FrameType) void {
         // Check if we should pause execution
         if (self.shouldPause(pc)) {
-            self.paused = true;
+            self.pause();
         }
 
         // While paused, we would need to implement a mechanism to wait
@@ -359,7 +376,7 @@ pub const DebuggingTracer = struct {
         }
 
         // Always pause on error for debugging
-        self.paused = true;
+        self.pause();
 
         std.log.debug("DebuggingTracer: Error occurred in frame type {s}: {}", .{ @typeName(FrameType), err });
     }
@@ -453,7 +470,7 @@ pub const DebuggingTracer = struct {
         self.total_gas_used = 0;
 
         // Keep breakpoints but reset execution state
-        self.paused = false;
+        self.resumeExecution();
     }
 
     /// Get debugging statistics
