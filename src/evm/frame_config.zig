@@ -30,12 +30,6 @@ pub const FrameConfig = struct {
     memory_limit: u64 = 0xFFFFFF,
     /// Database implementation type for storage operations (always required).
     DatabaseType: type,
-    /// Vector length for SIMD operations. Auto-detects CPU capabilities for optimal performance.
-    /// Set to 0 to disable SIMD and use scalar implementations. When > 0, enables vectorized
-    /// operations for bulk stack operations (DUP/SWAP) and other suitable operations.
-    /// Common values: 4, 8, 16, 32 depending on CPU (AVX, AVX2, AVX-512 support).
-    // @see https://ziglang.org/documentation/master/std/#std.simd.suggestVectorLengthForCpu
-    vector_length: comptime_int = std.simd.suggestVectorLengthForCpu(u8, builtin.cpu) orelse 0,
     
     /// Block info configuration for the frame
     block_info_config: @import("block_info_config.zig").BlockInfoConfig = .{},

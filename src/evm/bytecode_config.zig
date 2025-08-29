@@ -12,9 +12,6 @@ pub const BytecodeConfig = struct {
     max_bytecode_size: u32 = 24576,
     /// The maximum amount of bytes allowed in initcode (EIP-3860)
     max_initcode_size: u32 = 49152,
-    // @see https://ziglang.org/documentation/master/std/#std.simd.suggestVectorLengthForCpu
-    /// How big of a vector length to use for simd operations. 0 if simd should not be used
-    vector_length: comptime_int = std.simd.suggestVectorLengthForCpu(u8, builtin.cpu) orelse 0,
     /// PcType: chosen PC integer type from max_bytecode_size
     pub fn PcType(comptime self: Self) type {
         // https://ziglang.org/documentation/master/std/#std.math.maxInt
@@ -119,18 +116,6 @@ test "bytecode config validation runtime checks" {
     try std.testing.expectEqual(@as(u32, 2000), small_config.max_initcode_size);
 }
 
-test "bytecode config simd vector length" {
-    const config = BytecodeConfig{};
-    
-    // Vector length should be either 0 or a positive power of 2
-    if (config.vector_length > 0) {
-        // Check that it's a power of 2
-        try std.testing.expect(std.math.isPowerOfTwo(config.vector_length));
-    }
-    
-    // Vector length should be reasonable (not too large)
-    try std.testing.expect(config.vector_length <= 64);
-}
 
 test "bytecode config pc type consistency" {
     // Test that different sizes produce expected types
